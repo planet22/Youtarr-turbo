@@ -1,0 +1,1465 @@
+import React, { useState, useEffect } from 'react';
+import {
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  Button,
+  FormControl,
+  FormControlLabel,
+  InputLabel,
+  MenuItem,
+  Select,
+  SelectChangeEvent,
+  Switch,
+  TextField,
+  CircularProgress,
+  Alert,
+  Typography,
+  Divider,
+  List,
+  ListItem,
+  ListItemText,
+  ListItemIcon,
+  Link,
+  Collapse,
+  ListItemButton,
+  Tab,
+  Tabs,
+  Chip,
+} from '../ui';
+import { CheckCircle as CheckCircleIcon, XCircle as CancelIcon, Info as InfoIcon, Copy as ContentCopyIcon, Settings as SettingsIcon, Download as DownloadIcon, Filter as FilterAltIcon, Shield as RatingIcon, ShieldCheck as AutoRemovalIcon } from '../../lib/icons';
+import useMediaQuery from '../../hooks/useMediaQuery';
+import { useConfig } from '../../hooks/useConfig';
+import { useSubfolders } from '../../hooks/useSubfolders';
+import { SubfolderAutocomplete } from '../shared/SubfolderAutocomplete';
+import { ResolutionSelect } from '../shared/ResolutionSelect';
+import { AudioFormatSelect } from '../shared/AudioFormatSelect';
+import { RatingSelect } from '../shared/RatingSelect';
+import { RATING_OPTIONS } from '../../utils/ratings';
+import RatingBadge from '../shared/RatingBadge';
+import TabsEditor, { TabsEditorRefreshResult } from './components/TabsEditor';
+import { MEDIA_MODE_LABEL } from '../../utils/mediaMode';
+import { LIBRARY_MODE_LABEL } from '../../utils/libraryMode';
+
+const M3U_SORT_ORDERS = ['oldest_first', 'newest_first'] as const;
+type M3uSortOrder = (typeof M3U_SORT_ORDERS)[number];
+
+const toM3uSortOrder = (value: unknown): M3uSortOrder =>
+  M3U_SORT_ORDERS.includes(value as M3uSortOrder) ? (value as M3uSortOrder) : 'oldest_first';
+
+interface ChannelSettings {
+  sub_folder: string | null;
+  video_quality: string | null;
+  min_duration: number | null;
+  max_duration: number | null;
+  title_filter_regex: string | null;
+  season_episode_regex: string | null;
+  default_rating: string | null;
+  auto_download_enabled_tabs: string | null;
+  audio_format: string | null;
+  skip_video_folder: boolean | null;
+  media_mode: string | null;
+  library_mode: string | null;
+  hidden_tabs: string[];
+  m3u_enabled: boolean;
+  m3u_sort_order: M3uSortOrder;
+  auto_removal_protected: boolean;
+  auto_removal_keep_recent_count: number | null;
+}
+
+interface ChannelTabsState {
+  detectedTabs: string[];
+  availableTabs: string[];
+}
+
+interface FilterPreviewVideo {
+  video_id: string;
+  title: string;
+  upload_date: string;
+  matches: boolean;
+}
+
+interface FilterPreviewResult {
+  videos: FilterPreviewVideo[];
+  totalCount: number;
+  matchCount: number;
+}
+
+interface CombinedPreviewVideo {
+  video_id: string;
+  title: string;
+  upload_date: string;
+  titleMatches: boolean;
+  season: number | null;
+  episode: number | null;
+  filename: string | null;
+  seasonEpisodeMatches: boolean;
+}
+
+interface CombinedPreviewResult {
+  videos: CombinedPreviewVideo[];
+  totalCount: number;
+  titleMatchCount: number;
+  decodedCount: number;
+}
+
+interface ChannelSettingsDialogProps {
+  open: boolean;
+  onClose: () => void;
+  channelId: string;
+  channelName: string;
+  token: string | null;
+  onSettingsSaved?: (settings: ChannelSettings & ChannelTabsState) => void;
+}
+
+const TAB_TO_MEDIA_TYPE: Record<string, string> = {
+  videos: 'video',
+  shorts: 'short',
+  streams: 'livestream',
+};
+
+const MEDIA_TYPE_LABEL: Record<string, string> = {
+  video: 'New Videos',
+  short: 'New Shorts',
+  livestream: 'New Live/Streams',
+};
+
+const MEDIA_TYPE_ORDER: string[] = ['video', 'short', 'livestream'];
+
+const regexExamples = [
+  {
+    label: 'Exclude videos containing a word (case-insensitive)',
+    pattern: '(?i)^(?!.*roblox).*',
+    description: 'Excludes videos with "roblox" in the title'
+  },
+  {
+    label: 'Exclude videos containing multiple words',
+    pattern: '(?i)^(?!.*(roblox|minecraft)).*',
+    description: 'Excludes videos with "roblox" OR "minecraft"'
+  },
+  {
+    label: 'Include only videos matching specific phrases',
+    pattern: '(?i)(Official Trailer|New Trailer)',
+    description: 'Only matches videos containing these phrases'
+  }
+];
+
+const seasonEpisodeRegexExamples = [
+  {
+    label: 'Season / Episode words in the title',
+    pattern: '(?i).*season\\s*(?P<season>\\d+).*episode\\s*(?P<episode>\\d+)',
+    description: 'Matches "Taskmaster Season 20 Episode 5" -> Season 20, Episode 5'
+  },
+  {
+    label: 'Compact SxxExx style',
+    pattern: '(?i).*s(?P<season>\\d+)e(?P<episode>\\d+)',
+    description: 'Matches "Show Name S03E12" -> Season 3, Episode 12'
+  },
+  {
+    label: 'Dot-separated numbers',
+    pattern: '(?i).*episode\\s*(?P<season>\\d+)\\.(?P<episode>\\d+)',
+    description: 'Matches "Podcast Episode 4.12" -> Season 4, Episode 12'
+  }
+];
+
+function ChannelSettingsDialog({
+  open,
+  onClose,
+  channelId,
+  token,
+  onSettingsSaved
+}: ChannelSettingsDialogProps) {
+  const isMobile = useMediaQuery('(max-width: 767px)');
+  const [activeSection, setActiveSection] = useState('general');
+
+  const [settings, setSettings] = useState<ChannelSettings>({
+    sub_folder: null,
+    video_quality: null,
+    min_duration: null,
+    max_duration: null,
+    title_filter_regex: null,
+    season_episode_regex: null,
+    default_rating: null,
+    audio_format: null,
+    auto_download_enabled_tabs: null,
+    skip_video_folder: null,
+    media_mode: null,
+    library_mode: null,
+    hidden_tabs: [],
+    m3u_enabled: false,
+    m3u_sort_order: 'oldest_first',
+    auto_removal_protected: false,
+    auto_removal_keep_recent_count: null,
+  });
+  const [originalSettings, setOriginalSettings] = useState<ChannelSettings>({
+    sub_folder: null,
+    video_quality: null,
+    min_duration: null,
+    max_duration: null,
+    title_filter_regex: null,
+    season_episode_regex: null,
+    default_rating: null,
+    audio_format: null,
+    auto_download_enabled_tabs: null,
+    skip_video_folder: null,
+    media_mode: null,
+    library_mode: null,
+    hidden_tabs: [],
+    m3u_enabled: false,
+    m3u_sort_order: 'oldest_first',
+    auto_removal_protected: false,
+    auto_removal_keep_recent_count: null,
+  });
+  const [detectedTabs, setDetectedTabs] = useState<string[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState(false);
+
+  // Use config hook to get global quality setting
+  const { config, refetch: refetchConfig } = useConfig(token);
+  const globalQuality = config.preferredResolution || '1080';
+
+  const { subfolders, createSubfolder } = useSubfolders(token);
+
+  // Duration input state (in minutes for UI convenience)
+  const [minDurationMinutes, setMinDurationMinutes] = useState<string>('');
+  const [maxDurationMinutes, setMaxDurationMinutes] = useState<string>('');
+  const [keepRecentInput, setKeepRecentInput] = useState<string>('');
+
+  // Preview state
+  const [previewResult, setPreviewResult] = useState<FilterPreviewResult | null>(null);
+  const [loadingPreview, setLoadingPreview] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+
+  // Combined (title filter + season/episode decode) preview state - the
+  // only preview shown for series-mode channels (see isSeriesLibraryMode
+  // below); it strictly generalizes the movie-mode title-only preview
+  // above, so there's no separate season/episode-only preview anymore.
+  const [combinedPreviewResult, setCombinedPreviewResult] = useState<CombinedPreviewResult | null>(null);
+  const [loadingCombinedPreview, setLoadingCombinedPreview] = useState(false);
+  const [combinedPreviewError, setCombinedPreviewError] = useState<string | null>(null);
+
+  // Regex examples collapsible state
+  const [showRegexExamples, setShowRegexExamples] = useState(false);
+  const [showSeasonEpisodeRegexExamples, setShowSeasonEpisodeRegexExamples] = useState(false);
+
+  const effectiveQualityDisplay = settings.video_quality
+    ? `${settings.video_quality}p (channel)`
+    : `${globalQuality}p (global)`;
+
+  const effectiveLibraryMode = settings.library_mode ?? config.defaultLibraryMode ?? 'movie';
+  const isSeriesLibraryMode = effectiveLibraryMode === 'series';
+
+  const sections = [
+    { id: 'general', label: 'General', icon: <SettingsIcon size={18} /> },
+    { id: 'filters', label: 'Filters', icon: <FilterAltIcon size={18} /> },
+    { id: 'ratings', label: 'Ratings', icon: <RatingIcon size={18} /> },
+    { id: 'autoremoval', label: 'Auto-Removal', icon: <AutoRemovalIcon size={18} /> }
+  ];
+
+  useEffect(() => {
+    if (open) {
+      // Ensure we have the latest saved global defaults whenever dialog opens
+      refetchConfig().catch((err) => console.error('Failed to refresh config for channel settings dialog:', err));
+    }
+  }, [open, refetchConfig]);
+
+  useEffect(() => {
+    if (!open) {
+      // Reset state when dialog closes
+      setSuccess(false);
+      setError(null);
+      return;
+    }
+
+    setActiveSection('general');
+
+    // Load all data when dialog opens
+    const loadAllData = async () => {
+      setLoading(true);
+      setError(null);
+
+      try {
+        // Load settings
+        const settingsResponse = await fetch(`/api/channels/${channelId}/settings`, {
+          headers: {
+            'x-access-token': token || ''
+          }
+        });
+
+        if (!settingsResponse.ok) {
+          throw new Error('Failed to load channel settings');
+        }
+
+        const settingsData = await settingsResponse.json();
+        const loadedSettings: ChannelSettings = {
+          sub_folder: settingsData.sub_folder || null,
+          video_quality: settingsData.video_quality || null,
+          min_duration: settingsData.min_duration || null,
+          max_duration: settingsData.max_duration || null,
+          title_filter_regex: settingsData.title_filter_regex || null,
+          season_episode_regex: settingsData.season_episode_regex || null,
+          auto_download_enabled_tabs: settingsData.auto_download_enabled_tabs ?? 'video',
+          audio_format: settingsData.audio_format || null,
+          default_rating: Object.prototype.hasOwnProperty.call(settingsData, 'default_rating')
+            ? settingsData.default_rating
+            : null,
+          skip_video_folder: Object.prototype.hasOwnProperty.call(settingsData, 'skip_video_folder')
+            ? settingsData.skip_video_folder
+            : null,
+          media_mode: settingsData.media_mode || null,
+          library_mode: settingsData.library_mode || null,
+          hidden_tabs: Array.isArray(settingsData.hidden_tabs) ? settingsData.hidden_tabs : [],
+          m3u_enabled: settingsData.m3u_enabled === true,
+          m3u_sort_order: toM3uSortOrder(settingsData.m3u_sort_order),
+          auto_removal_protected: settingsData.auto_removal_protected === true,
+          auto_removal_keep_recent_count:
+            typeof settingsData.auto_removal_keep_recent_count === 'number'
+              ? settingsData.auto_removal_keep_recent_count
+              : null,
+        };
+        setSettings(loadedSettings);
+        setOriginalSettings(loadedSettings);
+        setDetectedTabs(Array.isArray(settingsData.detected_tabs) ? settingsData.detected_tabs : []);
+
+        // Convert seconds to minutes for UI
+        if (settingsData.min_duration) {
+          setMinDurationMinutes(String(Math.floor(settingsData.min_duration / 60)));
+        }
+        if (settingsData.max_duration) {
+          setMaxDurationMinutes(String(Math.floor(settingsData.max_duration / 60)));
+        }
+        setKeepRecentInput(
+          typeof settingsData.auto_removal_keep_recent_count === 'number'
+            ? String(settingsData.auto_removal_keep_recent_count)
+            : ''
+        );
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to load settings');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadAllData();
+  }, [open, channelId, token]);
+
+  const handleSave = async () => {
+    setSaving(true);
+    setError(null);
+    setSuccess(false);
+
+    try {
+      const response = await fetch(`/api/channels/${channelId}/settings`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-access-token': token || ''
+        },
+        body: JSON.stringify({
+          sub_folder: settings.sub_folder || null,
+          video_quality: settings.video_quality || null,
+          min_duration: settings.min_duration,
+          max_duration: settings.max_duration,
+          title_filter_regex: settings.title_filter_regex || null,
+          season_episode_regex: settings.season_episode_regex || null,
+          default_rating: settings.default_rating || null,
+          audio_format: settings.audio_format || null,
+          auto_download_enabled_tabs: settings.auto_download_enabled_tabs,
+          skip_video_folder: settings.skip_video_folder,
+          media_mode: settings.media_mode,
+          library_mode: settings.library_mode,
+          hidden_tabs: settings.hidden_tabs,
+          m3u_enabled: settings.m3u_enabled,
+          m3u_sort_order: settings.m3u_sort_order,
+          auto_removal_protected: settings.auto_removal_protected,
+          auto_removal_keep_recent_count: settings.auto_removal_keep_recent_count
+        })
+      });
+
+      if (!response.ok) {
+        if (response.status === 409) {
+          throw new Error('Cannot change subfolder while downloads are in progress for this channel. Please wait for downloads to complete.');
+        }
+
+        let errorMessage = 'Failed to update settings';
+        try {
+          const data = await response.json();
+          errorMessage = data.error || errorMessage;
+        } catch (parseError) {
+          // If JSON parsing fails, use generic error with status
+          errorMessage = `Server error: ${response.status} ${response.statusText}`;
+        }
+
+        throw new Error(errorMessage);
+      }
+
+      const result = await response.json();
+      const resultHiddenTabs: string[] = Array.isArray(result?.settings?.hidden_tabs)
+        ? result.settings.hidden_tabs
+        : settings.hidden_tabs;
+      const resultDetectedTabs: string[] = Array.isArray(result?.settings?.detected_tabs)
+        ? result.settings.detected_tabs
+        : detectedTabs;
+      const resultAvailableTabs: string[] = Array.isArray(result?.settings?.available_tabs)
+        ? result.settings.available_tabs
+        : resultDetectedTabs.filter((tab) => !resultHiddenTabs.includes(tab));
+
+      const updatedSettings: ChannelSettings = {
+        sub_folder: result?.settings?.sub_folder ?? settings.sub_folder ?? null,
+        video_quality: result?.settings?.video_quality ?? settings.video_quality ?? null,
+        min_duration: result?.settings?.min_duration ?? settings.min_duration ?? null,
+        max_duration: result?.settings?.max_duration ?? settings.max_duration ?? null,
+        title_filter_regex: result?.settings?.title_filter_regex ?? settings.title_filter_regex ?? null,
+        season_episode_regex: result?.settings?.season_episode_regex ?? settings.season_episode_regex ?? null,
+        audio_format: result?.settings?.audio_format ?? settings.audio_format ?? null,
+        default_rating: result?.settings && Object.prototype.hasOwnProperty.call(result.settings, 'default_rating')
+          ? result.settings.default_rating
+          : settings.default_rating ?? null,
+        auto_download_enabled_tabs: result?.settings?.auto_download_enabled_tabs ?? settings.auto_download_enabled_tabs ?? null,
+        skip_video_folder: result?.settings && Object.prototype.hasOwnProperty.call(result.settings, 'skip_video_folder')
+          ? result.settings.skip_video_folder
+          : settings.skip_video_folder ?? null,
+        media_mode: result?.settings?.media_mode ?? settings.media_mode ?? null,
+        library_mode: result?.settings?.library_mode ?? settings.library_mode ?? null,
+        hidden_tabs: resultHiddenTabs,
+        m3u_enabled: result?.settings?.m3u_enabled ?? settings.m3u_enabled,
+        m3u_sort_order: toM3uSortOrder(result?.settings?.m3u_sort_order ?? settings.m3u_sort_order),
+        auto_removal_protected: result?.settings?.auto_removal_protected ?? settings.auto_removal_protected,
+        auto_removal_keep_recent_count: result?.settings && Object.prototype.hasOwnProperty.call(result.settings, 'auto_removal_keep_recent_count')
+          ? result.settings.auto_removal_keep_recent_count
+          : settings.auto_removal_keep_recent_count,
+      };
+
+      setSettings(updatedSettings);
+      setOriginalSettings(updatedSettings);
+      setDetectedTabs(resultDetectedTabs);
+      setSuccess(true);
+
+      if (onSettingsSaved) {
+        onSettingsSaved({
+          ...updatedSettings,
+          detectedTabs: resultDetectedTabs,
+          availableTabs: resultAvailableTabs,
+        });
+      }
+
+      // Show success message briefly then close
+      setTimeout(() => {
+        onClose();
+      }, 1500);
+
+      // If folder was moved, show additional info
+      if (result.folderMoved && result.moveResult) {
+        console.log('Channel folder moved:', result.moveResult);
+      }
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Failed to save settings';
+      setError(errorMessage);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleCancel = () => {
+    setSettings(originalSettings);
+    onClose();
+  };
+
+  const hasChanges = () => {
+    const tabsChanged =
+      settings.hidden_tabs.length !== originalSettings.hidden_tabs.length ||
+      settings.hidden_tabs.some((tab) => !originalSettings.hidden_tabs.includes(tab));
+    return settings.sub_folder !== originalSettings.sub_folder ||
+           settings.video_quality !== originalSettings.video_quality ||
+           settings.min_duration !== originalSettings.min_duration ||
+           settings.max_duration !== originalSettings.max_duration ||
+           settings.title_filter_regex !== originalSettings.title_filter_regex ||
+           settings.season_episode_regex !== originalSettings.season_episode_regex ||
+           settings.audio_format !== originalSettings.audio_format ||
+           settings.default_rating !== originalSettings.default_rating ||
+           settings.auto_download_enabled_tabs !== originalSettings.auto_download_enabled_tabs ||
+           settings.skip_video_folder !== originalSettings.skip_video_folder ||
+           settings.media_mode !== originalSettings.media_mode ||
+           settings.library_mode !== originalSettings.library_mode ||
+           settings.m3u_enabled !== originalSettings.m3u_enabled ||
+           settings.m3u_sort_order !== originalSettings.m3u_sort_order ||
+           settings.auto_removal_protected !== originalSettings.auto_removal_protected ||
+           settings.auto_removal_keep_recent_count !== originalSettings.auto_removal_keep_recent_count ||
+           tabsChanged;
+  };
+
+  const allTabsHidden = detectedTabs.length > 0 &&
+    detectedTabs.every((tab) => settings.hidden_tabs.includes(tab));
+
+  const handleHiddenTabsChange = (nextHidden: string[]) => {
+    const hiddenMediaTypes = new Set(
+      nextHidden.map((tab) => TAB_TO_MEDIA_TYPE[tab]).filter(Boolean)
+    );
+    setSettings((prev) => {
+      const currentAuto = prev.auto_download_enabled_tabs
+        ? prev.auto_download_enabled_tabs.split(',').map((t) => t.trim()).filter(Boolean)
+        : [];
+      const filteredAuto = currentAuto.filter((mt) => !hiddenMediaTypes.has(mt));
+      return {
+        ...prev,
+        hidden_tabs: nextHidden,
+        auto_download_enabled_tabs: filteredAuto.join(','),
+      };
+    });
+  };
+
+  const handleTabsRefresh = (result: TabsEditorRefreshResult) => {
+    setDetectedTabs(result.detectedTabs);
+    setSettings((prev) => ({
+      ...prev,
+      hidden_tabs: result.hiddenTabs,
+      auto_download_enabled_tabs: result.autoDownloadEnabledTabs ?? prev.auto_download_enabled_tabs,
+    }));
+    setOriginalSettings((prev) => ({
+      ...prev,
+      hidden_tabs: result.hiddenTabs,
+      auto_download_enabled_tabs: result.autoDownloadEnabledTabs ?? prev.auto_download_enabled_tabs,
+    }));
+  };
+
+  const handlePreviewFilter = async () => {
+    setLoadingPreview(true);
+    setPreviewError(null);
+
+    try {
+      const regex = settings.title_filter_regex || '';
+      const response = await fetch(
+        `/api/channels/${channelId}/filter-preview?title_filter_regex=${encodeURIComponent(regex)}`,
+        {
+          headers: {
+            'x-access-token': token || ''
+          }
+        }
+      );
+
+      let data;
+
+      if (!response.ok) {
+        try {
+          data = await response.json();
+        } catch (parseError) {
+          // Ignore JSON parse failure; will fall back to default message
+        }
+        const serverMessage = data?.error;
+        throw new Error(serverMessage && typeof serverMessage === 'string'
+          ? serverMessage
+          : 'Failed to load preview');
+      }
+
+      data = await response.json();
+      setPreviewResult(data);
+    } catch (err) {
+      setPreviewError(err instanceof Error ? err.message : 'Failed to load preview');
+      setPreviewResult(null);
+    } finally {
+      setLoadingPreview(false);
+    }
+  };
+
+  const handlePreviewCombinedFilters = async () => {
+    setLoadingCombinedPreview(true);
+    setCombinedPreviewError(null);
+
+    try {
+      const titleRegex = settings.title_filter_regex || '';
+      const seasonEpisodeRegex = settings.season_episode_regex || '';
+      const params = new URLSearchParams({
+        title_filter_regex: titleRegex,
+        season_episode_regex: seasonEpisodeRegex,
+      });
+      const response = await fetch(
+        `/api/channels/${channelId}/combined-filter-preview?${params.toString()}`,
+        {
+          headers: {
+            'x-access-token': token || ''
+          }
+        }
+      );
+
+      let data;
+
+      if (!response.ok) {
+        try {
+          data = await response.json();
+        } catch (parseError) {
+          // Ignore JSON parse failure; will fall back to default message
+        }
+        const serverMessage = data?.error;
+        throw new Error(serverMessage && typeof serverMessage === 'string'
+          ? serverMessage
+          : 'Failed to load preview');
+      }
+
+      data = await response.json();
+      setCombinedPreviewResult(data);
+    } catch (err) {
+      setCombinedPreviewError(err instanceof Error ? err.message : 'Failed to load preview');
+      setCombinedPreviewResult(null);
+    } finally {
+      setLoadingCombinedPreview(false);
+    }
+  };
+
+  const handleDurationChange = (field: 'min' | 'max', value: string) => {
+    // Allow empty or numeric values only
+    if (value === '' || /^\d+$/.test(value)) {
+      if (field === 'min') {
+        setMinDurationMinutes(value);
+        setSettings({
+          ...settings,
+          min_duration: value ? parseInt(value) * 60 : null
+        });
+      } else {
+        setMaxDurationMinutes(value);
+        setSettings({
+          ...settings,
+          max_duration: value ? parseInt(value) * 60 : null
+        });
+      }
+    }
+  };
+
+  const handleKeepRecentChange = (value: string) => {
+    if (value === '' || /^[1-9]\d*$/.test(value)) {
+      setKeepRecentInput(value);
+      const parsed = parseInt(value, 10);
+      setSettings({
+        ...settings,
+        auto_removal_keep_recent_count: value && parsed > 0 ? parsed : null
+      });
+    }
+  };
+
+  const handleCopyRegex = async (pattern: string) => {
+    try {
+      await navigator.clipboard.writeText(pattern);
+    } catch (err) {
+      console.error('Failed to copy to clipboard:', err);
+    }
+  };
+
+  const toggleAutoDownloadTab = (tab: string, enabled: boolean) => {
+    const currentTabs = settings.auto_download_enabled_tabs ? settings.auto_download_enabled_tabs.split(',').map(t => t.trim()) : [];
+    let newTabs;
+    if (enabled) {
+      if (!currentTabs.includes(tab)) {
+        newTabs = [...currentTabs, tab].join(',');
+      } else {
+        newTabs = currentTabs.join(',');
+      }
+    } else {
+      newTabs = currentTabs.filter(t => t !== tab).join(',');
+    }
+    setSettings({
+      ...settings,
+      auto_download_enabled_tabs: newTabs || ''
+    });
+  };
+
+  const isTabEnabled = (tab: string) => {
+    const currentTabs = settings.auto_download_enabled_tabs ? settings.auto_download_enabled_tabs.split(',').map(t => t.trim()) : [];
+    return currentTabs.includes(tab);
+  };
+
+  const hiddenTabsSet = new Set(settings.hidden_tabs);
+  const availableMediaTypes = MEDIA_TYPE_ORDER.filter((mediaType) => {
+    const tabType = Object.keys(TAB_TO_MEDIA_TYPE).find((t) => TAB_TO_MEDIA_TYPE[t] === mediaType);
+    return tabType !== undefined && detectedTabs.includes(tabType) && !hiddenTabsSet.has(tabType);
+  });
+
+  const renderSectionContent = (sectionId: string) => {
+    switch (sectionId) {
+      case 'general':
+        return (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: isMobile ? 16 : 24 }}>
+            <TabsEditor
+              channelId={channelId}
+              token={token}
+              detectedTabs={detectedTabs}
+              hiddenTabs={settings.hidden_tabs}
+              onHiddenTabsChange={handleHiddenTabsChange}
+              onRefresh={handleTabsRefresh}
+              disabled={saving}
+            />
+
+            <Divider />
+
+            <div>
+              <Typography variant="subtitle2" gutterBottom style={{ fontWeight: 600 }}>
+                Auto Downloads
+              </Typography>
+              <Alert severity="info" style={{ marginBottom: 12 }}>
+                <Typography variant="body2">
+                  Enable these to automatically download new content from this channel during scheduled tasks. Automatic downloads must be enabled in Settings -&gt; Core.
+                </Typography>
+              </Alert>
+              {availableMediaTypes.length === 0 ? (
+                <Typography variant="body2" color="text.secondary">
+                  No detected tabs are available for auto-download. Enable a tab above first.
+                </Typography>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'row', flexWrap: 'wrap', gap: 16 }}>
+                  {availableMediaTypes.map((mediaType) => (
+                    <FormControlLabel
+                      key={mediaType}
+                      control={
+                        <Switch
+                          checked={isTabEnabled(mediaType)}
+                          onChange={(e) => toggleAutoDownloadTab(mediaType, e.target.checked)}
+                        />
+                      }
+                      label={MEDIA_TYPE_LABEL[mediaType]}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <Divider />
+
+            <div>
+              <Typography variant="subtitle2" gutterBottom style={{ fontWeight: 600 }}>
+                Resolution Override
+              </Typography>
+              <ResolutionSelect
+                label="Channel Video Quality Override"
+                emptyLabel="Using Global Setting"
+                value={settings.video_quality}
+                onChange={(value) => setSettings({
+                  ...settings,
+                  video_quality: value
+                })}
+              />
+              <Typography variant="caption" color="text.secondary" style={{ marginTop: 8, display: 'block' }}>
+                Effective channel quality: {effectiveQualityDisplay}.
+              </Typography>
+              {(settings.video_quality === '1440' || settings.video_quality === '2160') && (
+                <Typography variant="caption" color="warning.main" style={{ marginTop: 4, display: 'block' }}>
+                  YouTube only serves H.264 MP4 up to 1080p. {settings.video_quality === '2160' ? '4K' : '1440p'} uses VP9/AV1 (remuxed into MP4); older Plex clients without native VP9/AV1 decode may transcode.
+                </Typography>
+              )}
+            </div>
+
+            <AudioFormatSelect
+              className="mt-2"
+              value={settings.audio_format}
+              onChange={(value) => setSettings({
+                ...settings,
+                audio_format: value
+              })}
+              helperText={settings.audio_format ? 'MP3 files are saved at 192kbps in the same folder as videos.' : undefined}
+            />
+
+            <div className="mt-2">
+              <FormControl fullWidth>
+                <InputLabel id="video-file-structure-label">Video File Structure</InputLabel>
+                <Select
+                  labelId="video-file-structure-label"
+                  value={settings.skip_video_folder === null ? 'default' : settings.skip_video_folder ? 'flat' : 'subfolders'}
+                  onChange={(e: SelectChangeEvent<string>) => setSettings({
+                    ...settings,
+                    skip_video_folder: e.target.value === 'default' ? null : e.target.value === 'flat'
+                  })}
+                  label="Video File Structure"
+                >
+                  <MenuItem value="default">
+                    Use global setting ({config.defaultSkipVideoFolder ? 'Flat' : 'Video subfolders'})
+                  </MenuItem>
+                  <MenuItem value="flat">Flat (no video subfolders)</MenuItem>
+                  <MenuItem value="subfolders">Video subfolders</MenuItem>
+                </Select>
+              </FormControl>
+              <Typography variant="caption" color="text.secondary" className="mt-1 mb-2 block">
+                Flat saves video files directly in the channel folder instead of individual video subfolders. Only affects new downloads.
+              </Typography>
+            </div>
+
+            <div className="mt-2">
+              <FormControl fullWidth>
+                <InputLabel id="media-mode-label">Media Mode</InputLabel>
+                <Select
+                  labelId="media-mode-label"
+                  value={settings.media_mode ?? 'default'}
+                  onChange={(e: SelectChangeEvent<string>) => setSettings({
+                    ...settings,
+                    media_mode: e.target.value === 'default' ? null : e.target.value
+                  })}
+                  label="Media Mode"
+                >
+                  <MenuItem value="default">
+                    Use global setting ({MEDIA_MODE_LABEL[config.mediaMode || 'download']})
+                  </MenuItem>
+                  <MenuItem value="download">Download full files</MenuItem>
+                  <MenuItem value="strm">STRM only (no media download)</MenuItem>
+                  <MenuItem value="both">Both (download + STRM)</MenuItem>
+                </Select>
+              </FormControl>
+              <Typography variant="caption" color="text.secondary" className="mt-1 mb-2 block">
+                STRM only writes .strm pointer files (+ NFO/thumbnail) instead of downloading media,
+                so this channel streams on demand rather than saving full files. Only affects new downloads.
+              </Typography>
+            </div>
+
+            <div className="mt-2">
+              <FormControl fullWidth>
+                <InputLabel id="library-mode-label">Library Mode</InputLabel>
+                <Select
+                  labelId="library-mode-label"
+                  value={settings.library_mode ?? 'default'}
+                  onChange={(e: SelectChangeEvent<string>) => setSettings({
+                    ...settings,
+                    library_mode: e.target.value === 'default' ? null : e.target.value
+                  })}
+                  label="Library Mode"
+                >
+                  <MenuItem value="default">
+                    Use global setting ({LIBRARY_MODE_LABEL[config.defaultLibraryMode || 'movie']})
+                  </MenuItem>
+                  <MenuItem value="movie">{LIBRARY_MODE_LABEL.movie}</MenuItem>
+                  <MenuItem value="series">{LIBRARY_MODE_LABEL.series}</MenuItem>
+                </Select>
+              </FormControl>
+              <Typography variant="caption" color="text.secondary" className="mt-1 mb-2 block">
+                TV Series groups this channel's videos into Season/Episode folders for Jellyfin/Kodi
+                show browsing, using the episode filename template from Settings. Only affects new
+                downloads; existing files are not reorganized.
+              </Typography>
+            </div>
+
+            <div className="mt-2">
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={settings.m3u_enabled}
+                    onChange={(e) => setSettings({
+                      ...settings,
+                      m3u_enabled: e.target.checked
+                    })}
+                  />
+                }
+                label="Generate channel playlist file (.m3u)"
+              />
+              <Typography variant="caption" color="text.secondary" className="mt-1 block">
+                Writes a playlist of this channel&apos;s downloaded videos to the top of the
+                channel folder. Jellyfin and Emby import it automatically; it updates after
+                downloads and deletions, and refreshes nightly.
+              </Typography>
+              {settings.m3u_enabled && (
+                <FormControl fullWidth className="mt-2">
+                  <InputLabel id="m3u-sort-order-label">Playlist Order</InputLabel>
+                  <Select
+                    labelId="m3u-sort-order-label"
+                    value={settings.m3u_sort_order}
+                    onChange={(e: SelectChangeEvent<string>) => setSettings({
+                      ...settings,
+                      m3u_sort_order: toM3uSortOrder(e.target.value)
+                    })}
+                    label="Playlist Order"
+                  >
+                    <MenuItem value="oldest_first">Oldest first (chronological)</MenuItem>
+                    <MenuItem value="newest_first">Newest first</MenuItem>
+                  </Select>
+                </FormControl>
+              )}
+            </div>
+
+            <Alert severity="info" style={{ marginBottom: 16 }}>
+              <Typography variant="body2" style={{ fontWeight: 'bold', marginBottom: 8 }}>
+                Subfolder Organization
+              </Typography>
+              <Typography variant="body2">
+                Use subfolders to keep channel downloads organized without changing your global storage path.
+              </Typography>
+            </Alert>
+
+            <Divider />
+
+            <div>
+              <Typography variant="subtitle2" gutterBottom style={{ fontWeight: 600 }}>
+                Subfolder
+              </Typography>
+              <SubfolderAutocomplete
+                mode="channel"
+                value={settings.sub_folder}
+                onChange={(newValue) => {
+                  setSettings({
+                    ...settings,
+                    sub_folder: newValue
+                  });
+                }}
+                subfolders={subfolders}
+                defaultSubfolderDisplay={config.defaultSubfolder || null}
+                label="Subfolder"
+                helperText="Choose where this channel's videos are saved"
+                createSubfolder={createSubfolder}
+              />
+              <Alert severity="info" style={{ marginTop: 8 }}>
+                <Typography variant="caption">
+                  Subfolders are automatically prefixed with <code>__</code> on the filesystem.
+                </Typography>
+              </Alert>
+              <Typography variant="caption" color="text.secondary" style={{ marginTop: 8, display: 'block' }}>
+                Note: Changing the subfolder will move the channel&apos;s existing folder and files!
+              </Typography>
+            </div>
+          </div>
+        );
+      case 'filters':
+        return (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: isMobile ? 16 : 24 }}>
+            <div>
+              <Typography variant="subtitle2" gutterBottom style={{ fontWeight: 600 }}>
+                Duration Filters
+              </Typography>
+              <div style={{ display: 'flex', gap: 16, marginTop: 8, flexDirection: isMobile ? 'column' : 'row' }}>
+                <TextField
+                  label="Min Duration (mins)"
+                  type="number"
+                  value={minDurationMinutes}
+                  onChange={(e) => handleDurationChange('min', e.target.value)}
+                  placeholder="No minimum"
+                  fullWidth
+                  size="small"
+                  inputProps={{ min: 0 }}
+                  InputLabelProps={{ shrink: true }}
+                />
+                <TextField
+                  label="Max Duration (mins)"
+                  type="number"
+                  value={maxDurationMinutes}
+                  onChange={(e) => handleDurationChange('max', e.target.value)}
+                  placeholder="No maximum"
+                  fullWidth
+                  size="small"
+                  inputProps={{ min: 0 }}
+                  InputLabelProps={{ shrink: true }}
+                />
+              </div>
+            </div>
+
+            <Divider />
+
+            <div>
+              <Typography variant="subtitle2" gutterBottom style={{ fontWeight: 600 }}>
+                Download Filters
+              </Typography>
+              <Typography variant="caption" color="text.secondary" style={{ display: 'block', marginBottom: 8 }}>
+                Only download videos with titles matching regex pattern
+              </Typography>
+              <Typography variant="caption" color="text.secondary" style={{ display: 'block', marginBottom: 8 }}>
+                These filters only apply to channel downloads. Manually selected videos will always download.
+              </Typography>
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginTop: 8 }}>
+                <TextField
+                  label="Title Filter (Python Regex)"
+                  value={settings.title_filter_regex || ''}
+                  onChange={(e) => setSettings({
+                    ...settings,
+                    title_filter_regex: e.target.value || null
+                  })}
+                  placeholder="e.g., (?i)podcast|interview"
+                  fullWidth
+                  size="small"
+                  InputLabelProps={{ shrink: true }}
+                />
+                <a
+                  href="https://docs.python.org/3/library/re.html#regular-expression-syntax"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title="Python regex documentation"
+                  style={{ marginTop: 4, display: 'inline-flex', alignItems: 'center', color: 'var(--muted-foreground)' }}
+                >
+                  <InfoIcon size={16} />
+                </a>
+              </div>
+
+              <div style={{ marginTop: 8 }}>
+                <button
+                  onClick={() => setShowRegexExamples(!showRegexExamples)}
+                  style={{ color: 'var(--primary)', cursor: 'pointer', background: 'none', border: 'none', padding: 0, textDecoration: 'underline', fontSize: '0.75rem' }}
+                >
+                  {showRegexExamples ? 'Hide examples' : 'Show examples'}
+                </button>
+              </div>
+
+              <Collapse in={showRegexExamples}>
+                <div style={{ marginTop: 8, padding: 12, backgroundColor: 'var(--muted)', borderRadius: 4, border: '1px solid var(--border)' }}>
+                  {regexExamples.map((example, index) => (
+                    <div key={index} style={{ marginBottom: index < regexExamples.length - 1 ? 12 : 0 }}>
+                      <Typography variant="caption" style={{ fontWeight: 600 }} gutterBottom>
+                        {example.label}
+                      </Typography>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, backgroundColor: 'var(--card)', padding: '4px 8px', borderRadius: 4, marginBottom: 4 }}>
+                        <Typography
+                          variant="caption"
+                          style={{ fontFamily: 'var(--font-body)', flex: 1, wordBreak: 'break-all' }}
+                        >
+                          {example.pattern}
+                        </Typography>
+                        <button
+                          style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', padding: 2, color: 'var(--muted-foreground)' }}
+                          onClick={() => handleCopyRegex(example.pattern)}
+                        >
+                          <ContentCopyIcon size={12} />
+                        </button>
+                      </div>
+                      <Typography variant="caption" color="text.secondary" style={{ fontSize: '0.7rem' }}>
+                        {example.description}
+                      </Typography>
+                    </div>
+                  ))}
+                </div>
+              </Collapse>
+            </div>
+
+            {!isSeriesLibraryMode && (
+              <>
+                <div style={{ marginTop: 8 }}>
+                  <Button
+                    variant="outlined"
+                    onClick={handlePreviewFilter}
+                    disabled={loadingPreview || !settings.title_filter_regex}
+                    size="small"
+                  >
+                    {loadingPreview ? <CircularProgress size={16} style={{ marginRight: 8 }} /> : null}
+                    Preview Regex
+                  </Button>
+                  {previewResult && (
+                    <Typography variant="caption" color="text.secondary" style={{ marginLeft: 16 }}>
+                      {previewResult.matchCount} of {previewResult.totalCount} recent videos match
+                    </Typography>
+                  )}
+                </div>
+
+                {previewError && (
+                  <Alert severity="error" onClose={() => setPreviewError(null)}>
+                    {previewError}
+                  </Alert>
+                )}
+
+                {previewResult && (
+                  <div style={{ maxHeight: 200, overflow: 'auto', border: '1px solid var(--border)', borderRadius: 4 }}>
+                    <List dense>
+                      {previewResult.videos.map((video) => (
+                        <ListItem key={video.video_id}>
+                          <ListItemIcon style={{ minWidth: 32 }}>
+                            {video.matches ? (
+                              <CheckCircleIcon size={16} style={{ color: 'var(--success)' }} />
+                            ) : (
+                              <CancelIcon size={16} style={{ color: 'var(--destructive)' }} />
+                            )}
+                          </ListItemIcon>
+                          <ListItemText
+                            primary={video.title}
+                            primaryTypographyProps={{
+                              style: {
+                                fontSize: '0.75rem',
+                                opacity: video.matches ? 1 : 0.5,
+                                textDecoration: video.matches ? 'none' : 'line-through'
+                              }
+                            }}
+                          />
+                        </ListItem>
+                      ))}
+                    </List>
+                  </div>
+                )}
+              </>
+            )}
+
+            {isSeriesLibraryMode && (
+              <Typography variant="caption" color="text.secondary" style={{ display: 'block', marginTop: 8 }}>
+                TV Series library mode: this channel&apos;s Combined Preview below covers the title filter too.
+              </Typography>
+            )}
+
+            {isSeriesLibraryMode && (
+              <>
+                <Divider />
+
+                <div>
+                  <Typography variant="subtitle2" gutterBottom style={{ fontWeight: 600 }}>
+                    Season/Episode Decoding
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary" style={{ display: 'block', marginBottom: 8 }}>
+                    TV Series library mode only. Decode the season and episode number directly from each
+                    video&apos;s title instead of Youtarr&apos;s default (upload year as season, download order as episode).
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary" style={{ display: 'block', marginBottom: 8 }}>
+                    Leave blank to keep the default. A title this pattern doesn&apos;t match also falls back to the
+                    default automatically - it never fails the download.
+                  </Typography>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginTop: 8 }}>
+                    <TextField
+                      label="Season/Episode Regex (Python, named groups)"
+                      value={settings.season_episode_regex || ''}
+                      onChange={(e) => setSettings({
+                        ...settings,
+                        season_episode_regex: e.target.value || null
+                      })}
+                      placeholder="e.g., (?i).*season\s*(?P<season>\d+).*episode\s*(?P<episode>\d+)"
+                      fullWidth
+                      size="small"
+                      InputLabelProps={{ shrink: true }}
+                    />
+                    <a
+                      href="https://docs.python.org/3/library/re.html#index-17"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      title="Python named-group regex documentation"
+                      style={{ marginTop: 4, display: 'inline-flex', alignItems: 'center', color: 'var(--muted-foreground)' }}
+                    >
+                      <InfoIcon size={16} />
+                    </a>
+                  </div>
+                  <Typography variant="caption" color="text.secondary" style={{ display: 'block', marginTop: 4 }}>
+                    Must define two named groups, <code>(?P&lt;season&gt;...)</code> and <code>(?P&lt;episode&gt;...)</code>,
+                    each capturing a number.
+                  </Typography>
+
+                  <div style={{ marginTop: 8 }}>
+                    <button
+                      onClick={() => setShowSeasonEpisodeRegexExamples(!showSeasonEpisodeRegexExamples)}
+                      style={{ color: 'var(--primary)', cursor: 'pointer', background: 'none', border: 'none', padding: 0, textDecoration: 'underline', fontSize: '0.75rem' }}
+                    >
+                      {showSeasonEpisodeRegexExamples ? 'Hide examples' : 'Show examples'}
+                    </button>
+                  </div>
+
+                  <Collapse in={showSeasonEpisodeRegexExamples}>
+                    <div style={{ marginTop: 8, padding: 12, backgroundColor: 'var(--muted)', borderRadius: 4, border: '1px solid var(--border)' }}>
+                      {seasonEpisodeRegexExamples.map((example, index) => (
+                        <div key={index} style={{ marginBottom: index < seasonEpisodeRegexExamples.length - 1 ? 12 : 0 }}>
+                          <Typography variant="caption" style={{ fontWeight: 600 }} gutterBottom>
+                            {example.label}
+                          </Typography>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, backgroundColor: 'var(--card)', padding: '4px 8px', borderRadius: 4, marginBottom: 4 }}>
+                            <Typography
+                              variant="caption"
+                              style={{ fontFamily: 'var(--font-body)', flex: 1, wordBreak: 'break-all' }}
+                            >
+                              {example.pattern}
+                            </Typography>
+                            <button
+                              style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', padding: 2, color: 'var(--muted-foreground)' }}
+                              onClick={() => handleCopyRegex(example.pattern)}
+                            >
+                              <ContentCopyIcon size={12} />
+                            </button>
+                          </div>
+                          <Typography variant="caption" color="text.secondary" style={{ fontSize: '0.7rem' }}>
+                            {example.description}
+                          </Typography>
+                        </div>
+                      ))}
+                    </div>
+                  </Collapse>
+                </div>
+
+                <>
+                  <Divider />
+
+                  <div>
+                    <Typography variant="subtitle2" gutterBottom style={{ fontWeight: 600 }}>
+                      Preview
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary" style={{ display: 'block', marginBottom: 8 }}>
+                      Shows what would actually happen end-to-end for recent videos: whether the title filter above
+                      would let each one download, and (for ones that would) the season/episode/filename it would resolve
+                      to - whether from the decode regex or the upload-year-as-season default.
+                    </Typography>
+
+                    <div style={{ marginTop: 8 }}>
+                      <Button
+                        variant="outlined"
+                        onClick={handlePreviewCombinedFilters}
+                        disabled={loadingCombinedPreview}
+                        size="small"
+                      >
+                        {loadingCombinedPreview ? <CircularProgress size={16} style={{ marginRight: 8 }} /> : null}
+                        Preview
+                      </Button>
+                      {combinedPreviewResult && (
+                        <Typography variant="caption" color="text.secondary" style={{ marginLeft: 16 }}>
+                          {combinedPreviewResult.titleMatchCount} of {combinedPreviewResult.totalCount} pass the title filter,{' '}
+                          {combinedPreviewResult.decodedCount} decoded by the season/episode regex
+                        </Typography>
+                      )}
+                    </div>
+
+                      {combinedPreviewError && (
+                        <Alert severity="error" onClose={() => setCombinedPreviewError(null)} style={{ marginTop: 8 }}>
+                          {combinedPreviewError}
+                        </Alert>
+                      )}
+
+                      {combinedPreviewResult && (
+                        <div style={{ maxHeight: 260, overflow: 'auto', border: '1px solid var(--border)', borderRadius: 4, marginTop: 8 }}>
+                          <List dense>
+                            {combinedPreviewResult.videos.map((video) => (
+                              <ListItem key={video.video_id} style={{ alignItems: 'flex-start' }}>
+                                <ListItemIcon style={{ minWidth: 32, marginTop: 2 }}>
+                                  {video.titleMatches ? (
+                                    <CheckCircleIcon size={16} style={{ color: 'var(--success)' }} />
+                                  ) : (
+                                    <CancelIcon size={16} style={{ color: 'var(--destructive)' }} />
+                                  )}
+                                </ListItemIcon>
+                                <ListItemText
+                                  primary={video.title}
+                                  primaryTypographyProps={{
+                                    style: {
+                                      fontSize: '0.75rem',
+                                      opacity: video.titleMatches ? 1 : 0.5,
+                                      textDecoration: video.titleMatches ? 'none' : 'line-through'
+                                    }
+                                  }}
+                                  secondary={!video.titleMatches
+                                    ? 'Excluded by title filter - never downloaded'
+                                    : video.seasonEpisodeMatches
+                                      ? `Season ${video.season}, Episode ${video.episode} -> ${video.filename}`
+                                      : `Downloaded, but no season/episode decode match - falls back to default (Season ${video.season ?? '?'})`}
+                                  secondaryTypographyProps={{
+                                    style: {
+                                      fontSize: '0.7rem',
+                                      fontFamily: video.seasonEpisodeMatches ? 'var(--font-body)' : undefined,
+                                      wordBreak: 'break-all',
+                                      color: !video.titleMatches
+                                        ? 'var(--destructive)'
+                                        : video.seasonEpisodeMatches
+                                          ? 'var(--success)'
+                                          : 'var(--muted-foreground)',
+                                    }
+                                  }}
+                                />
+                              </ListItem>
+                            ))}
+                          </List>
+                        </div>
+                      )}
+                    </div>
+                  </>
+              </>
+            )}
+          </div>
+        );
+      case 'ratings': {
+        const effectiveRatingLabel = settings.default_rating
+          ? (RATING_OPTIONS.find((option) => option.value === settings.default_rating)?.label || settings.default_rating)
+          : 'Global';
+        return (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <Typography variant="subtitle2" gutterBottom style={{ fontWeight: 600 }}>
+              Content Ratings
+            </Typography>
+            <Alert severity="info">
+              <Typography variant="body2">
+                Set a default rating for videos from this channel when no rating metadata is available.
+              </Typography>
+            </Alert>
+            <RatingSelect
+              label="Default Rating"
+              value={settings.default_rating}
+              onChange={(value) => setSettings({
+                ...settings,
+                default_rating: value
+              })}
+            />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <Typography variant="caption" color="text.secondary">
+                Effective default rating:
+              </Typography>
+              <RatingBadge 
+                rating={effectiveRatingLabel} 
+                size="small" 
+              />
+            </div>
+          </div>
+        );
+      }
+      case 'autoremoval':
+        return (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <Typography variant="subtitle2" gutterBottom style={{ fontWeight: 600 }}>
+              Auto-Removal Protection
+            </Typography>
+            <Alert severity="info">
+              <Typography variant="body2">
+                These settings limit what the automatic video cleanup (Settings -&gt; Auto-Removal)
+                may delete from this channel. Manual deletion is unaffected.
+              </Typography>
+            </Alert>
+            <div>
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={settings.auto_removal_protected}
+                    onChange={(e) => {
+                      const checked = e.target.checked;
+                      // Full protection supersedes the keep-recent count.
+                      setSettings({
+                        ...settings,
+                        auto_removal_protected: checked,
+                        auto_removal_keep_recent_count: checked ? null : settings.auto_removal_keep_recent_count
+                      });
+                      if (checked) {
+                        setKeepRecentInput('');
+                      }
+                    }}
+                  />
+                }
+                label="Protect this channel from auto-removal"
+              />
+              <Typography variant="caption" color="text.secondary" className="block">
+                When enabled, no videos from this channel are ever deleted automatically.
+              </Typography>
+            </div>
+            <TextField
+              label="Always keep newest downloads"
+              type="number"
+              value={keepRecentInput}
+              onChange={(e) => handleKeepRecentChange(e.target.value)}
+              placeholder="No limit"
+              disabled={settings.auto_removal_protected}
+              fullWidth
+              size="small"
+              inputProps={{ min: 1, max: 10000 }}
+              InputLabelProps={{ shrink: true }}
+              helperText={settings.auto_removal_protected
+                ? 'Cleared while the whole channel is protected.'
+                : "Auto-removal always keeps this many of the channel's most recently downloaded videos. Leave empty for no per-channel limit."}
+            />
+          </div>
+        );
+      default:
+        return null;
+    }
+  };
+
+  return (
+    <Dialog 
+      open={open} 
+      onClose={handleCancel} 
+      maxWidth="xl" 
+      fullWidth
+      className={isMobile ? 'w-[calc(100vw-24px)] max-w-none max-h-[calc(100dvh-24px)]' : 'max-h-[calc(100vh-120px)]'}
+    >
+      <DialogTitle style={{ paddingBottom: 8 }}>
+        Channel Settings
+      </DialogTitle>
+      
+      {isMobile ? (
+        <div style={{ borderBottom: '1px solid var(--border)', padding: '0 8px' }}>
+          <Tabs
+            value={activeSection}
+            onChange={(_, newValue) => setActiveSection(String(newValue))}
+            variant="fullWidth"
+          >
+            {sections.map(section => (
+              <Tab 
+                key={section.id} 
+                value={section.id} 
+                label={section.label} 
+                icon={section.icon}
+                iconPosition="start"
+                style={{ minHeight: 40, textTransform: 'none', fontSize: '0.72rem', paddingLeft: 8, paddingRight: 8 }}
+              />
+            ))}
+          </Tabs>
+        </div>
+      ) : null}
+
+      <DialogContent style={{ padding: 0, display: 'flex', minHeight: 0 }}>
+        {!isMobile && (
+          <div style={{ 
+            width: 200, 
+            borderRight: '1px solid var(--border)',
+            backgroundColor: 'var(--muted)',
+            display: 'flex',
+            flexDirection: 'column'
+          }}>
+            <List style={{ paddingTop: 8 }}>
+              {sections.map((section) => (
+                <ListItemButton
+                  key={section.id}
+                  selected={activeSection === section.id}
+                  onClick={() => setActiveSection(section.id)}
+                  style={{
+                    paddingTop: 12,
+                    paddingBottom: 12,
+                    borderLeft: activeSection === section.id ? '4px solid var(--primary)' : '4px solid transparent',
+                  }}
+                >
+                  <ListItemIcon style={{ minWidth: 40, color: activeSection === section.id ? 'var(--primary)' : 'inherit' }}>
+                    {section.icon}
+                  </ListItemIcon>
+                  <ListItemText 
+                    primary={section.label} 
+                    primaryTypographyProps={{ 
+                      variant: 'body2',
+                      style: {
+                        fontWeight: activeSection === section.id ? 600 : 400,
+                        color: activeSection === section.id ? 'var(--primary)' : 'inherit'
+                      }
+                    }}
+                  />
+                </ListItemButton>
+              ))}
+            </List>
+          </div>
+        )}
+
+        <div style={{ flex: 1, padding: isMobile ? 12 : 24, overflowY: 'auto', minHeight: 0 }}>
+          {loading ? (
+            <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', paddingTop: 80, paddingBottom: 80 }}>
+              <CircularProgress />
+            </div>
+          ) : (
+            <>
+              {error && (
+                <Alert severity="error" style={{ marginBottom: 16 }} onClose={() => setError(null)}>
+                  {error}
+                </Alert>
+              )}
+
+              {success && (
+                <Alert severity="success" style={{ marginBottom: 16 }}>
+                  Settings saved successfully!
+                </Alert>
+              )}
+
+              {isMobile ? (
+                renderSectionContent(activeSection)
+              ) : (
+                renderSectionContent(activeSection)
+              )}
+            </>
+          )}
+        </div>
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={handleCancel} disabled={saving} variant="outlined">
+          Cancel
+        </Button>
+        <Button
+          onClick={handleSave}
+          variant="contained"
+          disabled={saving || loading || !hasChanges() || allTabsHidden}
+          style={{ minWidth: 100 }}
+        >
+          {saving ? <CircularProgress size={24} /> : 'Save'}
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+}
+
+export default ChannelSettingsDialog;

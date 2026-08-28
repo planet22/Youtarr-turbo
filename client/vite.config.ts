@@ -1,0 +1,116 @@
+import { rmSync } from 'node:fs';
+import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
+import tsconfigPaths from 'vite-tsconfig-paths';
+
+const buildOutDir = 'build';
+
+function excludeProductionMswWorker() {
+  return {
+    name: 'exclude-production-msw-worker',
+    apply: 'build' as const,
+    closeBundle() {
+      rmSync(`${buildOutDir}/mockServiceWorker.js`, { force: true });
+    },
+  };
+}
+
+export default defineConfig(() => {
+  const backendPort = process.env.VITE_BACKEND_PORT || '3087';
+  const backendTarget = `http://127.0.0.1:${backendPort}`;
+  const devServerHost = process.env.VITE_HOST || '0.0.0.0';
+
+  return {
+    plugins: [react(), tsconfigPaths(), excludeProductionMswWorker()],
+    envPrefix: ['VITE_', 'REACT_APP_'],
+    server: {
+      host: devServerHost,
+      port: 3000,
+      proxy: {
+        // Handle WebSocket path explicitly first
+        '/ws': {
+          target: backendTarget.replace(/^http/, 'ws'),
+          ws: true,
+          changeOrigin: true,
+        },
+        // All API-related paths (cache control is handled server-side, not here)
+        '/api': { 
+          target: backendTarget, 
+          changeOrigin: true,
+          ws: false,
+        },
+        '/auth': { 
+          target: backendTarget, 
+          changeOrigin: true,
+          ws: false,
+        },
+        '/setup': { 
+          target: backendTarget, 
+          changeOrigin: true,
+          ws: false,
+        },
+        '/getconfig': { 
+          target: backendTarget, 
+          changeOrigin: true, 
+          ws: false,
+        },
+        '/updateconfig': { target: backendTarget, changeOrigin: true, ws: false },
+        '/getCurrentReleaseVersion': { target: backendTarget, changeOrigin: true, ws: false },
+        '/getVideos': { target: backendTarget, changeOrigin: true, ws: false },
+        '/getchannels': { target: backendTarget, changeOrigin: true, ws: false },
+        '/getchannelvideos': { target: backendTarget, changeOrigin: true, ws: false },
+        '/runningjobs': { target: backendTarget, changeOrigin: true, ws: false },
+        '/storage-status': { target: backendTarget, changeOrigin: true, ws: false },
+        '/getplexlibraries': { target: backendTarget, changeOrigin: true, ws: false },
+        '/triggerchanneldownloads': { target: backendTarget, changeOrigin: true, ws: false },
+        '/triggerspecificdownloads': { target: backendTarget, changeOrigin: true, ws: false },
+        '/addchannelinfo': { target: backendTarget, changeOrigin: true, ws: false },
+        '/updatechannels': { target: backendTarget, changeOrigin: true, ws: false },
+        '/plex': { target: backendTarget, changeOrigin: true, ws: false },
+        '/images': { target: backendTarget, changeOrigin: true, ws: false },
+        '/fetchallchannelvideos': { target: backendTarget, changeOrigin: true, ws: false },
+        '/getChannelInfo': { target: backendTarget, changeOrigin: true, ws: false },
+      },
+    },
+    build: {
+      outDir: buildOutDir,
+      sourcemap: true,
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            if (!id.includes('node_modules')) {
+              return undefined;
+            }
+
+            if (
+              id.includes('/react/') ||
+              id.includes('/react-dom/') ||
+              id.includes('/react-router/') ||
+              id.includes('/react-router-dom/')
+            ) {
+              return 'react-vendor';
+            }
+
+            if (id.includes('/@radix-ui/')) {
+              return 'radix-vendor';
+            }
+
+            if (id.includes('/lucide-react/')) {
+              return 'icon-vendor';
+            }
+
+            if (
+              id.includes('/axios/') ||
+              id.includes('/lodash/') ||
+              id.includes('/date-fns/')
+            ) {
+              return 'data-vendor';
+            }
+
+            return undefined;
+          },
+        },
+      },
+    },
+  };
+});

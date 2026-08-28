@@ -1,0 +1,424 @@
+/* eslint-env jest */
+const loggerMock = require('../__mocks__/logger');
+const { findRouteHandler } = require('./testUtils');
+
+const createMockRequest = (overrides = {}) => ({
+  params: {},
+  query: {},
+  headers: {},
+  body: {},
+  path: '',
+  ip: '127.0.0.1',
+  connection: { remoteAddress: '127.0.0.1' },
+  socket: { remoteAddress: '127.0.0.1' },
+  log: loggerMock,
+  ...overrides
+});
+
+const createMockResponse = () => {
+  const res = {
+    statusCode: 200,
+    headers: {}
+  };
+
+  res.status = jest.fn((code) => {
+    res.statusCode = code;
+    return res;
+  });
+
+  res.json = jest.fn((payload) => {
+    res.body = payload;
+    return res;
+  });
+
+  res.send = jest.fn((payload) => {
+    res.body = payload;
+    return res;
+  });
+
+  return res;
+};
+
+const setupServer = async ({ authEnabled = 'false', passwordHash = null } = {}) => {
+  jest.resetModules();
+  jest.clearAllMocks();
+
+  process.env.NODE_ENV = 'test';
+
+  if (authEnabled === undefined) {
+    delete process.env.AUTH_ENABLED;
+  } else {
+    process.env.AUTH_ENABLED = authEnabled;
+  }
+
+  const https = require('https');
+  jest.spyOn(https, 'get').mockImplementation(() => {});
+
+  const fakeConfig = {
+    passwordHash,
+    username: passwordHash ? 'tester' : null,
+    dockerAutoCreated: false,
+    plexUrl: 'http://plex:32400',
+    plexPort: '32400'
+  };
+
+  const configModuleMock = {
+    directoryPath: '/downloads',
+    getConfig: jest.fn(() => fakeConfig),
+    updateConfig: jest.fn((nextConfig) => Object.assign(fakeConfig, nextConfig)),
+    getImagePath: jest.fn(() => '/images'),
+    getCookiesStatus: jest.fn(() => ({ cookiesEnabled: false })),
+    writeCustomCookiesFile: jest.fn(),
+    deleteCustomCookiesFile: jest.fn(),
+    getStorageStatus: jest.fn().mockResolvedValue({ total: 1, free: 1 }),
+    isElfhostedPlatform: jest.fn(() => false),
+    config: fakeConfig,
+    stopWatchingConfig: jest.fn()
+  };
+
+  const plexModuleMock = {
+    getLibrariesWithParams: jest.fn().mockResolvedValue([]),
+    getLibraries: jest.fn().mockResolvedValue([]),
+    getServerIdentityWithParams: jest.fn().mockResolvedValue({ claimed: true, machineIdentifier: 'MID' }),
+    refreshLibrary: jest.fn().mockResolvedValue(),
+    getAuthUrl: jest.fn().mockResolvedValue({ url: 'https://plex.example/auth' }),
+    checkPin: jest.fn().mockResolvedValue({ authenticated: true })
+  };
+  const childProcessMock = {
+    execSync: jest.fn(() => '2025.09.23')
+  };
+  const pinoHttpMock = jest.fn(() => (req, res, next) => next());
+
+  jest.doMock('../logger', () => loggerMock);
+  jest.doMock('child_process', () => childProcessMock);
+  jest.doMock('pino-http', () => pinoHttpMock);
+  jest.doMock('../db', () => ({
+    initializeDatabase: jest.fn().mockResolvedValue(),
+    reinitializeDatabase: jest.fn().mockResolvedValue({
+      connected: true,
+      schemaValid: true,
+      errors: []
+    }),
+    sequelize: {
+      authenticate: jest.fn().mockResolvedValue(true)
+    },
+    Session: {
+      findOne: jest.fn().mockResolvedValue(null),
+      destroy: jest.fn().mockResolvedValue(0)
+    },
+    Sequelize: { Op: { gt: Symbol('gt'), lt: Symbol('lt'), or: Symbol('or') } }
+  }));
+
+  jest.doMock('../modules/configModule', () => configModuleMock);
+  jest.doMock('../modules/plexModule', () => plexModuleMock);
+  jest.doMock('../modules/channelModule', () => ({
+    subscribe: jest.fn(),
+    readChannels: jest.fn().mockResolvedValue([]),
+    getChannelsPaginated: jest.fn().mockResolvedValue({
+      channels: [],
+      total: 0,
+      page: 1,
+      pageSize: 50,
+      totalPages: 0,
+      subFolders: []
+    }),
+    updateChannelsByDelta: jest.fn().mockResolvedValue(),
+    writeChannels: jest.fn().mockResolvedValue(),
+    getChannelInfo: jest.fn().mockResolvedValue({}),
+    getChannelVideos: jest.fn().mockResolvedValue([])
+  }));
+  jest.doMock('../modules/downloadModule', () => ({
+    doSpecificDownloads: jest.fn(),
+    doChannelDownloads: jest.fn()
+  }));
+  jest.doMock('../modules/jobModule', () => ({
+    getJob: jest.fn(),
+    getRunningJobs: jest.fn(() => []),
+    getRunningJobsWithFreshVideos: jest.fn().mockResolvedValue([])
+  }));
+  jest.doMock('../modules/videosModule', () => ({
+    getVideos: jest.fn().mockResolvedValue([])
+  }));
+  jest.doMock('../modules/channelSettingsModule', () => ({
+    getChannelSettings: jest.fn(),
+    updateChannelSettings: jest.fn(),
+    getAllSubFolders: jest.fn()
+  }));
+  jest.doMock('../modules/subfolderModule', () => ({
+    getAll: jest.fn().mockResolvedValue([]),
+    register: jest.fn().mockResolvedValue(undefined),
+    delete: jest.fn().mockResolvedValue(undefined),
+  }));
+  jest.doMock('../modules/archiveModule', () => ({
+    getAutoRemovalDryRun: jest.fn().mockResolvedValue({ videos: [], totalSize: 0 })
+  }));
+  jest.doMock('../modules/subscriptionImport', () => ({
+    init: jest.fn(),
+    ImportInProgressError: class ImportInProgressError extends Error {}
+  }));
+  jest.doMock('../modules/messageEmitter', () => ({
+    emitMessage: jest.fn(),
+    getLastMessages: jest.fn(() => [])
+  }));
+  jest.doMock('../models', () => ({
+    Channel: { findAll: jest.fn().mockResolvedValue([]) }
+  }));
+  jest.doMock('../modules/videoDeletionModule', () => ({
+    deleteVideos: jest.fn().mockResolvedValue({ deleted: [], failed: [] }),
+    deleteVideosByYoutubeIds: jest.fn().mockResolvedValue({ deleted: [], failed: [] })
+  }));
+  jest.doMock('../modules/videoValidationModule', () => ({
+    validateVideo: jest.fn().mockResolvedValue({ isValidUrl: true, metadata: {} })
+  }));
+  jest.doMock('../modules/notificationModule', () => ({
+    sendTestNotification: jest.fn().mockResolvedValue({ success: true })
+  }));
+  jest.doMock('../models/channelvideo', () => ({
+    update: jest.fn().mockResolvedValue([1])
+  }));
+  jest.doMock('../modules/webSocketServer.js', () => jest.fn());
+
+  jest.doMock('node-cron', () => ({ schedule: jest.fn() }));
+  jest.doMock('../modules/mediaServers/watchStatusScheduler', () => ({ scheduleTask: jest.fn(), subscribe: jest.fn() }));
+  jest.doMock('../modules/channel/channelBackdropBackfill', () => ({ subscribe: jest.fn() }));
+  jest.doMock('express-rate-limit', () => jest.fn(() => (req, res, next) => next()));
+
+  const serverModule = require('../server');
+  await serverModule.initialize();
+
+  return {
+    app: serverModule.app,
+    configModuleMock,
+    plexModuleMock
+  };
+};
+
+describe('Plex authentication routes', () => {
+  afterEach(() => {
+    delete process.env.AUTH_ENABLED;
+    jest.restoreAllMocks();
+  });
+
+  test('bypasses password requirement when platform manages auth', async () => {
+    const { app, plexModuleMock } = await setupServer({ authEnabled: 'false', passwordHash: null });
+
+    const handler = findRouteHandler(app, 'get', '/plex/auth-url');
+    const req = createMockRequest({ path: '/plex/auth-url' });
+    const res = createMockResponse();
+
+    await handler(req, res);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual({ url: 'https://plex.example/auth' });
+    expect(plexModuleMock.getAuthUrl).toHaveBeenCalledTimes(1);
+  });
+
+  test('blocks Plex auth when local auth not configured', async () => {
+    const { app, plexModuleMock } = await setupServer({ authEnabled: 'true', passwordHash: null });
+
+    const handler = findRouteHandler(app, 'get', '/plex/auth-url');
+    const req = createMockRequest({ path: '/plex/auth-url' });
+    const res = createMockResponse();
+
+    await handler(req, res);
+
+    expect(res.statusCode).toBe(503);
+    expect(res.body).toEqual({
+      error: 'Authentication not configured',
+      requiresSetup: true,
+      message: 'Please complete initial setup first'
+    });
+    expect(plexModuleMock.getAuthUrl).not.toHaveBeenCalled();
+  });
+
+  test('allows Plex PIN checks when platform manages auth', async () => {
+    const { app, plexModuleMock } = await setupServer({ authEnabled: 'false', passwordHash: null });
+
+    const handler = findRouteHandler(app, 'get', '/plex/check-pin/:pinId');
+    const req = createMockRequest({
+      path: '/plex/check-pin/sample',
+      params: { pinId: 'sample' }
+    });
+    const res = createMockResponse();
+
+    await handler(req, res);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual({ authenticated: true });
+    expect(plexModuleMock.checkPin).toHaveBeenCalledWith('sample');
+  });
+
+  test('blocks Plex PIN checks when local auth required but missing', async () => {
+    const { app, plexModuleMock } = await setupServer({ authEnabled: 'true', passwordHash: null });
+
+    const handler = findRouteHandler(app, 'get', '/plex/check-pin/:pinId');
+    const req = createMockRequest({
+      path: '/plex/check-pin/sample',
+      params: { pinId: 'sample' }
+    });
+    const res = createMockResponse();
+
+    await handler(req, res);
+
+    expect(res.statusCode).toBe(503);
+    expect(res.body).toEqual({
+      error: 'Authentication not configured',
+      requiresSetup: true,
+      message: 'Please complete initial setup first'
+    });
+    expect(plexModuleMock.checkPin).not.toHaveBeenCalled();
+  });
+
+  test('auto-saves Plex API key without overwriting managed URL IP', async () => {
+    const { app, configModuleMock, plexModuleMock } = await setupServer({ authEnabled: 'false', passwordHash: 'hash' });
+    plexModuleMock.getLibrariesWithParams.mockResolvedValue([{ id: 'lib' }]);
+
+    const handler = findRouteHandler(app, 'get', '/getplexlibraries');
+    const req = createMockRequest({
+      path: '/getplexlibraries',
+      query: { testIP: '', testApiKey: 'fresh-token' }
+    });
+    const res = createMockResponse();
+
+    await handler(req, res);
+
+    expect(plexModuleMock.getLibrariesWithParams).toHaveBeenCalledWith('', 'fresh-token', undefined, false);
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual([{ id: 'lib' }]);
+
+    expect(configModuleMock.updateConfig).toHaveBeenCalledTimes(1);
+    const updatedConfig = configModuleMock.updateConfig.mock.calls[0][0];
+    expect(updatedConfig.plexApiKey).toBe('fresh-token');
+    expect(updatedConfig.plexIP).toBeUndefined();
+    expect(updatedConfig.plexPort).toBe('32400');
+  });
+
+  test('auto-saves Plex IP when provided during test', async () => {
+    const { app, configModuleMock, plexModuleMock } = await setupServer({ authEnabled: 'false', passwordHash: 'hash' });
+    plexModuleMock.getLibrariesWithParams.mockResolvedValue([{ id: 'lib' }]);
+
+    const handler = findRouteHandler(app, 'get', '/getplexlibraries');
+    const req = createMockRequest({
+      path: '/getplexlibraries',
+      query: { testIP: '192.168.1.10', testApiKey: 'fresh-token', testPort: '23456' }
+    });
+    const res = createMockResponse();
+
+    await handler(req, res);
+
+    expect(plexModuleMock.getLibrariesWithParams).toHaveBeenCalledWith('192.168.1.10', 'fresh-token', '23456', false);
+    expect(configModuleMock.updateConfig).toHaveBeenCalledTimes(1);
+    const updatedConfig = configModuleMock.updateConfig.mock.calls[0][0];
+    expect(updatedConfig.plexIP).toBe('192.168.1.10');
+    expect(updatedConfig.plexApiKey).toBe('fresh-token');
+    expect(updatedConfig.plexPort).toBe('23456');
+  });
+
+  test('auto-saves plexViaHttps when testUseHttps=true', async () => {
+    const { app, configModuleMock, plexModuleMock } = await setupServer({ authEnabled: 'false', passwordHash: 'hash' });
+    plexModuleMock.getLibrariesWithParams.mockResolvedValue([{ id: 'lib' }]);
+
+    const handler = findRouteHandler(app, 'get', '/getplexlibraries');
+    const req = createMockRequest({
+      path: '/getplexlibraries',
+      query: { testIP: '192.168.1.10', testApiKey: 'fresh-token', testPort: '32400', testUseHttps: 'true' }
+    });
+    const res = createMockResponse();
+
+    await handler(req, res);
+
+    expect(plexModuleMock.getLibrariesWithParams).toHaveBeenCalledWith('192.168.1.10', 'fresh-token', '32400', true);
+    expect(configModuleMock.updateConfig).toHaveBeenCalledTimes(1);
+    const updatedConfig = configModuleMock.updateConfig.mock.calls[0][0];
+    expect(updatedConfig.plexIP).toBe('192.168.1.10');
+    expect(updatedConfig.plexApiKey).toBe('fresh-token');
+    expect(updatedConfig.plexPort).toBe('32400');
+    expect(updatedConfig.plexViaHttps).toBe(true);
+  });
+
+  test('auto-saves plexViaHttps when testUseHttps=false', async () => {
+    const { app, configModuleMock, plexModuleMock } = await setupServer({ authEnabled: 'false', passwordHash: 'hash' });
+    plexModuleMock.getLibrariesWithParams.mockResolvedValue([{ id: 'lib' }]);
+
+    const handler = findRouteHandler(app, 'get', '/getplexlibraries');
+    const req = createMockRequest({
+      path: '/getplexlibraries',
+      query: { testIP: '192.168.1.10', testApiKey: 'fresh-token', testPort: '32400', testUseHttps: 'false' }
+    });
+    const res = createMockResponse();
+
+    await handler(req, res);
+
+    expect(plexModuleMock.getLibrariesWithParams).toHaveBeenCalledWith('192.168.1.10', 'fresh-token', '32400', false);
+    expect(configModuleMock.updateConfig).toHaveBeenCalledTimes(1);
+    const updatedConfig = configModuleMock.updateConfig.mock.calls[0][0];
+    expect(updatedConfig.plexIP).toBe('192.168.1.10');
+    expect(updatedConfig.plexApiKey).toBe('fresh-token');
+    expect(updatedConfig.plexPort).toBe('32400');
+    expect(updatedConfig.plexViaHttps).toBe(false);
+  });
+
+  test('does not auto-save plexViaHttps when testUseHttps is undefined', async () => {
+    const { app, configModuleMock, plexModuleMock } = await setupServer({ authEnabled: 'false', passwordHash: 'hash' });
+    plexModuleMock.getLibrariesWithParams.mockResolvedValue([{ id: 'lib' }]);
+
+    const handler = findRouteHandler(app, 'get', '/getplexlibraries');
+    const req = createMockRequest({
+      path: '/getplexlibraries',
+      query: { testIP: '192.168.1.10', testApiKey: 'fresh-token', testPort: '32400' }
+    });
+    const res = createMockResponse();
+
+    await handler(req, res);
+
+    expect(plexModuleMock.getLibrariesWithParams).toHaveBeenCalledWith('192.168.1.10', 'fresh-token', '32400', false);
+    expect(configModuleMock.updateConfig).toHaveBeenCalledTimes(1);
+    const updatedConfig = configModuleMock.updateConfig.mock.calls[0][0];
+    expect(updatedConfig.plexIP).toBe('192.168.1.10');
+    expect(updatedConfig.plexApiKey).toBe('fresh-token');
+    expect(updatedConfig.plexPort).toBe('32400');
+    expect(updatedConfig.plexViaHttps).toBeUndefined();
+  });
+});
+
+describe('Plex server-identity route', () => {
+  afterEach(() => {
+    delete process.env.AUTH_ENABLED;
+    jest.restoreAllMocks();
+  });
+
+  test('uses test credentials when provided and returns identity', async () => {
+    const { app, plexModuleMock } = await setupServer({ authEnabled: 'false', passwordHash: 'hash' });
+    plexModuleMock.getServerIdentityWithParams.mockResolvedValue({ claimed: false, machineIdentifier: 'ABC' });
+
+    const handler = findRouteHandler(app, 'get', '/plex/server-identity');
+    const req = createMockRequest({
+      path: '/plex/server-identity',
+      query: { testIP: '192.168.1.10', testApiKey: 'tok', testPort: '32400', testUseHttps: 'true' }
+    });
+    const res = createMockResponse();
+
+    await handler(req, res);
+
+    expect(plexModuleMock.getServerIdentityWithParams).toHaveBeenCalledWith('192.168.1.10', 'tok', '32400', true);
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual({ claimed: false, machineIdentifier: 'ABC' });
+  });
+
+  test('falls back to saved config when no test credentials supplied', async () => {
+    const { app, configModuleMock, plexModuleMock } = await setupServer({ authEnabled: 'false', passwordHash: 'hash' });
+    configModuleMock.getConfig.mockReturnValue({
+      plexIP: '10.0.0.5', plexApiKey: 'saved-tok', plexPort: '32401', plexViaHttps: false
+    });
+
+    const handler = findRouteHandler(app, 'get', '/plex/server-identity');
+    const req = createMockRequest({ path: '/plex/server-identity', query: {} });
+    const res = createMockResponse();
+
+    await handler(req, res);
+
+    expect(plexModuleMock.getServerIdentityWithParams).toHaveBeenCalledWith('10.0.0.5', 'saved-tok', '32401', false);
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual({ claimed: true, machineIdentifier: 'MID' });
+  });
+});

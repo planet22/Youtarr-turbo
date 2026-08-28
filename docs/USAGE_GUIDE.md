@@ -1,0 +1,652 @@
+# Youtarr Usage Guide
+
+This guide provides step-by-step instructions for common tasks in Youtarr. After completing the [Installation Guide](INSTALLATION.md), use this guide to learn how to use Youtarr's features effectively.
+
+## Table of Contents
+
+- [Download Individual Videos](#download-individual-videos)
+- [Subscribe to Channels](#subscribe-to-channels)
+- [Import YouTube Subscriptions](#import-youtube-subscriptions)
+- [Subscribe to Playlists](#subscribe-to-playlists)
+- [Configure Automation](#configure-automation)
+- [Configure SponsorBlock](#configure-sponsorblock)
+- [Enable Download Notifications](#enable-download-notifications)
+- [Re-download Missing Videos](#re-download-missing-videos)
+- [Rescan Files on Disk](#rescan-files-on-disk)
+- [Organize Channels with Multi-Library Support](#organize-channels-with-multi-library-support)
+- [Browse and Filter Channel Videos](#browse-and-filter-channel-videos)
+- [Find Videos on YouTube](#find-videos-on-youtube)
+- [Preview and Play Videos](#preview-and-play-videos)
+- [Track Watch Status from Media Servers](#track-watch-status-from-media-servers)
+- [External Access with API Keys](#external-access-with-api-keys)
+- [Content Ratings](#content-ratings)
+
+## Download Individual Videos
+
+Download specific YouTube videos manually without subscribing to channels.
+
+1. **Navigate to the Downloads page**
+   - Click "Downloads" in the navigation menu
+
+2. **Paste YouTube URLs**
+   - Paste a single YouTube URL into the field and press **Enter** or click the **+** icon to add it
+   - Repeat for each video you want to queue
+   - Every URL is validated and previewed with video metadata before it is added
+
+3. **Customize download settings** (optional)
+   - Choose a specific resolution for this download, or leave it at the default to use your global quality setting
+   - Use the **Video File Structure** select (under **File Structure Override**) to force flat files (no video subfolders) or individual video subfolders for this download; the default applies each channel's own settings
+
+4. **Click "Start Download"**
+   - The download will begin immediately
+   - Progress is displayed in real-time
+   - You can continue using Youtarr while downloads run in the background
+
+## Subscribe to Channels
+
+Subscribe to YouTube channels to automatically download new videos as they're published.
+
+1. **Go to the Channels & Playlists page**
+   - Click "Channels & Playlists" in the navigation menu
+
+2. **Add a channel**
+   - Paste the channel URL or @handle into the **Add a new channel** field, then click the **Channel** button (or press Enter)
+     - Examples:
+       - `@MrBeast`
+       - `https://youtube.com/@MrBeast`
+       - `https://www.youtube.com/channel/UCX6OQ3DkcsbYNE6H8uQQuVA`
+
+3. **Queue downloads when you're ready**
+   - Newly added channels wait until you run a channel download or a scheduled cron cycle
+   - Go to **Downloads -> Manual Download**, switch to the **Channel/Playlist Downloads** tab, and click **Download new from all channels/playlists** to fetch the latest videos immediately
+   - The dialog lets you override resolution/video count for that run; otherwise the global defaults apply
+
+4. **Configure channel-specific settings** (optional)
+   - Click on a channel to open its detail page
+   - Click **Edit** (the gear button) in the **Channel Settings** bar to open channel settings. The dialog has four tabs:
+     - **General**:
+       - **Subfolder**: pick or create a subfolder to organize channels into separate media libraries (e.g., `__kids`, `__music`); the picker has an inline **Add Subfolder** action for new names
+       - **Resolution Override**: a **Channel Video Quality Override** that takes precedence over the global setting
+       - **Video File Structure**: download videos directly into the channel folder (flat) or into individual video subfolders (see [Folder Structure](YOUTARR_DOWNLOADS_FOLDER_STRUCTURE.md))
+       - **Auto Downloads**: separate toggles for **New Videos**, **New Shorts**, and **New Live/Streams**. These only take effect while the global **Enable Automatic Downloads** toggle in Settings -> Core is on.
+     - **Filters**: duration limits and a title regex to control which videos auto-download
+     - **Ratings**: a default content rating for this channel's downloads
+     - **Auto-Removal**: **Protect this channel from auto-removal**, or use **Always keep newest downloads** to keep the channel's newest N downloads out of automatic cleanup (see [Configure Automation](#configure-automation))
+
+### Channel playlist file (.m3u)
+
+Enable "Generate channel playlist file (.m3u)" in a channel's settings to have
+Youtarr write a `<Channel Name>.m3u` playlist at the top of that channel's
+folder, listing every downloaded video (oldest first by default, or newest
+first). Jellyfin and Emby import the file automatically as a playlist, but
+only from certain library types (Jellyfin: "Mixed Movies and Shows" or Music,
+Emby: "Mixed Content"); in a Movies-type library (the current
+recommendation) the server ignores the file, though it still opens in any
+`.m3u`-capable player such as VLC, mpv, or Kodi. See the
+[Jellyfin](media-servers/jellyfin.md#channel-playlist-files-m3u) and
+[Emby](media-servers/emby.md#channel-playlist-files-m3u) guides for the
+library-type tradeoff. The file updates after downloads and deletions and
+refreshes nightly after the scheduled file rescan; files deleted outside
+Youtarr drop out of the playlist at the next refresh.
+Turning the setting off (or unsubscribing from the channel) deletes the file.
+
+## Import YouTube Subscriptions
+
+Bulk-import channels from your existing YouTube subscriptions instead of adding them one at a time. Youtarr supports two import methods: a Google Takeout CSV file or a one-time cookies file upload.
+
+1. **Open the import page**
+   - Go to the Channels & Playlists page
+   - Click the **Import** button
+
+### Method 1: Google Takeout CSV
+
+Export your subscription list from Google and upload the CSV file. This method does not require sharing any login credentials, but the export can take 24-72 hours to arrive.
+
+1. **Export your subscriptions from Google Takeout**
+   - Go to [takeout.google.com](https://takeout.google.com/) and sign in
+   - Click **Deselect all** to clear pre-selected data products
+   - Scroll down to **YouTube and YouTube Music** and check its checkbox
+   - Click the **All YouTube data included** button that appears
+   - In the panel that opens, click **Deselect all**, then check **only** the **subscriptions** checkbox
+   - Click **OK**, then **Next step**
+   - Choose **Export once**, keep the file type as ZIP, and click **Create export**
+   - Wait for the email from Google (can take 24-72 hours), download the ZIP, and extract it
+
+2. **Upload the CSV**
+   - On the import page, select the **Import Using CSV** tab
+   - Click **Choose File** and select the file at: `Takeout/YouTube and YouTube Music/subscriptions/subscriptions.csv`
+   - Click **Upload & Preview**
+
+### Method 2: Cookies File
+
+Fetch your subscription list directly from YouTube using a cookies file. This is faster than Google Takeout since there is no waiting period.
+
+1. **Export your cookies**
+   - Install a browser extension such as [Get cookies.txt LOCALLY](https://chromewebstore.google.com/detail/get-cookiestxt-locally/cclelndahbckbenkjhflpdbgdldlbecc)
+   - Open YouTube in a browser where you are logged into the account you want to import from
+   - Use the extension to export your cookies to a `.txt` file
+
+2. **Upload the cookies file**
+   - On the import page, select the **Import Using Cookies** tab
+   - Click **Choose File** and select your exported cookies `.txt` file
+   - Click **Upload & Preview**
+
+> **Privacy note:** Your cookies are used only once to fetch the subscription list and are deleted immediately afterward. They are never saved to disk or stored in the database.
+
+### Reviewing Channels
+
+After uploading, Youtarr displays a review table with all discovered channels.
+
+- Each channel shows a thumbnail and name
+- Channels you are already subscribed to are marked with an "already subscribed" badge and cannot be selected
+- Use the **Select all** / **Deselect all** buttons (or the header checkbox) to quickly toggle the entire list
+- Click the settings icon (gear) on any channel row to configure per-channel settings before importing:
+  - **Auto-download enabled** - toggle automatic downloads on or off
+  - **Video quality** - set a quality override (720p through 2160p, or use the global default)
+  - **Download type** - choose Videos, Shorts, or Livestreams
+  - **Subfolder** - assign the channel to a subfolder for multi-library organization
+  - **Content rating** - set a default content rating (G, PG, PG-13, R, NC-17)
+- Use the **Enable auto-download** / **Disable auto-download** button to toggle auto-download for all selected channels at once
+
+When you are satisfied with your selections, click **Import selected** to begin.
+
+### Import Progress
+
+Once the import starts, Youtarr processes the selected channels as a background job.
+
+- A progress bar and per-channel status list update in real time
+- Each channel shows a success, error, or skipped icon as it completes
+- You can click **Cancel Import** at any time to stop the job; channels already imported are kept
+- If you navigate away from the import page, a banner appears at the top of the Channels & Playlists page showing overall progress with a **View details** link to return to the full progress view
+
+### Error Handling
+
+Individual channel errors (for example, bot detection or network timeouts) are displayed inline next to the affected channel. They do not stop the rest of the import. After the job finishes, the final status will read "Complete with Warnings" if some channels failed, so you can review which ones need attention.
+
+## Subscribe to Playlists
+
+Subscribe to a YouTube playlist and Youtarr tracks its videos, downloads them, and mirrors the playlist into Plex, Jellyfin, and Emby as a native playlist. It also writes a standard `.m3u` file so any other player can open the list.
+
+### Add a playlist
+
+1. **Go to the Channels & Playlists page**
+   - Click "Channels & Playlists" in the navigation menu
+   - Switch to the **Playlists** tab
+
+2. **Paste a playlist URL**
+   - Paste a playlist link such as `https://www.youtube.com/playlist?list=...` into the field, then click the **Playlist** button (or press Enter)
+   - The **Add playlist** dialog opens and fetches a preview: the title, channel, thumbnail, and video count
+   - If you opened the dialog without a URL first, paste the link inside it and click **Fetch info**
+
+3. **Subscribe**
+   - The dialog shows which media servers the playlist will sync to. If you haven't connected any, the videos still download and a `.m3u` file is still written; you just won't get a native server playlist.
+   - Click **Subscribe**. Youtarr pulls in the video list and opens the playlist's detail page.
+
+> Click the **?** icon on the Playlists tab for an in-app summary of how playlists work.
+
+### Where the videos are saved
+
+Playlists don't get their own folder. Each video is saved under the channel that uploaded it, so a playlist that pulls from five channels lands in five channel folders.
+
+- If you're already subscribed to that channel, the video uses that channel's subfolder and quality settings.
+- If you're not, the video uses the playlist's default subfolder (your global default unless you change it), and Youtarr creates a hidden channel record behind the scenes to keep future downloads organized.
+
+The same video never downloads twice just because it shows up in a playlist.
+
+Private, deleted, and members-only videos can't be accessed, so Youtarr leaves them out of the list and never downloads them. The video count reflects only the videos Youtarr can see.
+
+### The playlist detail page
+
+Open a playlist to manage it:
+
+- **Refresh from YouTube**: re-fetches the live playlist, updates the video list, then re-syncs and rewrites the `.m3u`. It doesn't download anything.
+- **Download new**: downloads every tracked video you don't already have. A settings dialog lets you confirm resolution and other options first.
+- **Auto-download new videos**: turn this on and Youtarr keeps the playlist current on your regular download schedule (see [Configure Automation](#configure-automation)).
+- **Playlist settings**: set a subfolder, resolution, download type, and default rating for this playlist. A video's own channel settings take precedence; these apply when the channel has no override. The download type also decides whether the playlist syncs to media servers as a video or music playlist (see [Switching a playlist's download type](MEDIA_SERVER_PLAYLISTS.md#switching-a-playlists-download-type)).
+- **Sync chips**: one per media server. Click to enable or disable sync for that server, or click an unconfigured server to jump to its settings.
+- **Public on media servers**: makes the playlist visible to other users on Jellyfin and Emby. Plex playlists are always created under one account and shared manually, so this setting doesn't affect Plex.
+- **Sync now** and **Rebuild .m3u file**: push the current state to your servers or regenerate the `.m3u` on demand. Sync runs in the background and can take a minute or two while your media server's library scan finishes.
+
+In the video list you can sort newest- or oldest-first, filter by download state with the **Show** control (All videos / Downloaded / Not downloaded), filter by watch status with the **Watched** control (see [Track Watch Status from Media Servers](#track-watch-status-from-media-servers)), exclude videos you don't want, and select specific videos to download with **Download Selected**. Excluded videos are skipped when downloading the playlist and removed from synced server playlists; if the file is already on disk, it stays there. Videos whose file was deleted after downloading count as not downloaded.
+
+### Playlist files (.m3u)
+
+For every playlist you subscribe to, Youtarr writes a `.m3u` file into a `__playlists__` folder next to your videos. It uses relative paths, so it keeps working if you move your library, and it's written whether or not you've connected a media server. The file lists every item you've actually downloaded, in playlist order: one entry each, using the file that matches the playlist's Download Type (the MP3 for MP3 Only playlists, the video file otherwise) and falling back to the other format so nothing is dropped. Any player that reads `.m3u` (VLC, mpv, Kodi, and most media servers) can open it.
+
+### Syncing to Plex, Jellyfin, and Emby
+
+Connect a media server under Settings first, then turn on sync for the playlists you want. A video has to be in your media server's library before it can be added to the synced playlist, so a fresh download might take a scan cycle to show up.
+
+Playlists set to **MP3 Only** sync as music playlists; your server needs a music-type library that includes the Youtarr output directory. The playlist's Download Type setting decides its media-server playlist type, so changing it later switches the synced playlist too. See [Audio-only playlists](MEDIA_SERVER_PLAYLISTS.md#audio-only-playlists) and [Switching a playlist's download type](MEDIA_SERVER_PLAYLISTS.md#switching-a-playlists-download-type).
+
+For per-server setup (API keys, user IDs, the Plex playlist visibility scope), the public/private model, and how Youtarr handles playlist changes, see [Media Server Playlists](MEDIA_SERVER_PLAYLISTS.md).
+
+## Configure Automation
+
+Set up automatic downloads on a schedule so Youtarr checks for new videos periodically.
+
+1. **Visit the Settings page**
+   - Click "Settings" in the navigation menu
+
+2. **Set download schedule**
+   - Open **Settings -> Core** and find the **Download Frequency** drop-down
+   - Pick how often the cron job should run (defaults to hourly)
+   - Use the drop-down to choose one of the preset cron intervals
+   - For in-depth field descriptions (and manual edits via config.json), see [Configuration Reference](CONFIG.md)
+
+3. **Choose video resolution**
+   - On the same Core page choose your preferred maximum resolution
+   - Options range from 360p up through 2160p (4K); YouTube provides the best quality available up to that limit
+
+4. **Configure download limits** (optional)
+   - Set maximum number of new videos to download per channel refresh
+
+5. **Enable Automatic Video Removal** (optional)
+   - Open **Settings -> Auto Removal** and toggle "Enable Automatic Video Removal"
+   - Turn on one or more removal rules; videos are removed when they match any enabled rule:
+     - **Old videos**: **Delete videos older than** a set number of days
+     - **Watched videos**: **Remove watched videos** once your media servers report them watched (see [Track Watch Status from Media Servers](#track-watch-status-from-media-servers)); you can add a **Wait after last watch** delay and a **Minimum time since download** so fresh downloads aren't removed right away
+     - **Low disk space**: delete the oldest videos **When free space falls below** a threshold
+   - Some videos are always kept, no matter which rules match:
+     - Videos you've marked as Protected
+     - The newest N downloads, if you set **Keep this many newest downloads**
+     - Videos from channels you've shielded in that channel's **Auto-Removal** settings tab (full protection or the channel's own keep-newest count)
+   - **Use "Preview Automatic Removal"** to simulate deletions before saving
+     - This shows you exactly which videos would be deleted without actually removing them
+     - Highly recommended before enabling auto-cleanup
+
+6. **Save configuration**
+   - Click "Save" to apply your settings
+   - Changes take effect immediately for the next scheduled run
+
+## Configure SponsorBlock
+
+Automatically remove or mark sponsored segments, intros, outros, and other unwanted content using the crowdsourced [SponsorBlock](https://sponsor.ajay.app/) database.
+
+1. **Go to Settings -> SponsorBlock**
+
+2. **Enable SponsorBlock**
+   - Toggle the "Enable SponsorBlock" switch
+
+3. **Choose action**
+   - **Remove segments entirely**: Cuts out selected segment types from the video file
+   - **Mark as chapters**: Adds chapter markers so you can skip manually (doesn't modify video)
+
+4. **Select which types of segments to handle**
+   - **Sponsor**: Paid promotions and sponsorships
+   - **Intro**: Intro sequences and animations
+   - **Outro**: End cards and credits
+   - **Self Promotion**: Creator promoting their own products/services
+   - **Interaction Reminder**: "Like and subscribe" requests
+   - **Music: Non-Music Section**: Non-music in music videos
+   - **Preview/Recap**: Recaps of previous episodes
+   - **Filler**: Tangential content not related to main topic
+
+5. **Save configuration**
+   - All new downloads will automatically process selected segments
+   - Existing videos are not retroactively processed
+
+## Enable Download Notifications
+
+Get Discord notifications when new videos finish downloading.
+
+1. **Create a Discord webhook**
+   - In Discord, go to: Server Settings -> Integrations -> Webhooks
+   - Click "New Webhook"
+   - Choose the channel for notifications
+   - Copy the webhook URL
+
+2. **Open Youtarr Settings -> Notifications**
+
+3. **Enable notifications**
+   - Toggle notifications on
+   - Paste your Discord webhook URL
+
+4. **Save configuration**
+
+5. **Test the notification**
+   - Click "Send Test Notification" to verify delivery
+   - Check your Discord channel for the test message
+
+**Note**: Youtarr sends notifications after successful downloads that include at least one new video. It won't spam for every single video - notifications are batched per download job.
+
+## Re-download Missing Videos
+
+Videos can become "missing" if they're manually deleted from disk. This feature helps you recover them by fetching the file from YouTube again. The same flow also works for videos still on disk (the new download replaces the existing file, which is handy for upgrading quality); videos that have been removed from YouTube are skipped automatically.
+
+> **Note**: If the file still exists somewhere (you moved it, renamed its folder, or converted it to a different format), use [Rescan Files on Disk](#rescan-files-on-disk) instead. Rescan reconciles Youtarr's database with what's already on disk without re-downloading.
+
+1. **Identify missing videos**
+   - Go to "Downloaded Videos" or a specific channel's video page
+   - Look for videos marked with a cloud-off icon (indicates missing from disk)
+   - The video metadata is still in Youtarr's database, but the file is gone
+
+2. **Select videos to re-download**
+   - Check the boxes next to the videos you want to fetch
+   - In table view, the header checkbox selects everything currently visible; grid and list views select one video at a time
+
+3. **Choose resolution**
+   - Select your preferred resolution for the re-download
+   - You can choose a different quality than the original when the download dialog opens
+
+4. **Queue for download**
+   - Click **Download** in the selection bar; the dialog turns on **Allow re-downloading previously fetched videos** for you when the selection includes missing or on-disk videos
+   - Confirm with **Start Download**; the job will run through the normal downloads queue
+   - Original metadata (watch status, etc.) is preserved
+
+## Rescan Files on Disk
+
+Use this when you've moved, renamed, or converted downloaded files outside Youtarr and want Youtarr's database to catch up with what's actually on disk. The rescan walks your downloads folder and updates Youtarr's view of which files exist and where; it does not re-download anything. It also probes files for their actual resolution, so on libraries downloaded before that was tracked, the quality chips on video listings fill in gradually as the nightly rescan works through them.
+
+Common cases:
+- You converted `.mp4` files to `.mkv` (or another supported container) using ffmpeg.
+- You restored a backup of your downloads folder to a different location.
+- You manually moved files between channel or subfolder directories.
+
+1. **Open Settings -> Maintenance & Rescan**
+2. Click **Rescan files on disk**
+3. The page shows progress in real time and a summary of the last run (videos updated, files marked missing)
+
+A scan also runs daily on a schedule and once at server startup, so changes you make outside Youtarr will eventually be picked up even if you don't trigger a manual rescan.
+
+**Supported file extensions**: `.mp4`, `.webm`, `.mkv`, `.m4v`, `.avi` for video, plus `.mp3` for audio-only downloads. Youtarr only writes `.mp4` (or `.mp3` for audio-only), but the rescan recognizes any of these so transcoding outside Youtarr won't orphan your library. Files must keep the `[<youtube-id>]` segment in their filename (the 11-character ID in brackets that yt-dlp writes by default) for Youtarr to match them back to the database.
+
+**When to use this vs. Re-download Missing Videos**:
+- File is **gone** (deleted): use [Re-download Missing Videos](#re-download-missing-videos).
+- File **still exists somewhere** (moved, renamed, or converted): use Rescan.
+
+## Organize Channels with Multi-Library Support
+
+Create separate media server libraries for different content types (e.g., kids content, music videos, educational content).
+
+### Why Use Multi-Library Support?
+
+- **Parental Controls**: Keep kids content separate with different access restrictions
+- **Sharing Rules**: Share specific libraries with specific users
+- **Better Organization**: Group similar content together
+- **Cleaner Interface**: Users only see relevant content in each library
+
+### How to Set Up Multi-Library Organization
+
+1. **Plan your library structure**
+   - Decide on subfolder names (convention: use `__` prefix like `__kids`, `__music`)
+   - Examples:
+     - `__kids` - Child-friendly YouTube channels
+     - `__music` - Music videos and concerts
+     - `__news` - News and current events
+     - `__education` - Educational content
+     - `__gaming` - Gaming content
+
+2. **Assign channels to subfolders**
+   - Go to the Channels & Playlists page
+   - Click on a channel
+   - Click the settings icon (gear)
+   - Pick or create a subfolder with the **Subfolder** field (use its **Add Subfolder** action for a new name)
+   - Save changes
+
+3. **Configure your media server**
+   - Create separate libraries in your media server (Plex/Jellyfin/etc.)
+   - Point each library to a specific subfolder:
+     - Library 1: `/path/to/downloads/__kids`
+     - Library 2: `/path/to/downloads/__music`
+     - Library 3: `/path/to/downloads` (for channels without a subfolder)
+
+4. **Apply restrictions and sharing**
+   - Configure library-specific access controls in your media server
+   - Set age ratings and content restrictions per library
+   - Share specific libraries with specific users
+
+## Browse and Filter Channel Videos
+
+Explore all videos available from your subscribed channels, even if you haven't downloaded them yet. This feature uses yt-dlp to fetch channel information directly from YouTube - no API key required.
+
+### Using the Channel Video Browser
+
+**Note:** *By default Youtarr only fetches the most recent 50 videos data per tab. To fetch ALL video data, click the `Refresh All` button.*
+
+1. **Navigate to a channel**
+   - Go to the Channels & Playlists page
+   - Click on any subscribed channel
+
+2. **Browse by content type**
+   - Use the tabs to filter:
+     - **Videos**: Long-form content
+     - **Shorts**: Short-form vertical videos
+     - **Streams**: Live streams and premieres
+
+3. **Use filtering and view controls**
+   - **Search**: Filter by title or keywords
+   - **Hide downloaded**: Toggle this option to focus on videos that still need to be fetched
+   - **View mode**: Switch between table/grid/list layouts; table view exposes sortable columns
+   - **Sorting**: In table view click the column headers to sort by publish date, title, duration, or file size
+
+4. **Live status indicators**
+   - Videos currently streaming show a **LIVE** indicator
+   - Youtarr won't download live streams until they finish
+
+5. **Download from the browser**
+   - Select specific videos you want to download
+   - Click "Download" in the selection bar
+   - Choose quality and start the download
+
+6. **Publish date accuracy note**
+   - YouTube's API doesn't provide exact publish times for older videos
+   - Recent videos have accurate timestamps
+
+### Ignore Videos from Auto-Downloads
+
+Mark specific videos to exclude them from automatic channel downloads.
+
+1. **Find the video** you want to ignore
+   - Browse the channel's video list
+
+2. **Click the ignore button**
+   - For videos not yet downloaded, click the "ignore" icon
+   - Video will be skipped during automatic channel refreshes
+
+3. **Bulk ignore**
+   - Select multiple videos
+   - Click "Ignore" in the selection bar
+
+4. **View ignored videos**
+   - Ignored videos are tracked in `config/complete.list`
+   - They won't appear in download recommendations
+   - You can still manually download them if you change your mind
+
+## Find Videos on YouTube
+
+Search YouTube from inside Youtarr and see which results you already have, which are missing, and which are new.
+
+1. **Open Find Videos on YouTube**
+   - In the sidebar, expand **Videos** and click **Find Videos on YouTube**
+   - Enter a search query (up to 200 characters)
+   - Pick a result count (10, 25, 50, or 100), optionally choose a minimum duration, and click Search
+
+2. **Results**
+   - Sorted newest-to-oldest by YouTube's approximate publish date (accurate to within a day or two, same fidelity as the channel videos page)
+   - If a minimum duration is selected, shorter results are hidden in the browser and the page shows how many results were filtered out
+   - Each card shows the channel, duration, upload date, and a status chip:
+     - **Downloaded**: already in your library
+     - **Missing**: previously downloaded but removed from disk
+     - **Not Downloaded**: new result, not yet saved
+   - Click a result to open the video detail modal, where you can download, play (if downloaded), or ignore it
+
+3. **Notes**
+   - Rate-limited to 10 searches per minute per session; server-side timeout is 60 seconds
+   - Nothing is persisted from the search itself, only videos you download get saved
+
+## Preview and Play Videos
+
+Click any thumbnail on the Videos page or a channel page to open a video detail modal with extended metadata and in-browser playback.
+
+1. **Open the modal**
+   - Click the thumbnail of any video in the Videos page, a channel's video list, or the channel page's grid/list/table views
+   - On mobile, the modal opens fullscreen with a back arrow; on desktop it opens as a centered dialog
+
+2. **Extended metadata**
+   - Description, tags, view count, likes, resolution, fps, file sizes, and related file paths
+   - For downloaded videos, the modal shows the downloaded format's dimensions from the video metadata, with the quality tier alongside when it isn't obvious from the numbers (e.g. `608x1080 (1080p)` for a vertical video); video listings show a small tier chip based on the file's measured on-disk resolution
+   - For downloaded videos, data is served from the cached `.info.json`
+   - For videos not yet downloaded, Youtarr fetches metadata on demand via yt-dlp (this can take a few seconds on the first open)
+
+3. **In-browser playback**
+   - Downloaded videos stream directly from Youtarr through the built-in player; no media server required
+   - Playback is authenticated via your existing session
+
+4. **Actions from the modal**
+   - Download, protect, delete, ignore, and rate actions are all available inside the modal
+   - Changes sync back to the source page when the modal closes
+
+## Track Watch Status from Media Servers
+
+If you've connected Plex, Jellyfin, or Emby, Youtarr can pull watch status from them: which videos have been played, how far through, and when. The sync is one-way; Youtarr only reads from your servers and never writes anything back.
+
+### How it works
+
+- On a schedule (every 4 hours by default) Youtarr asks each connected server who has watched what and stores the results.
+- Only videos a server actually reports on get recorded. A video with no watch data means "never synced" or "unknown", not "unwatched".
+- By default Youtarr syncs every user account on the server, not just yours. Jellyfin and Emby report full detail (played, percent watched, last watched) for every user. Plex reports full detail for the server owner; other Plex accounts come from the server's play history, which only records completed plays, so those users show as watched or not with no in-progress positions.
+- Videos Youtarr marks as missing still sync. If a file was moved somewhere Youtarr can't see but a media server still has it, its watch status keeps updating; files are recognized by the `[video-id]` at the end of the filename, so this works even if the file was renamed.
+- Watching a video in Youtarr's built-in player doesn't mark it watched. Watch status only comes from your media servers.
+
+### Settings
+
+Open **Settings -> Watch Status** to:
+
+- Turn the sync on or off and change how often it runs
+- Run a manual **Sync Now** and see per-server results for the last run
+- Toggle whether all users are synced, per server (on by default)
+- Choose when a video counts as "Watched" in listings: when **any** synced user has watched it (the default), or only when the primary account (the Plex owner or your configured Jellyfin/Emby user) has
+
+### Where it shows up
+
+- A **Watched** chip appears on videos in the Videos page, channel pages, and playlist pages. Hover it to see which servers reported the watch.
+- The video detail modal lists per-user detail: who watched it, on which server, how far through, and when.
+- On the Videos page and channel pages, the **Watched** filter chip cycles through three states: off, show only watched, or hide watched.
+- On a playlist page, use the **Watched** dropdown (All / Watched / Not watched) next to the **Show** control.
+
+When you filter for unwatched videos, the results include videos that have never been synced. Youtarr can't tell "not watched" apart from "no data yet", so it errs on the side of showing them.
+
+### What determines if a video is "watched"
+
+Youtarr doesn't decide this; it shows whatever your media servers report. All three servers mark a video played once playback passes a percentage threshold (90% by default), and each one lets you change it:
+
+- **Plex**: Settings -> Library -> **Video Played Threshold**
+- **Emby**: Emby Server -> Library, edit the library, then **Max resume percentage** at the bottom of the dialog (this one is per-library)
+- **Jellyfin**: Server -> Playback -> Resume -> **Maximum resume percentage**
+
+On Emby and Jellyfin the same setting also controls resume: stop after the threshold and the title counts as fully played instead of resumable. If you finished a video and it isn't showing as watched in Youtarr, check this setting on the server you played it on, then run a sync.
+
+## Common tasks
+
+- Set a per-download override: When downloading manually, use the download/settings dialog to pick a rating or clear it (NR) for that specific download.
+- Configure a channel default: Open a channel, click the settings (gear) and set `Default Rating` to apply to that channel's future downloads.
+- Upgrading from an older Youtarr version: If you upgraded and want ratings populated for existing videos, run the backfill script described below.
+
+### Backfilling ratings for existing videos
+
+The `backfill-ratings.js` script finds all videos with no `normalized_rating` and fetches ratings from YouTube via yt-dlp.
+
+> **Warning — this can take a very long time for large libraries.** Each video requires a yt-dlp metadata fetch (~5 seconds per video). For example: 1,000 videos ≈ 1.5 hours; 10,000 videos ≈ 14+ hours. Run `--dry-run` first to see how many videos need backfilling, then plan accordingly (e.g., run overnight, use `screen`/`tmux`).
+
+The script must be run inside the Docker container:
+
+```bash
+# Preview what would change (no database writes) — run this first!
+docker exec youtarr node scripts/backfill-ratings.js --dry-run
+
+# Run for real (consider using screen/tmux for large libraries)
+docker exec -it youtarr node scripts/backfill-ratings.js
+```
+
+**`--dry-run` flag** — Previews changes without modifying the database and shows how many videos need backfilling. Always run this first.
+
+**Log file** — A timestamped log is written to `scripts/backfill-ratings-<timestamp>.log` inside the container.
+
+**Behavior notes:**
+- Processes in batches of 10 with 500 ms rate limiting between requests
+- Videos that fail metadata fetch are marked `backfill-failed`
+- Videos with no rating data available are marked `backfill-no-rating`
+- Safe to re-run — already-rated videos are skipped, so if interrupted you can just run it again
+
+## Content Ratings
+
+Youtarr now supports content ratings for videos and channels. Ratings are normalized to common media-server values (for example `G`, `PG`, `PG-13`, `R`, `NC-17`, and `TV-*`) and surfaced in the UI as badges and in the video metadata. They can also be used to drive automated policies or filter downloads.
+
+How ratings are determined (priority):
+
+1. Manual Override — a rating explicitly set when performing a manual download (or via the download dialog override). This takes highest priority.
+2. Channel Default — a `default_rating` can be configured on a channel and applies to unrated videos for that channel.
+3. Mapped Metadata — ratings parsed and normalized from yt-dlp/YouTube metadata (MPAA, TV-PG, YT age-restrictions, or `age_limit` heuristics).
+4. NR / Not Rated — no rating could be determined; treated as unrated/null.
+
+## External Access with API Keys
+Send videos to Youtarr from anywhere using API keys. This enables one-click downloads from browser bookmarklets, mobile shortcuts, and automation tools.
+
+> **Note**: API keys currently support **single video downloads only**. Playlists and channels require the web UI.
+
+### Create an API Key
+
+1. **Open Settings -> API Keys**
+   - Click "Settings" in the navigation menu, then open the **API Keys** page
+
+2. **Create a new key**
+   - Click "Create Key"
+   - Enter a descriptive name (e.g., "iPhone Shortcut", "Work Laptop")
+   - Click "Create"
+
+3. **Save the key immediately**
+   - The full key is shown only once
+   - Copy it to a secure location before closing the dialog
+
+### Install a Browser Bookmarklet
+
+After creating an API key, you can set up a bookmarklet to send videos with one click:
+
+1. **Get the bookmarklet**
+   - In the key creation dialog, drag the "📥 Send to Youtarr" button to your bookmarks bar
+   - Or copy the bookmarklet code and create a bookmark manually
+
+2. **Use the bookmarklet**
+   - Navigate to any YouTube video page
+   - Click the bookmarklet in your bookmarks bar
+   - An alert confirms the video was queued
+
+### Set Up Mobile Shortcuts
+
+**Apple Shortcuts (iOS/macOS)**:
+1. Create a new Shortcut
+2. Add "Get URLs from Input" for Share Sheet integration
+3. Add "Get Contents of URL" with your Youtarr server URL and API key
+4. Enable "Show in Share Sheet" for YouTube
+
+**Android (Tasker/Automate)**:
+1. Create an HTTP Request action
+2. Configure POST to your Youtarr download endpoint
+3. Include your API key in the headers
+
+For detailed setup instructions and code examples, see the [API Integration Guide](API_INTEGRATION.md).
+
+### Manage Your API Keys
+
+- **View keys**: Settings -> API Keys shows all your keys
+- **Monitor usage**: Check "Last Used" and "Uses" columns to track activity
+- **Delete keys**: Click the trash icon to revoke a key instantly
+- **Rate limiting**: Adjust requests per minute to prevent abuse
+
+## Next Steps
+
+Now that you know how to use Youtarr's features, check out these guides for advanced topics:
+
+- [Configuration Reference](CONFIG.md) - Detailed explanation of all settings
+- [API Integration Guide](API_INTEGRATION.md) - Bookmarklets, mobile shortcuts, and automation
+- [Media Server Setup](MEDIA_SERVERS.md) - Configure Plex, Kodi, Jellyfin, or Emby
+- [Media Server Playlists](MEDIA_SERVER_PLAYLISTS.md) - Sync subscribed playlists to Plex, Jellyfin, and Emby
+- [Troubleshooting Guide](TROUBLESHOOTING.md) - Solutions to common issues
+- [Database Management](DATABASE.md) - Advanced database operations
+
+## Getting Help
+
+- [Troubleshooting Guide](TROUBLESHOOTING.md) - Common issues and solutions
+- [GitHub Issues](https://github.com/DialmasterOrg/Youtarr/issues) - Report bugs or request features
+- [Discord Server](https://discord.gg/68rvWnYMtD) - Join the community for help and discussion

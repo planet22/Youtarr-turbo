@@ -1,0 +1,200 @@
+const { spawn } = require('child_process');
+const path = require('path');
+const fs = require('fs');
+const tempPathManager = require('./download/tempPathManager');
+
+const MEMBERS_ONLY_PATTERNS = [
+  /join this channel to get access to members-only content/i,
+  /available to this channel'?s members/i,
+  /members[- ]only/i,
+  /subscriber[_ -]?only/i,
+];
+
+// YouTube uses two phrasings for terminations:
+//   "account has been terminated ..." (TOS violations)
+//   "channel was removed because it violated ..." (community guidelines)
+const TERMINATED_ACCOUNT_PATTERN = /(account has been terminated|channel was removed because it violated)/i;
+
+function isMembersOnlyError(message = '') {
+  const normalized = String(message);
+  return MEMBERS_ONLY_PATTERNS.some(pattern => pattern.test(normalized));
+}
+
+function isTerminatedAccountError(message = '') {
+  return TERMINATED_ACCOUNT_PATTERN.test(String(message));
+}
+
+class YtDlpRunner {
+  constructor() {
+    this.defaultTimeout = 10000;
+  }
+
+  isMembersOnlyError(message = '') {
+    return isMembersOnlyError(message);
+  }
+
+  isTerminatedAccountError(message = '') {
+    return isTerminatedAccountError(message);
+  }
+
+  /**
+   * Run yt-dlp with specified arguments
+   * NOTE: Args should be pre-built using ytdlpCommandBuilder methods which include
+   * common arguments (cookies, proxy, sleep-requests, etc.)
+   * @param {string[]} args - Pre-built arguments to pass to yt-dlp
+   * @param {Object} options - Options for execution
+   * @param {number} options.timeoutMs - Timeout in milliseconds (default: 10000)
+   * @param {string} options.pipeToFile - Optional file path to pipe output to
+   * @returns {Promise<string>} - stdout output or empty string if piped to file
+   */
+  async run(args, options = {}) {
+    const { timeoutMs = this.defaultTimeout, pipeToFile, signal } = options;
+
+    return new Promise((resolve, reject) => {
+      if (!Array.isArray(args)) {
+        reject(new Error('Arguments must be provided as an array'));
+        return;
+      }
+
+      const ytDlpProcess = spawn('yt-dlp', args, {
+        shell: false,
+        timeout: timeoutMs,
+        env: {
+          ...process.env,
+          TMPDIR: tempPathManager.getTempBasePath()
+        }
+      });
+
+      let stdout = '';
+      let stderr = '';
+      let fileStream = null;
+
+      if (pipeToFile) {
+        try {
+          const dir = path.dirname(pipeToFile);
+          if (!fs.existsSync(dir)) {
+            fs.mkdirSync(dir, { recursive: true });
+          }
+          fileStream = fs.createWriteStream(pipeToFile);
+        } catch (error) {
+          reject(new Error(`Failed to create output file: ${error.message}`));
+          ytDlpProcess.kill();
+          return;
+        }
+      }
+
+      const makeAbortError = () => {
+        const err = new Error('yt-dlp run aborted');
+        err.name = 'AbortError';
+        err.code = 'ABORT_ERR';
+        return err;
+      };
+
+      const onAbort = () => {
+        ytDlpProcess.kill('SIGTERM');
+        const graceHandle = setTimeout(() => {
+          if (!ytDlpProcess.killed) {
+            ytDlpProcess.kill('SIGKILL');
+          }
+        }, 1000);
+        graceHandle.unref();
+        reject(makeAbortError());
+      };
+
+      if (signal) {
+        if (signal.aborted) {
+          ytDlpProcess.kill('SIGTERM');
+          reject(makeAbortError());
+          return;
+        }
+        signal.addEventListener('abort', onAbort, { once: true });
+      }
+
+      ytDlpProcess.stdout.on('data', (data) => {
+        if (fileStream) {
+          fileStream.write(data);
+        } else {
+          stdout += data.toString();
+        }
+      });
+
+      ytDlpProcess.stderr.on('data', (data) => {
+        stderr += data.toString();
+      });
+
+      ytDlpProcess.on('close', (code) => {
+        if (signal) signal.removeEventListener('abort', onAbort);
+        if (fileStream) {
+          fileStream.end();
+        }
+
+        // Check for bot detection
+        if (stderr.includes('Sign in to confirm you\'re not a bot') ||
+            stderr.includes('Sign in to confirm that you\'re not a bot')) {
+          const error = new Error('Bot detection encountered. Please set cookies in your Configuration or try different cookies to resolve this issue.');
+          error.code = 'COOKIES_REQUIRED';
+          reject(error);
+        } else if (code === 0) {
+          resolve(stdout);
+        } else if (code === null) {
+          const timeoutError = new Error(`yt-dlp process timed out after ${timeoutMs}ms`);
+          timeoutError.code = 'YTDLP_TIMEOUT';
+          reject(timeoutError);
+        } else {
+          const errorMessage = stderr || `yt-dlp process exited with code ${code}`;
+          reject(new Error(errorMessage));
+        }
+      });
+
+      ytDlpProcess.on('error', (error) => {
+        if (signal) signal.removeEventListener('abort', onAbort);
+        if (fileStream) {
+          fileStream.end();
+        }
+
+        if (error.code === 'ENOENT') {
+          reject(new Error('yt-dlp not found. Please ensure yt-dlp is installed.'));
+        } else {
+          reject(error);
+        }
+      });
+
+      if (timeoutMs) {
+        setTimeout(() => {
+          if (!ytDlpProcess.killed) {
+            ytDlpProcess.kill('SIGTERM');
+            setTimeout(() => {
+              if (!ytDlpProcess.killed) {
+                ytDlpProcess.kill('SIGKILL');
+              }
+            }, 1000);
+          }
+        }, timeoutMs);
+      }
+    });
+  }
+
+  /**
+   * Fetch video metadata using yt-dlp
+   * @param {string} url - YouTube URL to fetch metadata for
+   * @param {number} timeoutMs - Timeout in milliseconds
+   * @returns {Promise<Object>} - Parsed JSON metadata
+   */
+  async fetchMetadata(url, timeoutMs = 60000) {
+    const YtdlpCommandBuilder = require('./download/ytdlpCommandBuilder');
+    // Skip sleep-requests for single metadata fetches - no rate limiting needed
+    const args = YtdlpCommandBuilder.buildMetadataFetchArgs(url, { skipSleepRequests: true });
+
+    try {
+      const stdout = await this.run(args, { timeoutMs });
+      return JSON.parse(stdout);
+    } catch (error) {
+      if (error.message.includes('timed out')) {
+        throw new Error('Failed to fetch video metadata: Request timed out');
+      }
+      throw new Error(`Failed to fetch video metadata: ${error.message}`);
+    }
+  }
+}
+
+module.exports = new YtDlpRunner();

@@ -1,0 +1,129 @@
+# Youtarr on Unraid
+
+Youtarr is available in the Unraid **Community Applications** store, using the actively maintained template from [@nwithan8](https://codeberg.org/nwithan8/unraid_templates).
+
+
+## Deploying on Unraid
+
+### Install and setup MariaDB
+1. Install the Community Applications plugin (if you have not already)
+2. Setup your MariaDB instance. The MariaDB Official docker container will work fine for this purpose.
+  - See [External Database Guide](external-db.md) for more information about external DB setup since this uses a DB instance that is not directly bundled with Youtarr.
+
+#### If this is the first time you've installed the MariaDB Official docker container
+Set the following configuration options and make note of them, you'll need the same values in your Youtarr configuration:
+- `Database Name`: `youtarr` is recommended
+- `Database User`: `youtarr` is recommended
+- `Port`: Leave as the default of `3306`
+- `Database Password`: Choose something secure
+- `MYSQL_ROOT_PASSWORD`: Choose something secure and write it down, you'll need it any time you have to log into MariaDB directly
+- `MARIADB_RANDOM_ROOT_PASSWORD`: **Leave this field completely blank.** It's a boolean, and *any* value in it (even the literal string "No") tells MariaDB to ignore your `MYSQL_ROOT_PASSWORD` and generate a random one instead, which you'll never see unless you grep it out of the container logs.
+
+> **Important**: These env vars only take effect the *first time* MariaDB initializes its data directory. If you set them wrong, start the container, and then change them, the changes are silently ignored. The only fix at that point is to stop MariaDB, wipe whatever data path you mapped in the template (e.g. `/mnt/user/appdata/mariadb-official/`), and let it re-initialize from scratch.
+
+The first time MariaDB runs it will automatically create the database and user for Youtarr.
+
+#### If you already have a MariaDB instance available
+
+You will need to create a database and user for Youtarr in that instance and ensure that you note the port, database name, database user and password for your subsequent Youtarr configuration.
+
+See [docs/platforms/external-db.md](external-db.md) for reference
+
+**NOTE**: Your MariaDB instance *must* be up and running before Youtarr starts!
+
+> **Warning: Do not update MariaDB and Youtarr at the same time.** If you update the MariaDB Official container and Youtarr together, MariaDB may still be upgrading its internal data files when Youtarr's migrations run, which can corrupt tables and cause data loss. Always update MariaDB first, confirm it's fully running (check its logs for "ready for connections"), then update Youtarr. See the [External Database Guide](external-db.md) for more details.
+
+### Install and setup Youtarr
+
+The recommended install path is through **Community Applications**, which always pulls the actively maintained template.
+
+1. Install the **Community Applications** plugin if you haven't already.
+2. Open the **Apps** tab, search for **Youtarr**, and click **Install**.
+3. Fill in the configuration fields the template presents:
+   - **Database** (`DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`): match the MariaDB instance you set up above.
+     - Use the LAN IP of your Unraid server as `DB_HOST` (eg `192.168.1.100`). Just the bare IP. No `http://` prefix, no trailing slash. `DB_HOST` is a hostname, not a URL.
+     - Do not use `127.0.0.1` or `localhost`, those refer to the container itself, not the Unraid host.
+   - **Authentication**: set both `AUTH_PRESET_USERNAME` and `AUTH_PRESET_PASSWORD` to seed your login credentials. They must meet these rules or they'll be ignored:
+     - `AUTH_PRESET_USERNAME`: 1-32 characters in length
+     - `AUTH_PRESET_PASSWORD`: 8-64 characters in length
+     - Leaving them blank uses the one-time setup-token wizard; retrieve the token from the container logs or the mapped `config/setup-token` file.
+   - Leave `AUTH_ENABLED` set to `true` unless Youtarr is only reachable over LAN/VPN or sits behind an authenticating reverse proxy.
+   - **Paths**: point the video output path at your media share (for example `/mnt/user/media/youtube`) and leave the config, images, and jobs paths at their `/mnt/user/appdata/youtarr/...` defaults unless you have a reason to change them.
+4. Click **Apply** to start Youtarr.
+
+Once the container is running, open `http://<your-unraid-ip>:3011` in your browser to access Youtarr (3011 is the template's default Web UI port; change it in the template if you prefer a different one).
+
+#### Manual install (fallback)
+
+If you would rather load the template by hand instead of through Community Applications, use the maintained template directly:
+
+- Template (web view): `https://codeberg.org/nwithan8/unraid_templates/src/branch/main/templates/youtarr.xml`
+
+1. Open a terminal in Unraid.
+2. Download the template and make it available in Unraid:
+```bash
+curl -L https://codeberg.org/nwithan8/unraid_templates/raw/branch/main/templates/youtarr.xml -o /boot/config/plugins/dockerMan/templates-user/my-youtarr.xml
+```
+3. Navigate to the Docker tab in Unraid and click "Add container".
+4. Select "Youtarr" from "User Templates".
+5. Fill in the configuration as described above.
+6. Click "Apply" to start Youtarr.
+
+## Troubleshooting MariaDB connection issues
+
+If Youtarr can't connect to MariaDB on startup, check the MariaDB container logs first. The common ones:
+
+- **`Access denied for user 'youtarr'@'172.17.0.1' (using password: YES)`** in the MariaDB log: the password Youtarr is sending doesn't match what MariaDB has stored. Either there's a typo between the two containers, or you set MariaDB up earlier with different credentials and the data dir still has the old ones. Env var changes are ignored after first init (see the warning in the setup section above).
+- **`Can't connect to MariaDB server`** in the Youtarr log: `DB_HOST` is wrong. Use the Unraid LAN IP, no `http://` prefix, no trailing slash, and not `127.0.0.1`/`localhost`.
+- **You can't even log in to MariaDB as root with the password you set**: the data dir was initialized with a random root password, almost certainly because `MARIADB_RANDOM_ROOT_PASSWORD` had a value in it on first start. Check the container logs from that first startup:
+  ```
+  docker logs MariaDB 2>&1 | grep -i "GENERATED ROOT PASSWORD"
+  ```
+  If you find it, log in with `docker exec -it MariaDB mariadb -uroot -p` and reset everything from there. If the logs have rotated and grep finds nothing, the only path forward is to stop MariaDB, wipe the mapped data directory, and start it again with `MARIADB_RANDOM_ROOT_PASSWORD` blank.
+
+> Newer MariaDB images use `mariadb` as the client binary, not `mysql`. If `docker exec ... mysql` returns "executable file not found in $PATH", use `mariadb` instead.
+
+## Running as Non-Root User
+
+By default, Youtarr runs as root inside the container. This works fine for most setups, but if you need Plex or Jellyfin to be able to delete files that Youtarr downloads, you'll need to run Youtarr as a non-root user with matching permissions.
+
+**Note**: The `YOUTARR_UID` and `YOUTARR_GID` environment variables do not work on Unraid. You must use the `--user` parameter instead.
+
+### Steps to Run as Non-Root
+
+1. **Stop the Youtarr container** if it's running
+
+2. **Set correct ownership on your directories** by opening an Unraid terminal and running:
+   ```bash
+   chown -R 99:100 /mnt/user/appdata/youtarr
+   chown -R 99:100 /path/to/your/youtube_videos
+   ```
+   Replace the paths with your actual mapped directories. The `99:100` corresponds to the `nobody:users` user/group on Unraid. The template maps Youtarr's config, images, and jobs under `/mnt/user/appdata/youtarr/` (in `config/`, `images/`, and `jobs/` subfolders), so recursing from the top with `chown -R` covers all of them in one shot.
+
+3. **Add the user parameter to your container**:
+   - Edit your Youtarr container in Unraid
+   - Scroll down to "Extra Parameters"
+   - Add: `--user 99:100`
+   - Click "Apply" to restart the container
+
+4. **Verify it's working** by running:
+   ```bash
+   docker exec -it Youtarr sh -c 'id'
+   ```
+   You should see `uid=99(nobody) gid=100(users)` instead of `uid=0(root)`.
+
+After this setup, Youtarr will create files with `nobody:users` ownership, which matches the default permissions that Plex and other media apps use on Unraid, allowing them to delete files as needed.
+
+## Troubleshooting file permissions over SMB (Windows, macOS)
+
+If you can see Youtarr's downloaded videos on a Windows or macOS SMB share but can't move, rename, or delete them ("You require permission from TOWER\nobody to make changes to this file" on Windows, or a padlock icon on macOS), the cause is almost always the file mode, not the ownership.
+
+Older versions of Youtarr wrote files with mode `644` (`rw-r--r--`), which means only the file owner (`nobody`) could modify them. If your SMB client authenticated as any other user, access was read-only. Current versions write downloads as `664` / directories as `775` by default, so **new downloads do not need any repair**.
+
+**One-time repair for files downloaded before this change:**
+```bash
+find /path/to/your/youtube_videos -type f -exec chmod 664 {} \;
+find /path/to/your/youtube_videos -type d -exec chmod 775 {} \;
+```
+
+Separately, your SMB share must be configured so the connecting user is either mapped to `nobody` or is a member of the `users` group, otherwise even group-writable files will still appear read-only. On Unraid, the simplest path is Shares -> edit the share -> SMB Security Settings -> set to `Public`, which maps all SMB users to `nobody`.

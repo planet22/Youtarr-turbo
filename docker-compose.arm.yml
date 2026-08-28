@@ -1,0 +1,12 @@
+# Named-volume database override.
+# The filename is historical: it was originally added for ARM systems, but it is
+# also useful on Docker Desktop and NAS/virtualized filesystems where bind-mounted
+# MariaDB data can corrupt during schema migrations.
+
+services:
+  youtarr-db:
+    volumes:
+      - youtarr-db-data:/var/lib/mysql
+
+volumes:
+  youtarr-db-data:

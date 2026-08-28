@@ -1,0 +1,53 @@
+/*{
+  "title": "Five Nights at Freddy’s SCARY Truth…",
+  "id": "WEywwDLeZE0",
+  "publishedAt": "2023-06-10T14:15:05Z",
+  "thumbnail": "https://i.ytimg.com/vi/WEywwDLeZE0/mqdefault.jpg",
+  "added": false
+},*/
+
+export interface ChannelVideo {
+  id?: number;
+  title: string;
+  youtube_id: string;
+  publishedAt: string | null | undefined;
+  // Provenance of publishedAt. The server blanks publishedAt for 'estimated'
+  // rows (ordering-only placeholders), so UI date displays never see them.
+  // Backend source of truth: server/modules/constants/publishedAtSource.js
+  published_at_source?: 'exact' | 'approximate' | 'estimated' | null;
+  thumbnail: string;
+  added: boolean;
+  removed?: boolean;
+  youtube_removed?: boolean;
+  duration: number;
+  availability?: string | null;
+  fileSize?: number | null;
+  filePath?: string | null;
+  audioFilePath?: string | null;
+  audioFileSize?: number | null;
+  media_type?: string | null;
+  live_status?: string | null;
+  ignored?: boolean;
+  ignored_at?: string | null;
+  normalized_rating?: string | null;
+  rating_source?: string | null;
+  protected?: boolean;
+  timeCreated?: string | null;
+  // Actual downloaded pixel dimensions, e.g. "1920x1080"; "0x0" = probe failed
+  video_resolution?: string | null;
+  watchedBy?: string[];
+  // Only present when the request opted in via applyChannelFilters=true
+  // (see ChannelVideos.tsx's filter-bar toggle) - whether this video would
+  // pass the channel's own configured Download Filters, and (TV Series
+  // library mode) the season/episode it would resolve to.
+  channelFilterPreview?: {
+    wouldDownload: boolean;
+    excludedReason: 'duration' | 'titleFilter' | null;
+    isSeriesMode: boolean;
+    season: number | null;
+    episode: number | null;
+    // true = decoded by the channel's season/episode regex; false = fell
+    // back to the upload-year-as-season default (or n/a if not series mode).
+    seasonEpisodeDecoded: boolean;
+  };
+}

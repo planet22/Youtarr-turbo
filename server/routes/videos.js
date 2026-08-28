@@ -1,0 +1,1053 @@
+const express = require('express');
+const rateLimit = require('express-rate-limit');
+const { ROOT_SENTINEL, GLOBAL_DEFAULT_SENTINEL } = require('../modules/filesystem/constants');
+
+// Video validation rate limiter
+const videoValidationLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000, // 1 minute
+  max: 30, // 30 requests per minute
+  message: 'Too many validation requests, please try again later',
+  standardHeaders: true,
+  legacyHeaders: false,
+  validate: { trustProxy: false },
+});
+
+// Bulk enrichment rate limiter
+const bulkEnrichLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000, // 1 minute
+  max: 20, // 20 enrichment batches per minute per client
+  message: 'Too many enrichment requests, please try again later',
+  standardHeaders: true,
+  legacyHeaders: false,
+  validate: { trustProxy: false },
+});
+
+// API key download rate limiter
+const apiKeyDownloadLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000, // 1 minute
+  max: (req) => {
+    // Only apply to API key auth, session auth is unlimited
+    if (req.authType !== 'api_key') {
+      return 0; // 0 = unlimited
+    }
+    const configModule = require('../modules/configModule');
+    return configModule.getConfig().apiKeyRateLimit || 10;
+  },
+  keyGenerator: (req) => {
+    // Rate limit per API key ID - only used for API key auth
+    // Session auth is skipped entirely via the skip function
+    return `apikey:${req.apiKeyId || 'unknown'}`;
+  },
+  skip: (req) => req.authType !== 'api_key', // Skip rate limiting for session auth
+  message: { success: false, error: 'Rate limit exceeded. Try again later.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+  validate: { trustProxy: false, ip: false },
+});
+
+/**
+ * Creates video routes
+ * @param {Object} deps - Dependencies
+ * @param {Function} deps.verifyToken - Token verification middleware
+ * @param {Object} deps.videosModule - Videos module
+ * @param {Object} deps.downloadModule - Download module
+ * @returns {express.Router}
+ */
+module.exports = function createVideoRoutes({ verifyToken, videosModule, downloadModule, videoOembedEnricher }) {
+  const router = express.Router();
+
+  /**
+   * @swagger
+   * /getVideos:
+   *   get:
+   *     summary: Get downloaded videos
+   *     description: Retrieve a paginated list of downloaded videos.
+   *     tags: [Videos]
+   *     parameters:
+   *       - in: query
+   *         name: page
+   *         schema:
+   *           type: integer
+   *           default: 1
+   *         description: Page number
+   *       - in: query
+   *         name: limit
+   *         schema:
+   *           type: integer
+   *           default: 12
+   *         description: Number of items per page
+   *       - in: query
+   *         name: search
+   *         schema:
+   *           type: string
+   *         description: Search term
+   *       - in: query
+   *         name: dateFrom
+   *         schema:
+   *           type: string
+   *           format: date
+   *         description: Filter videos from this date
+   *       - in: query
+   *         name: dateTo
+   *         schema:
+   *           type: string
+   *           format: date
+   *         description: Filter videos up to this date
+   *       - in: query
+   *         name: sortBy
+   *         schema:
+   *           type: string
+   *           enum: [added, title, date]
+   *           default: added
+   *         description: Field to sort by
+   *       - in: query
+   *         name: sortOrder
+   *         schema:
+   *           type: string
+   *           enum: [asc, desc]
+   *           default: desc
+   *         description: Sort order
+   *       - in: query
+   *         name: channelFilter
+   *         schema:
+   *           type: string
+   *         description: Filter by channel
+   *       - in: query
+   *         name: protectedFilter
+   *         schema:
+   *           type: string
+   *           enum: [off, only, exclude]
+   *           default: off
+   *         description: Tri-state filter on protected videos
+   *       - in: query
+   *         name: missingFilter
+   *         schema:
+   *           type: string
+   *           enum: [off, only, exclude]
+   *           default: off
+   *         description: Tri-state filter on missing (file removed) videos
+   *       - in: query
+   *         name: watchedFilter
+   *         schema:
+   *           type: string
+   *           enum: [off, only, exclude]
+   *           default: off
+   *         description: Tri-state filter on watched videos (per the configured watched rule)
+   *       - in: query
+   *         name: strmFilter
+   *         schema:
+   *           type: string
+   *           enum: [off, only, exclude]
+   *           default: off
+   *         description: Tri-state filter on STRM (stream shortcut) videos
+   *     responses:
+   *       200:
+   *         description: Paginated list of videos
+   *       500:
+   *         description: Failed to get videos
+   */
+  router.get('/getVideos', verifyToken, async (req, res) => {
+    req.log.info('Getting videos');
+
+    try {
+      const { page, limit, search, dateFrom, dateTo, sortBy, sortOrder, channelFilter, protectedFilter, missingFilter, watchedFilter, strmFilter } = req.query;
+
+      const parseFilterMode = (value) => (value === 'only' || value === 'exclude' ? value : 'off');
+
+      const options = {
+        page: parseInt(page) || 1,
+        limit: parseInt(limit) || 12,
+        search: search || '',
+        dateFrom: dateFrom || null,
+        dateTo: dateTo || null,
+        sortBy: sortBy || 'added',
+        sortOrder: sortOrder || 'desc',
+        channelFilter: channelFilter || '',
+        protectedFilter: parseFilterMode(protectedFilter),
+        missingFilter: parseFilterMode(missingFilter),
+        watchedFilter: parseFilterMode(watchedFilter),
+        strmFilter: parseFilterMode(strmFilter),
+      };
+
+      const result = await videosModule.getVideosPaginated(options);
+      res.json(result);
+    } catch (error) {
+      req.log.error({ err: error }, 'Failed to get videos');
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  /**
+   * @swagger
+   * /api/videos/rating:
+   *   post:
+   *     summary: Update video ratings
+   *     description: Update the content rating for multiple videos.
+   *     tags: [Videos]
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             properties:
+   *               videoIds:
+   *                 type: array
+   *                 items:
+   *                   type: integer
+   *               rating:
+   *                 type: string
+   *                 nullable: true
+   *                 description: Content rating or null to clear
+   *     responses:
+   *       200:
+   *         description: Ratings updated
+   *       400:
+   *         description: Invalid request
+   *       500:
+   *         description: Failed to update ratings
+   */
+  router.post('/api/videos/rating', verifyToken, async (req, res) => {
+    try {
+      const { videoIds, rating } = req.body;
+
+      if (!videoIds || !Array.isArray(videoIds) || videoIds.length === 0) {
+        return res.status(400).json({
+          success: false,
+          error: 'videoIds array is required'
+        });
+      }
+
+      if (rating === undefined) {
+        return res.status(400).json({
+          success: false,
+          error: 'rating is required'
+        });
+      }
+
+      // Validate/normalize against the single source of truth in ratingMapper
+      const ratingMapper = require('../modules/ratingMapper');
+      const ratingResult = ratingMapper.validateRating(rating);
+      if (!ratingResult.valid) {
+        return res.status(400).json({ success: false, error: ratingResult.error });
+      }
+      const normalizedRating = ratingResult.value;
+
+      const result = await videosModule.bulkUpdateVideoRatings(videoIds, normalizedRating);
+      res.json(result);
+    } catch (error) {
+      req.log.error({ err: error }, 'Failed to update video ratings');
+      res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+  });
+
+  /**
+   * @swagger
+   * /api/videos/{id}/protected:
+   *   patch:
+   *     summary: Toggle video protection
+   *     description: Set whether a video is protected from automatic deletion.
+   *     tags: [Videos]
+   *     parameters:
+   *       - in: path
+   *         name: id
+   *         required: true
+   *         schema:
+   *           type: integer
+   *         description: Video database ID
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             required:
+   *               - protected
+   *             properties:
+   *               protected:
+   *                 type: boolean
+   *     responses:
+   *       200:
+   *         description: Protection status updated
+   *       400:
+   *         description: Invalid request
+   *       404:
+   *         description: Video not found
+   *       500:
+   *         description: Failed to update protection status
+   */
+  router.patch('/api/videos/:id/protected', verifyToken, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { protected: protectedState } = req.body;
+
+      if (typeof protectedState !== 'boolean') {
+        return res.status(400).json({ error: 'protected field (boolean) is required' });
+      }
+
+      const result = await videosModule.setVideoProtection(parseInt(id, 10), protectedState);
+      res.json(result);
+    } catch (error) {
+      if (error.message === 'Video not found') {
+        return res.status(404).json({ error: 'Video not found' });
+      }
+      req.log.error({ err: error }, 'Failed to update video protection status');
+      res.status(500).json({ error: 'Failed to update protection status' });
+    }
+  });
+
+  /**
+   * @swagger
+   * /api/videos:
+   *   delete:
+   *     summary: Delete videos
+   *     description: Delete downloaded videos by database IDs or YouTube IDs.
+   *     tags: [Videos]
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             properties:
+   *               videoIds:
+   *                 type: array
+   *                 items:
+   *                   type: integer
+   *                 description: Database video IDs
+   *               youtubeIds:
+   *                 type: array
+   *                 items:
+   *                   type: string
+   *                 description: YouTube video IDs
+   *     responses:
+   *       200:
+   *         description: Videos deleted successfully
+   *       400:
+   *         description: Invalid request
+   *       500:
+   *         description: Failed to delete videos
+   */
+  router.delete('/api/videos', verifyToken, async (req, res) => {
+    try {
+      const { videoIds, youtubeIds } = req.body;
+
+      if ((!videoIds && !youtubeIds) ||
+          (videoIds && !Array.isArray(videoIds)) ||
+          (youtubeIds && !Array.isArray(youtubeIds)) ||
+          (videoIds && videoIds.length === 0 && (!youtubeIds || youtubeIds.length === 0)) ||
+          (youtubeIds && youtubeIds.length === 0 && (!videoIds || videoIds.length === 0))) {
+        return res.status(400).json({
+          success: false,
+          error: 'videoIds or youtubeIds array is required'
+        });
+      }
+
+      const videoDeletionModule = require('../modules/videoDeletionModule');
+      let result;
+
+      if (youtubeIds && youtubeIds.length > 0) {
+        result = await videoDeletionModule.deleteVideosByYoutubeIds(youtubeIds);
+      } else {
+        result = await videoDeletionModule.deleteVideos(videoIds);
+      }
+
+      res.json(result);
+    } catch (error) {
+      req.log.error({ err: error }, 'Failed to delete videos');
+      res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+  });
+
+  /**
+   * @swagger
+   * /api/videos/purge:
+   *   delete:
+   *     summary: Purge videos already missing from disk
+   *     description: Permanently removes database rows for videos already marked removed (missing from disk) — no file operations. Rejects any id whose video is not already marked removed; use DELETE /api/videos for those instead.
+   *     tags: [Videos]
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             properties:
+   *               videoIds:
+   *                 type: array
+   *                 items:
+   *                   type: integer
+   *                 description: Database video IDs
+   *     responses:
+   *       200:
+   *         description: Videos purged
+   *       400:
+   *         description: Invalid request
+   *       500:
+   *         description: Failed to purge videos
+   */
+  router.delete('/api/videos/purge', verifyToken, async (req, res) => {
+    try {
+      const { videoIds } = req.body;
+
+      if (!Array.isArray(videoIds) || videoIds.length === 0) {
+        return res.status(400).json({
+          success: false,
+          error: 'videoIds array is required'
+        });
+      }
+
+      const videoDeletionModule = require('../modules/videoDeletionModule');
+      const result = await videoDeletionModule.purgeVideos(videoIds);
+
+      res.json(result);
+    } catch (error) {
+      req.log.error({ err: error }, 'Failed to purge videos');
+      res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+  });
+
+  /**
+   * @swagger
+   * /api/auto-removal/dry-run:
+   *   post:
+   *     summary: Auto-removal dry run
+   *     description: Preview which videos would be removed by automatic cleanup without actually deleting them.
+   *     tags: [Videos]
+   *     requestBody:
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             properties:
+   *               autoRemovalEnabled:
+   *                 type: boolean
+   *               autoRemovalVideoAgeThreshold:
+   *                 type: integer
+   *                 description: Age threshold in days
+   *               autoRemovalFreeSpaceThreshold:
+   *                 type: integer
+   *                 description: Free space threshold in GB
+   *               autoRemovalWatchedEnabled:
+   *                 type: boolean
+   *                 description: Enable watched-based removal
+   *               autoRemovalWatchedMinDaysSinceWatched:
+   *                 type: integer
+   *                 description: Only remove videos whose latest watch is at least this many days old
+   *               autoRemovalWatchedMinVideoAgeDays:
+   *                 type: integer
+   *                 description: Only remove watched videos downloaded at least this many days ago
+   *               autoRemovalKeepRecentCount:
+   *                 type: integer
+   *                 description: Never remove the N most recently downloaded videos
+   *     responses:
+   *       200:
+   *         description: Dry run results
+   *       500:
+   *         description: Failed to perform dry run
+   */
+  router.post('/api/auto-removal/dry-run', verifyToken, async (req, res) => {
+    try {
+      const {
+        autoRemovalEnabled,
+        autoRemovalVideoAgeThreshold,
+        autoRemovalFreeSpaceThreshold,
+        autoRemovalWatchedEnabled,
+        autoRemovalWatchedMinDaysSinceWatched,
+        autoRemovalWatchedMinVideoAgeDays,
+        autoRemovalKeepRecentCount
+      } = req.body || {};
+
+      const coerceBoolean = (value) => {
+        if (typeof value === 'boolean') return value;
+        if (typeof value === 'string') return value.toLowerCase() === 'true';
+        return Boolean(value);
+      };
+
+      const overrides = {};
+
+      if (autoRemovalEnabled !== undefined) {
+        overrides.autoRemovalEnabled = coerceBoolean(autoRemovalEnabled);
+      }
+
+      if (autoRemovalVideoAgeThreshold !== undefined) {
+        overrides.autoRemovalVideoAgeThreshold = autoRemovalVideoAgeThreshold;
+      }
+
+      if (autoRemovalFreeSpaceThreshold !== undefined) {
+        overrides.autoRemovalFreeSpaceThreshold = autoRemovalFreeSpaceThreshold;
+      }
+
+      if (autoRemovalWatchedEnabled !== undefined) {
+        overrides.autoRemovalWatchedEnabled = coerceBoolean(autoRemovalWatchedEnabled);
+      }
+
+      if (autoRemovalWatchedMinDaysSinceWatched !== undefined) {
+        overrides.autoRemovalWatchedMinDaysSinceWatched = autoRemovalWatchedMinDaysSinceWatched;
+      }
+
+      if (autoRemovalWatchedMinVideoAgeDays !== undefined) {
+        overrides.autoRemovalWatchedMinVideoAgeDays = autoRemovalWatchedMinVideoAgeDays;
+      }
+
+      if (autoRemovalKeepRecentCount !== undefined) {
+        overrides.autoRemovalKeepRecentCount = autoRemovalKeepRecentCount;
+      }
+
+      const videoDeletionModule = require('../modules/videoDeletionModule');
+      const result = await videoDeletionModule.performAutomaticCleanup({
+        dryRun: true,
+        overrides
+      });
+
+      res.json(result);
+    } catch (error) {
+      req.log.error({ err: error }, 'Failed to perform auto-removal dry run');
+      res.status(500).json({ success: false, error: error.message || 'Failed to run auto-removal dry run' });
+    }
+  });
+
+  /**
+   * @swagger
+   * /api/checkYoutubeVideoURL:
+   *   post:
+   *     summary: Validate YouTube video URL
+   *     description: Validate a YouTube video URL and fetch its metadata.
+   *     tags: [Videos]
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             required:
+   *               - url
+   *             properties:
+   *               url:
+   *                 type: string
+   *                 description: YouTube video URL
+   *     responses:
+   *       200:
+   *         description: Validation result
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 isValidUrl:
+   *                   type: boolean
+   *                 title:
+   *                   type: string
+   *                 duration:
+   *                   type: integer
+   *                 thumbnail:
+   *                   type: string
+   *       400:
+   *         description: URL is required
+   *       429:
+   *         description: Too many validation requests
+   *       500:
+   *         description: Internal server error
+   */
+  router.post('/api/checkYoutubeVideoURL', verifyToken, videoValidationLimiter, async (req, res) => {
+    try {
+      const { url } = req.body;
+
+      if (!url) {
+        return res.status(400).json({
+          isValidUrl: false,
+          error: 'URL is required'
+        });
+      }
+
+      const videoValidationModule = require('../modules/videoValidationModule');
+      const validationResult = await videoValidationModule.validateVideo(url);
+
+      res.json(validationResult);
+    } catch (error) {
+      req.log.error({ err: error }, 'Failed to validate video URL');
+      res.status(500).json({
+        isValidUrl: false,
+        error: 'Internal server error'
+      });
+    }
+  });
+
+  /**
+   * @swagger
+   * /api/bulkEnrichVideos:
+   *   post:
+   *     summary: Enrich a batch of YouTube video IDs with title + channel name
+   *     description: >
+   *       Fetches lightweight metadata (title, channel name) for a batch of
+   *       YouTube video IDs via YouTube's public oEmbed endpoint. Used by the
+   *       Manual Download bulk-import flow to turn raw IDs into readable
+   *       chips without the cost of a full yt-dlp metadata fetch.
+   *       Outbound requests are rate-limited to protect the server's IP.
+   *     tags: [Videos]
+   *     security:
+   *       - BearerAuth: []
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             required: [ids]
+   *             properties:
+   *               ids:
+   *                 type: array
+   *                 items: { type: string }
+   *                 description: YouTube video IDs (11 chars)
+   *     responses:
+   *       200:
+   *         description: Map of id to metadata; failed lookups are omitted.
+   *       400:
+   *         description: Invalid body.
+   */
+  router.post('/api/bulkEnrichVideos', verifyToken, bulkEnrichLimiter, async (req, res) => {
+    try {
+      const { ids } = req.body || {};
+      if (!Array.isArray(ids)) {
+        return res.status(400).json({ error: 'ids must be an array' });
+      }
+      const enriched = await videoOembedEnricher.enrichByIds(ids);
+      res.json({ enriched });
+    } catch (error) {
+      req.log.error({ err: error }, 'Failed to enrich videos');
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  /**
+   * @swagger
+   * /api/videos/download:
+   *   options:
+   *     summary: CORS preflight for download endpoint
+   *     description: Handle CORS preflight requests for the download endpoint.
+   *     tags: [Videos]
+   *     security: []
+   *     responses:
+   *       204:
+   *         description: CORS preflight successful
+   */
+  router.options('/api/videos/download', (req, res) => {
+    res.set('Access-Control-Allow-Origin', '*');
+    res.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.set('Access-Control-Allow-Headers', 'Content-Type, x-api-key, x-access-token');
+    res.set('Access-Control-Max-Age', '86400');
+    res.status(204).end();
+  });
+
+  /**
+   * @swagger
+   * /api/videos/download:
+   *   post:
+   *     summary: Download a YouTube video
+   *     description: Add a YouTube video URL to the download queue. Designed for external integrations (bookmarklets, shortcuts, automations).
+   *     tags: [Videos]
+   *     security:
+   *       - ApiKeyAuth: []
+   *       - BearerAuth: []
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             required:
+   *               - url
+   *             properties:
+   *               url:
+   *                 type: string
+   *                 description: YouTube video URL
+   *                 example: "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+   *               resolution:
+   *                 type: string
+   *                 enum: ['360', '480', '720', '1080', '1440', '2160']
+   *                 description: Preferred resolution (defaults to server config)
+   *               subfolder:
+   *                 type: string
+   *                 description: Override subfolder for download
+   *     responses:
+   *       200:
+   *         description: Video queued for download
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 success:
+   *                   type: boolean
+   *                 message:
+   *                   type: string
+   *                 video:
+   *                   type: object
+   *                   properties:
+   *                     title:
+   *                       type: string
+   *                     thumbnail:
+   *                       type: string
+   *                     duration:
+   *                       type: integer
+   *       400:
+   *         description: Invalid URL or parameters
+   *       401:
+   *         description: Invalid or missing authentication
+   *       429:
+   *         description: Rate limit exceeded
+   */
+  router.post('/api/videos/download', verifyToken, apiKeyDownloadLimiter, async (req, res) => {
+    // Set CORS headers for bookmarklet/external access
+    res.set('Access-Control-Allow-Origin', '*');
+
+    const { url, resolution, subfolder } = req.body;
+
+    if (!url) {
+      return res.status(400).json({
+        success: false,
+        error: 'URL is required'
+      });
+    }
+
+    // Validate URL length (prevent excessively long URLs)
+    const MAX_URL_LENGTH = 2048;
+    if (url.length > MAX_URL_LENGTH) {
+      return res.status(400).json({
+        success: false,
+        error: `URL too long (max ${MAX_URL_LENGTH} characters)`
+      });
+    }
+
+    // Validate URL format - single videos only
+    const youtubeRegex = /^(https?:\/\/)?(www\.)?(youtube\.com\/(watch\?v=|shorts\/)|youtu\.be\/)[a-zA-Z0-9_-]{11}/;
+    if (!youtubeRegex.test(url)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid YouTube URL format'
+      });
+    }
+
+    // Reject playlists and channels - API keys only support single video downloads
+    if (url.includes('list=') || url.includes('/playlist') || url.includes('/channel/') || url.includes('/@')) {
+      return res.status(400).json({
+        success: false,
+        error: 'API keys only support single video downloads. Playlists and channels require the web UI.'
+      });
+    }
+
+    // Validate resolution if provided
+    const validResolutions = ['360', '480', '720', '1080', '1440', '2160'];
+    if (resolution && !validResolutions.includes(resolution)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid resolution. Valid values: 360, 480, 720, 1080, 1440, 2160'
+      });
+    }
+
+    // Validate subfolder if provided
+    if (subfolder) {
+      const channelSettingsModule = require('../modules/channelSettingsModule');
+      const validation = channelSettingsModule.validateSubFolder(subfolder);
+      if (!validation.valid) {
+        return res.status(400).json({
+          success: false,
+          error: validation.error
+        });
+      }
+    }
+
+    // Persist a real subfolder override so it is reusable in future downloads.
+    if (subfolder && subfolder !== ROOT_SENTINEL && subfolder !== GLOBAL_DEFAULT_SENTINEL) {
+      require('../modules/subfolderModule')
+        .register(subfolder)
+        .catch((err) => req.log.warn({ err }, 'Failed to register download subfolder'));
+    }
+
+    try {
+      // Optionally fetch video metadata for response
+      const videoValidationModule = require('../modules/videoValidationModule');
+      const metadata = await videoValidationModule.validateVideo(url);
+
+      if (!metadata.isValidUrl) {
+        return res.status(400).json({
+          success: false,
+          error: metadata.error || 'Could not validate video URL'
+        });
+      }
+
+      // Queue the download
+      const overrideSettings = {};
+      if (resolution) overrideSettings.resolution = resolution;
+      if (subfolder) overrideSettings.subfolder = subfolder;
+
+      // Build initiatedBy info for download source indicator
+      const initiatedBy = req.authType === 'api_key'
+        ? { type: 'api_key', name: req.apiKeyName }
+        : { type: 'web_ui' };
+
+      // Channel attribution from the validation metadata already fetched above,
+      // so tracked channels' per-channel settings apply to API-key downloads.
+      const videoMeta = metadata.metadata || {};
+      const videoChannelMap = videoMeta.channelId && videoMeta.youtubeId
+        ? { [videoMeta.youtubeId]: videoMeta.channelId }
+        : undefined;
+
+      downloadModule.doGroupedManualDownloads({
+        body: {
+          urls: [url],
+          overrideSettings: Object.keys(overrideSettings).length > 0 ? overrideSettings : undefined,
+          videoChannelMap,
+          initiatedBy
+        }
+      }).catch((err) => {
+        req.log.error({ err }, 'Failed to start API download');
+      });
+
+      // Increment usage count for API key statistics
+      if (req.authType === 'api_key' && req.apiKeyId) {
+        const apiKeyModule = require('../modules/apiKeyModule');
+        apiKeyModule.incrementUsageCount(req.apiKeyId).catch(err => {
+          req.log.warn({ err, keyId: req.apiKeyId }, 'Failed to increment API key usage count');
+        });
+      }
+
+      res.json({
+        success: true,
+        message: 'Video queued for download',
+        video: {
+          title: metadata.title,
+          thumbnail: metadata.thumbnail,
+          duration: metadata.duration
+        }
+      });
+    } catch (error) {
+      req.log.error({ err: error }, 'Failed to queue video download');
+      res.status(500).json({
+        success: false,
+        error: 'Failed to queue video for download'
+      });
+    }
+  });
+
+  /**
+   * @swagger
+   * /triggerspecificdownloads:
+   *   post:
+   *     summary: Download specific videos
+   *     description: Trigger download of specific YouTube video URLs.
+   *     tags: [Videos]
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             required:
+   *               - urls
+   *             properties:
+   *               urls:
+   *                 type: array
+   *                 items:
+   *                   type: string
+   *                 description: Array of YouTube video URLs to download
+   *               overrideSettings:
+   *                 type: object
+   *                 properties:
+   *                   resolution:
+   *                     type: string
+   *                     enum: ['360', '480', '720', '1080', '1440', '2160']
+   *                     description: Override download resolution
+   *               videoChannelMap:
+   *                 type: object
+   *                 additionalProperties:
+   *                   type: string
+   *                 description: >
+   *                   Optional map of YouTube video ID (11 characters) to owning
+   *                   YouTube channel ID (UC-prefixed), captured from URL
+   *                   validation metadata. Lets tracked channels' per-channel
+   *                   download settings apply to each pasted video.
+   *     responses:
+   *       200:
+   *         description: Download job started
+   *       400:
+   *         description: Invalid resolution
+   */
+  router.post('/triggerspecificdownloads', verifyToken, (req, res) => {
+    const { overrideSettings } = req.body;
+    if (overrideSettings) {
+      if (overrideSettings.resolution) {
+        const validResolutions = ['360', '480', '720', '1080', '1440', '2160'];
+        if (!validResolutions.includes(overrideSettings.resolution)) {
+          return res.status(400).json({
+            error: 'Invalid resolution. Valid values: 360, 480, 720, 1080, 1440, 2160'
+          });
+        }
+      }
+      // Note: video count is not applicable for manual downloads
+
+      // Validate subfolder override if provided
+      if (overrideSettings.subfolder !== undefined && overrideSettings.subfolder !== null) {
+        const channelSettingsModule = require('../modules/channelSettingsModule');
+        const validation = channelSettingsModule.validateSubFolder(overrideSettings.subfolder);
+        if (!validation.valid) {
+          return res.status(400).json({
+            error: validation.error
+          });
+        }
+      }
+
+      // Validate subfolder soft fallback if provided. This field reaches the
+      // filesystem path the same way subfolder does, so it must pass the same
+      // traversal-safe validation rather than being trusted as internal-only.
+      if (overrideSettings.subfolderFallback !== undefined && overrideSettings.subfolderFallback !== null) {
+        const channelSettingsModule = require('../modules/channelSettingsModule');
+        const validation = channelSettingsModule.validateSubFolder(overrideSettings.subfolderFallback);
+        if (!validation.valid) {
+          return res.status(400).json({
+            error: validation.error
+          });
+        }
+      }
+
+      // Validate skipVideoFolder if provided
+      if (overrideSettings.skipVideoFolder !== undefined && typeof overrideSettings.skipVideoFolder !== 'boolean') {
+        return res.status(400).json({
+          error: 'skipVideoFolder must be a boolean'
+        });
+      }
+
+      // Validate/normalize rating override if provided
+      if (overrideSettings.rating !== undefined) {
+        const ratingMapper = require('../modules/ratingMapper');
+        const ratingResult = ratingMapper.validateRating(overrideSettings.rating);
+        if (!ratingResult.valid) {
+          return res.status(400).json({ error: ratingResult.error });
+        }
+        overrideSettings.rating = ratingResult.value;
+      }
+
+      // Validate/normalize rating soft fallback if provided
+      if (overrideSettings.ratingFallback !== undefined && overrideSettings.ratingFallback !== null) {
+        const ratingMapper = require('../modules/ratingMapper');
+        const ratingResult = ratingMapper.validateRating(overrideSettings.ratingFallback);
+        if (!ratingResult.valid) {
+          return res.status(400).json({ error: ratingResult.error });
+        }
+        overrideSettings.ratingFallback = ratingResult.value;
+      }
+    }
+
+    // videoChannelMap is untrusted client input: it maps each pasted video to
+    // the channel_id captured from validation metadata. Entries only ever act
+    // as candidates that must resolve to a tracked+enabled channel, but the
+    // shape is still validated here at the boundary.
+    const { videoChannelMap } = req.body;
+    if (videoChannelMap !== undefined && videoChannelMap !== null) {
+      const YOUTUBE_ID_PATTERN = /^[a-zA-Z0-9_-]{11}$/;
+      const YOUTUBE_CHANNEL_ID_PATTERN = /^UC[a-zA-Z0-9_-]{22}$/;
+      const isValidMap =
+        typeof videoChannelMap === 'object' &&
+        !Array.isArray(videoChannelMap) &&
+        Object.entries(videoChannelMap).every(
+          ([videoId, channelId]) =>
+            YOUTUBE_ID_PATTERN.test(videoId) &&
+            typeof channelId === 'string' &&
+            YOUTUBE_CHANNEL_ID_PATTERN.test(channelId)
+        );
+      if (!isValidMap) {
+        return res.status(400).json({
+          error: 'videoChannelMap must map 11-character YouTube video IDs to UC-format channel IDs'
+        });
+      }
+    }
+
+    downloadModule.doGroupedManualDownloads(req).catch((err) => {
+      req.log.error({ err }, 'Failed to start manual downloads');
+    });
+    res.json({ status: 'success' });
+  });
+
+  /**
+   * @swagger
+   * /triggerchanneldownloads:
+   *   post:
+   *     summary: Trigger channel downloads
+   *     description: Manually trigger the download of new videos from all enabled channels.
+   *     tags: [Videos]
+   *     requestBody:
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             properties:
+   *               overrideSettings:
+   *                 type: object
+   *                 properties:
+   *                   resolution:
+   *                     type: string
+   *                     enum: ['360', '480', '720', '1080', '1440', '2160']
+   *                     description: Override download resolution
+   *                   videoCount:
+   *                     type: integer
+   *                     minimum: 1
+   *                     maximum: 50
+   *                     description: Override number of videos to download per channel
+   *     responses:
+   *       200:
+   *         description: Channel download job started
+   *       400:
+   *         description: Job already running or invalid settings
+   */
+  router.post('/triggerchanneldownloads', verifyToken, (req, res) => {
+    const jobModule = require('../modules/jobModule');
+    const runningJobs = jobModule.getRunningJobs();
+    const channelDownloadJob = runningJobs.find(
+      (job) =>
+        job.jobType.includes('Channel Downloads') && job.status === 'In Progress'
+    );
+    if (channelDownloadJob) {
+      res.status(400).json({ error: 'Job Already Running' });
+      return;
+    }
+
+    const { overrideSettings } = req.body;
+    if (overrideSettings) {
+      if (overrideSettings.resolution) {
+        const validResolutions = ['360', '480', '720', '1080', '1440', '2160'];
+        if (!validResolutions.includes(overrideSettings.resolution)) {
+          return res.status(400).json({
+            error: 'Invalid resolution. Valid values: 360, 480, 720, 1080, 1440, 2160'
+          });
+        }
+      }
+      if (overrideSettings.videoCount !== undefined) {
+        const count = parseInt(overrideSettings.videoCount);
+        if (isNaN(count) || count < 1 || count > 50) {
+          return res.status(400).json({
+            error: 'Invalid video count. Must be between 1 and 50'
+          });
+        }
+      }
+    }
+
+    downloadModule
+      .doChannelAndPlaylistDownloads(req.body || {})
+      .catch((err) => {
+        req.log.error({ err }, 'Manual channel + playlist downloads failed');
+      });
+    res.json({ status: 'success' });
+  });
+
+  return router;
+};
+

@@ -1,0 +1,1168 @@
+import { act, renderHook, waitFor } from '@testing-library/react';
+import { useChannelVideos } from '../useChannelVideos';
+import { ChannelVideo } from '../../../../types/ChannelVideo';
+import type { ChipFilterMode } from '../../../shared/VideoList/types';
+
+// Mock fetch
+const mockFetch = jest.fn();
+global.fetch = mockFetch as any;
+
+describe('useChannelVideos', () => {
+  const mockToken = 'test-token-123';
+  const mockChannelId = 'UC123456789';
+
+  const defaultParams = {
+    channelId: mockChannelId,
+    page: 1,
+    pageSize: 16,
+    downloadedFilter: 'off' as ChipFilterMode,
+    searchQuery: '',
+    sortBy: 'date',
+    sortOrder: 'desc',
+    tabType: 'videos',
+    maxRating: 'all',
+    token: mockToken,
+  };
+
+  const mockVideos: ChannelVideo[] = [
+    {
+      title: 'Test Video 1',
+      youtube_id: 'video1',
+      publishedAt: '2023-01-01T00:00:00Z',
+      thumbnail: 'https://i.ytimg.com/vi/video1/mqdefault.jpg',
+      added: false,
+      duration: 300,
+      media_type: 'video',
+      live_status: null,
+    },
+    {
+      title: 'Test Video 2',
+      youtube_id: 'video2',
+      publishedAt: '2023-01-02T00:00:00Z',
+      thumbnail: 'https://i.ytimg.com/vi/video2/mqdefault.jpg',
+      added: true,
+      removed: false,
+      duration: 600,
+      media_type: 'video',
+      live_status: null,
+    },
+  ];
+
+  const mockResponse = {
+    videos: mockVideos,
+    totalCount: 2,
+    oldestVideoDate: '2023-01-01T00:00:00Z',
+    autoDownloadsEnabled: true,
+  };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockFetch.mockReset();
+  });
+
+  describe('Initial State', () => {
+    test('returns default state values before fetch completes', () => {
+      mockFetch.mockImplementation(() => new Promise(() => {})); // Never resolves
+
+      const { result } = renderHook(() => useChannelVideos(defaultParams));
+
+      expect(result.current.videos).toEqual([]);
+      expect(result.current.totalCount).toBe(0);
+      expect(result.current.oldestVideoDate).toBeNull();
+      expect(result.current.loading).toBe(true);
+      expect(result.current.error).toBeNull();
+      expect(result.current.autoDownloadsEnabled).toBe(false);
+      expect(typeof result.current.refetch).toBe('function');
+    });
+  });
+
+  describe('Successful Data Fetching', () => {
+    test('fetches and returns channel videos successfully', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: jest.fn().mockResolvedValueOnce(mockResponse),
+      });
+
+      const { result } = renderHook(() => useChannelVideos(defaultParams));
+
+      await waitFor(() => {
+        expect(result.current.loading).toBe(false);
+      });
+
+      expect(result.current.videos).toEqual(mockVideos);
+      expect(result.current.totalCount).toBe(2);
+      expect(result.current.oldestVideoDate).toBe('2023-01-01T00:00:00Z');
+      expect(result.current.autoDownloadsEnabled).toBe(true);
+      expect(result.current.error).toBeNull();
+    });
+
+    test('constructs correct API URL with query parameters', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: jest.fn().mockResolvedValueOnce(mockResponse),
+      });
+
+      renderHook(() =>
+        useChannelVideos({
+          ...defaultParams,
+          page: 2,
+          pageSize: 8,
+          downloadedFilter: 'exclude',
+          searchQuery: 'test query',
+          sortBy: 'title',
+          sortOrder: 'asc',
+          tabType: 'shorts',
+        })
+      );
+
+      await waitFor(() => {
+        expect(mockFetch).toHaveBeenCalledTimes(1);
+      });
+
+      const callArgs = mockFetch.mock.calls[0];
+      const url = callArgs[0];
+
+      expect(url).toContain(`/getchannelvideos/${mockChannelId}`);
+      expect(url).toContain('page=2');
+      expect(url).toContain('pageSize=8');
+      expect(url).toContain('downloadedFilter=exclude');
+      expect(url).toContain('searchQuery=test+query');
+      expect(url).toContain('sortBy=title');
+      expect(url).toContain('sortOrder=asc');
+      expect(url).toContain('tabType=shorts');
+    });
+
+    test('sends downloadedFilter=only when mode is only', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: jest.fn().mockResolvedValueOnce(mockResponse),
+      });
+
+      renderHook(() =>
+        useChannelVideos({
+          ...defaultParams,
+          downloadedFilter: 'only',
+        })
+      );
+
+      await waitFor(() => {
+        expect(mockFetch).toHaveBeenCalledTimes(1);
+      });
+
+      const url = mockFetch.mock.calls[0][0];
+      expect(url).toContain('downloadedFilter=only');
+    });
+
+    test('omits downloadedFilter param when mode is off', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: jest.fn().mockResolvedValueOnce(mockResponse),
+      });
+
+      renderHook(() => useChannelVideos(defaultParams));
+
+      await waitFor(() => {
+        expect(mockFetch).toHaveBeenCalledTimes(1);
+      });
+
+      const url = mockFetch.mock.calls[0][0];
+      expect(url).not.toContain('downloadedFilter');
+    });
+
+    test('discards a stale response that resolves after a newer request', async () => {
+      // Simulates a filter change while at page 3 with infinite scroll on:
+      // the old-page request is still in flight when the page-1 reset request
+      // fires.
+      type HookProps = Parameters<typeof useChannelVideos>[0];
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: jest.fn().mockResolvedValue({ ...mockResponse, videos: [mockVideos[0]] }),
+      });
+
+      const initialProps: HookProps = { ...defaultParams, page: 3, append: true, resetKey: 'k1' };
+      const { result, rerender } = renderHook(
+        (props: HookProps) => useChannelVideos(props),
+        { initialProps }
+      );
+      await waitFor(() => expect(result.current.loading).toBe(false));
+
+      // Filter change: the stale request for the old page fires first...
+      let resolveStale: (value: unknown) => void = () => {};
+      mockFetch.mockReturnValueOnce(new Promise((resolve) => { resolveStale = resolve; }));
+      rerender({
+        ...defaultParams,
+        page: 3,
+        append: true,
+        resetKey: 'k2',
+        watchedFilter: 'only' as ChipFilterMode,
+      });
+
+      // ...then the page-1 reset request supersedes it.
+      let resolveFresh: (value: unknown) => void = () => {};
+      mockFetch.mockReturnValueOnce(new Promise((resolve) => { resolveFresh = resolve; }));
+      rerender({
+        ...defaultParams,
+        page: 1,
+        append: true,
+        resetKey: 'k2',
+        watchedFilter: 'only' as ChipFilterMode,
+      });
+
+      await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(3));
+
+      // The fresh page-1 response resolves first.
+      resolveFresh({
+        ok: true,
+        json: jest.fn().mockResolvedValue({
+          ...mockResponse,
+          videos: [{ ...mockVideos[1], youtube_id: 'fresh1' }],
+        }),
+      });
+      await waitFor(() =>
+        expect(result.current.videos.map((v) => v.youtube_id)).toEqual(['fresh1'])
+      );
+
+      // The stale page-3 response resolves late and must be discarded.
+      resolveStale({
+        ok: true,
+        json: jest.fn().mockResolvedValue({
+          ...mockResponse,
+          videos: [{ ...mockVideos[0], youtube_id: 'stale1' }],
+        }),
+      });
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(result.current.videos.map((v) => v.youtube_id)).toEqual(['fresh1']);
+    });
+
+    test('sends watchedFilter when mode is active and omits it when off', async () => {
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: jest.fn().mockResolvedValue(mockResponse),
+      });
+
+      renderHook(() =>
+        useChannelVideos({
+          ...defaultParams,
+          watchedFilter: 'exclude' as ChipFilterMode,
+        })
+      );
+
+      await waitFor(() => {
+        expect(mockFetch).toHaveBeenCalledTimes(1);
+      });
+      expect(mockFetch.mock.calls[0][0]).toContain('watchedFilter=exclude');
+
+      renderHook(() => useChannelVideos(defaultParams));
+
+      await waitFor(() => {
+        expect(mockFetch).toHaveBeenCalledTimes(2);
+      });
+      expect(mockFetch.mock.calls[1][0]).not.toContain('watchedFilter');
+    });
+
+    test('includes correct authentication header', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: jest.fn().mockResolvedValueOnce(mockResponse),
+      });
+
+      renderHook(() => useChannelVideos(defaultParams));
+
+      await waitFor(() => {
+        expect(mockFetch).toHaveBeenCalledTimes(1);
+      });
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({
+          headers: {
+            'x-access-token': mockToken,
+          },
+        })
+      );
+    });
+
+    test('handles empty videos array', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: jest.fn().mockResolvedValueOnce({
+          videos: [],
+          totalCount: 0,
+          oldestVideoDate: null,
+          autoDownloadsEnabled: false,
+        }),
+      });
+
+      const { result } = renderHook(() => useChannelVideos(defaultParams));
+
+      await waitFor(() => {
+        expect(result.current.loading).toBe(false);
+      });
+
+      expect(result.current.videos).toEqual([]);
+      expect(result.current.totalCount).toBe(0);
+      expect(result.current.oldestVideoDate).toBeNull();
+    });
+
+    test('handles undefined videos in response', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: jest.fn().mockResolvedValueOnce({
+          totalCount: 0,
+        }),
+      });
+
+      const { result } = renderHook(() => useChannelVideos(defaultParams));
+
+      await waitFor(() => {
+        expect(result.current.loading).toBe(false);
+      });
+
+      // Should not update videos when undefined
+      expect(result.current.videos).toEqual([]);
+    });
+
+    test('handles null videos in response', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: jest.fn().mockResolvedValueOnce({
+          videos: null,
+          totalCount: 0,
+        }),
+      });
+
+      const { result } = renderHook(() => useChannelVideos(defaultParams));
+
+      await waitFor(() => {
+        expect(result.current.loading).toBe(false);
+      });
+
+      expect(result.current.videos).toEqual([]);
+    });
+
+    test('handles missing optional fields in response', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: jest.fn().mockResolvedValueOnce({
+          videos: mockVideos,
+        }),
+      });
+
+      const { result } = renderHook(() => useChannelVideos(defaultParams));
+
+      await waitFor(() => {
+        expect(result.current.loading).toBe(false);
+      });
+
+      expect(result.current.videos).toEqual(mockVideos);
+      expect(result.current.totalCount).toBe(0);
+      expect(result.current.oldestVideoDate).toBeNull();
+      expect(result.current.autoDownloadsEnabled).toBe(false);
+    });
+  });
+
+  describe('Error Handling', () => {
+    test('handles network errors', async () => {
+      const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+      const networkError = new Error('Network error');
+
+      mockFetch.mockRejectedValueOnce(networkError);
+
+      const { result } = renderHook(() => useChannelVideos(defaultParams));
+
+      await waitFor(() => {
+        expect(result.current.loading).toBe(false);
+      });
+
+      expect(result.current.error).toEqual(networkError);
+      expect(result.current.videos).toEqual([]);
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        'Error fetching channel videos:',
+        networkError
+      );
+
+      consoleErrorSpy.mockRestore();
+    });
+
+    test('handles non-ok response status', async () => {
+      const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        statusText: 'Not Found',
+      });
+
+      const { result } = renderHook(() => useChannelVideos(defaultParams));
+
+      await waitFor(() => {
+        expect(result.current.loading).toBe(false);
+      });
+
+      expect(result.current.error).toBeInstanceOf(Error);
+      expect(result.current.error?.message).toBe('Not Found');
+      expect(result.current.videos).toEqual([]);
+
+      consoleErrorSpy.mockRestore();
+    });
+
+    test('handles non-Error exceptions', async () => {
+      const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+
+      mockFetch.mockRejectedValueOnce('string error');
+
+      const { result } = renderHook(() => useChannelVideos(defaultParams));
+
+      await waitFor(() => {
+        expect(result.current.loading).toBe(false);
+      });
+
+      expect(result.current.error).toBeInstanceOf(Error);
+      expect(result.current.error?.message).toBe('Unknown error');
+
+      consoleErrorSpy.mockRestore();
+    });
+
+    test('surfaces an error when response body has fetchError=true', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: jest.fn().mockResolvedValueOnce({
+          videos: [],
+          totalCount: 0,
+          oldestVideoDate: null,
+          autoDownloadsEnabled: false,
+          fetchError: true,
+        }),
+      });
+
+      const { result } = renderHook(() => useChannelVideos(defaultParams));
+
+      await waitFor(() => {
+        expect(result.current.loading).toBe(false);
+      });
+
+      expect(result.current.error).toBeInstanceOf(Error);
+      expect(result.current.error?.message).toBe('Failed to fetch channel videos');
+      expect(result.current.videos).toEqual([]);
+    });
+
+    test('does not surface an error when fetchError is absent (filter returned no results)', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: jest.fn().mockResolvedValueOnce({
+          videos: [],
+          totalCount: 0,
+          oldestVideoDate: null,
+          autoDownloadsEnabled: false,
+        }),
+      });
+
+      const { result } = renderHook(() => useChannelVideos(defaultParams));
+
+      await waitFor(() => {
+        expect(result.current.loading).toBe(false);
+      });
+
+      expect(result.current.error).toBeNull();
+      expect(result.current.videos).toEqual([]);
+    });
+
+    test('clears previous error on successful refetch', async () => {
+      const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+
+      // First call fails
+      mockFetch.mockRejectedValueOnce(new Error('First error'));
+
+      const { result } = renderHook(() => useChannelVideos(defaultParams));
+
+      await waitFor(() => {
+        expect(result.current.error).toBeTruthy();
+      });
+
+      // Second call succeeds
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: jest.fn().mockResolvedValueOnce(mockResponse),
+      });
+
+      await result.current.refetch();
+
+      await waitFor(() => {
+        expect(result.current.error).toBeNull();
+      });
+
+      expect(result.current.videos).toEqual(mockVideos);
+
+      consoleErrorSpy.mockRestore();
+    });
+  });
+
+  describe('Conditional Fetching', () => {
+    test('does not fetch when channelId is undefined', () => {
+      renderHook(() =>
+        useChannelVideos({
+          ...defaultParams,
+          channelId: undefined,
+        })
+      );
+
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    test('does not fetch when token is null', () => {
+      renderHook(() =>
+        useChannelVideos({
+          ...defaultParams,
+          token: null,
+        })
+      );
+
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    test('does not fetch when both channelId and token are missing', () => {
+      renderHook(() =>
+        useChannelVideos({
+          ...defaultParams,
+          channelId: undefined,
+          token: null,
+        })
+      );
+
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('Refetch Functionality', () => {
+    test('refetch triggers a new fetch request', async () => {
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: jest.fn().mockResolvedValue(mockResponse),
+      });
+
+      const { result } = renderHook(() => useChannelVideos(defaultParams));
+
+      await waitFor(() => {
+        expect(result.current.loading).toBe(false);
+      });
+
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+
+      await result.current.refetch();
+
+      await waitFor(() => {
+        expect(mockFetch).toHaveBeenCalledTimes(2);
+      });
+    });
+
+    test('refetch sets loading state', async () => {
+      let resolvePromise: (value: any) => void;
+      const promise = new Promise((resolve) => {
+        resolvePromise = resolve;
+      });
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: jest.fn().mockResolvedValueOnce(mockResponse),
+      });
+
+      const { result } = renderHook(() => useChannelVideos(defaultParams));
+
+      await waitFor(() => {
+        expect(result.current.loading).toBe(false);
+      });
+
+      mockFetch.mockReturnValueOnce(promise);
+
+      const refetchPromise = result.current.refetch();
+
+      await waitFor(() => {
+        expect(result.current.loading).toBe(true);
+      });
+
+      resolvePromise!({
+        ok: true,
+        json: jest.fn().mockResolvedValueOnce(mockResponse),
+      });
+
+      await refetchPromise;
+
+      await waitFor(() => {
+        expect(result.current.loading).toBe(false);
+      });
+    });
+  });
+
+  describe('Dependency Changes', () => {
+    test('refetches when page changes', async () => {
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: jest.fn().mockResolvedValue(mockResponse),
+      });
+
+      const { rerender } = renderHook(
+        ({ params }) => useChannelVideos(params),
+        {
+          initialProps: { params: defaultParams },
+        }
+      );
+
+      await waitFor(() => {
+        expect(mockFetch).toHaveBeenCalledTimes(1);
+      });
+
+      rerender({ params: { ...defaultParams, page: 2 } });
+
+      await waitFor(() => {
+        expect(mockFetch).toHaveBeenCalledTimes(2);
+      });
+    });
+
+    test('refetches when pageSize changes', async () => {
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: jest.fn().mockResolvedValue(mockResponse),
+      });
+
+      const { rerender } = renderHook(
+        ({ params }) => useChannelVideos(params),
+        {
+          initialProps: { params: defaultParams },
+        }
+      );
+
+      await waitFor(() => {
+        expect(mockFetch).toHaveBeenCalledTimes(1);
+      });
+
+      rerender({ params: { ...defaultParams, pageSize: 8 } });
+
+      await waitFor(() => {
+        expect(mockFetch).toHaveBeenCalledTimes(2);
+      });
+    });
+
+    test('refetches when downloadedFilter changes', async () => {
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: jest.fn().mockResolvedValue(mockResponse),
+      });
+
+      const { rerender } = renderHook(
+        ({ params }) => useChannelVideos(params),
+        {
+          initialProps: { params: defaultParams },
+        }
+      );
+
+      await waitFor(() => {
+        expect(mockFetch).toHaveBeenCalledTimes(1);
+      });
+
+      rerender({ params: { ...defaultParams, downloadedFilter: 'exclude' as ChipFilterMode } });
+
+      await waitFor(() => {
+        expect(mockFetch).toHaveBeenCalledTimes(2);
+      });
+    });
+
+    test('refetches when searchQuery changes', async () => {
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: jest.fn().mockResolvedValue(mockResponse),
+      });
+
+      const { rerender } = renderHook(
+        ({ params }) => useChannelVideos(params),
+        {
+          initialProps: { params: defaultParams },
+        }
+      );
+
+      await waitFor(() => {
+        expect(mockFetch).toHaveBeenCalledTimes(1);
+      });
+
+      rerender({ params: { ...defaultParams, searchQuery: 'test' } });
+
+      await waitFor(() => {
+        expect(mockFetch).toHaveBeenCalledTimes(2);
+      });
+    });
+
+    test('refetches when sortBy changes', async () => {
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: jest.fn().mockResolvedValue(mockResponse),
+      });
+
+      const { rerender } = renderHook(
+        ({ params }) => useChannelVideos(params),
+        {
+          initialProps: { params: defaultParams },
+        }
+      );
+
+      await waitFor(() => {
+        expect(mockFetch).toHaveBeenCalledTimes(1);
+      });
+
+      rerender({ params: { ...defaultParams, sortBy: 'title' } });
+
+      await waitFor(() => {
+        expect(mockFetch).toHaveBeenCalledTimes(2);
+      });
+    });
+
+    test('refetches when sortOrder changes', async () => {
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: jest.fn().mockResolvedValue(mockResponse),
+      });
+
+      const { rerender } = renderHook(
+        ({ params }) => useChannelVideos(params),
+        {
+          initialProps: { params: defaultParams },
+        }
+      );
+
+      await waitFor(() => {
+        expect(mockFetch).toHaveBeenCalledTimes(1);
+      });
+
+      rerender({ params: { ...defaultParams, sortOrder: 'asc' } });
+
+      await waitFor(() => {
+        expect(mockFetch).toHaveBeenCalledTimes(2);
+      });
+    });
+
+    test('refetches when tabType changes', async () => {
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: jest.fn().mockResolvedValue(mockResponse),
+      });
+
+      const { rerender } = renderHook(
+        ({ params }) => useChannelVideos(params),
+        {
+          initialProps: { params: defaultParams },
+        }
+      );
+
+      await waitFor(() => {
+        expect(mockFetch).toHaveBeenCalledTimes(1);
+      });
+
+      rerender({ params: { ...defaultParams, tabType: 'shorts' } });
+
+      await waitFor(() => {
+        expect(mockFetch).toHaveBeenCalledTimes(2);
+      });
+    });
+
+    test('refetches when channelId changes', async () => {
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: jest.fn().mockResolvedValue(mockResponse),
+      });
+
+      const { rerender } = renderHook(
+        ({ params }) => useChannelVideos(params),
+        {
+          initialProps: { params: defaultParams },
+        }
+      );
+
+      await waitFor(() => {
+        expect(mockFetch).toHaveBeenCalledTimes(1);
+      });
+
+      rerender({ params: { ...defaultParams, channelId: 'UC987654321' } });
+
+      await waitFor(() => {
+        expect(mockFetch).toHaveBeenCalledTimes(2);
+      });
+    });
+
+    test('refetches when token changes', async () => {
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: jest.fn().mockResolvedValue(mockResponse),
+      });
+
+      const { rerender } = renderHook(
+        ({ params }) => useChannelVideos(params),
+        {
+          initialProps: { params: defaultParams },
+        }
+      );
+
+      await waitFor(() => {
+        expect(mockFetch).toHaveBeenCalledTimes(1);
+      });
+
+      rerender({ params: { ...defaultParams, token: 'new-token' } });
+
+      await waitFor(() => {
+        expect(mockFetch).toHaveBeenCalledTimes(2);
+      });
+    });
+  });
+
+  describe('Loading State Management', () => {
+    test('sets loading to true during fetch', async () => {
+      let resolvePromise: (value: any) => void;
+      const promise = new Promise((resolve) => {
+        resolvePromise = resolve;
+      });
+
+      mockFetch.mockReturnValueOnce(promise);
+
+      const { result } = renderHook(() => useChannelVideos(defaultParams));
+
+      expect(result.current.loading).toBe(true);
+
+      resolvePromise!({
+        ok: true,
+        json: jest.fn().mockResolvedValueOnce(mockResponse),
+      });
+
+      await waitFor(() => {
+        expect(result.current.loading).toBe(false);
+      });
+    });
+
+    test('sets loading to false after successful fetch', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: jest.fn().mockResolvedValueOnce(mockResponse),
+      });
+
+      const { result } = renderHook(() => useChannelVideos(defaultParams));
+
+      await waitFor(() => {
+        expect(result.current.loading).toBe(false);
+      });
+
+      expect(result.current.videos).toEqual(mockVideos);
+    });
+
+    test('sets loading to false after failed fetch', async () => {
+      const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+
+      mockFetch.mockRejectedValueOnce(new Error('Fetch error'));
+
+      const { result } = renderHook(() => useChannelVideos(defaultParams));
+
+      await waitFor(() => {
+        expect(result.current.loading).toBe(false);
+      });
+
+      expect(result.current.error).toBeTruthy();
+
+      consoleErrorSpy.mockRestore();
+    });
+  });
+
+  describe('Append Mode (Infinite Scroll)', () => {
+    const pageOneVideos: ChannelVideo[] = [
+      {
+        title: 'Page 1 Video A',
+        youtube_id: 'p1a',
+        publishedAt: '2023-03-01T00:00:00Z',
+        thumbnail: 'https://i.ytimg.com/vi/p1a/mqdefault.jpg',
+        added: false,
+        duration: 100,
+        media_type: 'video',
+        live_status: null,
+      },
+      {
+        title: 'Page 1 Video B',
+        youtube_id: 'p1b',
+        publishedAt: '2023-03-02T00:00:00Z',
+        thumbnail: 'https://i.ytimg.com/vi/p1b/mqdefault.jpg',
+        added: false,
+        duration: 200,
+        media_type: 'video',
+        live_status: null,
+      },
+    ];
+
+    const pageTwoVideos: ChannelVideo[] = [
+      {
+        title: 'Page 2 Video A',
+        youtube_id: 'p2a',
+        publishedAt: '2023-03-03T00:00:00Z',
+        thumbnail: 'https://i.ytimg.com/vi/p2a/mqdefault.jpg',
+        added: false,
+        duration: 300,
+        media_type: 'video',
+        live_status: null,
+      },
+    ];
+
+    test('concatenates page 2 onto page 1 when append=true', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: jest.fn().mockResolvedValueOnce({
+          videos: pageOneVideos,
+          totalCount: 3,
+          oldestVideoDate: '2023-03-01T00:00:00Z',
+          autoDownloadsEnabled: false,
+        }),
+      });
+
+      const { result, rerender } = renderHook(
+        ({ params }: { params: Parameters<typeof useChannelVideos>[0] }) =>
+          useChannelVideos(params),
+        {
+          initialProps: {
+            params: { ...defaultParams, append: true, resetKey: 'key-A', page: 1 },
+          },
+        }
+      );
+
+      await waitFor(() => {
+        expect(result.current.videos).toEqual(pageOneVideos);
+      });
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: jest.fn().mockResolvedValueOnce({
+          videos: pageTwoVideos,
+          totalCount: 3,
+          oldestVideoDate: '2023-03-01T00:00:00Z',
+          autoDownloadsEnabled: false,
+        }),
+      });
+
+      rerender({
+        params: { ...defaultParams, append: true, resetKey: 'key-A', page: 2 },
+      });
+
+      await waitFor(() => {
+        expect(result.current.videos).toHaveLength(3);
+      });
+
+      expect(result.current.videos).toEqual([...pageOneVideos, ...pageTwoVideos]);
+    });
+
+    test('resets accumulated list and replaces (not appends) when resetKey changes at page > 1', async () => {
+      // Initial page 1 with append=true
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: jest.fn().mockResolvedValueOnce({
+          videos: pageOneVideos,
+          totalCount: 3,
+          oldestVideoDate: '2023-03-01T00:00:00Z',
+          autoDownloadsEnabled: false,
+        }),
+      });
+
+      const { result, rerender } = renderHook(
+        ({ params }: { params: Parameters<typeof useChannelVideos>[0] }) =>
+          useChannelVideos(params),
+        {
+          initialProps: {
+            params: { ...defaultParams, append: true, resetKey: 'key-A', page: 1 },
+          },
+        }
+      );
+
+      await waitFor(() => {
+        expect(result.current.videos).toEqual(pageOneVideos);
+      });
+
+      // Accumulate page 2
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: jest.fn().mockResolvedValueOnce({
+          videos: pageTwoVideos,
+          totalCount: 3,
+          oldestVideoDate: '2023-03-01T00:00:00Z',
+          autoDownloadsEnabled: false,
+        }),
+      });
+
+      rerender({
+        params: { ...defaultParams, append: true, resetKey: 'key-A', page: 2 },
+      });
+
+      await waitFor(() => {
+        expect(result.current.videos).toHaveLength(3);
+      });
+
+      // Now resetKey changes while page stays at 2. The next response should REPLACE,
+      // not append onto the accumulated list (regression guard for M12).
+      const afterResetVideos: ChannelVideo[] = [
+        {
+          title: 'Filtered Only',
+          youtube_id: 'filtered1',
+          publishedAt: '2023-04-01T00:00:00Z',
+          thumbnail: 'https://i.ytimg.com/vi/filtered1/mqdefault.jpg',
+          added: false,
+          duration: 400,
+          media_type: 'video',
+          live_status: null,
+        },
+      ];
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: jest.fn().mockResolvedValueOnce({
+          videos: afterResetVideos,
+          totalCount: 1,
+          oldestVideoDate: '2023-04-01T00:00:00Z',
+          autoDownloadsEnabled: false,
+        }),
+      });
+
+      rerender({
+        params: { ...defaultParams, append: true, resetKey: 'key-B', page: 2 },
+      });
+
+      await waitFor(() => {
+        expect(result.current.videos).toEqual(afterResetVideos);
+      });
+
+      // Must not contain any prior page's videos.
+      expect(result.current.videos).toHaveLength(1);
+      expect(result.current.totalCount).toBe(1);
+    });
+  });
+
+  describe('onFirstLoad callback', () => {
+    const freshResponse = { ...mockResponse, freshFetchPerformed: true };
+
+    test('fires once with channelId after the first fresh-fetch response', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: jest.fn().mockResolvedValueOnce(freshResponse),
+      });
+
+      const onFirstLoad = jest.fn();
+      const { result } = renderHook(() =>
+        useChannelVideos({ ...defaultParams, onFirstLoad })
+      );
+
+      await waitFor(() => {
+        expect(result.current.loading).toBe(false);
+      });
+
+      expect(onFirstLoad).toHaveBeenCalledTimes(1);
+      expect(onFirstLoad).toHaveBeenCalledWith(mockChannelId);
+    });
+
+    test('does not fire again on subsequent fresh-fetch responses for the same channel', async () => {
+      mockFetch.mockResolvedValue({
+        ok: true,
+        json: jest.fn().mockResolvedValue(freshResponse),
+      });
+
+      const onFirstLoad = jest.fn();
+      const { result } = renderHook(() =>
+        useChannelVideos({ ...defaultParams, onFirstLoad })
+      );
+
+      await waitFor(() => {
+        expect(onFirstLoad).toHaveBeenCalledTimes(1);
+      });
+
+      await result.current.refetch();
+      await result.current.refetch();
+
+      expect(onFirstLoad).toHaveBeenCalledTimes(1);
+    });
+
+    test('does not fire on a cache-only response (freshFetchPerformed absent or false)', async () => {
+      // mockResponse has no freshFetchPerformed key, simulating the cache path.
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: jest.fn().mockResolvedValueOnce(mockResponse),
+      });
+
+      const onFirstLoad = jest.fn();
+      const { result } = renderHook(() =>
+        useChannelVideos({ ...defaultParams, onFirstLoad })
+      );
+
+      await waitFor(() => {
+        expect(result.current.loading).toBe(false);
+      });
+
+      expect(onFirstLoad).not.toHaveBeenCalled();
+    });
+
+    test('fires on a later fresh-fetch response even when earlier responses were cache-only', async () => {
+      // First response: cache-only (no freshFetchPerformed). Latch must stay open.
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: jest.fn().mockResolvedValueOnce(mockResponse),
+      });
+
+      const onFirstLoad = jest.fn();
+      const { result } = renderHook(() =>
+        useChannelVideos({ ...defaultParams, onFirstLoad })
+      );
+
+      await waitFor(() => {
+        expect(result.current.loading).toBe(false);
+      });
+      expect(onFirstLoad).not.toHaveBeenCalled();
+
+      // Second response: backend ran yt-dlp this time. Latch fires now.
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: jest.fn().mockResolvedValueOnce(freshResponse),
+      });
+
+      await result.current.refetch();
+
+      await waitFor(() => {
+        expect(onFirstLoad).toHaveBeenCalledTimes(1);
+      });
+      expect(onFirstLoad).toHaveBeenCalledWith(mockChannelId);
+    });
+
+    test('does not fire when the server reports fetchError', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: jest.fn().mockResolvedValueOnce({
+          ...freshResponse,
+          fetchError: true,
+        }),
+      });
+
+      const onFirstLoad = jest.fn();
+      const { result } = renderHook(() =>
+        useChannelVideos({ ...defaultParams, onFirstLoad })
+      );
+
+      await waitFor(() => {
+        expect(result.current.loading).toBe(false);
+      });
+
+      expect(onFirstLoad).not.toHaveBeenCalled();
+    });
+
+    test('does not fire when the network request rejects', async () => {
+      mockFetch.mockRejectedValueOnce(new Error('network error'));
+
+      const onFirstLoad = jest.fn();
+      const { result } = renderHook(() =>
+        useChannelVideos({ ...defaultParams, onFirstLoad })
+      );
+
+      await waitFor(() => {
+        expect(result.current.loading).toBe(false);
+      });
+
+      expect(onFirstLoad).not.toHaveBeenCalled();
+    });
+  });
+
+});

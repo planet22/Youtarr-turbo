@@ -1,0 +1,144 @@
+const createHealthRoutes = require('./health');
+const createAuthRoutes = require('./auth');
+const createSetupRoutes = require('./setup');
+const createConfigRoutes = require('./config');
+const createChannelRoutes = require('./channels');
+const createVideoRoutes = require('./videos');
+const createJobRoutes = require('./jobs');
+const createPlexRoutes = require('./plex');
+const createApiKeyRoutes = require('./apikeys');
+const createSubscriptionRoutes = require('./subscriptions');
+const createVideoDetailRoutes = require('./videoDetail');
+const createVideoSearchRoutes = require('./videoSearch');
+const createChannelSearchRoutes = require('./channelSearch');
+const createPlaylistRoutes = require('./playlists');
+const createMediaServerRoutes = require('./mediaServers');
+const createYoutubeApiKeyRoutes = require('./youtubeApiKey');
+const createYtdlpOptionsRoutes = require('./ytdlpOptions');
+const createMaintenanceRoutes = require('./maintenance');
+const createSubfolderRoutes = require('./subfolders');
+const videoMetadataModule = require('../modules/videoMetadataModule');
+const videoOembedEnricher = require('../modules/videoOembedEnricher');
+const playlistModule = require('../modules/playlistModule');
+const m3uGenerator = require('../modules/m3uGenerator');
+const mediaServers = require('../modules/mediaServers');
+const channelSettingsModule = require('../modules/channelSettingsModule');
+const channelDownloadAllModule = require('../modules/channelDownloadAllModule');
+const ratingMapper = require('../modules/ratingMapper');
+const subfolderModule = require('../modules/subfolderModule');
+const playlistVideoFilters = require('../modules/playlistVideoFilters');
+const models = require('../models');
+const createYtStreamRoutes = require('./ytstream');
+const createNzbRoutes = require('./nzb');
+
+/**
+ * Registers all route modules with the Express app
+ * @param {Object} app - Express application
+ * @param {Object} deps - Dependencies to inject into route modules
+ */
+function registerRoutes(app, deps) {
+  const {
+    verifyToken,
+    loginLimiter,
+    setupCreateAuthLimiter,
+    youtubeApiKeyTestLimiter,
+    ytdlpValidationRateLimiter,
+    filenamePreviewRateLimiter,
+    configModule,
+    channelModule,
+    plexModule,
+    downloadModule,
+    jobModule,
+    videosModule,
+    archiveModule,
+    subscriptionImportModule,
+    videoSearchModule,
+    channelSearchModule,
+    youtubeApi,
+    getCachedYtDlpVersion,
+    refreshYtDlpVersionCache,
+    validateEnvAuthCredentials,
+    setupTokenModule,
+    getClientAddress,
+    isWslEnvironment,
+  } = deps;
+
+  // Health routes (no auth required for health checks, but yt-dlp endpoints are authenticated)
+  app.use(createHealthRoutes({ getCachedYtDlpVersion, refreshYtDlpVersionCache, verifyToken, configModule }));
+
+  // Auth routes
+  app.use(createAuthRoutes({ verifyToken, loginLimiter, configModule, getClientAddress }));
+
+  // Setup routes
+  app.use(createSetupRoutes({ configModule, setupTokenModule, setupCreateAuthLimiter, getClientAddress }));
+
+  // Config routes
+  app.use(createConfigRoutes({ verifyToken, configModule, validateEnvAuthCredentials, isWslEnvironment, filenamePreviewRateLimiter }));
+
+  // Channel routes
+  app.use(createChannelRoutes({ verifyToken, channelModule, archiveModule, channelDownloadAllModule, ratingMapper }));
+
+  // Video routes
+  app.use(createVideoRoutes({ verifyToken, videosModule, downloadModule, videoOembedEnricher }));
+
+  // Video search routes
+  app.use(createVideoSearchRoutes({ verifyToken, videoSearchModule }));
+
+  // Channel search routes
+  app.use(createChannelSearchRoutes({ verifyToken, channelSearchModule }));
+
+  // YouTube API key test route
+  app.use(createYoutubeApiKeyRoutes({ verifyToken, youtubeApiKeyTestLimiter, youtubeApi, configModule }));
+
+  // yt-dlp options validation route
+  app.use(createYtdlpOptionsRoutes({ verifyToken, ytdlpValidationRateLimiter }));
+
+  // Job routes
+  app.use(createJobRoutes({ verifyToken, jobModule, downloadModule }));
+
+  // Plex routes
+  app.use(createPlexRoutes({ verifyToken, plexModule, configModule }));
+
+  // API Key routes
+  app.use(createApiKeyRoutes({ verifyToken }));
+
+  // Subscription import routes
+  app.use(createSubscriptionRoutes({ verifyToken, subscriptionImportModule }));
+
+  // Video detail routes (metadata and streaming)
+  app.use(createVideoDetailRoutes({ verifyToken, videoMetadataModule, mediaServers }));
+
+  // Playlist routes
+  app.use(createPlaylistRoutes({ verifyToken, playlistModule, downloadModule, m3uGenerator, mediaServers, models, channelSettingsModule, ratingMapper, subfolderModule, playlistVideoFilters }));
+
+  // Media server routes
+  app.use(createMediaServerRoutes({ verifyToken, configModule, mediaServers }));
+
+  // Maintenance routes
+  app.use(createMaintenanceRoutes({ verifyToken, videosModule, configModule }));
+
+  // Subfolder registry routes
+  app.use(createSubfolderRoutes({ verifyToken, subfolderModule }));
+
+/*
+ * GET /api/ytstream/:youtubeId is public (no token) so media servers/players
+ * can play STRM sidecar files. mode=direct redirects to a resolved upstream
+ * URL, mode=ffmpeg re-streams through a local ffmpeg process, mode=hls
+ * serves a real segmented playlist. See docs/YTSTREAM.md.
+ */
+  app.use(createYtStreamRoutes({ verifyToken, getClientAddress, models }));
+
+/*
+ * /nzb/* makes Youtarr act as a Newznab search indexer + SABnzbd-compatible
+ * download client for Sonarr/Radarr/Prowlarr (see docs/NZB.md). Deliberately
+ * mounted outside /api so it doesn't inherit apiLimiter/verifyToken - it has
+ * its own dedicated API key auth (verifyNzbApiKey in server/routes/nzb.js).
+ */
+  app.use(createNzbRoutes());
+
+  // Defensive redirect: /channels -> /subscriptions (frontend handles client-side routing,
+  // this fallback covers direct server-side hits during the transition period)
+  app.get('/channels', (req, res) => res.redirect(301, '/subscriptions'));
+}
+
+module.exports = { registerRoutes };

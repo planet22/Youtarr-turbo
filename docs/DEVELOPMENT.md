@@ -1,0 +1,804 @@
+# Development Guide
+
+## Using Development Builds
+
+Want to try features before they hit a stable release? Youtarr publishes a bleeding-edge `dev-latest` image that tracks the `dev` branch. Every merge to `dev` rebuilds it, so it's the fastest way to test unreleased work. It hasn't been through the stabilization pass that `latest` gets, so expect rough edges and occasional breakage. It's best used for testing and feedback, not as a daily driver.
+
+The `dev-latest` tag always points at the most recent dev build. Each commit also gets an immutable `dev-rc.<sha>` tag if you want to pin to a specific build.
+
+### Recommended: `./start.sh --dev`
+
+```bash
+./start.sh --dev --pull-latest
+```
+
+This pulls `dialmaster/youtarr:dev-latest` and starts the stack. On later runs, drop `--pull-latest` if you want to stay on the image you already have locally.
+
+### Alternative: bypass `./start.sh`
+
+`./start.sh` layers `docker-compose.arm.yml` on top of the default compose file for fresh installs so MariaDB uses a named volume. Existing installs with real MariaDB data in `./database/` keep using the bind mount and print a migration warning instead. ARM installs continue to use the named-volume override.
+
+To pull the dev image while managing compose file selection yourself, use docker directly:
+
+```bash
+./stop.sh
+docker pull dialmaster/youtarr:dev-latest
+YOUTARR_IMAGE=dialmaster/youtarr:dev-latest docker compose up -d
+```
+
+This uses only `docker-compose.yml` and leaves your MariaDB volume config alone.
+
+### Switching back to the stable release
+
+Restart without the `YOUTARR_IMAGE` override:
+
+```bash
+./start.sh
+# or, if you run compose directly
+docker compose up -d
+```
+
+If you set `YOUTARR_IMAGE` in `.env`, remove or comment that line first, otherwise compose will keep using the dev image.
+
+## Prerequisites
+
+For development, you'll need:
+
+1. **Node.js 20.19+ and npm 11.10+** (needed for the build script that compiles the client and installs dependencies before Docker runs)
+2. **Docker** and Docker Compose (v2 or v1)
+3. **Git** for version control
+4. A code editor (VS Code recommended)
+
+**Note:** Runtime dependencies (MariaDB, yt-dlp, ffmpeg, Node) run inside the dev containers, but the `build-dev` script uses your host Node.js to install packages and build the frontend before the Docker image is created.
+
+### npm version requirement and install cooldown
+
+Installs are gated on a **5-day cooldown**: npm refuses to install any package version published less than 5 days ago (`min-release-age=5` in `.npmrc`). This is a supply-chain defense; most malicious package releases are caught and removed within a day or two, so waiting before adopting a new version avoids the bulk of the risk. The cooldown applies at resolution time (`npm install` / `npm update`), not to `npm ci`, so your day-to-day builds against the committed lockfile are unaffected.
+
+The cooldown requires **npm 11.10 or newer**, which is enforced via `engines` in `package.json` plus `engine-strict=true` in `.npmrc`. If your local npm is older, `npm ci` / `npm install` will fail with an engine error instead of silently skipping the cooldown. Upgrade with:
+
+```bash
+# Pin to an npm 11.10+ release that is itself older than the 5-day cooldown
+# window (this global install is not lockfile-pinned, so it is not cooldown-protected),
+# matching the pin used by CI and the Docker build.
+npm install -g npm@11.15.0 --ignore-scripts
+npm --version   # confirm >= 11.10.0
+```
+
+CI and the Docker build pin npm to a known 11.x via a "Pin npm" step / `npm install -g`, so they honor the same gate.
+
+If you ever need an urgent dependency update that the cooldown blocks (for example a same-day security patch), override it for that one install with `npm install <pkg> --before=<date>` or a temporary `--min-release-age=0`, rather than removing the repo-wide setting.
+
+**Lifecycle scripts are disabled by default.** `.npmrc` sets `ignore-scripts=true`, so a dependency's `preinstall` / `install` / `postinstall` scripts do not run just because you install it. This blocks the most common malicious-package execution path. The CI and Docker installs already passed `--ignore-scripts`; this extends the same protection to a bare local `npm install`. Explicitly invoked scripts still run, so Husky setup via `npm run prepare` (used by `build-dev.sh`) is unaffected. If you add a dependency that needs a native build step, run `npm rebuild <pkg> --ignore-scripts=false` after confirming you trust the package; a plain `npm rebuild` inherits `ignore-scripts=true` and would still skip the build.
+
+## Project Structure
+
+```
+Youtarr/
+├── client/                                   # React frontend
+│   ├── src/
+│   │   ├── components/                       # React components
+│   │   ├── types/                            # TypeScript definitions
+│   │   └── providers/                        # Context providers
+│   └── package.json
+├── server/                                   # Node.js backend
+│   ├── models/                               # Sequelize models
+│   ├── modules/                              # Business logic
+│   ├── db.js                                 # Database connection
+│   └── server.js                             # Express server
+├── migrations/                               # Database migrations
+├── config/                                   # Configuration files
+├── scripts/                                  # Utility scripts
+├── docker-compose.external-db.yml            # Config that does not start internal DB (dev & prod)
+└── docker-compose.yml                        # Docker Compose configuration with internal db (dev & prod)
+```
+
+## Development Setup
+
+### 1. Clone Repository
+
+```bash
+git clone https://github.com/DialmasterOrg/Youtarr.git
+cd Youtarr
+```
+
+### 2. Build Development Environment
+```bash
+# First build (installs dependencies and builds the client)
+./scripts/build-dev.sh --install-deps
+
+# Subsequent builds (after code changes)
+./scripts/build-dev.sh
+```
+
+Optional flags:
+- `--install-deps` - Runs `npm ci --ignore-scripts` in the root and `client/` before building, then runs `npm run prepare` once to wire up Husky git hooks (Husky's own script only; dependency lifecycle scripts stay disabled). Required on a clean clone or after dependency changes.
+- `--no-cache` - Force rebuild to get latest yt-dlp version
+- `SKIP_DEV_IMAGE_PRUNE=1` - Skip automatic cleanup of old untagged `youtarr-dev` images (pruning is enabled by default to keep Docker storage from filling)
+
+The script runs `npm run build` for the client and then invokes `docker build`, so make sure Node.js 20.19+ and npm are available locally.
+
+### 3. Configure .env (optional)
+
+- Copy `.env.example` to `.env`
+  - This is optional, if not created manually it will be created by the `./scripts/start-dev.sh`
+    script
+  - Edit `.env` to configure your YOUTUBE_OUTPUT_DIR
+    - This will be the directory that is mounted by Youtarr where downloaded videos will be placed
+    - It defaults to `./downloads`
+  - Leave `AUTH_PRESET_USERNAME` and `AUTH_PRESET_PASSWORD` blank to configure your login via
+    UI on first startup (credentials will be saved to `config/config.json`)
+
+### 4. Start Development Environment
+
+**Step 1: Full Docker Development**
+
+Build and run the full stack using the pre-built static frontend served by the app container.
+
+```bash
+# Start both app and database containers (serves static frontend)
+./scripts/start-dev.sh
+```
+
+This starts:
+- **Backend** on http://localhost:3011 (Node.js Express server with `--watch` for auto-restart)
+- **Frontend (static, served by the app container)** on http://localhost:3087
+- **MariaDB** database on the internal Docker network only
+
+Optional flags:
+- `--no-auth` - Disable authentication (only use behind auth gateway or if not exposed outside your network)
+- `--debug`   - Set logging level to "debug" (defaults to `info`)
+
+**Step 2: Vite Dev Server (Hot Module Reload — optional)**
+
+For faster, iterative frontend development you can run the Vite dev server with HMR. This is optional; run it when you want instant frontend reloads while developing UI.
+
+```bash
+# Terminal 1: Start backend in Docker
+./scripts/start-dev.sh
+
+# Terminal 2: Start Vite dev server (HMR)
+cd client
+npm run dev
+```
+
+Then access:
+- **Frontend (HMR)** at http://localhost:3000
+
+The Vite dev server will proxy API and WebSocket requests to the backend at port `3011` so API calls work the same as the full-stack run.
+
+The dev server binds to all interfaces (`0.0.0.0`) by default so workflows that reach the host from another network namespace (Docker, WSL2, remote dev containers) work without extra configuration. Override with the `VITE_HOST` env var (e.g. `VITE_HOST=localhost npm run dev`) if you want to bind to loopback only.
+
+### 5. Storybook (Component Development)
+
+Use Storybook to develop and document components in isolation.
+
+**Prerequisites:** Complete Step 2 (Build Development Environment) first, or at minimum install client dependencies:
+```bash
+cd client && npm ci --ignore-scripts
+```
+
+The MSW (Mock Service Worker) file used for Storybook API mocking is committed at `client/public/mockServiceWorker.js`. After bumping `msw`, regenerate it with `cd client && npm run msw:init` and commit the updated worker.
+
+```bash
+# Start Storybook Server
+npm run storybook
+```
+
+Storybook will open automatically in your browser. Story validation is done via Jest tests (see `client/src/tests/storybook_coverage.test.js`).
+
+### 6. Access the Application
+
+Navigate to:
+- **Docker static build**: http://localhost:3087
+- **Vite dev server (if running)**: http://localhost:3000
+
+Create your admin account on first access.
+
+### 7. Stop Development Environment
+
+```bash
+./stop.sh
+```
+
+## Resetting local development environment
+**!IMPORTANT!**: This COMPLETELY resets your local environment and REMOVES all data except your downloaded videos!
+
+**DATABASE AND CONFIGURATION IS REMOVED AND NOT BACKED UP!**
+
+*This can be useful for local development and testing*
+
+```bash
+./scripts/reset-server-data.sh
+```
+
+## How Docker Development Works
+
+### Build-and-Test Workflow
+
+The development setup is a "build-and-test-in-Docker" workflow that ensures your code works in a containerized environment:
+
+**Build Phase** (`./scripts/build-dev.sh`):
+1. Runs `npm ci --ignore-scripts` on your host (if `--install-deps` is used)
+2. Builds the React frontend (`npm run build` in client directory) - creates production build
+3. Builds a Docker image with the pre-built static files
+
+**Runtime Phase** (`./scripts/start-dev.sh`):
+- Runs the Node.js Express server with `node --watch server/server.js` - backend code changes auto-restart the server without a rebuild
+- Serves the pre-built React static files from `/app/client/build` (frontend changes require a rebuild unless you are running the Vite dev server)
+- Application accessible at http://localhost:3087
+
+### Volume Mounts
+
+The development setup (`docker-compose.dev.yml`) mounts these directories into the container:
+
+```yaml
+volumes:
+  - ${YOUTUBE_OUTPUT_DIR:-./downloads}:/usr/src/app/data  # Downloaded videos
+  - ./server/images:/app/server/images                     # Generated thumbnails
+  - ./config:/app/config                                   # Configuration files
+  - ./jobs:/app/jobs                                       # Job state
+  # Backend source and migrations for hot reload with --watch
+  - ./server:/app/server
+  - ./migrations:/app/migrations
+  - ./package.json:/app/package.json
+  - ./package-lock.json:/app/package-lock.json
+```
+
+**Backend hot reload:** `./server/` is mounted and the container runs `node --watch server/server.js`, so backend code changes auto-restart the server without a rebuild. Check the container logs to confirm the restart.
+
+**Frontend:** `client/src/` is NOT mounted. Frontend changes reach the running app one of two ways:
+- **Full rebuild**: `./scripts/build-dev.sh` rebuilds the static bundle that the app container serves at http://localhost:3087.
+- **Vite dev server (recommended)**: run `cd client && npm run dev` in a second terminal. Vite serves the frontend on http://localhost:3000 with HMR and proxies API/WebSocket calls to the backend on host port 3087 (which `docker-compose.dev.yml` forwards to container port 3011). Override with `VITE_BACKEND_PORT` if you have remapped the host port.
+
+### When to Rebuild
+
+You **must** rebuild (`./scripts/build-dev.sh`) for:
+- Frontend code changes when you are using the static-bundle workflow (not needed if you are using the Vite dev server).
+- Installing new npm dependencies (use `--install-deps` flag).
+- Updating system dependencies (yt-dlp, ffmpeg - use `--no-cache` flag).
+- Changing the Dockerfile.
+- First time setup.
+
+You **do not** need to rebuild for:
+- Backend code changes (server/*.js, modules, routes) - `node --watch` picks them up automatically.
+- New migration files - `./migrations/` is mounted, though you still need to restart the container for them to run.
+- Frontend changes while the Vite dev server is running - Vite HMR updates the browser.
+
+### Benefits of This Approach
+
+- ✅ Tests your code in the actual Docker environment it will run in
+- ✅ Catches Docker-specific issues early
+- ✅ Consistent behavior between development and production
+- ✅ Database runs in Docker (no local MariaDB installation needed)
+- ✅ Includes all system dependencies (yt-dlp, ffmpeg)
+
+## Development Workflow
+
+### Daily Development
+
+**Vite Dev Server Workflow (Recommended for Frontend)**
+
+```bash
+# Terminal 1: Start backend
+./scripts/start-dev.sh
+
+# Terminal 2: Start Vite with HMR
+cd client
+npm run dev
+
+# Make code changes - frontend updates instantly!
+# Backend changes auto-restart via --watch
+
+# View logs
+docker compose -f docker-compose.dev.yml logs -f youtarr
+
+# Stop when done
+./stop.sh
+```
+
+**Full Docker Workflow (For Testing Production Build)**
+
+```bash
+# Start development environment
+./scripts/start-dev.sh
+
+# Make code changes in your editor
+
+# After making changes, rebuild and restart:
+./scripts/build-dev.sh
+./scripts/start-dev.sh  # Automatically stops and restarts containers
+
+# View logs
+docker compose -f docker-compose.dev.yml logs -f
+
+# Stop when done
+./stop.sh
+```
+
+**Note:** Youtarr only supports the Docker-based workflow described here. Always build and test inside the dev containers rather than trying to run the backend or frontend directly on the host.
+
+### Working with Containers
+
+```bash
+# View running containers
+docker compose ps
+
+# Execute commands in app container
+docker compose exec youtarr bash
+
+# Execute commands in database container
+docker compose exec youtarr-db bash
+
+# Restart a specific service
+docker compose restart youtarr
+
+# View logs for specific service
+docker compose logs -f youtarr
+docker compose logs -f youtarr-db
+```
+
+### Database Access
+
+```bash
+# From inside the database container
+docker compose exec youtarr-db mysql -u root -p123qweasd youtarr
+```
+
+## Code Style and Linting
+
+### ESLint Configuration
+
+The project uses ESLint for code quality. Configuration is in `.eslintrc.js`.
+
+```bash
+# Lint all code
+npm run lint
+
+# Lint with auto-fix
+npm run lint:fix
+
+# Lint specific areas
+npm run lint:frontend
+npm run lint:backend
+
+# TypeScript type checking
+npm run lint:ts
+```
+
+### Pre-commit Hooks
+
+Husky is configured to run linting, typescript checks and tests before commits. To bypass (not recommended):
+```bash
+git commit --no-verify
+```
+
+## Testing
+
+### Running Tests
+
+All tests run on your host machine (not in Docker) since they're isolated unit tests:
+
+```bash
+# Run all tests (backend + frontend)
+npm test
+
+# Backend tests only
+npm run test:backend
+
+# Frontend tests only
+npm run test:frontend
+
+# Run with coverage
+npm run test:coverage
+
+# Watch mode (backend)
+npm run test:watch
+```
+
+### Frontend Tests
+
+```bash
+cd client
+npm test                         # Watch mode
+npm test -- --coverage           # With coverage
+npm test -- --watchAll=false     # Run once
+```
+
+## Database Development
+
+### Working with Migrations
+
+```bash
+# Create a new migration
+./scripts/db-create-migration.sh migration-name
+
+# Migrations run automatically on container startup
+```
+
+### Database Schema
+
+See [DATABASE.md](DATABASE.md)
+
+### Backend Debugging
+
+**Option 1: Container Debugging with VS Code**
+
+Create `.vscode/launch.json`:
+```json
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "node",
+      "request": "attach",
+      "name": "Docker: Attach to Node",
+      "remoteRoot": "/usr/src/app",
+      "localRoot": "${workspaceFolder}",
+      "protocol": "inspector",
+      "port": 9229,
+      "restart": true,
+      "sourceMaps": true
+    }
+  ]
+}
+```
+
+Modify `docker-compose.yml` to expose debug port:
+```yaml
+ports:
+  - "3011:3011"
+  - "9229:9229"  # Debug port
+command: node --inspect=0.0.0.0:9229 server/server.js
+```
+
+**Option 2: Logger Debugging**
+
+Use the project's Pino logger (not `console.log`) so output stays structured and log levels work:
+
+```javascript
+const logger = require('../logger'); // adjust relative path as needed
+logger.debug({ variable }, 'Debug info');
+debugger; // Breakpoint
+```
+
+Set `LOG_LEVEL=debug` in your `.env` to surface `logger.debug(...)` output.
+
+**Option 3: Exec into Container**
+
+```bash
+docker compose exec youtarr bash
+# Now you can run commands, inspect files, etc.
+```
+
+### Frontend Debugging
+
+1. React Developer Tools browser extension
+2. Network tab for API calls
+3. Console for errors and logs
+4. Source maps are included in the production build for debugging
+
+### Database Debugging
+
+Enable Sequelize SQL logging in `db.js` by routing it through the Pino logger:
+```javascript
+const logger = require('./logger');
+const sequelize = new Sequelize({
+  // ... other config
+  logging: (sql) => logger.debug({ sql }, 'sequelize query')
+});
+```
+
+Then set `LOG_LEVEL=debug` in your `.env` to see the queries.
+
+## API Development
+
+### API Documentation (Swagger)
+
+Youtarr provides interactive API documentation via Swagger UI:
+
+- **Swagger UI**: http://localhost:3087/swagger
+- **OpenAPI JSON**: http://localhost:3087/swagger.json
+
+The Swagger documentation includes:
+- All available endpoints with request/response schemas
+- Authentication requirements
+- Try-it-out functionality for testing endpoints
+- Request body examples and parameter descriptions
+
+### API Structure
+
+Routes are organized into modular files under `./server/routes/`:
+
+```
+server/routes/
+├── auth.js       # Authentication endpoints
+├── channels.js   # Channel management
+├── config.js     # Configuration endpoints
+├── health.js     # Health check endpoints
+├── jobs.js       # Download job management
+├── plex.js       # Plex integration
+├── setup.js      # Initial setup endpoints
+├── videos.js     # Video management
+└── index.js      # Route registration
+```
+
+### Key Endpoints
+
+All endpoints require authentication except setup and health checks:
+
+- **Setup:** `GET /setup/status`, `POST /setup/create-auth`
+- **Auth:** `POST /auth/login`, `POST /auth/logout`, `GET /auth/sessions`
+- **Config:** `GET /getconfig`, `POST /updateconfig`
+- **Channels:** `GET /getchannels`, `POST /updatechannels`
+- **Downloads:** `POST /triggerspecificdownloads`, `GET /jobstatus/:jobId`
+- **Plex:** `GET /getplexlibraries`, `GET /plex/auth-url`
+- **Health:** `GET /api/health`, `GET /api/db-status`
+
+For the complete list of 40+ endpoints, see the [Swagger documentation](http://localhost:3087/swagger).
+
+### Authentication
+
+All API endpoints (except setup, login, and health checks) require authentication:
+```javascript
+headers: {
+  'x-access-token': 'session-token-here'
+}
+```
+
+### Adding New Endpoints
+
+When adding new API endpoints:
+
+1. Add the route to the appropriate file in `./server/routes/`
+2. Include JSDoc annotations for Swagger documentation:
+
+```javascript
+/**
+ * @swagger
+ * /api/your-endpoint:
+ *   get:
+ *     summary: Brief description
+ *     description: Detailed description of what the endpoint does.
+ *     tags: [CategoryTag]
+ *     parameters:
+ *       - in: query
+ *         name: paramName
+ *         schema:
+ *           type: string
+ *         description: Parameter description
+ *     responses:
+ *       200:
+ *         description: Success response description
+ */
+router.get('/api/your-endpoint', verifyToken, async (req, res) => {
+  // Implementation
+});
+```
+
+3. The Swagger documentation will automatically update on the next server restart
+
+### WebSocket Events
+
+WebSocket shares the HTTP port (3011 in container, 3087 on host) and emits:
+- `downloadProgress` - Download progress updates
+- `downloadComplete` - Video download finished
+- `jobsUpdated` - Download job enqueued or started
+- `channelsUpdated` - Channel list changed
+- `videosUpdated` - A video's database rows were persisted mid-batch
+- `rescanStatus` - Filesystem rescan started or finished
+- `channelTabsDetected` - Tab detection finished for a channel
+- `progress` / `complete` / `error` (source `subscriptionImport`) - Subscription import job updates
+
+The client also synthesizes a local `connectionRestored` message after every reconnect (`client/src/providers/WebSocketProvider.tsx`); the server never sends it.
+
+## Contributing
+
+### Branching Strategy
+
+Youtarr uses a **dev → main** branching model:
+
+| Branch | Purpose | Docker Tag |
+|--------|---------|------------|
+| `main` | Stable, released code | `latest`, `vX.X.X` |
+| `dev` | Integration branch for upcoming release | `dev-latest`, `dev-rc.<sha>` |
+| `feature/*`, `fix/*` | Individual changes | None |
+
+### Git Workflow
+
+1. **Start from dev branch**:
+   ```bash
+   git checkout dev
+   git pull origin dev
+   git checkout -b feat/your-feature
+   ```
+
+2. Make changes and commit:
+   ```bash
+   git add .
+   git commit -m "feat: add new feature"
+   ```
+
+3. Push and create pull request **targeting `dev`** (not `main`)
+
+4. After merge to `dev`, an RC Docker image is automatically built
+
+5. When ready, maintainer creates PR from `dev` → `main` for production release
+
+### Commit Message Convention
+
+Follow conventional commits for automatic versioning:
+
+- `feat:` - New feature (minor version bump)
+- `fix:` - Bug fix (patch version bump)
+- `docs:` - Documentation only
+- `style:` - Code style changes
+- `refactor:` - Code refactoring
+- `test:` - Test changes
+- `chore:` - Build process or auxiliary tool changes
+- `BREAKING CHANGE:` - Breaking change (major version bump)
+
+### Code Review Checklist
+
+Before submitting PR:
+- [ ] PR targets `dev` branch
+- [ ] Code passes linting (`npm run lint`)
+- [ ] All tests pass (`npm test`)
+- [ ] Database migrations included (if needed)
+- [ ] Documentation updated
+- [ ] No sensitive data in commits
+- [ ] Follows existing code style
+
+## Building Images
+
+### Docker Build
+
+```bash
+# Build local image
+./scripts/build-dev.sh
+
+# Test locally
+./scripts/start-dev.sh
+```
+
+### Release Process
+
+Releases are automated via GitHub Actions with a two-stage workflow:
+
+**Release Candidates (automatic on dev merge):**
+1. Merge your PR to `dev` branch
+2. RC workflow automatically:
+   - Builds multi-arch Docker images (amd64 + arm64)
+   - Pushes `dev-latest` and `dev-rc.<sha>` tags to Docker Hub
+
+**Production Releases (automatic on main merge):**
+1. Maintainer creates PR from `dev` → `main`
+2. After merge, release workflow automatically:
+   - Bumps version based on commit messages
+   - Updates CHANGELOG.md
+   - Creates GitHub release
+   - Builds optimized Docker image (~600MB)
+   - Pushes `latest` and `vX.X.X` tags to Docker Hub
+
+## Troubleshooting Development Issues
+
+### Containers Won't Start
+
+```bash
+# Check container status
+docker compose ps
+
+# View logs
+docker compose logs
+
+# Rebuild from scratch
+docker compose down -v
+./scripts/build-dev.sh --no-cache
+./scripts/start-dev.sh
+```
+
+### Port Already in Use
+
+```bash
+# Find process using port
+lsof -i :3011  # Mac/Linux
+netstat -ano | findstr :3011  # Windows
+
+# Or stop all Docker containers
+docker compose down
+```
+
+### Database Connection Issues
+
+1. Check database is running:
+   ```bash
+   docker compose ps youtarr-db
+   ```
+
+2. Check database logs:
+   ```bash
+   docker compose logs youtarr-db
+   ```
+
+3. Test connection:
+   ```bash
+   docker compose exec youtarr-db mysql -u root -p123qweasd youtarr
+   ```
+
+### Code Changes Not Reflected
+
+Backend and frontend reload differently in the dev setup.
+
+**Backend code changes** (`server/*.js`, `server/modules/`, `server/routes/`, `migrations/`):
+- `./server/` and `./migrations/` are volume-mounted into the container and the container runs `node --watch`.
+- Saves auto-restart the server within a few seconds; check the container logs to confirm the restart fired.
+- No rebuild required. (New migration files still require a container restart to actually run.)
+
+**Frontend code changes** (`client/src/`):
+- `client/src/` is NOT mounted into the app container; the static bundle is baked into the image at build time.
+- If you are running the Vite dev server (`cd client && npm run dev`), HMR updates the browser automatically on http://localhost:3000 - no rebuild.
+- Otherwise, rebuild the static bundle:
+
+```bash
+./scripts/build-dev.sh
+./scripts/start-dev.sh  # automatically stops and restarts containers
+```
+
+If a backend change is not being picked up, verify the container is actually running `node --watch` (`docker compose -f docker-compose.dev.yml logs youtarr` should show restart messages when you save) and that you edited a file under `./server/`.
+
+### Module Not Found Errors
+
+```bash
+# Rebuild with fresh dependencies
+./scripts/build-dev.sh --install-deps
+```
+
+## Security Considerations
+
+### Development Security
+
+- Never commit `.env` files
+- Use environment variables for secrets
+- Sanitize user inputs
+- Validate all API inputs
+- Use prepared statements for SQL (Sequelize handles this)
+- Keep dependencies updated
+
+### Security Testing
+
+```bash
+# Check for vulnerabilities
+npm audit
+
+# Fix vulnerabilities
+npm audit fix
+
+# Check frontend
+cd client && npm audit
+```
+
+## Performance Profiling
+
+### Backend Profiling
+
+Add to `server.js` for request timing (use the Pino logger, not `console.log`):
+```javascript
+const logger = require('./logger');
+app.use((req, res, next) => {
+  const start = Date.now();
+  res.on('finish', () => {
+    logger.info({ method: req.method, path: req.path, durationMs: Date.now() - start }, 'request');
+  });
+  next();
+});
+```
+
+### Frontend Profiling
+
+Use React DevTools Profiler to identify performance bottlenecks.
+
+## Platform-Specific Development
+
+When working on changes that interact with platform-managed deployments, see the dedicated developer guides:
+
+- [Elfhosted](development/ELFHOSTED.md) - environment variables, behavior switches, and how to spoof an Elfhosted deployment locally for testing.

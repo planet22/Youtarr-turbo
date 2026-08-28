@@ -1,0 +1,1940 @@
+import React from 'react';
+import { render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import '@testing-library/jest-dom';
+import ChannelSettingsDialog from '../ChannelSettingsDialog';
+import { useConfig } from '../../../hooks/useConfig';
+import { DEFAULT_CONFIG } from '../../../config/configSchema';
+
+// Mock the useConfig hook
+const mockRefetchConfig = jest.fn();
+
+jest.mock('../../../hooks/useConfig', () => ({
+  useConfig: jest.fn(),
+}));
+
+// Mock axios because TabsEditor (rendered inside the dialog) uses axios.post
+// for the refresh button. Existing dialog tests do not click refresh so the
+// mock is passive for them; it's only exercised by the refresh-path test.
+jest.mock('axios', () => ({
+  post: jest.fn(),
+  isAxiosError: jest.fn(() => false),
+}));
+
+// Mock useSubfolders so tests don't make real fetch calls for the subfolder list.
+jest.mock('../../../hooks/useSubfolders', () => ({
+  useSubfolders: () => ({
+    subfolders: ['__Library1', '__Library2'],
+    loading: false,
+    error: null,
+    refetch: jest.fn(),
+    createSubfolder: jest.fn(() => Promise.resolve()),
+    deleteSubfolder: jest.fn(() => Promise.resolve()),
+  }),
+}));
+
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const mockAxios = require('axios');
+
+const mockUseConfig = useConfig as jest.MockedFunction<typeof useConfig>;
+
+describe('ChannelSettingsDialog', () => {
+  const mockOnClose = jest.fn();
+  const mockOnSettingsSaved = jest.fn();
+  let mockFetch: jest.Mock;
+
+  const defaultProps = {
+    open: true,
+    onClose: mockOnClose,
+    channelId: 'channel123',
+    channelName: 'Test Channel',
+    token: 'test-token',
+    onSettingsSaved: mockOnSettingsSaved,
+  };
+
+  const mockChannelSettings = {
+    sub_folder: null,
+    video_quality: null,
+    min_duration: null,
+    max_duration: null,
+    title_filter_regex: null,
+    audio_format: null,
+    default_rating: null,
+    skip_video_folder: null,
+    m3u_enabled: false,
+    m3u_sort_order: 'oldest_first',
+  };
+
+  const mockSubfolders = ['__Sports', '__Music', '__Tech'];
+
+  const buildUseConfigResult = (configOverrides: Partial<typeof DEFAULT_CONFIG> = {}) => ({
+    config: { ...DEFAULT_CONFIG, preferredResolution: '1080', ...configOverrides },
+    refetch: mockRefetchConfig,
+    loading: false,
+    error: null,
+    initialConfig: null,
+    isPlatformManaged: {
+      plexUrl: false,
+      authEnabled: true,
+      useTmpForDownloads: false,
+      ytdlpUpdates: false
+    },
+    deploymentEnvironment: {
+      platform: null,
+      isWsl: false,
+    },
+    setConfig: jest.fn(),
+    setInitialConfig: jest.fn(),
+  });
+
+  type FetchCall = [input: RequestInfo | URL, init?: RequestInit];
+
+  const findChannelSettingsPutCall = (): FetchCall | undefined =>
+    (mockFetch.mock.calls as FetchCall[]).find(
+      ([url, init]) => url === '/api/channels/channel123/settings' && init?.method === 'PUT'
+    );
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockFetch = jest.fn();
+    global.fetch = mockFetch;
+    mockAxios.post.mockReset();
+    mockAxios.isAxiosError.mockReturnValue(false);
+    mockRefetchConfig.mockResolvedValue(undefined);
+    // Reset mockUseConfig to default
+    mockUseConfig.mockReturnValue(buildUseConfigResult());
+  });
+
+  async function openSettingsSection(sectionName: 'General' | 'Auto Download' | 'Filters' | 'Ratings') {
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: sectionName }));
+    return user;
+  }
+
+  afterEach(() => {
+    // Cleanup
+  });
+
+  describe('Component Rendering', () => {
+    test('renders dialog when open is true', async () => {
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: jest.fn().mockResolvedValueOnce(mockChannelSettings),
+        });
+
+      render(<ChannelSettingsDialog {...defaultProps} />);
+
+      expect(screen.getByRole('dialog', { name: 'Channel Settings' })).toBeInTheDocument();
+
+      await waitFor(() => {
+        expect(mockFetch).toHaveBeenCalledWith('/api/channels/channel123/settings', {
+          headers: { 'x-access-token': 'test-token' },
+        });
+      });
+    });
+
+    test('does not render dialog when open is false', () => {
+      render(<ChannelSettingsDialog {...defaultProps} open={false} />);
+
+      expect(screen.queryByRole('dialog', { name: 'Channel Settings' })).not.toBeInTheDocument();
+    });
+
+    test('shows loading spinner while fetching data', () => {
+      mockFetch.mockImplementation(() => new Promise(() => {}));
+
+      render(<ChannelSettingsDialog {...defaultProps} />);
+
+      expect(screen.getByRole('progressbar')).toBeInTheDocument();
+    });
+
+    test('renders all form controls after loading', async () => {
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: jest.fn().mockResolvedValueOnce(mockChannelSettings),
+        });
+
+      render(<ChannelSettingsDialog {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+      });
+
+      expect(screen.getByLabelText('Channel Video Quality Override')).toBeInTheDocument();
+      expect(screen.getByLabelText('Subfolder')).toBeInTheDocument();
+
+      await openSettingsSection('Filters');
+
+      expect(screen.getByLabelText('Min Duration (mins)')).toBeInTheDocument();
+      expect(screen.getByLabelText('Max Duration (mins)')).toBeInTheDocument();
+      expect(screen.getByLabelText('Title Filter (Python Regex)')).toBeInTheDocument();
+    });
+  });
+
+  describe('Data Loading', () => {
+    test('loads channel settings on dialog open', async () => {
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: jest.fn().mockResolvedValueOnce({
+            sub_folder: 'Sports',
+            video_quality: '720',
+            min_duration: 300,
+            max_duration: 3600,
+            title_filter_regex: '(?i)highlight',
+          }),
+        });
+
+      render(<ChannelSettingsDialog {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(mockFetch).toHaveBeenCalledWith('/api/channels/channel123/settings', {
+          headers: { 'x-access-token': 'test-token' },
+        });
+      });
+
+      await waitFor(() => {
+        expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+      });
+
+      const subfolderInput = screen.getByLabelText('Subfolder');
+      expect(subfolderInput).toHaveValue('__Sports');
+
+      await openSettingsSection('Filters');
+
+      const minDurationInput = screen.getByLabelText('Min Duration (mins)');
+      expect(minDurationInput).toHaveValue(5);
+
+      const maxDurationInput = screen.getByLabelText('Max Duration (mins)');
+      expect(maxDurationInput).toHaveValue(60);
+
+      const regexInput = screen.getByLabelText('Title Filter (Python Regex)');
+      expect(regexInput).toHaveValue('(?i)highlight');
+    });
+
+    test('renders the options provided by the useSubfolders hook', async () => {
+      const user = userEvent.setup();
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: jest.fn().mockResolvedValueOnce(mockChannelSettings),
+      });
+
+      render(<ChannelSettingsDialog {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+      });
+
+      const subfolderInput = screen.getByLabelText('Subfolder');
+      await user.click(subfolderInput);
+
+      // Subfolders from the hook appear as options
+      expect(screen.getByText('__Library1')).toBeInTheDocument();
+      expect(screen.getByText('__Library2')).toBeInTheDocument();
+    });
+
+    test('refetches config when dialog opens', async () => {
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: jest.fn().mockResolvedValueOnce(mockChannelSettings),
+        });
+
+      render(<ChannelSettingsDialog {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(mockRefetchConfig).toHaveBeenCalled();
+      });
+    });
+
+    test('shows error when settings load fails', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+      });
+
+      render(<ChannelSettingsDialog {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.getByText('Failed to load channel settings')).toBeInTheDocument();
+      });
+    });
+
+    test('handles network errors gracefully', async () => {
+      mockFetch.mockRejectedValueOnce(new Error('Network error'));
+
+      render(<ChannelSettingsDialog {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.getByText('Network error')).toBeInTheDocument();
+      });
+    });
+
+    test('continues loading if subfolder fetch fails', async () => {
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: jest.fn().mockResolvedValueOnce(mockChannelSettings),
+        })
+        .mockRejectedValueOnce(new Error('Subfolder error'));
+
+      const consoleSpy = jest.spyOn(console, 'error').mockImplementation();
+
+      render(<ChannelSettingsDialog {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+      });
+
+      expect(screen.getByLabelText('Subfolder')).toBeInTheDocument();
+
+      consoleSpy.mockRestore();
+    });
+  });
+
+  describe('Video Quality Settings', () => {
+    test('displays quality options in dropdown', async () => {
+      const user = userEvent.setup();
+
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: jest.fn().mockResolvedValueOnce(mockChannelSettings),
+        });
+
+      render(<ChannelSettingsDialog {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+      });
+
+      const qualitySelect = screen.getByLabelText('Channel Video Quality Override');
+      await user.click(qualitySelect);
+
+      const listbox = screen.getByRole('listbox');
+      expect(within(listbox).getByText('360p')).toBeInTheDocument();
+      expect(within(listbox).getByText('480p')).toBeInTheDocument();
+      expect(within(listbox).getByText('720p (HD)')).toBeInTheDocument();
+      expect(within(listbox).getByText('1080p (Full HD)')).toBeInTheDocument();
+      expect(within(listbox).getByText('1440p (2K)')).toBeInTheDocument();
+      expect(within(listbox).getByText('2160p (4K)')).toBeInTheDocument();
+    });
+
+    test('changes video quality selection', async () => {
+      const user = userEvent.setup();
+
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: jest.fn().mockResolvedValueOnce(mockChannelSettings),
+        });
+
+      render(<ChannelSettingsDialog {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+      });
+
+      const qualitySelect = screen.getByLabelText('Channel Video Quality Override');
+      await user.click(qualitySelect);
+
+      const option720 = screen.getByText('720p (HD)');
+      await user.click(option720);
+
+      expect(screen.getByText(/Effective channel quality: 720p \(channel\)/i)).toBeInTheDocument();
+    });
+
+    test('shows global quality when no channel override', async () => {
+      // Set useConfig to return 720p
+      mockUseConfig.mockReturnValue({
+        config: { ...DEFAULT_CONFIG, preferredResolution: '720' },
+        refetch: mockRefetchConfig,
+        loading: false,
+        error: null,
+        initialConfig: null,
+        isPlatformManaged: {
+          plexUrl: false,
+          authEnabled: true,
+          useTmpForDownloads: false,
+          ytdlpUpdates: false
+        },
+        deploymentEnvironment: {
+          platform: null,
+          isWsl: false,
+        },
+        setConfig: jest.fn(),
+        setInitialConfig: jest.fn(),
+      });
+
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: jest.fn().mockResolvedValueOnce(mockChannelSettings),
+        });
+
+      render(<ChannelSettingsDialog {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.getByText(/Effective channel quality: 720p \(global\)/i)).toBeInTheDocument();
+      });
+    });
+
+    test('shows channel quality when override is set', async () => {
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: jest.fn().mockResolvedValueOnce({
+            ...mockChannelSettings,
+            video_quality: '1440',
+          }),
+        });
+
+      render(<ChannelSettingsDialog {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.getByText(/Effective channel quality: 1440p \(channel\)/i)).toBeInTheDocument();
+      });
+    });
+  });
+
+  describe('Subfolder Settings', () => {
+    test('renders subfolder autocomplete with existing value', async () => {
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: jest.fn().mockResolvedValueOnce({
+            ...mockChannelSettings,
+            sub_folder: 'Sports',
+          }),
+        });
+
+      render(<ChannelSettingsDialog {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+      });
+
+      const subfolderInput = screen.getByLabelText('Subfolder');
+      expect(subfolderInput).toHaveValue('__Sports');
+    });
+
+    test('allows adding new subfolder via Add Subfolder dialog', async () => {
+      const user = userEvent.setup();
+
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: jest.fn().mockResolvedValueOnce(mockChannelSettings),
+        });
+
+      render(<ChannelSettingsDialog {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+      });
+
+      // Open the subfolder dropdown
+      const subfolderInput = screen.getByLabelText('Subfolder');
+      await user.click(subfolderInput);
+
+      // Click "Add Subfolder" option
+      const addOption = await screen.findByText('Add Subfolder');
+      await user.click(addOption);
+
+      // The Add Subfolder dialog should open
+      expect(screen.getByText('Add New Subfolder')).toBeInTheDocument();
+
+      // Enter a new subfolder name
+      const dialogInput = screen.getByLabelText('Subfolder Name');
+      await user.type(dialogInput, 'Gaming');
+
+      // Click Add button
+      const addButton = screen.getByRole('button', { name: 'Add Subfolder' });
+      await user.click(addButton);
+
+      // The dialog should close and the new value should be selected
+      await waitFor(() => {
+        expect(screen.queryByText('Add New Subfolder')).not.toBeInTheDocument();
+      });
+
+      // The input should show the new subfolder
+      expect(subfolderInput).toHaveValue('__Gaming');
+    });
+
+    test('sends clean subfolder name when saving via Add Subfolder', async () => {
+      const user = userEvent.setup();
+
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: jest.fn().mockResolvedValueOnce(mockChannelSettings),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: jest.fn().mockResolvedValueOnce({
+            settings: { ...mockChannelSettings, sub_folder: 'Gaming' },
+          }),
+        });
+
+      render(<ChannelSettingsDialog {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+      });
+
+      // Open the subfolder dropdown and add a new subfolder
+      const subfolderInput = screen.getByLabelText('Subfolder');
+      await user.click(subfolderInput);
+
+      const addOption = await screen.findByText('Add Subfolder');
+      await user.click(addOption);
+
+      const dialogInput = screen.getByLabelText('Subfolder Name');
+      await user.type(dialogInput, 'Gaming');
+
+      const addButton = screen.getByRole('button', { name: 'Add Subfolder' });
+      await user.click(addButton);
+
+      await waitFor(() => {
+        expect(screen.queryByText('Add New Subfolder')).not.toBeInTheDocument();
+      });
+
+      const saveButton = screen.getByRole('button', { name: 'Save' });
+      await user.click(saveButton);
+
+      // Verify the component sends the clean subfolder name to API
+      await waitFor(() => {
+        const putCall = mockFetch.mock.calls.find(
+          call => call[0] === '/api/channels/channel123/settings' && call[1]?.method === 'PUT'
+        );
+        expect(putCall).toBeDefined();
+      });
+
+      const putCall = mockFetch.mock.calls.find(
+        call => call[0] === '/api/channels/channel123/settings' && call[1]?.method === 'PUT'
+      );
+      const body = JSON.parse(putCall[1].body);
+      // Should send the clean subfolder name to API (without __ prefix)
+      expect(body.sub_folder).toBe('Gaming');
+    });
+
+    test('shows warning about moving folder', async () => {
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: jest.fn().mockResolvedValueOnce(mockChannelSettings),
+        });
+
+      render(<ChannelSettingsDialog {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(
+          screen.getByText(/Changing the subfolder will move the channel's existing folder/i)
+        ).toBeInTheDocument();
+      });
+    });
+  });
+
+  describe('Duration Filters', () => {
+    test('converts seconds to minutes when loading', async () => {
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: jest.fn().mockResolvedValueOnce({
+            ...mockChannelSettings,
+            min_duration: 180,
+            max_duration: 1800,
+          }),
+        });
+
+      render(<ChannelSettingsDialog {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+      });
+
+      await openSettingsSection('Filters');
+
+      const minDurationInput = screen.getByLabelText('Min Duration (mins)');
+      expect(minDurationInput).toHaveValue(3);
+
+      const maxDurationInput = screen.getByLabelText('Max Duration (mins)');
+      expect(maxDurationInput).toHaveValue(30);
+    });
+
+    test('converts minutes to seconds when saving', async () => {
+      const user = userEvent.setup();
+
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: jest.fn().mockResolvedValueOnce(mockChannelSettings),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: jest.fn().mockResolvedValueOnce({
+            settings: { ...mockChannelSettings, min_duration: 600, max_duration: 3600 },
+          }),
+        });
+
+      render(<ChannelSettingsDialog {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+      });
+
+      await openSettingsSection('Filters');
+
+      const minDurationInput = screen.getByLabelText('Min Duration (mins)');
+      await user.clear(minDurationInput);
+      await user.type(minDurationInput, '10');
+
+      const maxDurationInput = screen.getByLabelText('Max Duration (mins)');
+      await user.clear(maxDurationInput);
+      await user.type(maxDurationInput, '60');
+
+      const saveButton = screen.getByRole('button', { name: 'Save' });
+      await user.click(saveButton);
+
+      await waitFor(() => {
+        expect(mockFetch).toHaveBeenCalledWith(
+          '/api/channels/channel123/settings',
+          expect.objectContaining({
+            method: 'PUT',
+            body: expect.stringContaining('"min_duration":600'),
+          })
+        );
+      });
+
+      await waitFor(() => {
+        expect(mockFetch).toHaveBeenCalledWith(
+          '/api/channels/channel123/settings',
+          expect.objectContaining({
+            method: 'PUT',
+            body: expect.stringContaining('"max_duration":3600'),
+          })
+        );
+      });
+    });
+
+    test('allows only numeric input for duration', async () => {
+      const user = userEvent.setup();
+
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: jest.fn().mockResolvedValueOnce(mockChannelSettings),
+        });
+
+      render(<ChannelSettingsDialog {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+      });
+
+      await openSettingsSection('Filters');
+
+      const minDurationInput = screen.getByLabelText('Min Duration (mins)');
+      await user.type(minDurationInput, 'abc');
+
+      expect(minDurationInput).toHaveValue(null);
+    });
+
+    test('clears duration when input is empty', async () => {
+      const user = userEvent.setup();
+
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: jest.fn().mockResolvedValueOnce({
+            ...mockChannelSettings,
+            min_duration: 300,
+          }),
+        });
+
+      render(<ChannelSettingsDialog {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+      });
+
+      await openSettingsSection('Filters');
+
+      const minDurationInput = screen.getByLabelText('Min Duration (mins)');
+      expect(minDurationInput).toHaveValue(5);
+
+      await user.clear(minDurationInput);
+
+      expect(minDurationInput).toHaveValue(null);
+    });
+  });
+
+  describe('Title Filter Regex', () => {
+    test('renders title filter input', async () => {
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: jest.fn().mockResolvedValueOnce(mockChannelSettings),
+        });
+
+      render(<ChannelSettingsDialog {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+      });
+
+      await openSettingsSection('Filters');
+
+      expect(screen.getByLabelText('Title Filter (Python Regex)')).toBeInTheDocument();
+      expect(
+        screen.getByText(/Only download videos with titles matching regex pattern/i)
+      ).toBeInTheDocument();
+    });
+
+    test('updates regex value on input', async () => {
+      const user = userEvent.setup();
+
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: jest.fn().mockResolvedValueOnce(mockChannelSettings),
+        });
+
+      render(<ChannelSettingsDialog {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+      });
+
+      await openSettingsSection('Filters');
+
+      const regexInput = screen.getByLabelText('Title Filter (Python Regex)');
+      await user.type(regexInput, '(?i)podcast');
+
+      expect(regexInput).toHaveValue('(?i)podcast');
+    });
+
+    test('renders preview button', async () => {
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: jest.fn().mockResolvedValueOnce(mockChannelSettings),
+        });
+
+      render(<ChannelSettingsDialog {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+      });
+
+      await openSettingsSection('Filters');
+
+      expect(screen.getByRole('button', { name: 'Preview Regex' })).toBeInTheDocument();
+    });
+
+    test('disables preview button when no regex entered', async () => {
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: jest.fn().mockResolvedValueOnce(mockChannelSettings),
+        });
+
+      render(<ChannelSettingsDialog {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+      });
+
+      await openSettingsSection('Filters');
+
+      const previewButton = screen.getByRole('button', { name: 'Preview Regex' });
+      expect(previewButton).toBeDisabled();
+    });
+
+    test('loads preview when button clicked', async () => {
+      const user = userEvent.setup();
+
+      const mockPreviewResult = {
+        videos: [
+          { video_id: '1', title: 'Test Video 1', upload_date: '2024-01-01', matches: true },
+          { video_id: '2', title: 'Another Video', upload_date: '2024-01-02', matches: false },
+        ],
+        totalCount: 2,
+        matchCount: 1,
+      };
+
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: jest.fn().mockResolvedValueOnce({
+            ...mockChannelSettings,
+            title_filter_regex: '(?i)test',
+          }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: jest.fn().mockResolvedValueOnce(mockPreviewResult),
+        });
+
+      render(<ChannelSettingsDialog {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+      });
+
+      await openSettingsSection('Filters');
+
+      const previewButton = screen.getByRole('button', { name: 'Preview Regex' });
+      await user.click(previewButton);
+
+      await waitFor(() => {
+        expect(screen.getByText('1 of 2 recent videos match')).toBeInTheDocument();
+      });
+
+      expect(screen.getByText('Test Video 1')).toBeInTheDocument();
+      expect(screen.getByText('Another Video')).toBeInTheDocument();
+    });
+
+    test('shows error when preview fails', async () => {
+      const user = userEvent.setup();
+
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: jest.fn().mockResolvedValueOnce({
+            ...mockChannelSettings,
+            title_filter_regex: '(?i)test',
+          }),
+        })
+        .mockResolvedValueOnce({
+          ok: false,
+          json: jest.fn().mockResolvedValueOnce({ error: 'Invalid regex' }),
+        });
+
+      render(<ChannelSettingsDialog {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+      });
+
+      await openSettingsSection('Filters');
+
+      const previewButton = screen.getByRole('button', { name: 'Preview Regex' });
+      await user.click(previewButton);
+
+      await waitFor(() => {
+        expect(screen.getByText('Invalid regex')).toBeInTheDocument();
+      });
+    });
+
+    test('renders documentation link', async () => {
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: jest.fn().mockResolvedValueOnce(mockChannelSettings),
+        });
+
+      render(<ChannelSettingsDialog {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+      });
+
+      await openSettingsSection('Filters');
+
+      const docLink = screen.getByTitle('Python regex documentation');
+      expect(docLink).toHaveAttribute(
+        'href',
+        'https://docs.python.org/3/library/re.html#regular-expression-syntax'
+      );
+      expect(docLink).toHaveAttribute('target', '_blank');
+      expect(docLink).toHaveAttribute('rel', 'noopener noreferrer');
+    });
+  });
+
+  describe('Save Functionality', () => {
+    test('saves settings when save button clicked', async () => {
+      const user = userEvent.setup();
+
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: jest.fn().mockResolvedValueOnce(mockChannelSettings),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: jest.fn().mockResolvedValueOnce({
+            settings: { ...mockChannelSettings, video_quality: '720' },
+          }),
+        });
+
+      render(<ChannelSettingsDialog {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+      });
+
+      const qualitySelect = screen.getByLabelText('Channel Video Quality Override');
+      await user.click(qualitySelect);
+      await user.click(screen.getByText('720p (HD)'));
+
+      const saveButton = screen.getByRole('button', { name: 'Save' });
+      await user.click(saveButton);
+
+      await waitFor(() => {
+        expect(mockFetch).toHaveBeenCalledWith(
+          '/api/channels/channel123/settings',
+          expect.objectContaining({
+            method: 'PUT',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-access-token': 'test-token',
+            },
+          })
+        );
+      });
+    });
+
+    test('shows success message after save', async () => {
+      const user = userEvent.setup();
+
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: jest.fn().mockResolvedValueOnce(mockChannelSettings),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: jest.fn().mockResolvedValueOnce({
+            settings: { ...mockChannelSettings, video_quality: '720' },
+          }),
+        });
+
+      render(<ChannelSettingsDialog {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+      });
+
+      const qualitySelect = screen.getByLabelText('Channel Video Quality Override');
+      await user.click(qualitySelect);
+      await user.click(screen.getByText('720p (HD)'));
+
+      const saveButton = screen.getByRole('button', { name: 'Save' });
+      await user.click(saveButton);
+
+      await waitFor(() => {
+        expect(screen.getByText('Settings saved successfully!')).toBeInTheDocument();
+      });
+    });
+
+    test('calls onSettingsSaved callback after successful save', async () => {
+      const user = userEvent.setup();
+
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: jest.fn().mockResolvedValueOnce(mockChannelSettings),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: jest.fn().mockResolvedValueOnce({
+            settings: { ...mockChannelSettings, video_quality: '720' },
+          }),
+        });
+
+      render(<ChannelSettingsDialog {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+      });
+
+      const qualitySelect = screen.getByLabelText('Channel Video Quality Override');
+      await user.click(qualitySelect);
+      await user.click(screen.getByText('720p (HD)'));
+
+      const saveButton = screen.getByRole('button', { name: 'Save' });
+      await user.click(saveButton);
+
+      await waitFor(() => {
+        expect(mockOnSettingsSaved).toHaveBeenCalledWith(
+          expect.objectContaining({
+            ...mockChannelSettings,
+            video_quality: '720',
+          })
+        );
+      });
+    });
+
+    test('closes dialog after successful save', async () => {
+      const user = userEvent.setup();
+
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: jest.fn().mockResolvedValueOnce(mockChannelSettings),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: jest.fn().mockResolvedValueOnce({
+            settings: { ...mockChannelSettings, video_quality: '720' },
+          }),
+        });
+
+      render(<ChannelSettingsDialog {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+      });
+
+      const qualitySelect = screen.getByLabelText('Channel Video Quality Override');
+      await user.click(qualitySelect);
+      await user.click(screen.getByText('720p (HD)'));
+
+      const saveButton = screen.getByRole('button', { name: 'Save' });
+      await user.click(saveButton);
+
+      await waitFor(() => {
+        expect(screen.getByText('Settings saved successfully!')).toBeInTheDocument();
+      });
+
+      await waitFor(
+        () => {
+          expect(mockOnClose).toHaveBeenCalled();
+        },
+        { timeout: 2000 }
+      );
+    });
+
+    test('shows error when save fails', async () => {
+      const user = userEvent.setup();
+
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: jest.fn().mockResolvedValueOnce(mockChannelSettings),
+        })
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 500,
+          statusText: 'Internal Server Error',
+          json: jest.fn().mockRejectedValueOnce(new Error('Parse error')),
+        });
+
+      render(<ChannelSettingsDialog {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+      });
+
+      const qualitySelect = screen.getByLabelText('Channel Video Quality Override');
+      await user.click(qualitySelect);
+      await user.click(screen.getByText('720p (HD)'));
+
+      const saveButton = screen.getByRole('button', { name: 'Save' });
+      await user.click(saveButton);
+
+      await waitFor(() => {
+        expect(screen.getByText('Server error: 500 Internal Server Error')).toBeInTheDocument();
+      });
+    });
+
+    test('shows specific error for 409 conflict', async () => {
+      const user = userEvent.setup();
+
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: jest.fn().mockResolvedValueOnce(mockChannelSettings),
+        })
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 409,
+        });
+
+      render(<ChannelSettingsDialog {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+      });
+
+      // Change quality to enable save button
+      const qualitySelect = screen.getByLabelText('Channel Video Quality Override');
+      await user.click(qualitySelect);
+      await user.click(screen.getByText('720p (HD)'));
+
+      const saveButton = screen.getByRole('button', { name: 'Save' });
+      await user.click(saveButton);
+
+      await waitFor(() => {
+        expect(
+          screen.getByText(/Cannot change subfolder while downloads are in progress/i)
+        ).toBeInTheDocument();
+      });
+    });
+
+    test('disables save button when no changes made', async () => {
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: jest.fn().mockResolvedValueOnce(mockChannelSettings),
+        });
+
+      render(<ChannelSettingsDialog {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+      });
+
+      const saveButton = screen.getByRole('button', { name: 'Save' });
+      expect(saveButton).toBeDisabled();
+    });
+
+    test('enables save button when changes are made', async () => {
+      const user = userEvent.setup();
+
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: jest.fn().mockResolvedValueOnce(mockChannelSettings),
+        });
+
+      render(<ChannelSettingsDialog {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+      });
+
+      const saveButton = screen.getByRole('button', { name: 'Save' });
+      expect(saveButton).toBeDisabled();
+
+      const qualitySelect = screen.getByLabelText('Channel Video Quality Override');
+      await user.click(qualitySelect);
+      await user.click(screen.getByText('720p (HD)'));
+
+      expect(saveButton).not.toBeDisabled();
+    });
+  });
+
+  describe('Cancel Functionality', () => {
+    test('closes dialog when cancel button clicked', async () => {
+      const user = userEvent.setup();
+
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: jest.fn().mockResolvedValueOnce(mockChannelSettings),
+        });
+
+      render(<ChannelSettingsDialog {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+      });
+
+      const cancelButton = screen.getByRole('button', { name: 'Cancel' });
+      await user.click(cancelButton);
+
+      expect(mockOnClose).toHaveBeenCalled();
+    });
+
+    test('reverts changes when cancel is clicked', async () => {
+      const user = userEvent.setup();
+
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: jest.fn().mockResolvedValueOnce(mockChannelSettings),
+        });
+
+      const { rerender } = render(<ChannelSettingsDialog {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+      });
+
+      const qualitySelect = screen.getByLabelText('Channel Video Quality Override');
+      await user.click(qualitySelect);
+      await user.click(screen.getByText('720p (HD)'));
+
+      expect(screen.getByText(/Effective channel quality: 720p \(channel\)/i)).toBeInTheDocument();
+
+      const cancelButton = screen.getByRole('button', { name: 'Cancel' });
+      await user.click(cancelButton);
+
+      expect(mockOnClose).toHaveBeenCalled();
+
+      rerender(<ChannelSettingsDialog {...defaultProps} open={false} />);
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: jest.fn().mockResolvedValueOnce(mockChannelSettings),
+        });
+
+      rerender(<ChannelSettingsDialog {...defaultProps} open={true} />);
+
+      await waitFor(() => {
+        expect(screen.getByText(/Effective channel quality: 1080p \(global\)/i)).toBeInTheDocument();
+      });
+    });
+  });
+
+  describe('State Reset on Dialog Close', () => {
+    test('reloads data when dialog reopens', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: jest.fn().mockResolvedValueOnce(mockChannelSettings),
+      });
+
+      const { rerender } = render(<ChannelSettingsDialog {...defaultProps} open={true} />);
+
+      await waitFor(() => {
+        expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+      });
+
+      rerender(<ChannelSettingsDialog {...defaultProps} open={false} />);
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: jest.fn().mockResolvedValueOnce(mockChannelSettings),
+      });
+
+      rerender(<ChannelSettingsDialog {...defaultProps} open={true} />);
+
+      await waitFor(() => {
+        // 1 call on first open (settings) + 1 call on second open
+        // subfolders come from useSubfolders hook, not from fetch
+        expect(mockFetch).toHaveBeenCalledTimes(2);
+      });
+    });
+  });
+
+  describe('Informational Alerts', () => {
+    test('renders subfolder organization info', async () => {
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: jest.fn().mockResolvedValueOnce(mockChannelSettings),
+        });
+
+      render(<ChannelSettingsDialog {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.getByText('Subfolder Organization')).toBeInTheDocument();
+      });
+
+      expect(
+        screen.getByText(/Subfolders are automatically prefixed with/i)
+      ).toBeInTheDocument();
+    });
+
+    test('renders download filters info', async () => {
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: jest.fn().mockResolvedValueOnce(mockChannelSettings),
+        });
+
+      render(<ChannelSettingsDialog {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+      });
+
+      await openSettingsSection('Filters');
+
+      expect(screen.getByText('Download Filters')).toBeInTheDocument();
+
+      expect(
+        screen.getByText(
+          /These filters only apply to channel downloads\. Manually selected videos will always download\./i
+        )
+      ).toBeInTheDocument();
+    });
+  });
+
+  describe('Video File Structure Select', () => {
+    // The ui Select trigger's accessible name is its InputLabel text
+    // ("Video File Structure"), not the selected option, because it's
+    // labeled via labelId. Same query idiom as PlaylistSettingsDialog.test.tsx.
+    test('shows "Use global setting (Video subfolders)" when channel setting is null and global default is off', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: jest.fn().mockResolvedValueOnce(mockChannelSettings),
+      });
+
+      render(<ChannelSettingsDialog {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+      });
+
+      expect(screen.getByLabelText('Video File Structure')).toHaveTextContent(
+        'Use global setting (Video subfolders)'
+      );
+    });
+
+    test('shows "Use global setting (Flat)" when the global flat default is on', async () => {
+      mockUseConfig.mockReturnValue(buildUseConfigResult({ defaultSkipVideoFolder: true }));
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: jest.fn().mockResolvedValueOnce(mockChannelSettings),
+      });
+
+      render(<ChannelSettingsDialog {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+      });
+
+      expect(screen.getByLabelText('Video File Structure')).toHaveTextContent(
+        'Use global setting (Flat)'
+      );
+    });
+
+    test('loads skip_video_folder true from server and shows Flat selected', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: jest.fn().mockResolvedValueOnce({
+          ...mockChannelSettings,
+          skip_video_folder: true,
+        }),
+      });
+
+      render(<ChannelSettingsDialog {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+      });
+
+      expect(screen.getByLabelText('Video File Structure')).toHaveTextContent(
+        'Flat (no video subfolders)'
+      );
+    });
+
+    test('saves true when Flat is selected', async () => {
+      const user = userEvent.setup();
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: jest.fn().mockResolvedValueOnce(mockChannelSettings),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: jest.fn().mockResolvedValueOnce({
+            settings: { ...mockChannelSettings, skip_video_folder: true },
+          }),
+        });
+
+      render(<ChannelSettingsDialog {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+      });
+
+      await user.click(screen.getByLabelText('Video File Structure'));
+      const flatOption = await screen.findByRole('option', { name: 'Flat (no video subfolders)' });
+      await user.click(flatOption);
+
+      await user.click(screen.getByRole('button', { name: 'Save' }));
+
+      let putCall: ReturnType<typeof findChannelSettingsPutCall>;
+      await waitFor(() => {
+        putCall = findChannelSettingsPutCall();
+        expect(putCall).toBeDefined();
+      });
+      const body = JSON.parse(String(putCall![1]?.body));
+      expect(body.skip_video_folder).toBe(true);
+    });
+
+    test('saves false when Video subfolders is selected explicitly', async () => {
+      const user = userEvent.setup();
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: jest.fn().mockResolvedValueOnce(mockChannelSettings),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: jest.fn().mockResolvedValueOnce({
+            settings: { ...mockChannelSettings, skip_video_folder: false },
+          }),
+        });
+
+      render(<ChannelSettingsDialog {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+      });
+
+      await user.click(screen.getByLabelText('Video File Structure'));
+      const subfoldersOption = await screen.findByRole('option', { name: 'Video subfolders' });
+      await user.click(subfoldersOption);
+
+      await user.click(screen.getByRole('button', { name: 'Save' }));
+
+      let putCall: ReturnType<typeof findChannelSettingsPutCall>;
+      await waitFor(() => {
+        putCall = findChannelSettingsPutCall();
+        expect(putCall).toBeDefined();
+      });
+      const body = JSON.parse(String(putCall![1]?.body));
+      expect(body.skip_video_folder).toBe(false);
+    });
+
+    test('saves null when Use global setting is selected to clear an override', async () => {
+      const user = userEvent.setup();
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: jest.fn().mockResolvedValueOnce({
+            ...mockChannelSettings,
+            skip_video_folder: true,
+          }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: jest.fn().mockResolvedValueOnce({
+            settings: { ...mockChannelSettings, skip_video_folder: null },
+          }),
+        });
+
+      render(<ChannelSettingsDialog {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+      });
+
+      await user.click(screen.getByLabelText('Video File Structure'));
+      const useGlobalOption = await screen.findByRole('option', { name: /Use global setting/ });
+      await user.click(useGlobalOption);
+
+      await user.click(screen.getByRole('button', { name: 'Save' }));
+
+      let putCall: ReturnType<typeof findChannelSettingsPutCall>;
+      await waitFor(() => {
+        putCall = findChannelSettingsPutCall();
+        expect(putCall).toBeDefined();
+      });
+      const body = JSON.parse(String(putCall![1]?.body));
+      expect(body.skip_video_folder).toBeNull();
+    });
+  });
+
+  describe('Edge Cases', () => {
+    test('handles missing onSettingsSaved callback', async () => {
+      const user = userEvent.setup();
+
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: jest.fn().mockResolvedValueOnce(mockChannelSettings),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: jest.fn().mockResolvedValueOnce({
+            settings: { ...mockChannelSettings, video_quality: '720' },
+          }),
+        });
+
+      render(<ChannelSettingsDialog {...defaultProps} onSettingsSaved={undefined} />);
+
+      await waitFor(() => {
+        expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+      });
+
+      const qualitySelect = screen.getByLabelText('Channel Video Quality Override');
+      await user.click(qualitySelect);
+      await user.click(screen.getByText('720p (HD)'));
+
+      const saveButton = screen.getByRole('button', { name: 'Save' });
+
+      expect(() => user.click(saveButton)).not.toThrow();
+    });
+
+    test('handles null token', async () => {
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: jest.fn().mockResolvedValueOnce(mockChannelSettings),
+        });
+
+      render(<ChannelSettingsDialog {...defaultProps} token={null} />);
+
+      await waitFor(() => {
+        expect(mockFetch).toHaveBeenCalledWith(
+          '/api/channels/channel123/settings',
+          expect.objectContaining({
+            headers: { 'x-access-token': '' },
+          })
+        );
+      });
+    });
+
+    test('closes error alert when close button clicked', async () => {
+      const user = userEvent.setup();
+
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+      });
+
+      render(<ChannelSettingsDialog {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.getByText('Failed to load channel settings')).toBeInTheDocument();
+      });
+
+      const alerts = screen.getAllByRole('button', { name: /close/i });
+      await user.click(alerts[0]);
+
+      await waitFor(() => {
+        expect(screen.queryByText('Failed to load channel settings')).not.toBeInTheDocument();
+      });
+    });
+
+    test('handles folderMoved result in response', async () => {
+      const user = userEvent.setup();
+      const consoleSpy = jest.spyOn(console, 'log').mockImplementation();
+
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: jest.fn().mockResolvedValueOnce(mockChannelSettings),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: jest.fn().mockResolvedValueOnce({
+            settings: { ...mockChannelSettings, sub_folder: 'NewFolder' },
+            folderMoved: true,
+            moveResult: { success: true, from: 'OldFolder', to: 'NewFolder' },
+          }),
+        });
+
+      render(<ChannelSettingsDialog {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+      });
+
+      // Change quality to enable save button
+      const qualitySelect = screen.getByLabelText('Channel Video Quality Override');
+      await user.click(qualitySelect);
+      await user.click(screen.getByText('720p (HD)'));
+
+      const saveButton = screen.getByRole('button', { name: 'Save' });
+      await user.click(saveButton);
+
+      await waitFor(() => {
+        expect(consoleSpy).toHaveBeenCalledWith(
+          'Channel folder moved:',
+          expect.objectContaining({ success: true })
+        );
+      });
+
+      consoleSpy.mockRestore();
+    });
+  });
+
+  describe('Channel Tabs integration', () => {
+    test('loads detected_tabs and hidden_tabs from settings and reflects them in TabsEditor', async () => {
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: jest.fn().mockResolvedValueOnce({
+            ...mockChannelSettings,
+            detected_tabs: ['videos', 'shorts', 'streams'],
+            hidden_tabs: ['shorts'],
+            available_tabs: ['videos', 'streams'],
+          }),
+        });
+
+      render(<ChannelSettingsDialog {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+      });
+
+      expect(screen.getByTestId('tabs-editor-checkbox-videos')).toBeChecked();
+      expect(screen.getByTestId('tabs-editor-checkbox-shorts')).not.toBeChecked();
+      expect(screen.getByTestId('tabs-editor-checkbox-streams')).toBeChecked();
+    });
+
+    test('save request includes hidden_tabs in the PUT body', async () => {
+      const user = userEvent.setup();
+
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: jest.fn().mockResolvedValueOnce({
+            ...mockChannelSettings,
+            detected_tabs: ['videos', 'shorts', 'streams'],
+            hidden_tabs: [],
+            available_tabs: ['videos', 'shorts', 'streams'],
+          }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: jest.fn().mockResolvedValueOnce({
+            settings: {
+              ...mockChannelSettings,
+              hidden_tabs: ['shorts'],
+              detected_tabs: ['videos', 'shorts', 'streams'],
+              available_tabs: ['videos', 'streams'],
+            },
+          }),
+        });
+
+      render(<ChannelSettingsDialog {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+      });
+
+      await user.click(screen.getByTestId('tabs-editor-checkbox-shorts'));
+
+      const saveButton = screen.getByRole('button', { name: 'Save' });
+      await user.click(saveButton);
+
+      await waitFor(() => {
+        const saveCall = mockFetch.mock.calls.find(
+          ([url, init]) =>
+            url === '/api/channels/channel123/settings' && init?.method === 'PUT'
+        );
+        expect(saveCall).toBeDefined();
+      });
+
+      const saveCall = mockFetch.mock.calls.find(
+        ([url, init]) =>
+          url === '/api/channels/channel123/settings' && init?.method === 'PUT'
+      )!;
+      const body = JSON.parse(saveCall[1].body as string);
+      expect(body.hidden_tabs).toEqual(['shorts']);
+    });
+
+    test('save button is disabled when every detected tab is hidden', async () => {
+      const user = userEvent.setup();
+
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: jest.fn().mockResolvedValueOnce({
+            ...mockChannelSettings,
+            detected_tabs: ['videos', 'shorts'],
+            hidden_tabs: [],
+            available_tabs: ['videos', 'shorts'],
+          }),
+        });
+
+      render(<ChannelSettingsDialog {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+      });
+
+      await user.click(screen.getByTestId('tabs-editor-checkbox-videos'));
+      await user.click(screen.getByTestId('tabs-editor-checkbox-shorts'));
+
+      expect(screen.getByText('At least one tab must remain visible.')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+    });
+
+    test('refresh updates detected tabs and resets originalSettings so Save stays disabled', async () => {
+      const user = userEvent.setup();
+
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: jest.fn().mockResolvedValueOnce({
+            ...mockChannelSettings,
+            detected_tabs: ['videos', 'shorts'],
+            hidden_tabs: ['shorts'],
+            available_tabs: ['videos'],
+          }),
+        });
+
+      // Backend's redetect probe now also finds 'streams' and keeps 'shorts' hidden
+      mockAxios.post.mockResolvedValueOnce({
+        data: {
+          availableTabs: ['videos', 'streams'],
+          detectedTabs: ['videos', 'shorts', 'streams'],
+          hiddenTabs: ['shorts'],
+        },
+      });
+
+      render(<ChannelSettingsDialog {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+      });
+
+      // Initial state: only videos + shorts detected, streams not yet present
+      expect(screen.getByTestId('tabs-editor-checkbox-videos')).toBeChecked();
+      expect(screen.getByTestId('tabs-editor-checkbox-shorts')).not.toBeChecked();
+      expect(screen.queryByTestId('tabs-editor-checkbox-streams')).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+
+      // Click refresh; TabsEditor posts via axios and receives the new state
+      await user.click(screen.getByTestId('tabs-editor-refresh'));
+
+      await waitFor(() => {
+        expect(mockAxios.post).toHaveBeenCalledWith(
+          '/api/channels/channel123/tabs/redetect',
+          null,
+          { headers: { 'x-access-token': 'test-token' } }
+        );
+      });
+
+      // After refresh: streams now rendered; videos + streams checked, shorts still hidden
+      await waitFor(() => {
+        expect(screen.getByTestId('tabs-editor-checkbox-streams')).toBeInTheDocument();
+      });
+      expect(screen.getByTestId('tabs-editor-checkbox-videos')).toBeChecked();
+      expect(screen.getByTestId('tabs-editor-checkbox-shorts')).not.toBeChecked();
+      expect(screen.getByTestId('tabs-editor-checkbox-streams')).toBeChecked();
+
+      // Critical invariant: handleTabsRefresh resets originalSettings.hidden_tabs
+      // to the refresh result, so hasChanges() is false and Save stays disabled.
+      // If that reset is broken, Save would be ENABLED here.
+      expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+    });
+  });
+
+  describe('Auto Downloads', () => {
+    test('renders one switch per detected, non-hidden tab using new labels', async () => {
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: jest.fn().mockResolvedValueOnce({
+            ...mockChannelSettings,
+            detected_tabs: ['videos', 'shorts', 'streams'],
+            hidden_tabs: ['shorts'],
+            available_tabs: ['videos', 'streams'],
+            auto_download_enabled_tabs: 'video',
+          }),
+        });
+
+      render(<ChannelSettingsDialog {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+      });
+
+      expect(screen.getByLabelText('New Videos')).toBeInTheDocument();
+      expect(screen.getByLabelText('New Live/Streams')).toBeInTheDocument();
+      expect(screen.queryByLabelText('New Shorts')).not.toBeInTheDocument();
+      expect(screen.queryByText('Automatically download new Videos')).not.toBeInTheDocument();
+    });
+
+    test('reflects loaded auto_download_enabled_tabs in switch state', async () => {
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: jest.fn().mockResolvedValueOnce({
+            ...mockChannelSettings,
+            detected_tabs: ['videos', 'shorts', 'streams'],
+            hidden_tabs: [],
+            available_tabs: ['videos', 'shorts', 'streams'],
+            auto_download_enabled_tabs: 'short,livestream',
+          }),
+        });
+
+      render(<ChannelSettingsDialog {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+      });
+
+      expect(screen.getByLabelText('New Videos')).not.toBeChecked();
+      expect(screen.getByLabelText('New Shorts')).toBeChecked();
+      expect(screen.getByLabelText('New Live/Streams')).toBeChecked();
+    });
+
+    test('shows an empty-state message when no detected, non-hidden tabs remain', async () => {
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: jest.fn().mockResolvedValueOnce({
+            ...mockChannelSettings,
+            detected_tabs: [],
+            hidden_tabs: [],
+            available_tabs: [],
+            auto_download_enabled_tabs: '',
+          }),
+        });
+
+      render(<ChannelSettingsDialog {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+      });
+
+      expect(screen.getByText(/No detected tabs are available for auto-download/i)).toBeInTheDocument();
+      expect(screen.queryByLabelText('New Videos')).not.toBeInTheDocument();
+    });
+
+    test('toggling a switch updates the value sent in the PUT body', async () => {
+      const user = userEvent.setup();
+
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: jest.fn().mockResolvedValueOnce({
+            ...mockChannelSettings,
+            detected_tabs: ['videos', 'shorts'],
+            hidden_tabs: [],
+            available_tabs: ['videos', 'shorts'],
+            auto_download_enabled_tabs: 'video',
+          }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: jest.fn().mockResolvedValueOnce({
+            settings: {
+              ...mockChannelSettings,
+              auto_download_enabled_tabs: 'video,short',
+              detected_tabs: ['videos', 'shorts'],
+              hidden_tabs: [],
+              available_tabs: ['videos', 'shorts'],
+            },
+          }),
+        });
+
+      render(<ChannelSettingsDialog {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+      });
+
+      await user.click(screen.getByLabelText('New Shorts'));
+      await user.click(screen.getByRole('button', { name: 'Save' }));
+
+      await waitFor(() => {
+        const saveCall = mockFetch.mock.calls.find(
+          ([url, init]) =>
+            url === '/api/channels/channel123/settings' && init?.method === 'PUT'
+        );
+        expect(saveCall).toBeDefined();
+      });
+
+      const saveCall = mockFetch.mock.calls.find(
+        ([url, init]) =>
+          url === '/api/channels/channel123/settings' && init?.method === 'PUT'
+      )!;
+      const body = JSON.parse(saveCall[1].body as string);
+      expect(body.auto_download_enabled_tabs).toBe('video,short');
+    });
+
+    test('hiding a tab strips its media type from the saved auto_download_enabled_tabs', async () => {
+      const user = userEvent.setup();
+
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: jest.fn().mockResolvedValueOnce({
+            ...mockChannelSettings,
+            detected_tabs: ['videos', 'shorts'],
+            hidden_tabs: [],
+            available_tabs: ['videos', 'shorts'],
+            auto_download_enabled_tabs: 'video,short',
+          }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: jest.fn().mockResolvedValueOnce({
+            settings: {
+              ...mockChannelSettings,
+              auto_download_enabled_tabs: 'video',
+              detected_tabs: ['videos', 'shorts'],
+              hidden_tabs: ['shorts'],
+              available_tabs: ['videos'],
+            },
+          }),
+        });
+
+      render(<ChannelSettingsDialog {...defaultProps} />);
+
+      await waitFor(() => {
+        expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+      });
+
+      // Both switches start enabled
+      expect(screen.getByLabelText('New Videos')).toBeChecked();
+      expect(screen.getByLabelText('New Shorts')).toBeChecked();
+
+      // Hide the 'shorts' tab
+      await user.click(screen.getByTestId('tabs-editor-checkbox-shorts'));
+
+      // The 'New Shorts' switch should disappear because the tab is now hidden
+      expect(screen.queryByLabelText('New Shorts')).not.toBeInTheDocument();
+
+      await user.click(screen.getByRole('button', { name: 'Save' }));
+
+      await waitFor(() => {
+        const saveCall = mockFetch.mock.calls.find(
+          ([url, init]) =>
+            url === '/api/channels/channel123/settings' && init?.method === 'PUT'
+        );
+        expect(saveCall).toBeDefined();
+      });
+
+      const saveCall = mockFetch.mock.calls.find(
+        ([url, init]) =>
+          url === '/api/channels/channel123/settings' && init?.method === 'PUT'
+      )!;
+      const body = JSON.parse(saveCall[1].body as string);
+      expect(body.auto_download_enabled_tabs).toBe('video');
+      expect(body.hidden_tabs).toEqual(['shorts']);
+    });
+  });
+
+  describe('Channel playlist file (.m3u) settings', () => {
+    // The ui Switch renders as role="checkbox" and gets its label via
+    // FormControlLabel, so query with getByLabelText.
+    test('renders the m3u toggle off by default and hides the order select', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: jest.fn().mockResolvedValueOnce(mockChannelSettings),
+      });
+
+      render(<ChannelSettingsDialog {...defaultProps} />);
+      await screen.findByText(/Generate channel playlist file/i);
+
+      const toggle = screen.getByLabelText(/Generate channel playlist file/i);
+      expect(toggle).not.toBeChecked();
+      expect(screen.queryByLabelText(/Playlist Order/i)).not.toBeInTheDocument();
+    });
+
+    test('enabling the toggle reveals the order select and saves both fields', async () => {
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: jest.fn().mockResolvedValueOnce(mockChannelSettings),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: jest.fn().mockResolvedValueOnce({
+            settings: { ...mockChannelSettings, m3u_enabled: true, m3u_sort_order: 'newest_first' },
+          }),
+        });
+
+      render(<ChannelSettingsDialog {...defaultProps} />);
+      await screen.findByText(/Generate channel playlist file/i);
+      const user = userEvent.setup();
+
+      await user.click(screen.getByLabelText(/Generate channel playlist file/i));
+      await user.click(screen.getByLabelText(/Playlist Order/i));
+      await user.click(await screen.findByRole('option', { name: /Newest first/i }));
+      await user.click(screen.getByRole('button', { name: /Save/i }));
+
+      let putCall: ReturnType<typeof findChannelSettingsPutCall>;
+      await waitFor(() => {
+        putCall = findChannelSettingsPutCall();
+        expect(putCall).toBeDefined();
+      });
+      const body = JSON.parse(String(putCall![1]!.body));
+      expect(body.m3u_enabled).toBe(true);
+      expect(body.m3u_sort_order).toBe('newest_first');
+    });
+  });
+});

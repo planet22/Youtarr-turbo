@@ -1,0 +1,112 @@
+name: Release Candidate Build
+
+on:
+  push:
+    branches: [ dev ]
+
+concurrency:
+  group: release-rc-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  release-rc:
+    name: Build & Push RC Image
+    runs-on: ubuntu-latest
+    # Skip if commit message contains [skip ci]
+    if: "!contains(github.event.head_commit.message, '[skip ci]')"
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Get version info
+        id: version
+        run: |
+          # Get short SHA for unique RC identifier
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          
+          # Create RC tag: dev-rc.<sha> (not tied to a specific version)
+          RC_TAG="dev-rc.${SHORT_SHA}"
+          
+          echo "rc_tag=${RC_TAG}" >> $GITHUB_OUTPUT
+          echo "short_sha=${SHORT_SHA}" >> $GITHUB_OUTPUT
+          
+          echo "🏷️ RC tag: ${RC_TAG}"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '20'
+
+      - name: Pin npm
+        run: npm install -g npm@11.15.0 --ignore-scripts
+
+      - name: Install server dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Install client dependencies
+        run: |
+          cd client
+          npm ci --ignore-scripts
+
+      - name: Build client
+        run: |
+          cd client
+          npm run build
+          echo "✅ Client build successful"
+
+      - name: Verify MSW worker excluded from production bundle
+        run: |
+          if [ -e client/build/mockServiceWorker.js ]; then
+            echo "❌ client/build/mockServiceWorker.js should not exist in production output"
+            exit 1
+          fi
+          echo "✅ MSW worker correctly excluded from production bundle"
+
+      - name: Set up QEMU (multi-arch)
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push RC Docker images
+        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # v5
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: |
+            ${{ vars.DOCKERHUB_USERNAME }}/youtarr:${{ steps.version.outputs.rc_tag }}
+            ${{ vars.DOCKERHUB_USERNAME }}/youtarr:dev-latest
+          no-cache: true
+
+      - name: Summary
+        run: |
+          echo "## 🚀 Release Candidate Published" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Docker Images" >> $GITHUB_STEP_SUMMARY
+          echo "- \`${{ vars.DOCKERHUB_USERNAME }}/youtarr:${{ steps.version.outputs.rc_tag }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- \`${{ vars.DOCKERHUB_USERNAME }}/youtarr:dev-latest\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Pull Commands" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
+          echo "# Specific RC version" >> $GITHUB_STEP_SUMMARY
+          echo "docker pull ${{ vars.DOCKERHUB_USERNAME }}/youtarr:${{ steps.version.outputs.rc_tag }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "# Latest dev build" >> $GITHUB_STEP_SUMMARY
+          echo "docker pull ${{ vars.DOCKERHUB_USERNAME }}/youtarr:dev-latest" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "⚠️ **Note:** This is a release candidate for testing. Use \`latest\` for stable releases." >> $GITHUB_STEP_SUMMARY
+

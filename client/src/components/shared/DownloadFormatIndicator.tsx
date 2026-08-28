@@ -1,0 +1,142 @@
+import React from 'react';
+import { Box, Chip, Tooltip } from '../ui';
+import { MovieOutlined as VideoFormatIcon, AudioIcon as AudioFormatIcon, Wifi as StrmIcon } from '../../lib/icons';
+import { formatFileSize } from '../../utils/formatters';
+import { resolutionTierLabel } from '../../utils/videoResolution';
+import { SHARED_THEMED_CHIP_SMALL_STYLE, SHARED_COMPACT_CHIP_OVERRIDES } from './chipStyles';
+
+interface DownloadFormatIndicatorProps {
+  filePath?: string | null;
+  audioFilePath?: string | null;
+  fileSize?: number | string | null;
+  audioFileSize?: number | string | null;
+  // Actual downloaded pixel dimensions ("1920x1080"); the tier label is
+  // derived at render time. Chip hidden when null/undefined, malformed, or
+  // the backend's "0x0" probe-failed sentinel.
+  videoResolution?: string | null;
+  // 'vertical' stacks the chips to fit narrow table columns
+  orientation?: 'horizontal' | 'vertical';
+  compact?: boolean;
+}
+
+// Strip internal Docker paths from display
+const stripInternalPath = (path: string): string => {
+  const internalPrefixes = ['/usr/src/app/data/'];
+  for (const prefix of internalPrefixes) {
+    if (path.startsWith(prefix)) {
+      return path.slice(prefix.length);
+    }
+  }
+  return path;
+};
+
+const getDisplayPath = (path: string): string =>
+  stripInternalPath(path).replace(/\\/g, '/').replace(/\/+$/, '');
+
+const DownloadFormatIndicator: React.FC<DownloadFormatIndicatorProps> = ({
+  filePath,
+  audioFilePath,
+  fileSize,
+  audioFileSize,
+  videoResolution,
+  orientation = 'horizontal',
+  compact = false
+}) => {
+  const hasVideo = !!filePath;
+  const hasAudio = !!audioFilePath;
+
+  // Don't render anything if no files exist
+  if (!hasVideo && !hasAudio) {
+    return null;
+  }
+
+  // .strm files are text pointers, not media - their "size" is a handful of
+  // bytes and reads as a meaningless "0MB" chip. Show a STRM chip instead
+  // (same icon/label as MediaModeChip's STRM indicator) rather than a size.
+  const isVideoStrm = !!filePath && filePath.toLowerCase().endsWith('.strm');
+  const isAudioStrm = !!audioFilePath && audioFilePath.toLowerCase().endsWith('.strm');
+
+  // Parse file sizes to numbers for formatting
+  const videoSizeNum = typeof fileSize === 'string' ? parseInt(fileSize, 10) : fileSize;
+  const audioSizeNum = typeof audioFileSize === 'string' ? parseInt(audioFileSize, 10) : audioFileSize;
+
+  const displayVideoPath = filePath ? getDisplayPath(filePath) : '';
+  const displayAudioPath = audioFilePath ? getDisplayPath(audioFilePath) : '';
+  const resolutionLabel = resolutionTierLabel(videoResolution);
+
+  // Format size labels
+  const videoSizeLabel = videoSizeNum ? formatFileSize(videoSizeNum) : 'Unknown';
+  const audioSizeLabel = audioSizeNum ? formatFileSize(audioSizeNum) : 'Unknown';
+  const renderPathTooltip = (path: string) => (
+    <div
+      style={{
+        maxWidth: 320,
+        whiteSpace: 'normal',
+        overflowWrap: 'anywhere',
+        wordBreak: 'break-word',
+      }}
+    >
+      {path}
+    </div>
+  );
+
+  const containerClassName =
+    orientation === 'vertical'
+      ? 'inline-flex flex-col items-start gap-1'
+      : 'inline-flex items-center gap-1';
+
+  const chipStyle = compact
+    ? { ...SHARED_THEMED_CHIP_SMALL_STYLE, ...SHARED_COMPACT_CHIP_OVERRIDES }
+    : SHARED_THEMED_CHIP_SMALL_STYLE;
+
+  return (
+    <Box
+      className={containerClassName}
+      data-testid="download-format-indicator"
+      // A chip tap should just show its path tooltip, not bubble up to row/card selection.
+      onClick={(e) => e.stopPropagation()}
+    >
+      {hasVideo && (
+        <Tooltip title={renderPathTooltip(displayVideoPath)} arrow placement="top" enterTouchDelay={0}>
+          <Chip
+            size="small"
+            icon={isVideoStrm
+              ? <StrmIcon size={14} className="text-primary" data-testid="StrmFormatIcon" />
+              : <VideoFormatIcon size={14} className="text-primary" data-testid="VideoFormatIcon" />}
+            label={isVideoStrm ? 'STRM' : videoSizeLabel}
+            variant="outlined"
+            style={chipStyle}
+            data-testid="video-format-chip"
+          />
+        </Tooltip>
+      )}
+      {hasVideo && resolutionLabel && (
+        <Tooltip title={`Downloaded resolution (${videoResolution})`} arrow placement="top" enterTouchDelay={0}>
+          <Chip
+            size="small"
+            label={resolutionLabel}
+            variant="outlined"
+            style={chipStyle}
+            data-testid="video-resolution-chip"
+          />
+        </Tooltip>
+      )}
+      {hasAudio && (
+        <Tooltip title={renderPathTooltip(displayAudioPath)} arrow placement="top" enterTouchDelay={0}>
+          <Chip
+            size="small"
+            icon={isAudioStrm
+              ? <StrmIcon size={14} className="text-secondary" data-testid="StrmFormatIcon" />
+              : <AudioFormatIcon size={14} className="text-secondary" data-testid="AudioFormatIcon" />}
+            label={isAudioStrm ? 'STRM' : audioSizeLabel}
+            variant="outlined"
+            style={chipStyle}
+            data-testid="audio-format-chip"
+          />
+        </Tooltip>
+      )}
+    </Box>
+  );
+};
+
+export default DownloadFormatIndicator;

@@ -1,0 +1,680 @@
+const fs = require('fs-extra');
+const fsPromises = require('fs').promises;
+
+// Mock fs-extra and fs.promises
+jest.mock('fs-extra');
+jest.mock('fs', () => ({
+  ...jest.requireActual('fs'),
+  promises: {
+    readdir: jest.fn(),
+    rmdir: jest.fn(),
+    rm: jest.fn(),
+    access: jest.fn(),
+    unlink: jest.fn()
+  }
+}));
+
+// Mock logger
+jest.mock('../../../logger', () => ({
+  debug: jest.fn(),
+  warn: jest.fn(),
+  info: jest.fn(),
+  error: jest.fn()
+}));
+
+const {
+  ensureDir,
+  ensureDirSync,
+  ensureDirWithRetries,
+  isDirectoryEmpty,
+  isDirectoryEffectivelyEmpty,
+  removeIfEmpty,
+  isVideoDirectory,
+  isChannelDirectory,
+  isSubfolderDir,
+  cleanupEmptyChannelDirectory,
+  removeDirectoryResilient,
+  isIgnorableEntry,
+  listDirectory,
+  listSubdirectories,
+  isMainVideoFile
+} = require('../directoryManager');
+
+describe('filesystem/directoryManager', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  describe('ensureDir', () => {
+    it('should call fs.ensureDir', async () => {
+      fs.ensureDir.mockResolvedValueOnce();
+
+      await ensureDir('/path/to/dir');
+
+      expect(fs.ensureDir).toHaveBeenCalledWith('/path/to/dir');
+    });
+  });
+
+  describe('ensureDirSync', () => {
+    it('should call fs.ensureDirSync', () => {
+      ensureDirSync('/path/to/dir');
+
+      expect(fs.ensureDirSync).toHaveBeenCalledWith('/path/to/dir');
+    });
+  });
+
+  describe('ensureDirWithRetries', () => {
+    it('should succeed on first attempt', async () => {
+      fs.ensureDir.mockResolvedValueOnce();
+
+      await ensureDirWithRetries('/path/to/dir');
+
+      expect(fs.ensureDir).toHaveBeenCalledTimes(1);
+      expect(fs.ensureDir).toHaveBeenCalledWith('/path/to/dir');
+    });
+
+    it('should retry on transient errors and succeed', async () => {
+      const error = new Error('EACCES');
+      error.code = 'EACCES';
+      fs.ensureDir
+        .mockRejectedValueOnce(error)
+        .mockRejectedValueOnce(error)
+        .mockResolvedValueOnce();
+
+      await ensureDirWithRetries('/path/to/dir', { retries: 3, delayMs: 1 });
+
+      expect(fs.ensureDir).toHaveBeenCalledTimes(3);
+    });
+
+    it('should throw after all retries are exhausted', async () => {
+      const error = new Error('EACCES');
+      error.code = 'EACCES';
+      fs.ensureDir.mockRejectedValue(error);
+
+      await expect(
+        ensureDirWithRetries('/path/to/dir', { retries: 2, delayMs: 1 })
+      ).rejects.toThrow('EACCES');
+
+      // initial attempt + 2 retries = 3 calls
+      expect(fs.ensureDir).toHaveBeenCalledTimes(3);
+    });
+
+    it('should use exponential backoff between retries', async () => {
+      const error = new Error('EACCES');
+      error.code = 'EACCES';
+      fs.ensureDir
+        .mockRejectedValueOnce(error)
+        .mockResolvedValueOnce();
+
+      const start = Date.now();
+      await ensureDirWithRetries('/path/to/dir', { retries: 3, delayMs: 50 });
+      const elapsed = Date.now() - start;
+
+      // First retry should wait ~50ms (delayMs * 2^0)
+      expect(elapsed).toBeGreaterThanOrEqual(40);
+      expect(fs.ensureDir).toHaveBeenCalledTimes(2);
+    });
+
+    it('should use default options when none provided', async () => {
+      const error = new Error('EACCES');
+      error.code = 'EACCES';
+      fs.ensureDir
+        .mockRejectedValueOnce(error)
+        .mockResolvedValueOnce();
+
+      await ensureDirWithRetries('/path/to/dir');
+
+      expect(fs.ensureDir).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe('isDirectoryEmpty', () => {
+    it('should return true for empty directory', async () => {
+      fsPromises.readdir.mockResolvedValueOnce([]);
+
+      const result = await isDirectoryEmpty('/path/empty');
+
+      expect(result).toBe(true);
+    });
+
+    it('should return false for non-empty directory', async () => {
+      fsPromises.readdir.mockResolvedValueOnce(['file1', 'file2']);
+
+      const result = await isDirectoryEmpty('/path/full');
+
+      expect(result).toBe(false);
+    });
+
+    it('should return false for non-existent directory', async () => {
+      fsPromises.readdir.mockRejectedValueOnce(new Error('Not found'));
+
+      const result = await isDirectoryEmpty('/path/missing');
+
+      expect(result).toBe(false);
+    });
+  });
+
+  describe('isDirectoryEffectivelyEmpty', () => {
+    it('should return true for truly empty directory', async () => {
+      fsPromises.readdir.mockResolvedValueOnce([]);
+
+      const result = await isDirectoryEffectivelyEmpty('/path/empty');
+
+      expect(result).toBe(true);
+    });
+
+    it('should return true for directory containing only poster.jpg', async () => {
+      fsPromises.readdir.mockResolvedValueOnce(['poster.jpg']);
+
+      const result = await isDirectoryEffectivelyEmpty('/path/channel');
+
+      expect(result).toBe(true);
+    });
+
+    it('should return true for directory containing only backdrop.jpg', async () => {
+      fsPromises.readdir.mockResolvedValueOnce(['backdrop.jpg']);
+
+      const result = await isDirectoryEffectivelyEmpty('/path/channel');
+
+      expect(result).toBe(true);
+    });
+
+    it('should return true with case-insensitive match (Poster.JPG)', async () => {
+      fsPromises.readdir.mockResolvedValueOnce(['Poster.JPG']);
+
+      const result = await isDirectoryEffectivelyEmpty('/path/channel');
+
+      expect(result).toBe(true);
+    });
+
+    it('should return false when directory contains video files', async () => {
+      fsPromises.readdir.mockResolvedValueOnce(['poster.jpg', 'video.mp4']);
+
+      const result = await isDirectoryEffectivelyEmpty('/path/channel');
+
+      expect(result).toBe(false);
+    });
+
+    it('should return false for non-existent directory', async () => {
+      fsPromises.readdir.mockRejectedValueOnce(new Error('ENOENT'));
+
+      const result = await isDirectoryEffectivelyEmpty('/path/missing');
+
+      expect(result).toBe(false);
+    });
+
+    it('should return true for directory with only OS metadata files', async () => {
+      fsPromises.readdir.mockResolvedValueOnce(['.DS_Store', 'Thumbs.db']);
+
+      const result = await isDirectoryEffectivelyEmpty('/path/channel');
+
+      expect(result).toBe(true);
+    });
+
+    it('should return true for directory with mixed ignorable files', async () => {
+      fsPromises.readdir.mockResolvedValueOnce(['poster.jpg', '.DS_Store', 'desktop.ini']);
+
+      const result = await isDirectoryEffectivelyEmpty('/path/channel');
+
+      expect(result).toBe(true);
+    });
+
+    it('should return false when directory contains non-ignorable files only', async () => {
+      fsPromises.readdir.mockResolvedValueOnce(['Channel - Title - abc123']);
+
+      const result = await isDirectoryEffectivelyEmpty('/path/channel');
+
+      expect(result).toBe(false);
+    });
+
+    it('should return true for directory containing only AppleDouble sidecars', async () => {
+      fsPromises.readdir.mockResolvedValueOnce(['._video.mp4', '._poster.jpg']);
+
+      const result = await isDirectoryEffectivelyEmpty('/path/channel');
+
+      expect(result).toBe(true);
+    });
+
+    it('should return true for directory mixing AppleDouble and standard ignorables', async () => {
+      fsPromises.readdir.mockResolvedValueOnce(['._video.mp4', 'poster.jpg', '.DS_Store']);
+
+      const result = await isDirectoryEffectivelyEmpty('/path/channel');
+
+      expect(result).toBe(true);
+    });
+
+    it('should return false when AppleDouble files coexist with real video', async () => {
+      fsPromises.readdir.mockResolvedValueOnce(['._video.mp4', 'video.mp4']);
+
+      const result = await isDirectoryEffectivelyEmpty('/path/channel');
+
+      expect(result).toBe(false);
+    });
+
+    it('should return true for directory containing only poster and a channel .m3u', async () => {
+      fsPromises.readdir.mockResolvedValueOnce(['poster.jpg', 'Chan A.m3u']);
+
+      const result = await isDirectoryEffectivelyEmpty('/path/channel');
+
+      expect(result).toBe(true);
+    });
+  });
+
+  describe('isIgnorableEntry', () => {
+    it('returns true for entries in the ignorable list (case-insensitive)', () => {
+      expect(isIgnorableEntry('poster.jpg')).toBe(true);
+      expect(isIgnorableEntry('Poster.JPG')).toBe(true);
+      expect(isIgnorableEntry('.DS_Store')).toBe(true);
+      expect(isIgnorableEntry('Thumbs.db')).toBe(true);
+      expect(isIgnorableEntry('desktop.ini')).toBe(true);
+    });
+
+    it('returns true for AppleDouble sidecars', () => {
+      expect(isIgnorableEntry('._video.mp4')).toBe(true);
+      expect(isIgnorableEntry('._poster.jpg')).toBe(true);
+      expect(isIgnorableEntry('._.DS_Store')).toBe(true);
+    });
+
+    it('returns true for .m3u playlist files (case-insensitive)', () => {
+      expect(isIgnorableEntry('Chan A.m3u')).toBe(true);
+      expect(isIgnorableEntry('CHANNEL.M3U')).toBe(true);
+    });
+
+    it('returns true for a .m3u.tmp staging file stranded by a crash', () => {
+      expect(isIgnorableEntry('Chan A.m3u.tmp')).toBe(true);
+    });
+
+    it('returns false for real video files', () => {
+      expect(isIgnorableEntry('video.mp4')).toBe(false);
+      expect(isIgnorableEntry('Channel - Title [abc123].mp4')).toBe(false);
+    });
+
+    it('returns false for null/undefined/empty', () => {
+      expect(isIgnorableEntry(null)).toBe(false);
+      expect(isIgnorableEntry(undefined)).toBe(false);
+      expect(isIgnorableEntry('')).toBe(false);
+    });
+  });
+
+  describe('removeIfEmpty', () => {
+    it('should remove empty directory', async () => {
+      fsPromises.readdir.mockResolvedValueOnce([]);
+      fsPromises.rmdir.mockResolvedValueOnce();
+
+      const result = await removeIfEmpty('/path/empty');
+
+      expect(result).toBe(true);
+      expect(fsPromises.rmdir).toHaveBeenCalledWith('/path/empty');
+    });
+
+    it('should not remove non-empty directory', async () => {
+      fsPromises.readdir.mockResolvedValueOnce(['file']);
+
+      const result = await removeIfEmpty('/path/full');
+
+      expect(result).toBe(false);
+      expect(fsPromises.rmdir).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('isVideoDirectory', () => {
+    it('should return true for video directories', () => {
+      expect(isVideoDirectory('/path/Channel - Title - dQw4w9WgXcQ')).toBe(true);
+      expect(isVideoDirectory('/path/Channel - Long Title Here - abc123defgh')).toBe(true);
+    });
+
+    it('should return false for channel directories', () => {
+      expect(isVideoDirectory('/path/ChannelName')).toBe(false);
+      expect(isVideoDirectory('/path/Channel - Name')).toBe(false);
+    });
+
+    it('should return false for directories without valid video ID', () => {
+      expect(isVideoDirectory('/path/Channel - Title - short')).toBe(false);
+      // 13+ characters is too long
+      expect(isVideoDirectory('/path/Channel - Title - toolong123456')).toBe(false);
+    });
+
+    it('should validate video ID characters', () => {
+      expect(isVideoDirectory('/path/Channel - Title - abc_123-XYZ')).toBe(true);
+      expect(isVideoDirectory('/path/Channel - Title - abc!@#$%^&')).toBe(false);
+    });
+  });
+
+  describe('isChannelDirectory', () => {
+    const baseDir = '/videos';
+
+    it('should return true for direct child of baseDir', () => {
+      expect(isChannelDirectory('/videos/ChannelName', baseDir)).toBe(true);
+    });
+
+    it('should return true for child of subfolder', () => {
+      expect(isChannelDirectory('/videos/__Subfolder/ChannelName', baseDir)).toBe(true);
+    });
+
+    it('should return false for baseDir itself', () => {
+      expect(isChannelDirectory('/videos', baseDir)).toBe(false);
+    });
+
+    it('should return true for paths 2 levels below baseDir (video folders or channels in subfolders)', () => {
+      // Note: This function only checks depth, not directory type.
+      // In practice, callers should check isVideoDirectory first.
+      expect(isChannelDirectory('/videos/Channel/Video - Title - abc123', baseDir)).toBe(true);
+    });
+
+    it('should return true for subfolder directories (1 level below baseDir)', () => {
+      // Subfolder directories ARE 1 level below baseDir
+      expect(isChannelDirectory('/videos/__Subfolder', baseDir)).toBe(true);
+    });
+
+    it('should return false for paths too deep', () => {
+      expect(isChannelDirectory('/videos/Channel/Video/File', baseDir)).toBe(false);
+    });
+  });
+
+  describe('isSubfolderDir', () => {
+    it('should return true for directories starting with __', () => {
+      expect(isSubfolderDir('__MyFolder')).toBe(true);
+      expect(isSubfolderDir('__')).toBe(true);
+    });
+
+    it('should return false for regular directories', () => {
+      expect(isSubfolderDir('MyFolder')).toBe(false);
+      expect(isSubfolderDir('_MyFolder')).toBe(false);
+    });
+
+    it('should return false for null/undefined', () => {
+      expect(isSubfolderDir(null)).toBe(false);
+      expect(isSubfolderDir(undefined)).toBe(false);
+    });
+  });
+
+  describe('cleanupEmptyChannelDirectory', () => {
+    const baseDir = '/videos';
+
+    it('should remove empty channel directory and return true', async () => {
+      fsPromises.access.mockResolvedValueOnce();
+      fsPromises.readdir.mockResolvedValueOnce([]);
+      fsPromises.rmdir.mockResolvedValueOnce();
+
+      const result = await cleanupEmptyChannelDirectory('/videos/ChannelName', baseDir);
+
+      expect(fsPromises.rmdir).toHaveBeenCalledWith('/videos/ChannelName');
+      expect(result).toBe(true);
+    });
+
+    it('should not remove non-channel directory and return false', async () => {
+      const result = await cleanupEmptyChannelDirectory('/videos', baseDir);
+
+      expect(fsPromises.rmdir).not.toHaveBeenCalled();
+      expect(result).toBe(false);
+    });
+
+    it('should not remove non-empty channel directory and return false', async () => {
+      fsPromises.access.mockResolvedValueOnce();
+      fsPromises.readdir.mockResolvedValueOnce(['video-folder']);
+
+      const result = await cleanupEmptyChannelDirectory('/videos/ChannelName', baseDir);
+
+      expect(fsPromises.rmdir).not.toHaveBeenCalled();
+      expect(result).toBe(false);
+    });
+
+    it('should return false when directory does not exist', async () => {
+      fsPromises.access.mockRejectedValueOnce(new Error('ENOENT'));
+
+      const result = await cleanupEmptyChannelDirectory('/videos/ChannelName', baseDir);
+
+      expect(fsPromises.rmdir).not.toHaveBeenCalled();
+      expect(result).toBe(false);
+    });
+
+    describe('with includeIgnorableFiles: true', () => {
+      it('should remove directory with only poster.jpg', async () => {
+        fsPromises.access.mockResolvedValueOnce();
+        // First readdir for isDirectoryEffectivelyEmpty
+        fsPromises.readdir.mockResolvedValueOnce(['poster.jpg']);
+        fsPromises.unlink.mockResolvedValueOnce();
+        // Second readdir for deleting ignorable files
+        fsPromises.readdir.mockResolvedValueOnce(['poster.jpg']);
+        fsPromises.rmdir.mockResolvedValueOnce();
+
+        const result = await cleanupEmptyChannelDirectory('/videos/ChannelName', baseDir, {
+          includeIgnorableFiles: true
+        });
+
+        expect(fsPromises.unlink).toHaveBeenCalledWith('/videos/ChannelName/poster.jpg');
+        expect(fsPromises.rmdir).toHaveBeenCalledWith('/videos/ChannelName');
+        expect(result).toBe(true);
+      });
+
+      it('should not remove directory with video files present', async () => {
+        fsPromises.access.mockResolvedValueOnce();
+        fsPromises.readdir.mockResolvedValueOnce(['poster.jpg', 'video.mp4']);
+
+        const result = await cleanupEmptyChannelDirectory('/videos/ChannelName', baseDir, {
+          includeIgnorableFiles: true
+        });
+
+        expect(fsPromises.rmdir).not.toHaveBeenCalled();
+        expect(result).toBe(false);
+      });
+
+      it('should remove truly empty directory', async () => {
+        fsPromises.access.mockResolvedValueOnce();
+        fsPromises.readdir.mockResolvedValueOnce([]);
+        // Second readdir for deleting ignorable files (empty, so no unlinking)
+        fsPromises.readdir.mockResolvedValueOnce([]);
+        fsPromises.rmdir.mockResolvedValueOnce();
+
+        const result = await cleanupEmptyChannelDirectory('/videos/ChannelName', baseDir, {
+          includeIgnorableFiles: true
+        });
+
+        expect(fsPromises.unlink).not.toHaveBeenCalled();
+        expect(fsPromises.rmdir).toHaveBeenCalledWith('/videos/ChannelName');
+        expect(result).toBe(true);
+      });
+    });
+
+    it('should default includeIgnorableFiles to false (backward compat)', async () => {
+      fsPromises.access.mockResolvedValueOnce();
+      // Directory contains only poster.jpg — should NOT be removed with default options
+      fsPromises.readdir.mockResolvedValueOnce(['poster.jpg']);
+
+      const result = await cleanupEmptyChannelDirectory('/videos/ChannelName', baseDir);
+
+      expect(fsPromises.rmdir).not.toHaveBeenCalled();
+      expect(result).toBe(false);
+    });
+
+    describe('with includeIgnorableFiles: true (race-safety + AppleDouble)', () => {
+      it('only unlinks ignorable entries even if a real file appears between reads', async () => {
+        fsPromises.access.mockResolvedValueOnce();
+        // First readdir for isDirectoryEffectivelyEmpty — only ignorables
+        fsPromises.readdir.mockResolvedValueOnce(['poster.jpg', '._poster.jpg']);
+        // Second readdir for the unlink loop — race: a real video file appeared
+        fsPromises.readdir.mockResolvedValueOnce(['poster.jpg', '._poster.jpg', 'real-video.mp4']);
+        fsPromises.unlink.mockResolvedValue();
+        fsPromises.rmdir.mockResolvedValueOnce();
+
+        await cleanupEmptyChannelDirectory('/videos/ChannelName', baseDir, {
+          includeIgnorableFiles: true
+        });
+
+        // The real video file must NOT be unlinked
+        expect(fsPromises.unlink).toHaveBeenCalledWith('/videos/ChannelName/poster.jpg');
+        expect(fsPromises.unlink).toHaveBeenCalledWith('/videos/ChannelName/._poster.jpg');
+        expect(fsPromises.unlink).not.toHaveBeenCalledWith('/videos/ChannelName/real-video.mp4');
+      });
+
+      it('sweeps AppleDouble files before rmdir', async () => {
+        fsPromises.access.mockResolvedValueOnce();
+        fsPromises.readdir.mockResolvedValueOnce(['._video.mp4', '._poster.jpg']);
+        fsPromises.readdir.mockResolvedValueOnce(['._video.mp4', '._poster.jpg']);
+        fsPromises.unlink.mockResolvedValue();
+        fsPromises.rmdir.mockResolvedValueOnce();
+
+        const result = await cleanupEmptyChannelDirectory('/videos/ChannelName', baseDir, {
+          includeIgnorableFiles: true
+        });
+
+        expect(fsPromises.unlink).toHaveBeenCalledWith('/videos/ChannelName/._video.mp4');
+        expect(fsPromises.unlink).toHaveBeenCalledWith('/videos/ChannelName/._poster.jpg');
+        expect(fsPromises.rmdir).toHaveBeenCalledWith('/videos/ChannelName');
+        expect(result).toBe(true);
+      });
+    });
+  });
+
+  describe('removeDirectoryResilient', () => {
+    const dirPath = '/videos/Channel/Channel - Video - abc123';
+
+    it('resolves on the first attempt when fs.rm succeeds', async () => {
+      fsPromises.rm.mockResolvedValueOnce();
+
+      await expect(removeDirectoryResilient(dirPath)).resolves.toBeUndefined();
+
+      expect(fsPromises.rm).toHaveBeenCalledTimes(1);
+      expect(fsPromises.rm).toHaveBeenCalledWith(dirPath, { recursive: true, force: true });
+      expect(fsPromises.readdir).not.toHaveBeenCalled();
+    });
+
+    it('resolves cleanly when the directory is already gone (ENOENT)', async () => {
+      const enoent = Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+      fsPromises.rm.mockRejectedValueOnce(enoent);
+
+      await expect(removeDirectoryResilient(dirPath)).resolves.toBeUndefined();
+
+      expect(fsPromises.rm).toHaveBeenCalledTimes(1);
+    });
+
+    it('sweeps AppleDouble entries on ENOTEMPTY and retries successfully', async () => {
+      const enotempty = Object.assign(new Error('ENOTEMPTY'), { code: 'ENOTEMPTY' });
+      fsPromises.rm
+        .mockRejectedValueOnce(enotempty)
+        .mockResolvedValueOnce();
+      fsPromises.readdir.mockResolvedValueOnce(['._video.mp4', '._poster.jpg', 'real.mp4']);
+      fsPromises.unlink.mockResolvedValue();
+
+      await expect(removeDirectoryResilient(dirPath, { delayMs: 1 })).resolves.toBeUndefined();
+
+      expect(fsPromises.rm).toHaveBeenCalledTimes(2);
+      // Sweep only touches AppleDouble entries, not the real file
+      expect(fsPromises.unlink).toHaveBeenCalledWith(`${dirPath}/._video.mp4`);
+      expect(fsPromises.unlink).toHaveBeenCalledWith(`${dirPath}/._poster.jpg`);
+      expect(fsPromises.unlink).not.toHaveBeenCalledWith(`${dirPath}/real.mp4`);
+    });
+
+    it('treats ENOENT during the post-ENOTEMPTY readdir as already-gone', async () => {
+      const enotempty = Object.assign(new Error('ENOTEMPTY'), { code: 'ENOTEMPTY' });
+      const enoent = Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+      fsPromises.rm.mockRejectedValueOnce(enotempty);
+      fsPromises.readdir.mockRejectedValueOnce(enoent);
+
+      await expect(removeDirectoryResilient(dirPath, { delayMs: 1 })).resolves.toBeUndefined();
+
+      // No retry of fs.rm — we returned cleanly
+      expect(fsPromises.rm).toHaveBeenCalledTimes(1);
+      expect(fsPromises.unlink).not.toHaveBeenCalled();
+    });
+
+    it('rejects with the original error after exhausting retries on persistent ENOTEMPTY', async () => {
+      const enotempty = Object.assign(new Error('ENOTEMPTY'), { code: 'ENOTEMPTY' });
+      fsPromises.rm.mockRejectedValue(enotempty);
+      fsPromises.readdir.mockResolvedValue([]);
+
+      await expect(
+        removeDirectoryResilient(dirPath, { retries: 2, delayMs: 1 })
+      ).rejects.toMatchObject({ code: 'ENOTEMPTY' });
+
+      // initial attempt + 2 retries = 3 fs.rm calls
+      expect(fsPromises.rm).toHaveBeenCalledTimes(3);
+    });
+
+    it('rejects immediately for non-retryable errors (EACCES)', async () => {
+      const eacces = Object.assign(new Error('EACCES'), { code: 'EACCES' });
+      fsPromises.rm.mockRejectedValueOnce(eacces);
+
+      await expect(removeDirectoryResilient(dirPath, { delayMs: 1 })).rejects.toMatchObject({
+        code: 'EACCES'
+      });
+
+      expect(fsPromises.rm).toHaveBeenCalledTimes(1);
+      expect(fsPromises.readdir).not.toHaveBeenCalled();
+    });
+
+    it('propagates non-ENOENT readdir errors during sweep', async () => {
+      const enotempty = Object.assign(new Error('ENOTEMPTY'), { code: 'ENOTEMPTY' });
+      const eacces = Object.assign(new Error('EACCES'), { code: 'EACCES' });
+      fsPromises.rm.mockRejectedValueOnce(enotempty);
+      fsPromises.readdir.mockRejectedValueOnce(eacces);
+
+      await expect(removeDirectoryResilient(dirPath, { delayMs: 1 })).rejects.toMatchObject({
+        code: 'EACCES'
+      });
+
+      expect(fsPromises.rm).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('listDirectory', () => {
+    it('should list directory contents with file types', async () => {
+      const mockEntries = [
+        { name: 'file1', isDirectory: () => false },
+        { name: 'dir1', isDirectory: () => true }
+      ];
+      fsPromises.readdir.mockResolvedValueOnce(mockEntries);
+
+      const result = await listDirectory('/path');
+
+      expect(result).toEqual(mockEntries);
+      expect(fsPromises.readdir).toHaveBeenCalledWith('/path', { withFileTypes: true });
+    });
+
+    it('should return empty array for missing directory', async () => {
+      const error = new Error('Not found');
+      error.code = 'ENOENT';
+      fsPromises.readdir.mockRejectedValueOnce(error);
+
+      const result = await listDirectory('/missing');
+
+      expect(result).toEqual([]);
+    });
+  });
+
+  describe('listSubdirectories', () => {
+    it('should return only directories', async () => {
+      const mockEntries = [
+        { name: 'file1', isDirectory: () => false },
+        { name: 'dir1', isDirectory: () => true },
+        { name: 'dir2', isDirectory: () => true }
+      ];
+      fsPromises.readdir.mockResolvedValueOnce(mockEntries);
+
+      const result = await listSubdirectories('/path');
+
+      expect(result).toEqual(['/path/dir1', '/path/dir2']);
+    });
+  });
+
+  describe('isMainVideoFile', () => {
+    it('should return true for main video files', () => {
+      expect(isMainVideoFile('Channel - Title [dQw4w9WgXcQ].mp4')).toBe(true);
+      expect(isMainVideoFile('Channel - Title [dQw4w9WgXcQ].mkv')).toBe(true);
+      expect(isMainVideoFile('Channel - Title [dQw4w9WgXcQ].webm')).toBe(true);
+    });
+
+    it('should return false for fragment files', () => {
+      expect(isMainVideoFile('video.f137.mp4')).toBe(false);
+      expect(isMainVideoFile('video.f140.m4a')).toBe(false);
+    });
+
+    it('should return false for thumbnails', () => {
+      expect(isMainVideoFile('poster.jpg')).toBe(false);
+    });
+
+    it('should return false for info files', () => {
+      expect(isMainVideoFile('Channel - Title [dQw4w9WgXcQ].info.json')).toBe(false);
+    });
+  });
+});

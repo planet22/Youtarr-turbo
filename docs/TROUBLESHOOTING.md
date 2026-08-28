@@ -1,0 +1,842 @@
+# Youtarr Troubleshooting Guide
+
+## Login Issues
+
+### Cannot Find the Setup Token
+
+**Problem**: First-time setup wizard asks for a token and you don't know where to find it.
+
+See [Authentication - Cannot Find the Setup Token](AUTHENTICATION.md#cannot-find-the-setup-token) for the full list of solutions.
+
+### Forgotten Admin Password {#reset-admin-password}
+
+**Problem**: Cannot log in because you've forgotten the admin password.
+
+**Solution**:
+
+**Method 1: Using Environment Variables (Recommended)**
+1. Stop Youtarr:
+   ```bash
+   ./stop.sh
+   ```
+
+2. Edit your `.env` file and set new credentials:
+   ```bash
+   AUTH_PRESET_USERNAME=admin
+   AUTH_PRESET_PASSWORD=your-new-password
+   ```
+
+3. Start Youtarr:
+   ```bash
+   ./start.sh
+   ```
+
+4. Log in with the new credentials. Once logged in, you can remove these variables from `.env` if desired (credentials will persist in `config/config.json`)
+
+**Method 2: Reset via config.json (Requires localhost access)**
+1. Stop Youtarr:
+   ```bash
+   ./stop.sh
+   ```
+
+2. Edit `./config/config.json` and delete both the `username` and `passwordHash` lines
+
+3. Start Youtarr:
+   ```bash
+   ./start.sh
+   ```
+
+4. Open Youtarr in any browser. You will be prompted to create a new admin account using the one-time setup token from `docker logs youtarr` or `config/setup-token`.
+
+### Session Expired
+
+**Problem**: Getting "Invalid or expired token" errors.
+
+**Solution**:
+- You will be automatically redirected to the login page
+- Simply log back in with your credentials
+- Sessions expire after 7 days
+- If issues persist, clear browser cache/cookies
+
+### Plex API Key Issues
+
+**Problem**: Cannot connect to Plex server or refresh library.
+
+**Solution**:
+1. **Get a new API key automatically**:
+   - Go to **Settings -> Plex**
+   - Click "Get Key" button next to Plex API Key field
+   - Log in with your Plex account (must have admin access to your server)
+   - Save configuration
+
+2. **Get API key manually**:
+   - Follow [these instructions](https://www.plexopedia.com/plex-media-server/general/plex-token/)
+   - Enter the token in the Plex API Key field
+   - Save configuration
+
+3. **If you have an invalid/old key**:
+   - Stop Youtarr: `./stop.sh`
+   - Edit `config/config.json` and clear the key: `"plexApiKey": ""`
+   - Restart: `./start.sh`
+   - Get a new key using method 1 or 2 above
+
+### Discord Notifications Not Sending
+
+**Problem**: You never receive Discord alerts after downloads.
+
+**Solution**:
+1. Open **Settings -> Notifications** and confirm **Enable Notifications** is on.
+2. Verify the Discord webhook URL is correct and saved; use the test notification button next to the saved URL to confirm delivery.
+3. Notifications only send when at least one new video downloads successfully—skipped runs will not trigger an alert.
+4. Check the server logs (`docker compose logs -f`) for `Failed to send notification` errors that may indicate network or webhook permission issues.
+
+### Test Notification Fails
+
+**Problem**: Sending a test notification shows an error.
+
+**Solution**:
+1. Ensure the webhook URL is saved and not blank or whitespace.
+2. Confirm the webhook belongs to Discord (URL should start with `https://discord.com/api/webhooks/`).
+3. Make sure the Discord channel still exists and the webhook has permission to post.
+4. Retry after checking network/firewall rules that may block outbound HTTPS requests.
+
+## Automatic Video Removal Issues
+
+### Dry Run Preview Fails or Shows "Storage status unavailable"
+
+**Problem**: Previewing automatic removal returns an error, or the space-based strategy is disabled.
+
+**Solution**:
+- Confirm the storage indicator (shown in the app header and at the bottom of the navigation sidebar) is visible and shows valid values. Space-based removal requires the server to resolve the download directory path and gather disk usage via `df`.
+- Ensure the `DATA_PATH` (or selected YouTube directory) exists within the container/host and is mounted with read access to filesystem metadata.
+- If you're running on network storage or uncommon mounts, try remounting with `df` support or rely on age-based cleanup instead.
+- Retry the preview after saving the configuration again. The preview endpoint requires a valid auth token; log back in if necessary.
+
+### Nightly Cleanup Didn't Delete Anything
+
+**Problem**: Automatic cleanup runs at 2:00 AM but no videos are removed.
+
+**Solution**:
+- Verify Automatic Video Removal is enabled on **Settings -> Auto Removal** and at least one rule is configured: an age threshold, a free-space threshold, or watched-based removal. Note that watched-based removal only runs while watch status sync is enabled.
+- Remember the exclusions. Videos you've marked as Protected, videos of channels with auto-removal protection enabled, and the newest downloads kept by "Keep this many newest downloads" (the global setting plus any per-channel keep counts) are never removed, so a run can legitimately delete nothing.
+- Run the dry-run preview to see how many videos currently match the rules - it also shows how many videos the protection settings are keeping. Adjust values if needed (for example, lower the free-space threshold or reduce the age requirement).
+- Check server logs around 2:00 AM for `[Auto-Removal]` messages to confirm the job is executing (`docker compose logs -f youtarr`).
+- If errors appear in the logs (e.g., permission issues deleting files), resolve those first - the cron job will skip files it cannot delete.
+
+## Library / File Issues
+
+### Videos Show as "Missing" After I Moved or Renamed Files
+
+**Problem**: After moving downloaded files to a new location, renaming a folder, or restoring from backup, videos display with a cloud-off icon as if they were deleted.
+
+**Solution**: Open **Settings -> Maintenance & Rescan** and click **Rescan files on disk**. Youtarr walks the downloads folder, matches files by the `[<youtube-id>]` segment in each filename, and updates the stored paths and "missing" flags. The same scan also runs daily on a schedule and at server startup.
+
+The rescan recognizes `.mp4`, `.webm`, `.mkv`, `.m4v`, `.avi`, and `.mp3`. Files that no longer have the `[<youtube-id>]` segment in their name (for example, if you renamed `Channel - Video [abc123XYZ01].mp4` to `My Movie.mp4`) cannot be matched and will continue to show as missing.
+
+### I Converted Videos to a Different Format and Youtarr Lost Them
+
+**Problem**: You used ffmpeg or another tool to convert downloaded `.mp4` videos to `.mkv` (or another container), and Youtarr now lists those videos as missing.
+
+**Solution**: Run **Settings -> Maintenance & Rescan -> Rescan files on disk**. As long as the converted file kept the original `[<youtube-id>]` segment in its filename and uses one of the supported extensions (`.mp4`, `.webm`, `.mkv`, `.m4v`, `.avi`, `.mp3`), Youtarr will detect the new file, update the stored path, and clear the "missing" flag. See [Rescan Files on Disk](USAGE_GUIDE.md#rescan-files-on-disk) for full details on supported formats and limitations.
+
+### Video Downloads Fine but Never Appears in Plex (Windows Path Length)
+
+**Problem**: A video downloads successfully, shows as downloaded in Youtarr, and exists on disk, but it never appears in Plex; if the video belongs to a synced playlist, the logs show `Unable to sync item <id> for playlist "..." to <server>: not found on server, skipping`.
+
+**Cause**: When Plex runs on Windows, its scanner silently skips any file whose full path is 260 characters or longer (the Win32 MAX_PATH limit). Youtarr's filename template is used for both the per-video folder and the filename; with the channel folder on top, the channel name appears three times in the full path and the title twice. Combined with your Windows drive and folder prefix, a long channel name plus a long title can cross the limit. The current default template caps titles at 64 bytes (`%(title).64B`) to keep typical paths well clear of the limit, but installs that saved settings under an older default keep their persisted `.74B`/`.76B` value, which can cross it. The file itself is fine: NTFS and File Explorer handle long paths, but Plex's scanner does not. Note that Windows' `LongPathsEnabled` registry setting does not help, because Plex does not declare itself long-path aware.
+
+**Diagnosis**: Measure the full path as Plex sees it (drive letter through `.mp4`). At 260 characters or more, this is your problem.
+
+**Solution**: Shorten the video's folder and file names on disk, keeping the `[<youtube-id>]` segment in the filename. Then run **Settings -> Maintenance & Rescan -> Rescan files on disk** so Youtarr picks up the new path, let Plex scan the library, and (for playlists) run **Sync now**. To prevent recurrence, shorten the filename template under **Settings -> Core Settings -> Video Filename Template**: reduce the title truncation to the current recommended `%(title).64B` (or smaller), or use a preset without the channel-name prefix; see [Video Filename Template](CONFIG.md#video-filename-template). Only new downloads are affected; existing files keep their names.
+
+## Docker Issues
+
+### "Empty section between colons" Error
+
+**Problem**: Getting error `invalid spec: :/usr/src/app/data: empty section between colons` when trying to start with Docker Compose.
+
+**Cause**: You ran `docker compose up` directly instead of using `./start.sh` without creating and configuring your `.env` file. The docker-compose.yml file requires the `YOUTUBE_OUTPUT_DIR` environment variable to be set, which `./start.sh` reads from your config.json.
+
+**Solution**:
+1. Use the start script instead of running docker-compose commands directly:
+```bash
+./start.sh
+```
+
+The start script:
+- Reads your configured YouTube output directory from `config/config.json`
+- Exports it as `YOUTUBE_OUTPUT_DIR` environment variable
+- Then runs docker-compose with the correct configuration
+
+2. Using docker-compose commands:
+- Ensure that you have created your `.env` file from the provided `.env.example` and configured your `YOUTUBE_OUTPUT_DIR` before attempting to run `docker compose up -d`
+
+### Docker Desktop Mount Path Error (Windows)
+
+**Problem**: Error message: `Error response from daemon: error while creating mount source path '/run/desktop/mnt/host/...': mkdir /run/desktop/mnt/host/...: file exists`
+
+This is a known Docker Desktop issue on Windows where mount points become corrupted.
+
+**Solutions** (try in order):
+
+1. **Restart Docker Desktop**:
+   ```bash
+   ./stop.sh
+   ```
+   Quit Docker Desktop from system tray, restart it, then:
+   ```bash
+   ./start.sh
+   ```
+
+2. **Reset WSL2 mounts**:
+   - Open PowerShell as Administrator
+   - Run: `wsl --shutdown`
+   - Restart Docker Desktop
+   - Run `./start.sh`
+
+3. **Full system restart**:
+   - If Docker Desktop hangs, restart your entire machine
+   - This clears all stale mount points
+
+**Prevention**:
+- Always use `./stop.sh` before shutting down Docker Desktop
+- Disable Windows Fast Startup (Control Panel → Power Options)
+- Let Docker Desktop fully start before running `./start.sh`
+
+### Container Won't Start
+
+**Problem**: Containers fail to start or immediately exit.
+
+**Solution**:
+1. Check logs:
+   ```bash
+   docker compose logs -f
+   ```
+
+2. Ensure the web port isn't in use:
+   ```bash
+   netstat -an | grep 3087
+   ```
+
+### Asustor App Central: Stuck on an Old Version
+
+**Problem**: You installed Youtarr from App Central on an Asustor NAS, a newer Youtarr release exists, but pulling images via Docker or Portainer doesn't update anything.
+
+**Solution**: This is expected. The App Central package pins the exact Youtarr version in its docker-compose file, so the image tag doesn't change until the package maintainer publishes an updated package and Asustor approves it. That usually happens within a few days of a [GitHub release](https://github.com/DialmasterOrg/Youtarr/releases). Update through App Central when the new version appears there; your config, database, and videos are preserved. See the [Asustor guide](platforms/asustor.md) for details.
+
+## Database Issues
+
+### Table Corruption After Simultaneous Database and Youtarr Update
+
+**Problem**: After updating both your external MariaDB/MySQL and Youtarr at the same time, logs show errors like:
+```
+SequelizeDatabaseError: Table 'youtarr.Jobs' doesn't exist in engine
+```
+(errno 1932), and/or tables appear empty despite having data before the update.
+
+**Cause**: When MariaDB upgrades to a new version, it performs internal data file upgrades on startup. If a Youtarr migration runs before that process completes, the combination of a database engine upgrade and an ALTER TABLE happening back-to-back can corrupt tables or cause data loss. This is a MariaDB/InnoDB limitation that affects any application running migrations during a database version change.
+
+**Solution**:
+Restart Youtarr. In most cases the table corruption is transient and the health check will recover automatically on restart. The error in the logs may look severe, but the database typically self-heals once MariaDB finishes its internal upgrade. Job/download history may be lost, but channels, videos, and settings are unaffected.
+
+**Prevention**: Never update your database server and Youtarr at the same time. Update MariaDB first, confirm it is fully running (check its logs for "ready for connections"), then update Youtarr. See the [External Database Guide](platforms/external-db.md) for details.
+
+### UTF-8 Character Errors
+
+**Problem**: Errors like `Incorrect string value: '\\xF0\\x9F\\xA7\\xA1'` when channel names or video titles contain emojis.
+
+By default Youtarr creates the database and tables as utf8mb4, so this shouldn't happen
+unless you are using an external DB. If so, see [External Database Guide](platforms/external-db.md)
+for how to create your DB with the correct character set.
+
+**How to** ensure that your DB is using the correct character set:
+1. Check your database character set by connecting to the DB and then running:
+```bash
+    -- Database Character Set
+    SELECT 'DATABASE' as Object_Type, 'youtarr' as Name, DEFAULT_CHARACTER_SET_NAME as   Charset, DEFAULT_COLLATION_NAME as Collation
+    FROM information_schema.SCHEMATA
+    WHERE SCHEMA_NAME = 'youtarr';
+
+    -- Table Character Sets (excluding Sequelize metadata)
+    SELECT 'TABLE' as Object_Type, TABLE_NAME as Name,
+    IFNULL(CCSA.CHARACTER_SET_NAME, '') as Charset,
+    TABLE_COLLATION as Collation
+    FROM information_schema.tables t
+    LEFT JOIN information_schema.COLLATION_CHARACTER_SET_APPLICABILITY CCSA
+    ON t.TABLE_COLLATION = CCSA.COLLATION_NAME
+    WHERE TABLE_SCHEMA = 'youtarr'
+    AND TABLE_TYPE = 'BASE TABLE'
+    AND TABLE_NAME != 'SequelizeMeta'
+    ORDER BY TABLE_NAME;
+```
+**It doesn't matter if the SequelizeMeta table is not utf8mb4**
+
+**Solution**
+Either:
+1. Recreate your DB with the correct character set (**THIS WILL CAUSE LOSS OF ALL DB DATA**)
+or
+2. Backup your DB and then convert your existing DB to the correct character set.
+
+```
+  ALTER DATABASE youtarr CHARACTER SET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
+```
+
+**Note:** `ALTER DATABASE` only changes the default for *new* tables. Existing tables keep their old
+character set, so you'll need to convert each one too. See
+[UTF8mb4 Migration Fails on Foreign Key Columns](#utf8mb4-migration-fails-on-foreign-key-columns)
+below for how (foreign key checks have to be off first).
+
+### UTF8mb4 Migration Fails on Foreign Key Columns
+
+**Problem**: On startup the `20250907000000-upgrade-to-utf8mb4-if-needed` migration fails with logs like:
+```
+Upgrading database to utf8mb4...
+Converting table JobVideos from utf8mb3_general_ci to utf8mb4_unicode_ci
+UTF8mb4 migration failed: ...
+```
+It fails on an `ALTER TABLE ... CONVERT TO CHARACTER SET` for a table that has a `job_id` foreign key
+(`JobVideos` or `JobVideoDownloads`). This is almost always an external database that was created as
+`utf8`/`utf8mb3` instead of `utf8mb4`.
+
+**Cause**: The `job_id` columns are UUIDs stored as `CHAR(36)`, and they're part of a foreign key into
+the `Jobs` table. MariaDB won't change the character set of a column that's part of a foreign key, so
+the conversion fails right there. It only happens when the database was created as `utf8mb3` in the
+first place. The bundled MariaDB is created as `utf8mb4`, so it skips the conversion entirely and
+never runs into this.
+
+**Solution**: Update Youtarr. The migration now turns foreign key checks off while it converts the
+tables and turns them back on afterward. It also checks each table on its own instead of trusting the
+database default, so it'll finish the job on a database that an earlier failed run left half-converted
+(database default already on `utf8mb4`, some tables still on `utf8mb3`).
+
+To fix it by hand before updating, connect to the database as root and run the conversion with foreign
+key checks off. Replace `youtarr` with your database name, and add an `ALTER TABLE` line for every
+table that's still on `utf8mb3`:
+```sql
+SET FOREIGN_KEY_CHECKS = 0;
+ALTER DATABASE youtarr CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+ALTER TABLE JobVideos CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+ALTER TABLE JobVideoDownloads CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+-- ... repeat for any other table still on utf8mb3 ...
+SET FOREIGN_KEY_CHECKS = 1;
+```
+The character-set query in [UTF-8 Character Errors](#utf-8-character-errors) above will tell you which
+tables are still on the wrong character set.
+
+**Prevention**: If you run your own database, create it as `utf8mb4` from the start and this conversion
+never has to run. See the [External Database Guide](platforms/external-db.md).
+
+### Migration Fails Creating JobVideoDownloads (errno 150)
+
+**Problem**: A fresh install (or an upgrade of an older install) fails partway through migrations with:
+```
+Can't create table `youtarr`.`JobVideoDownloads` (errno: 150 "Foreign key constraint is incorrectly formed")
+```
+and the server starts in degraded mode.
+
+**Cause**: This happens when the database was not created with `utf8mb4` defaults - an external database,
+or a MariaDB service running without the compose file's `--character-set-server=utf8mb4` arguments. The
+`Jobs.id` and `JobVideos.job_id` columns are UUIDs stored as `CHAR(36)` with the binary collation
+`utf8mb4_bin`. When the utf8mb4 conversion above runs, `ALTER TABLE ... CONVERT TO CHARACTER SET` coerces
+them to `utf8mb4_unicode_ci`. The `JobVideoDownloads` migration then creates its `job_id` column as
+`utf8mb4_bin`, and InnoDB refuses the foreign key because the collations on the two sides no longer match.
+
+**Solution**: Update Youtarr. The migrations now restore the binary collation automatically - the utf8mb4
+conversion re-applies it right after converting, and the `JobVideoDownloads` migration repairs it before
+creating the table, so a restart on the latest image finishes the job.
+
+To fix it by hand instead, connect to the database as root and run:
+```sql
+SET FOREIGN_KEY_CHECKS = 0;
+ALTER TABLE Jobs MODIFY id CHAR(36) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL;
+ALTER TABLE JobVideos MODIFY job_id CHAR(36) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL;
+SET FOREIGN_KEY_CHECKS = 1;
+```
+then restart the Youtarr container; the remaining migrations will complete.
+
+**Prevention**: Same as the previous section - create your own database as `utf8mb4` from the start, or
+keep the charset arguments from the bundled `docker-compose.yml`.
+
+### Database Connection Failed
+
+**Problem**: Cannot connect to database errors.
+
+**Solution**:
+1. Ensure the database container is running (the commands below only applies if using the bundled DB):
+   ```bash
+   docker ps | grep youtarr-db
+   ```
+
+2. Check database logs:
+   ```bash
+   docker logs youtarr-db
+   ```
+
+3. Verify database credentials in environment
+
+### Stuck on "Waiting for database"
+
+**Problem**: The youtarr container loops `Waiting for database... (attempt N/30)` and finally exits with
+`Failed to connect to database after 30 attempts`, with no other error in its logs.
+
+**Cause**: Usually a credentials mismatch that stays silent because the startup wait loop only reports
+that the connection failed, not why. A common one when connecting as root: `DB_ROOT_PASSWORD` sets the
+bundled MariaDB's root password, while the app connects using `DB_PASSWORD`. Both default to the same
+value, so setting only one of them in `.env` makes the two sides disagree and the app can never log in.
+
+**Solution**: When connecting as root, set `DB_ROOT_PASSWORD` and `DB_PASSWORD` to the same value in
+`.env` (or set neither). If the database volume was already initialized with a different root password,
+either use that password or wipe the database directory and let it re-initialize (**this deletes all DB
+data**). `docker logs youtarr-db` will show `Access denied` warnings when it's a credentials problem.
+
+### Access Denied for Custom Database User
+
+**Problem**: After changing `DB_USER` and `DB_PASSWORD` in your `.env` file to use a non-root user, you see access denied errors in the logs:
+```
+youtarr-db  | 2025-11-22  6:28:19 8 [Warning] Access denied for user '<DB_USER>'@'172.25.0.3' (using password: YES)
+```
+
+**Cause**: When using the bundled MariaDB container, you changed `DB_USER` and `DB_PASSWORD` in `.env` but forgot to uncomment the corresponding `MYSQL_USER` and `MYSQL_PASSWORD` environment variables in `docker-compose.yml`. MariaDB needs these variables to create the custom user during initialization.
+
+**Solution**:
+1. Stop Youtarr:
+   `./stop.sh` or `docker compose down`
+
+2. Edit `docker-compose.yml` and uncomment the `MYSQL_USER` and `MYSQL_PASSWORD` lines under the `youtarr-db` service:
+   ```yaml
+   environment:
+     MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
+     MYSQL_DATABASE: ${DB_NAME}
+     MYSQL_USER: ${DB_USER}        # Uncomment this line
+     MYSQL_PASSWORD: ${DB_PASSWORD}  # Uncomment this line
+   ```
+
+3. If the database has already been initialized with incorrect credentials, remove the database directory:
+
+   **WARNING: This will completely remove your DB data!**
+   ```bash
+   rm -rf ./database
+   # Or if using a named volume:
+   docker volume rm youtarr-db-data
+   ```
+
+4. Start Youtarr again:
+   `./start.sh` or `docker compose up -d`
+
+**Note**: This only applies when using the bundled MariaDB container. External database setups don't need the `MYSQL_USER`/`MYSQL_PASSWORD` variables.
+
+### MariaDB init: `Operation CREATE USER failed for 'root'@'%'`
+
+**Problem**: Fresh installs that only use `.env` + `docker-compose.yml` fail during the MariaDB bootstrap with:
+```
+ERROR 1396 (HY000) at line 21: Operation CREATE USER failed for 'root'@'%'
+```
+
+**Cause**: The compose file was configured to set `MYSQL_USER=root`. MariaDB already creates the `root` accounts internally, so trying to create it again aborts initialization and leaves the builtin tables in a crashed state.
+
+**Solution**:
+1. Leave the `MYSQL_USER` / `MYSQL_PASSWORD` lines commented out in `docker-compose.yml` when `DB_USER=root` (the default). Only uncomment them if you explicitly set a non-root `DB_USER` / `DB_PASSWORD` in `.env`.
+2. Remove the broken datadir (`rm -rf ./database` or `docker volume rm youtarr-db-data`, depending on which storage you use).
+3. Run `docker compose up -d` again. MariaDB will initialize cleanly.
+
+### Duplicate Column Errors After Upgrade
+
+**Problem**: MariaDB logs `Duplicate column name 'duration'` (or similar) when the stack starts. The API returns `Database error: Duplicate column name ...`.
+
+**Cause**: The `SequelizeMeta` table was lost or corrupted, so Sequelize re-ran migrations on top of a populated schema. Every migration now checks for existing tables/columns/indexes before mutating anything, so simply restarting the containers lets the stack skip duplicate work automatically in most cases.
+**NOTE**: This should not happen anymore, migrations have been updated to be idempotent.
+
+**Solution**:
+1. Restart the stack (`docker compose up -d`). If the schema had already been migrated, the rerun will now skip those operations.
+2. If the error persists, check `docker compose logs youtarr` to see which migration is still failing.
+3. Manually reconcile the schema for that migration:
+   - Connect to MariaDB: `docker compose exec youtarr-db mysql -u root -p youtarr`
+   - Drop the duplicate column or table mentioned in the error (for example `ALTER TABLE Videos DROP COLUMN media_type;`), **or** restore a known-good backup.
+   - Exit MySQL and restart the stack.
+4. Once the stack is back online, confirm the schema is healthy: `curl http://localhost:3087/api/db-status` reports whether the database connection and schema checks passed, and the startup logs (`docker compose logs youtarr`) show the migration results.
+
+Tip: run with a named volume (see Docker Desktop/ARM/Synology sections) so filesystem corruption is less likely to recur.
+
+### Docker Desktop / ARM: `Incorrect information in file` errors
+
+**Problem**: MariaDB logs errors like:
+```
+ERROR 1033 (HY000): Incorrect information in file: './youtarr/videos.frm'
+```
+or:
+```
+errno 1932 - Table 'youtarr.videos' doesn't exist in engine
+```
+
+This can happen when MariaDB data lives on the bind-mounted host directory (`./database:/var/lib/mysql`) and Docker proxies that directory through a virtualized filesystem, most often Docker Desktop on Windows/macOS, ARM hosts, or some NAS setups. During DDL operations such as `CREATE TABLE` or `ALTER TABLE`, InnoDB can end up out of sync with MariaDB's table metadata. Native Linux Docker hosts are usually unaffected.
+
+**Existing install with data to preserve**
+
+Use the migration helper. It dumps the bind-mounted DB, preserves `./database/` as a timestamped backup directory, pins the named-volume override in `.env`, and imports the dump into a fresh named-volume MariaDB:
+```bash
+./scripts/migrate-to-named-volume.sh
+```
+
+See [Database Management](DATABASE.md#migrating-from-bind-mount-to-named-volume) for the full migration and revert details.
+
+**Fresh install with no data to preserve**
+
+Start with the named-volume override:
+```bash
+docker compose -f docker-compose.yml -f docker-compose.arm.yml up -d
+```
+
+Or add this to `.env` before plain `docker compose up -d`:
+```env
+COMPOSE_PATH_SEPARATOR=:
+COMPOSE_FILE=docker-compose.yml:docker-compose.arm.yml
+```
+
+**Alternatives**:
+- Point Youtarr at an external MariaDB/MySQL instance via `./start-with-external-db.sh`.
+- Run the stack on Linux/WSL, which uses a native filesystem for bind mounts.
+
+## Download Issues
+
+### Videos Not Downloading
+
+**Problem**: Channels are added but videos aren't downloading.
+
+**Checklist**:
+1. Check the download directory is correctly configured
+2. Verify the directory is accessible by Docker
+3. Check logs for yt-dlp errors:
+   ```bash
+   docker compose logs -f youtarr | grep yt-dlp
+   ```
+4. Ensure the cron schedule is configured (default: every 6 hours)
+5. Manually trigger a download from the Channels page
+
+### yt-dlp Errors
+
+**Problem**: yt-dlp fails to download videos.
+
+**Solution #1**:
+
+Update yt-dlp. Most download failures are extractor breakage that a newer yt-dlp fixes.
+
+- The fastest fix is in-app: go to **Settings -> YT-DLP** and update yt-dlp manually. With **Automatically update yt-dlp daily (4:00 AM)** enabled this happens each night on its own.
+- If the latest stable yt-dlp still fails, switch the **Update Channel** to **Nightly** on the same page. Nightly gets extractor fixes days earlier than stable.
+- Youtarr's Docker image also bundles the latest yt-dlp at release time, so pulling a new image updates it too:
+  - Via docker compose:
+      ```bash
+      docker compose down
+      docker compose pull
+      docker compose up -d
+      ```
+  - Using helper scripts:
+      ```bash
+      ./stop.sh
+      ./start.sh --pull-latest
+      ```
+
+**Solution #2**:
+
+YouTube is blocking your downloads.
+1. If cookies are **not** enabled, try enabling and uploading cookies in Settings -> Cookies. If cookies **are** enabled, they may be the cause - see "Downloads Fail with HTTP 403" below.
+2. If only some videos are failing, try increasing the **Sleep Between Requests (seconds)** value in the yt-dlp Options section of **Settings -> YT-DLP**
+3. Try using a proxy, or switching to a VPN
+
+**NOTE**: In some cases YouTube may temporarily blacklist your IP address if too many requests were happening from your IP. You may just need to wait in order to download again. You can manually test downloading a video from YouTube to rule out Youtarr-specific issues by downloading yt-dlp and attempting to manually download a single video.
+
+### Downloads Fail with HTTP 403: Forbidden
+
+**Problem**: A video (or every video) fails with `unable to download video data: HTTP Error 403: Forbidden`, even after Youtarr's automatic retry. Metadata, thumbnails, and subtitles often download fine; only the video itself fails.
+
+Youtarr detects this pattern and shows a "Likely cause" diagnosis on the Downloads page, in Download History (expand the failed job's row), and in notifications. The right fix depends on whether cookies are enabled:
+
+**If cookies are enabled** (Settings -> Cookies):
+
+Uploaded cookies change which YouTube player client yt-dlp can use, and YouTube enforces stricter requirements on that path. Stale or rotated cookies are the most common trigger - YouTube rotates cookie values regularly, so an exported cookies file goes invalid over time.
+
+1. **Refresh your cookies first**: sign into YouTube in your browser, re-export cookies with a browser extension (e.g., "Get cookies.txt LOCALLY"), and upload the fresh file. Refreshing preserves whatever you enabled cookies for.
+2. **If fresh cookies still fail**, temporarily disable cookies and retry the video. Many videos download fine without cookies because yt-dlp can then use a less restricted client.
+
+**If cookies are not enabled**:
+
+The 403 is sometimes a temporary block on YouTube's side - retrying later can work. If it keeps failing, uploading YouTube cookies from your browser (Settings -> Cookies) often resolves it.
+
+**Note**: The same failure on one machine but not another usually comes down to this cookies difference, not the network - both machines can share an IP and behave differently.
+
+### No Download Progress Shown (Downloads Work, Videos "Just Appear")
+
+**Problem**: Downloads complete successfully, but the **Downloads -> Activity** page never updates live: progress percentages stay frozen (or the page shows "Waiting for progress updates...") until you refresh the page or switch back to the tab. Other real-time updates (channel refresh status, download complete notifications) are also missing.
+
+**Cause**: Youtarr delivers all real-time updates over a WebSocket connection that shares the same host and port as the web UI. Regular page loads and downloads use plain HTTP, so everything else works - but if something between your browser and Youtarr (most commonly a reverse proxy) doesn't forward WebSocket upgrade requests, the progress display never gets live updates.
+
+**How to confirm**:
+1. Open your browser devtools (F12) -> **Network** tab -> filter by "WS", then reload the Youtarr page. A working setup shows a WebSocket connection with status `101 Switching Protocols`. If it fails or keeps retrying, the WebSocket is being blocked.
+2. While a download is running, watch the Activity page. It seeds its state over plain HTTP, so it will show the running job and catch up whenever you refresh or refocus the tab - but live progress between refreshes only arrives over the WebSocket. If the page stays frozen until you refresh, the WebSocket is the problem.
+
+**Solution**: Enable WebSocket support for the Youtarr host in your reverse proxy:
+- **Nginx Proxy Manager**: edit the proxy host and enable the **Websockets Support** toggle.
+- **nginx**: add to the Youtarr `location` block:
+  ```nginx
+  proxy_http_version 1.1;
+  proxy_set_header Upgrade $http_upgrade;
+  proxy_set_header Connection "upgrade";
+  ```
+- **Synology DSM reverse proxy**: open the reverse proxy rule -> **Custom Header** -> **Create** -> **WebSocket** (adds the `Upgrade` and `Connection` headers).
+- **Apache**: enable `mod_proxy_wstunnel`.
+- **Caddy / Traefik**: WebSocket pass-through is automatic; no configuration needed.
+
+If you aren't using a reverse proxy, check for browser extensions, VPN software, or corporate proxies that block WebSocket connections.
+
+
+## Slow Channel Operations with Proxy
+
+### Adding or Refreshing Channels Takes ~15 Seconds
+
+**Problem**: Adding a new channel or refreshing channel metadata takes around 15 seconds longer than expected.
+
+**Cause**: Youtarr first attempts direct HTTP requests for thumbnails and RSS feeds. When you're using a SOCKS5 or HTTP proxy, these direct requests cannot reach YouTube and must wait for a 15-second timeout before falling back to yt-dlp, which correctly uses your configured proxy.
+
+**Solution**: This is expected behavior and no action is needed. The operations will complete successfully after the brief timeout. If operations are taking significantly longer than 15-20 seconds, verify your proxy is correctly configured in **Configuration > Advanced Settings**.
+
+---
+
+## Plex Integration Issues
+
+### Videos Not Showing in Plex
+
+**Problem**: Downloaded videos don't appear in Plex library.
+
+**Checklist**:
+1. Verify Plex library is set to "Other Videos" type
+2. Ensure Plex agent is "Personal Media"
+3. Check Plex has access to the download directory
+4. Manually scan the library in Plex
+5. Verify Plex server IP and port are correct
+   - Docker Desktop (Windows/macOS): `host.docker.internal`
+   - Docker on macOS without Docker Desktop (e.g., Colima): host LAN IP (e.g., `192.168.x.x`) or `host.lima.internal`
+   - Docker on Linux or running inside WSL2 without Docker Desktop: host LAN IP (e.g., `192.168.x.x`)
+   - Ensure the Plex Port matches your Plex configuration (default `32400`).
+
+### Cannot Connect to Plex
+
+**Problem**: Youtarr cannot communicate with Plex server.
+
+**Solution**:
+1. Verify the Plex IP and port settings:
+  - Docker Desktop (Windows/macOS): use `host.docker.internal`
+  - Docker on macOS without Docker Desktop (e.g., Colima): use the host LAN IP (e.g., `192.168.x.x`) or `host.lima.internal`
+  - Docker on Linux or running inside WSL2 without Docker Desktop: use the host LAN IP (e.g., `192.168.x.x`)
+  - Update the Plex Port field if Plex listens on a non-default port (default `32400`).
+2. Ensure Plex is running on the same machine
+3. Check firewall isn't blocking local connections
+4. Verify Plex is accessible at the configured IP and port
+
+## Playlist Sync Issues
+
+For how playlist sync works across Plex, Jellyfin, and Emby, see [Media Server Playlists](MEDIA_SERVER_PLAYLISTS.md). The most common issues:
+
+### Videos Missing from a Synced Playlist
+
+**Problem**: A playlist syncs, but some videos aren't in it.
+
+**Checklist**:
+1. Confirm the videos are actually downloaded. Youtarr only adds videos that exist on disk; a video still showing as "Tracked" on the playlist page hasn't downloaded yet.
+2. A video has to be indexed in your media server's library before it can be added. Trigger a library scan and use **Sync now** on the playlist page.
+3. Check that the video isn't marked **Ignored** on the playlist page.
+4. Check the item's format matches the playlist's **Download Type**: an MP3 Only playlist syncs only items that have an mp3, and a video playlist syncs only items with a video file, so items downloaded in the other format (for example via a per-video override) are left out. The playlist page shows a notice with the count of affected items; see [Switching a playlist's download type](MEDIA_SERVER_PLAYLISTS.md#switching-a-playlists-download-type).
+
+### Playlist Not Created on Jellyfin or Emby
+
+**Problem**: You enabled sync but no native playlist appears.
+
+**Checklist**:
+1. Open **Settings -> Jellyfin Integration** (or **Settings -> Emby Integration**) and click **Test Connection**. A stale API key or changed server URL is the usual cause.
+2. Confirm the configured **User** still exists on the server.
+3. Youtarr won't create the playlist until at least one of its videos is downloaded and indexed. Download a video, then **Sync now**.
+
+### Playlist Not Visible to Other Users (Plex)
+
+This is by design. Plex playlists are owned by a single account, and Youtarr can't grant per-user access. To share one, open the playlist in Plex Web and share it (playlist menu -> Share), or use **Settings -> Manage Library Access -> [user] -> Media** to grant playlists to a user. See the [Plex playlist visibility scope](MEDIA_SERVER_PLAYLISTS.md#plex) notes for unclaimed-server setups.
+
+### Shared Playlists Don't Appear for Other Users (Plex)
+
+**Problem**: You shared a Youtarr-created playlist with another Plex user (the share shows up correctly under **Settings -> Manage Library Access -> [user] -> Media**), but when that user opens the server's **Playlists** section it says "Playlists is empty" - on every client (Web, iOS, Apple TV, etc.).
+
+This is Plex behavior, not a Youtarr bug, and nothing needs to be reconfigured. In Plex, the **Playlists** source only lists playlists the user created themselves. Playlists shared by another account appear under a separate sidebar source named **Media**, at the same level as Playlists and Libraries. Have the recipient open **Media** in the server's sidebar; the shared playlists are listed there.
+
+Related gotchas when sharing playlists with other users:
+
+1. **Sharing a playlist does not grant access to the underlying library.** The recipient also needs the Youtarr library shared with them, or the playlist's items will be hidden.
+2. **Content-rating restrictions hide YouTube videos.** Downloaded YouTube videos have no content rating, so rating-based parental restrictions filter them out. For kid accounts, use label-based restrictions instead.
+3. **Smart playlists can't be shared** - but Youtarr creates standard playlists, so this doesn't affect Youtarr-created playlists.
+
+## Watch Status Issues
+
+### Videos Not Showing as Watched
+
+**Problem**: You've watched videos on your media server, but Youtarr never shows the Watched chip for them.
+
+**Solutions**:
+1. Confirm the sync is on and has run: open **Settings -> Watch Status**, click **Sync Now**, and check the per-server results for the last run. A server that errors here is usually a connection or API-key problem; fix that first.
+2. Watching in Youtarr's built-in player doesn't count. Watch status only comes from your media servers.
+3. All three servers only mark a video played once playback passes a configurable percentage threshold (90% by default), so a video you stopped partway through may genuinely not count as watched yet. See [What determines if a video is "watched"](USAGE_GUIDE.md#what-determines-if-a-video-is-watched) for where to change the threshold on each server.
+4. Check for a path mismatch. Youtarr matches watch state to videos by filename, so if the server is indexing files from a different copy of your library (or files renamed to drop the `[<youtube-id>]` segment), nothing will match. Run a [rescan](USAGE_GUIDE.md#rescan-files-on-disk) if you've moved or renamed files.
+5. For non-owner Plex users specifically: their state comes from the server's play history, and that pull is incremental. If a path mismatch prevented matching for a while, plays from that period may have been scanned already and won't be picked up on later syncs. After fixing the mismatch, delete the `plex` row from the `watch_status_sync_cursors` table to force a full history re-scan on the next sync (see the [Configuration Reference](CONFIG.md#watch-status-sync)).
+
+## Channel Import Issues
+
+### Cookies Upload Fails or Returns No Channels
+
+**Problem**: Uploading a cookies file returns an error, or YouTube reports no subscriptions for the account.
+
+**Common causes and solutions**:
+
+1. **Expired or invalid cookies**: Cookies from YouTube sessions expire. If you see "cookies appear to be expired or invalid," sign into YouTube in your browser, re-export your cookies using a browser extension (e.g., "Get cookies.txt LOCALLY"), and upload the fresh file.
+
+2. **Wrong file format**: The cookies file must be in Netscape cookies.txt format (the first line starts with `# Netscape HTTP Cookie File`). If you copied cookies from browser dev tools or exported in a different format, the upload will be rejected. Use a browser extension that exports in the Netscape format.
+
+3. **Not logged into the right YouTube account**: If the upload succeeds but returns zero channels, the cookies may belong to an account with no subscriptions. Make sure you are signed into the correct YouTube account before exporting cookies.
+
+4. **Bot detection / verification challenge**: YouTube sometimes flags automated access and shows a CAPTCHA or verification prompt. If you see "YouTube is asking for verification," open YouTube in your browser using the same account, complete any security challenges, then re-export your cookies and try again.
+
+### CSV Upload Errors
+
+**Problem**: Uploading a CSV file returns "Missing header" or another parsing error.
+
+**Common causes and solutions**:
+
+1. **Wrong file**: The import expects the `subscriptions.csv` file from Google Takeout, which has exactly three columns: Channel Id, Channel Url, Channel Title. If you uploaded a different CSV (e.g., a watch history or playlist export), select the correct file from your Takeout archive under `YouTube and YouTube Music/subscriptions/subscriptions.csv`.
+
+2. **File too large**: CSV uploads are limited to 5 MB. A typical Takeout subscriptions file is well under this limit. If your file exceeds it, verify you selected the right file; the subscriptions CSV should not be that large.
+
+3. **Encoding issues**: The parser expects UTF-8 encoding and handles a UTF-8 BOM if present. If your CSV was re-saved in a different encoding (e.g., UTF-16 or Latin-1), re-export from Google Takeout or re-save as UTF-8 in a text editor before uploading.
+
+4. **No valid channels found**: If the file parses but contains no rows with valid YouTube channel IDs (IDs starting with "UC"), the CSV may have been modified or corrupted. Download a fresh copy from Google Takeout.
+
+### Individual Channels Fail During Import
+
+**Problem**: Some channels show errors during import while others succeed.
+
+Per-channel failures are normal and do not stop the overall import. The import processes each channel independently and records individual results. Common reasons a single channel may fail:
+
+1. **Bot detection / rate limiting**: YouTube may throttle or block requests when many channels are resolved in sequence. Failed channels are marked with their error, and you can retry them later by running another import.
+
+2. **Private or terminated channels**: Channels that have been made private, deleted, or terminated by YouTube will fail with a lookup error. These cannot be imported.
+
+3. **Network timeouts**: Transient network issues can cause individual channel lookups to fail. Check the per-channel status on the import progress page; channels that failed due to temporary errors can be retried in a subsequent import.
+
+### Import Appears Stuck
+
+**Problem**: The import has been running for a long time with no visible progress.
+
+Large imports take time because each channel requires a yt-dlp lookup to resolve metadata (name, thumbnail, video feed URL). An import of several hundred channels can take 10-30 minutes depending on network speed and YouTube's response times.
+
+**What to check**:
+1. Open the import progress page to see per-channel status. If channels are still being processed, the import is working normally.
+2. Check the container logs for errors: `docker compose logs -f youtarr`
+3. If the import is truly unresponsive (no channels have progressed for several minutes), you can cancel it from the progress page and start a new one.
+
+### "Too Many Requests" Error
+
+**Problem**: The cookies upload endpoint returns a 429 "Too many requests" error.
+
+The cookies preview endpoint is rate-limited to 3 requests per minute because each request runs a yt-dlp process against YouTube. Wait at least one minute before retrying. If you need to test multiple cookies files, space your uploads about 20-30 seconds apart.
+
+## Performance Issues
+
+### High Memory/CPU Usage
+
+**Problem**: Youtarr consuming excessive resources.
+
+**Solution**:
+1. Check for stuck download jobs (these can be cleared by restarting Youtarr)
+2. Restart containers:
+   ```bash
+   ./stop.sh
+   ./start.sh
+   ```
+3. Check disk space - low space can cause performance issues
+
+## Network Access Issues
+
+### Cannot Access from Other Devices
+
+**Problem**: Can't access Youtarr from other computers on the network.
+
+**Solution**:
+1. Configure firewall to allow port 3087
+2. Use server's actual IP address, not localhost
+3. Check Windows Defender Firewall settings
+4. Verify router settings if accessing from different subnet
+
+## Metadata Issues
+
+### Metadata Not Showing in Media Server
+
+**Problem**: Videos play but metadata (title, description, etc.) isn't displaying in your media server.
+
+#### Plex
+**Solution**:
+- Ensure "Local Media Assets" is enabled in your library agent settings
+- Place Local Media Assets at the top of the agent priority list
+- Check container logs for "Successfully added additional metadata to video file"
+- Try "Refresh Metadata" on the library or individual items
+- Verify the library type is "Other Videos" with "Personal Media" agent
+
+#### Kodi/Jellyfin/Emby
+**Solution**:
+- Verify .nfo files exist alongside video files (same name, different extension)
+- Ensure library is configured as "Movies" or "Mixed" type
+- Enable "Nfo" metadata reader in library settings
+- Disable all online metadata scrapers to avoid conflicts
+- Try a full library rescan
+- Check file permissions - media server must be able to read .nfo files
+
+### Channel Posters Not Displaying
+
+**Problem**: Channel folders don't show artwork/posters.
+**NOTE:** Plex does not support channel posters, this is only supported on Kodi/Jellyfin/Emby
+
+**Solution**:
+- Verify poster.jpg exists in each channel folder
+- Check that "Copy channel poster.jpg files" is enabled in **Settings -> Core**
+- Ensure media server has read permissions for image files
+- Some servers cache artwork - try:
+  - Clearing server cache
+  - Restarting the media server
+  - Removing and re-adding the library
+
+### Special Characters in Titles/Metadata
+
+**Problem**: Titles with $, &, or other special characters display incorrectly.
+
+**Solution**:
+- Youtarr properly escapes XML characters in NFO files
+- For Plex: Embedded metadata handles special characters automatically
+- If issues persist:
+  - Check media server logs for XML parsing errors
+  - Verify you're running the latest version of Youtarr
+  - Report specific character issues on GitHub
+
+### NFO Files Not Being Created
+
+**Problem**: Videos download but no .nfo files are generated.
+
+**Solution**:
+- Check that "Generate video .nfo files" is enabled in **Settings -> Core**
+- Verify post-processing completed (check container logs)
+- Ensure write permissions in video directories
+- Look for errors in logs during post-processing phase
+
+## Getting Help
+
+If these solutions don't resolve your issue:
+
+1. Check the [GitHub Issues](https://github.com/DialmasterOrg/Youtarr/issues) page
+2. Provide details about your operating system
+3. Provide relevant logs when reporting issues:
+   ```bash
+   docker compose logs --tail=100 youtarr
+   ```
+4. Include your configuration (without sensitive data)
+5. Describe steps to reproduce the problem

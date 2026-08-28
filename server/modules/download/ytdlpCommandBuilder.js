@@ -1,0 +1,685 @@
+const path = require('path');
+const configModule = require('../configModule');
+const tempPathManager = require('./tempPathManager');
+const logger = require('../../logger');
+const customArgsParser = require('./customArgsParser');
+const {
+  CHANNEL_TEMPLATE,
+  composeVideoFileTemplate,
+  composeThumbnailFilename,
+  composeVideoFolderName,
+} = require('../filesystem/constants');
+
+class YtdlpCommandBuilder {
+  /**
+   * Build output path with optional subfolder support
+   * Downloads always go to temp path first, then get moved to final location
+   * @param {string|null} subFolder - Optional subfolder name
+   * @param {boolean} skipVideoFolder - If true, skip the video subfolder level (flat structure)
+   * @returns {string} - Full output path template
+   */
+  static buildOutputPath(subFolder = null, skipVideoFolder = false) {
+    // Always use temp path - downloads are staged before moving to final location
+    const baseOutputPath = tempPathManager.getTempBasePath();
+    const prefix = configModule.getConfig().videoFilenamePrefix;
+    const videoFolderName = composeVideoFolderName(prefix);
+    const videoFileTemplate = composeVideoFileTemplate(prefix);
+
+    const segments = [baseOutputPath];
+    if (subFolder) segments.push(subFolder);
+    segments.push(CHANNEL_TEMPLATE);
+    if (!skipVideoFolder) segments.push(videoFolderName);
+    segments.push(videoFileTemplate);
+
+    return path.join(...segments);
+  }
+
+  /**
+   * Build thumbnail output path with optional subfolder support
+   * Thumbnails are staged in temp path alongside videos
+   * @param {string|null} subFolder - Optional subfolder name
+   * @param {boolean} skipVideoFolder - If true, skip the video subfolder level (flat structure)
+   * @returns {string} - Thumbnail path template
+   */
+  static buildThumbnailPath(subFolder = null, skipVideoFolder = false) {
+    // Always use temp path - thumbnails are staged with videos
+    const baseOutputPath = tempPathManager.getTempBasePath();
+    const prefix = configModule.getConfig().videoFilenamePrefix;
+    const videoFolderName = composeVideoFolderName(prefix);
+    const thumbnailFilename = composeThumbnailFilename(prefix);
+
+    const segments = [baseOutputPath];
+    if (subFolder) segments.push(subFolder);
+    segments.push(CHANNEL_TEMPLATE);
+    if (!skipVideoFolder) segments.push(videoFolderName);
+    segments.push(thumbnailFilename);
+
+    return path.join(...segments);
+  }
+  /**
+   * YouTube caps H.264 MP4 streams at 1080p. Above that, only VP9 (typically
+   * webm) and AV1 are available. When this returns true, the default format
+   * selector must not restrict to [ext=mp4], and the caller must pass
+   * --merge-output-format mp4 so the final container stays MP4.
+   * @param {string|number|null} resolution - Requested max height
+   * @returns {boolean}
+   */
+  static resolutionRequiresNonMp4Source(resolution) {
+    const height = Number(resolution);
+    return Number.isFinite(height) && height > 1080;
+  }
+
+  /**
+   * Build format string based on resolution, codec preference, and audio format
+   * @param {string} resolution - Video resolution (e.g., '1080', '720')
+   * @param {string} videoCodec - Video codec preference ('h264', 'h265', 'default')
+   * @param {string|null} audioFormat - Audio format ('mp3_only' for audio-only, null for video)
+   * @returns {string} - Format string for yt-dlp -f argument
+   */
+  static buildFormatString(resolution, videoCodec = 'default', audioFormat = null) {
+    // For MP3-only mode, we just need best audio
+    if (audioFormat === 'mp3_only') {
+      return 'bestaudio[ext=m4a]/bestaudio/best';
+    }
+
+    const res = resolution || '1080';
+
+    // Base format components
+    const audioFmt = 'bestaudio[ext=m4a]';
+    const fallbackMp4 = 'best[ext=mp4]';
+    const ultimateFallback = 'best';
+
+    let videoFormat;
+
+    switch (videoCodec) {
+    case 'h264':
+      // Prefer H.264/AVC codec, fallback to any codec at preferred resolution, then fallback to best
+      videoFormat = `bestvideo[height<=${res}][ext=mp4][vcodec^=avc]+${audioFmt}/bestvideo[height<=${res}][ext=mp4]+${audioFmt}/${fallbackMp4}/${ultimateFallback}`;
+      break;
+
+    case 'h265':
+      // Prefer H.265/HEVC codec, fallback to any codec at preferred resolution, then fallback to best
+      videoFormat = `bestvideo[height<=${res}][ext=mp4][vcodec^=hev]+${audioFmt}/bestvideo[height<=${res}][ext=mp4]+${audioFmt}/${fallbackMp4}/${ultimateFallback}`;
+      break;
+
+    case 'default':
+    default: {
+      // At 1080p and below, H.264 MP4 is available on YouTube so we keep the
+      // [ext=mp4] constraint for maximum Plex client compatibility (direct-play
+      // on Apple TV HD, older Rokus, iOS, etc.). Above 1080p, YouTube only
+      // serves VP9/AV1, so we drop the constraint and rely on
+      // --merge-output-format mp4 to keep the output container MP4.
+      const primarySelector = this.resolutionRequiresNonMp4Source(res)
+        ? `bestvideo[height<=${res}]+${audioFmt}`
+        : `bestvideo[height<=${res}][ext=mp4]+${audioFmt}`;
+      videoFormat = `${primarySelector}/${fallbackMp4}/${ultimateFallback}`;
+      break;
+    }
+    }
+
+    return videoFormat;
+  }
+
+  // Build Sponsorblock args based on configuration
+  static buildSponsorblockArgs(config) {
+    const args = [];
+
+    if (!config.sponsorblockEnabled) return args;
+
+    // Build categories list from enabled categories
+    const enabledCategories = Object.entries(config.sponsorblockCategories || {})
+      .filter(([, enabled]) => enabled)
+      .map(([category]) => category);
+
+    if (enabledCategories.length > 0) {
+      const categoriesStr = enabledCategories.join(',');
+
+      if (config.sponsorblockAction === 'remove') {
+        args.push('--sponsorblock-remove', categoriesStr);
+      } else if (config.sponsorblockAction === 'mark') {
+        args.push('--sponsorblock-mark', categoriesStr);
+      }
+    }
+
+    // Add custom API URL if specified
+    if (config.sponsorblockApiUrl && config.sponsorblockApiUrl.trim()) {
+      args.push('--sponsorblock-api', config.sponsorblockApiUrl.trim());
+    }
+
+    return args;
+  }
+
+  // Build cookies args for yt-dlp commands
+  static buildCookiesArgs() {
+    const cookiesPath = configModule.getCookiesPath();
+    if (cookiesPath) {
+      return ['--cookies', cookiesPath];
+    }
+    return [];
+  }
+
+  /**
+   * Build temp path args for yt-dlp internal temp files
+   * This redirects yt-dlp's internal temp files (used during download/merge operations)
+   * to our already-writable staging directory, fixing permission errors on some Docker setups.
+   * @returns {string[]} - Array with --paths temp: argument
+   */
+  static buildTempPathArgs() {
+    const tempPath = tempPathManager.getTempBasePath();
+    return ['--paths', `temp:${tempPath}`];
+  }
+
+  /**
+   * Build audio extraction args for MP3 downloads
+   * @param {string|null} audioFormat - 'video_mp3' or 'mp3_only', null for video only
+   * @returns {string[]} - Array of yt-dlp arguments for audio extraction
+   */
+  static buildAudioArgs(audioFormat) {
+    if (!audioFormat) {
+      return [];
+    }
+
+    const args = [];
+
+    if (audioFormat === 'mp3_only') {
+      // Extract audio only, convert to MP3 at 192kbps
+      args.push('-x', '--audio-format', 'mp3', '--audio-quality', '192K');
+    } else if (audioFormat === 'video_mp3') {
+      // Keep video AND extract audio as MP3 at 192kbps
+      args.push('--extract-audio', '--keep-video', '--audio-format', 'mp3', '--audio-quality', '192K');
+    }
+
+    return args;
+  }
+
+  /**
+   * Build the managed common flags that every yt-dlp invocation needs.
+   * NOTE: custom user args are NOT included here. Each builder is responsible
+   * for appending `buildCustomArgs(config)` at the end, after all managed
+   * flags but before the URL operand, so yt-dlp's last-wins semantics let
+   * users override managed defaults like --retries / --fragment-retries.
+   *
+   * @param {Object} config
+   * @param {Object} options
+   * @param {boolean} options.skipSleepRequests - Skip --sleep-requests for single metadata fetches
+   * @returns {string[]}
+   */
+  static buildCommonArgs(config, options = {}) {
+    const { skipSleepRequests = false } = options;
+    const args = [];
+
+    // Point yt-dlp's own extractor cache (nsig/sigfuncs — the deciphered
+    // functions from YouTube's ~2MB player JS, needed to compute the 'n'
+    // throttling-bypass parameter and resolve signed URLs) at a directory
+    // under the persistent config volume, not yt-dlp's own default
+    // ($HOME/.cache/yt-dlp) — the container's HOME isn't a mounted volume,
+    // so the default location is wiped on every recreate/image update,
+    // forcing a fresh ~2MB JS parse on the first request after every
+    // restart. Every yt-dlp invocation in the app funnels through here, so
+    // this benefits downloads and ytstream (direct/ffmpeg/hls) alike, and
+    // — since the cache key is the player version, not the video — a
+    // single warm entry serves every subsequent request regardless of
+    // which video it's for. yt-dlp handles its own cache invalidation
+    // (versioned cache format), so this needs no TTL/eviction logic here.
+    // Falls through to yt-dlp's own default cache location (today's
+    // behavior, unchanged) if configPath isn't available for some reason.
+    if (configModule.configPath) {
+      args.push('--cache-dir', path.join(path.dirname(configModule.configPath), '.ytdlp-cache'));
+    }
+
+    // IP family (replaces previously-hardcoded -4)
+    // Default 'ipv4' preserves backwards compat for any config missing the field.
+    const ipFamily = config.ytdlpIpFamily || 'ipv4';
+    if (ipFamily === 'ipv4') {
+      args.push('-4');
+    } else if (ipFamily === 'ipv6') {
+      args.push('-6');
+    }
+    // 'auto' adds neither
+
+    // Proxy
+    if (config.proxy && config.proxy.trim()) {
+      args.push('--proxy', config.proxy.trim());
+    }
+
+    // Download rate limit
+    if (config.ytdlpDownloadRateLimit && config.ytdlpDownloadRateLimit.trim()) {
+      args.push('--limit-rate', config.ytdlpDownloadRateLimit.trim());
+    }
+
+    // Sleep between requests (configurable, skipped for single metadata fetches)
+    if (!skipSleepRequests) {
+      const sleepRequests = config.sleepRequests ?? 1;
+      if (sleepRequests > 0) {
+        args.push('--sleep-requests', String(sleepRequests));
+      }
+    }
+
+    // Cookies
+    const cookiesPath = configModule.getCookiesPath();
+    if (cookiesPath) {
+      args.push('--cookies', cookiesPath);
+    }
+
+    // Temp paths for yt-dlp's internal temp files
+    args.push(...this.buildTempPathArgs());
+
+    return args;
+  }
+
+  /**
+   * Tokenize and validate the user's custom yt-dlp args. Returns a token
+   * array suitable for spreading at the END of a command (after managed
+   * flags, before URL operands) so yt-dlp's last-wins semantics let the
+   * user override managed defaults.
+   *
+   * Defense-in-depth: re-validates against the denylist in case config.json
+   * was hand-edited after the route-level gate. Invalid args are silently
+   * dropped with a warn log; never crashes yt-dlp.
+   *
+   * @param {Object} config
+   * @returns {string[]}
+   */
+  static buildCustomArgs(config) {
+    if (!config.ytdlpCustomArgs || !config.ytdlpCustomArgs.trim()) {
+      return [];
+    }
+    try {
+      const tokens = customArgsParser.tokenize(config.ytdlpCustomArgs);
+      const validation = customArgsParser.validate(tokens);
+      if (!validation.ok) {
+        logger.warn(
+          { reason: validation.error },
+          'Skipping invalid custom yt-dlp args (denylist)'
+        );
+        return [];
+      }
+      return tokens;
+    } catch (err) {
+      logger.warn(
+        { err: err.message },
+        'Failed to parse custom yt-dlp args; ignoring'
+      );
+      return [];
+    }
+  }
+
+  /**
+   * Build arguments for fetching metadata (channel info, video info, etc.)
+   * @param {string} url - URL to fetch
+   * @param {Object} options - Options object
+   * @param {boolean} options.flatPlaylist - Fetch flat playlist info
+   * @param {number} options.playlistEnd - Limit playlist items
+   * @param {string} options.playlistItems - Specific playlist items
+   * @param {string} options.extractorArgs - Extractor arguments
+   * @param {boolean} options.skipSleepRequests - Skip sleep between requests (for single fetches)
+   * @returns {string[]} - Complete args array
+   */
+  static buildMetadataFetchArgs(url, options = {}) {
+    const config = configModule.getConfig();
+    const args = [...this.buildCommonArgs(config, { skipSleepRequests: options.skipSleepRequests })];
+
+    args.push('--skip-download', '--dump-single-json');
+
+    if (options.flatPlaylist) {
+      args.push('--flat-playlist');
+    }
+
+    if (options.playlistEnd !== undefined && options.playlistEnd !== null) {
+      args.push('--playlist-end', String(options.playlistEnd));
+    }
+
+    if (options.playlistItems !== undefined && options.playlistItems !== null) {
+      args.push('--playlist-items', String(options.playlistItems));
+    }
+
+    if (options.extractorArgs) {
+      args.push('--extractor-args', options.extractorArgs);
+    }
+
+    // Custom user args last (yt-dlp last-wins) but before URL operand
+    args.push(...this.buildCustomArgs(config));
+
+    args.push(url);
+    return args;
+  }
+
+  /**
+   * Build arguments for fetching metadata AND sanitized folder name in one call.
+   * Combines --dump-single-json with --get-filename to output:
+   *   <sanitized folder name>\n<JSON metadata>
+   * For channels with no videos, only JSON is output (no folder name line).
+   * @param {string} url - URL to fetch
+   * @param {Object} options - Options object
+   * @param {number} options.playlistEnd - Limit playlist items
+   * @param {boolean} options.skipSleepRequests - Skip sleep between requests
+   * @returns {string[]} - Complete args array
+   */
+  static buildMetadataWithFolderNameArgs(url, options = {}) {
+    const config = configModule.getConfig();
+    const args = [];
+    args.push('--skip-download', '--dump-single-json', '--flat-playlist');
+    if (options.playlistEnd !== undefined && options.playlistEnd !== null) {
+      args.push('--playlist-end', String(options.playlistEnd));
+    }
+
+    args.push(...this.buildCommonArgs(config, { skipSleepRequests: options.skipSleepRequests }));
+
+    // Custom user args last (yt-dlp last-wins) but before URL operand
+    args.push(...this.buildCustomArgs(config));
+
+    args.push(url);
+    return args;
+  }
+
+  /**
+   * Build arguments for downloading thumbnails
+   * @param {string} url - URL to fetch
+   * @param {string} outputPath - Output path for thumbnail
+   * @returns {string[]} - Complete args array
+   */
+  static buildThumbnailDownloadArgs(url, outputPath) {
+    const config = configModule.getConfig();
+    const args = [...this.buildCommonArgs(config)];
+
+    args.push(
+      '--skip-download',
+      '--write-thumbnail',
+      '--playlist-end', '1',
+      '--playlist-items', '0',
+      '--convert-thumbnails', 'jpg',
+      '-o', outputPath
+    );
+
+    // Custom user args last (yt-dlp last-wins) but before URL operand
+    args.push(...this.buildCustomArgs(config));
+
+    args.push(url);
+
+    return args;
+  }
+
+  // Build subtitle args based on configuration
+  static buildSubtitleArgs(config) {
+    const args = [];
+
+    if (!config.subtitlesEnabled) return args;
+
+    const language = config.subtitleLanguage || 'en';
+
+    args.push(
+      '--write-sub',           // Download manual subtitles (preferred)
+      '--write-auto-sub',      // Fallback to auto-generated if manual not available
+      '--sub-langs', language,
+      '--convert-subs', 'srt',
+      '--sleep-subtitles', '2' // Add 2 second delay between subtitle requests to avoid rate limiting
+    );
+
+    return args;
+  }
+
+  /**
+   * Build match filter string for yt-dlp based on channel filter configuration
+   * @param {Object} filterConfig - ChannelFilterConfig instance with min_duration, max_duration, title_filter_regex
+   * @returns {string} - Complete match filter string for yt-dlp
+   */
+  static buildMatchFilters(filterConfig = null) {
+    // Base filters - always applied for channel downloads
+    const baseFilters = [
+      'availability!=subscriber_only',
+      '!is_live',
+      'live_status!=is_upcoming',
+    ];
+
+    // If no filter config provided or no filters set, return base filters only
+    if (
+      !filterConfig ||
+      !filterConfig.hasGroupingCriteria ||
+      (typeof filterConfig.hasGroupingCriteria === 'function' &&
+        !filterConfig.hasGroupingCriteria())
+    ) {
+      return baseFilters.join(' & ');
+    }
+
+    const additionalFilters = [];
+
+    // Add duration filters if specified
+    if (
+      filterConfig.minDuration !== null &&
+      filterConfig.minDuration !== undefined
+    ) {
+      additionalFilters.push(`duration >= ${filterConfig.minDuration}`);
+    }
+    if (
+      filterConfig.maxDuration !== null &&
+      filterConfig.maxDuration !== undefined
+    ) {
+      additionalFilters.push(`duration <= ${filterConfig.maxDuration + 59}`); // This way it captures the full minute (e.g. max 10 mins includes up to 10:59)
+    }
+
+    // Add title regex filter if specified
+    if (filterConfig.titleFilterRegex) {
+      // Escape backslashes and single quotes for Python string literal
+      const escapedRegex = filterConfig.titleFilterRegex
+        .replace(/\\/g, '\\\\') // Escape backslashes first
+        // eslint-disable-next-line quotes
+        .replace(/'/g, "\\'"); // Escape single quotes
+      additionalFilters.push(`title ~= '${escapedRegex}'`);
+    }
+
+    // Combine all filters
+    const allFilters = [...baseFilters, ...additionalFilters];
+    return allFilters.join(' & ');
+  }
+
+  static buildSearchArgs(query, count) {
+    // youtubetab:approximate_date populates an approximate upload_date/timestamp from "X years ago" text without paying for full per-video extraction.
+    const config = configModule.getConfig();
+    const args = [
+      ...this.buildCommonArgs(config, { skipSleepRequests: true }),
+      '--flat-playlist',
+      '--dump-json',
+      '--no-warnings',
+      '--extractor-args', 'youtubetab:approximate_date',
+      '--default-search', 'ytsearch',
+      // Custom user args last (yt-dlp last-wins) but before the search operand
+      ...this.buildCustomArgs(config),
+      `ytsearch${count}:${query}`,
+    ];
+    return args;
+  }
+
+  static buildChannelSearchArgs(query, count) {
+    const config = configModule.getConfig();
+    // sp=EgIQAg%3D%3D is YouTube's "type: channel" search filter; the results
+    // page yields one flat-playlist entry per channel.
+    const searchUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}&sp=EgIQAg%3D%3D`;
+    return [
+      ...this.buildCommonArgs(config, { skipSleepRequests: true }),
+      '--flat-playlist',
+      '--dump-json',
+      '--no-warnings',
+      '--playlist-items', `1-${count}`,
+      // Custom user args last (yt-dlp last-wins) but before the URL operand
+      ...this.buildCustomArgs(config),
+      searchUrl,
+    ];
+  }
+
+  /**
+   * Build yt-dlp command args array for channel downloads
+   * @param {string} resolution - Video resolution
+   * @param {boolean} allowRedownload - Allow re-downloading previously fetched videos
+   * @param {string|null} subFolder - Subfolder for output
+   * @param {Object|null} filterConfig - Channel filter configuration
+   * @param {string|null} audioFormat - Audio format ('video_mp3', 'mp3_only', or null for video only)
+   * @param {boolean} skipVideoFolder - If true, skip the video subfolder level (flat structure)
+   * @returns {string[]} - Array of yt-dlp command arguments
+   */
+  static getBaseCommandArgs(
+    resolution,
+    allowRedownload = false,
+    subFolder = null,
+    filterConfig = null,
+    audioFormat = null,
+    skipVideoFolder = false
+  ) {
+    const config = configModule.getConfig();
+    const res = resolution || config.preferredResolution || '1080';
+    const videoCodec = config.videoCodec || 'default';
+
+    const outputPath = this.buildOutputPath(subFolder, skipVideoFolder);
+    const thumbnailPath = this.buildThumbnailPath(subFolder, skipVideoFolder);
+
+    // Start with common args (includes -4, proxy, sleep-requests, cookies)
+    const args = [
+      ...this.buildCommonArgs(config),
+      '--windows-filenames',  // Sanitize filenames for Windows/Plex compatibility
+      '--ffmpeg-location', configModule.ffmpegPath,
+      '--socket-timeout', String(config.downloadSocketTimeoutSeconds || 30),
+      '--throttled-rate', config.downloadThrottledRate || '100K',
+      '--retries', String(config.downloadRetryCount || 2),
+      '--fragment-retries', String(config.downloadRetryCount || 2),
+      '--extractor-retries', '3',  // Retry subtitle/metadata extraction (helps with 429 errors)
+      '--retry-sleep', 'http:5',   // Sleep 5s on HTTP errors like 429 before retrying
+      '--newline',
+      '--progress',
+      '--progress-template',
+      '{"percent":"%(progress._percent_str)s","downloaded":"%(progress.downloaded_bytes|0)s","total":"%(progress.total_bytes|0)s","speed":"%(progress.speed|0)s","eta":"%(progress.eta|0)s"}',
+      '--output-na-placeholder', 'Unknown Channel',
+      // Clean @ prefix from uploader_id when it's used as fallback
+      '--replace-in-metadata', 'uploader_id', '^@', '',
+      '-f', this.buildFormatString(res, videoCodec, audioFormat),
+      // Only force MP4 remux when sources might be webm (1440p+).
+      // At <=1080p the format selector already picks MP4 sources.
+      ...(this.resolutionRequiresNonMp4Source(res) ? ['--merge-output-format', 'mp4'] : []),
+      '--write-thumbnail',
+      '--convert-thumbnails', 'jpg',
+    ];
+
+    // Add audio extraction args if configured
+    const audioArgs = this.buildAudioArgs(audioFormat);
+    args.push(...audioArgs);
+
+    // Add subtitle args if configured
+    const subtitleArgs = this.buildSubtitleArgs(config);
+    args.push(...subtitleArgs);
+
+    // Only use download archive if NOT allowing re-downloads
+    if (!allowRedownload) {
+      args.push('--download-archive', './config/complete.list');
+    }
+
+    // Build match filter with any channel-specific filtering
+    const matchFilter = this.buildMatchFilters(filterConfig);
+
+    args.push(
+      '--ignore-errors',
+      '--embed-metadata',
+      '--write-info-json',
+      '--no-write-playlist-metafiles',
+      '--extractor-args', 'youtubetab:tab=videos;sort=dd',
+      '--match-filter', matchFilter,
+      '-o', outputPath,
+      '--datebefore', 'now',
+      '-o', `thumbnail:${thumbnailPath}`,
+      '-o', 'pl_thumbnail:',
+      '--exec', `node ${path.resolve(__dirname, '../videoDownloadPostProcessFiles.js')} {}`
+    );
+
+    // Add Sponsorblock args if configured
+    const sponsorblockArgs = this.buildSponsorblockArgs(config);
+    args.push(...sponsorblockArgs);
+
+    // Custom user args MUST be appended last so yt-dlp's last-wins semantics
+    // let users override managed defaults like --retries / --fragment-retries.
+    // The URL list (-a tempChannelsFile) is appended later by downloadModule.
+    args.push(...this.buildCustomArgs(config));
+
+    return args;
+  }
+
+  /**
+   * Build yt-dlp command args array for manual downloads - no duration filter
+   * Note: Subfolder routing is handled post-download in videoDownloadPostProcessFiles.js
+   * @param {string} resolution - Video resolution
+   * @param {boolean} allowRedownload - Allow re-downloading previously fetched videos
+   * @param {string|null} audioFormat - Audio format ('video_mp3', 'mp3_only', or null for video only)
+   * @param {boolean} skipVideoFolder - If true, skip the video subfolder level (flat structure)
+   * @returns {string[]} - Array of yt-dlp command arguments
+   */
+  static getBaseCommandArgsForManualDownload(resolution, allowRedownload = false, audioFormat = null, skipVideoFolder = false) {
+    const config = configModule.getConfig();
+    const res = resolution || config.preferredResolution || '1080';
+    const videoCodec = config.videoCodec || 'default';
+
+    const outputPath = this.buildOutputPath(null, skipVideoFolder);
+    const thumbnailPath = this.buildThumbnailPath(null, skipVideoFolder);
+
+    // Start with common args (includes -4, proxy, sleep-requests, cookies)
+    const args = [
+      ...this.buildCommonArgs(config),
+      '--windows-filenames',  // Sanitize filenames for Windows/Plex compatibility
+      '--ffmpeg-location', configModule.ffmpegPath,
+      '--socket-timeout', String(config.downloadSocketTimeoutSeconds || 30),
+      '--throttled-rate', config.downloadThrottledRate || '100K',
+      '--retries', String(config.downloadRetryCount || 2),
+      '--fragment-retries', String(config.downloadRetryCount || 2),
+      '--extractor-retries', '3',  // Retry subtitle/metadata extraction (helps with 429 errors)
+      '--retry-sleep', 'http:5',   // Sleep 5s on HTTP errors like 429 before retrying
+      '--newline',
+      '--progress',
+      '--progress-template',
+      '{"percent":"%(progress._percent_str)s","downloaded":"%(progress.downloaded_bytes|0)s","total":"%(progress.total_bytes|0)s","speed":"%(progress.speed|0)s","eta":"%(progress.eta|0)s"}',
+      '--output-na-placeholder', 'Unknown Channel',
+      // Clean @ prefix from uploader_id when it's used as fallback
+      '--replace-in-metadata', 'uploader_id', '^@', '',
+      '-f', this.buildFormatString(res, videoCodec, audioFormat),
+      // Only force MP4 remux when sources might be webm (1440p+).
+      // At <=1080p the format selector already picks MP4 sources.
+      ...(this.resolutionRequiresNonMp4Source(res) ? ['--merge-output-format', 'mp4'] : []),
+      '--write-thumbnail',
+      '--convert-thumbnails', 'jpg',
+    ];
+
+    // Add audio extraction args if configured
+    const audioArgs = this.buildAudioArgs(audioFormat);
+    args.push(...audioArgs);
+
+    // Add subtitle args if configured
+    const subtitleArgs = this.buildSubtitleArgs(config);
+    args.push(...subtitleArgs);
+
+    // Only use download archive if NOT allowing re-downloads
+    if (!allowRedownload) {
+      args.push('--download-archive', './config/complete.list');
+    }
+
+    args.push(
+      '--ignore-errors',
+      '--embed-metadata',
+      '--write-info-json',
+      '--no-write-playlist-metafiles',
+      '--extractor-args', 'youtubetab:tab=videos;sort=dd',
+      '--match-filter', 'availability!=subscriber_only & !is_live & live_status!=is_upcoming',
+      '-o', outputPath,
+      '--datebefore', 'now',
+      '-o', `thumbnail:${thumbnailPath}`,
+      '-o', 'pl_thumbnail:',
+      '--exec', `node ${path.resolve(__dirname, '../videoDownloadPostProcessFiles.js')} {}`
+    );
+
+    // Add Sponsorblock args if configured
+    const sponsorblockArgs = this.buildSponsorblockArgs(config);
+    args.push(...sponsorblockArgs);
+
+    // Custom user args MUST be appended last so yt-dlp's last-wins semantics
+    // let users override managed defaults like --retries / --fragment-retries.
+    // URL operands are appended later by downloadModule.
+    args.push(...this.buildCustomArgs(config));
+
+    return args;
+  }
+}
+
+module.exports = YtdlpCommandBuilder;

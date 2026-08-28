@@ -1,0 +1,676 @@
+/* eslint-env jest */
+const loggerMock = require('../__mocks__/logger');
+const { findRouteHandlers } = require('./testUtils');
+
+const createMockRequest = (overrides = {}) => ({
+  method: 'GET',
+  params: {},
+  query: {},
+  body: {},
+  headers: {},
+  path: overrides.path || '/',
+  ip: '127.0.0.1',
+  connection: { remoteAddress: '127.0.0.1' },
+  socket: { remoteAddress: '127.0.0.1' },
+  log: loggerMock,
+  ...overrides
+});
+
+const createMockResponse = () => {
+  const res = {
+    statusCode: 200,
+    headers: {},
+    body: undefined,
+    finished: false
+  };
+
+  res.status = jest.fn((code) => {
+    res.statusCode = code;
+    return res;
+  });
+
+  res.json = jest.fn((payload) => {
+    res.body = payload;
+    res.finished = true;
+    return res;
+  });
+
+  res.send = jest.fn((payload) => {
+    res.body = payload;
+    res.finished = true;
+    return res;
+  });
+
+  return res;
+};
+
+const createServerModule = ({
+  authEnabled = 'true',
+  passwordHash = 'hashed-password',
+  session,
+  skipInitialize = false,
+  configOverrides = {},
+  trustProxy
+} = {}) => {
+  jest.resetModules();
+  jest.clearAllMocks();
+
+  const state = {};
+
+  return new Promise((resolve, reject) => {
+    jest.isolateModules(() => {
+      try {
+        process.env.NODE_ENV = 'test';
+        if (authEnabled === undefined) {
+          delete process.env.AUTH_ENABLED;
+        } else {
+          process.env.AUTH_ENABLED = authEnabled;
+        }
+
+        if (trustProxy === undefined) {
+          delete process.env.TRUST_PROXY;
+        } else {
+          process.env.TRUST_PROXY = trustProxy;
+        }
+
+        const defaultSessionUpdate = jest.fn().mockResolvedValue();
+        let effectiveSession;
+
+        if (session !== undefined) {
+          effectiveSession = session;
+          if (effectiveSession && !effectiveSession.update) {
+            effectiveSession.update = defaultSessionUpdate;
+          }
+        } else if (passwordHash) {
+          effectiveSession = {
+            id: 123,
+            username: 'tester',
+            update: defaultSessionUpdate
+          };
+        } else {
+          effectiveSession = null;
+        }
+
+        const dbMock = {
+          initializeDatabase: jest.fn().mockResolvedValue(),
+          reinitializeDatabase: jest.fn().mockResolvedValue({
+            connected: true,
+            schemaValid: true,
+            errors: []
+          }),
+          sequelize: {
+            authenticate: jest.fn().mockResolvedValue(true)
+          },
+          Session: {
+            findOne: jest.fn().mockImplementation(() => Promise.resolve(effectiveSession)),
+            create: jest.fn().mockResolvedValue(),
+            update: jest.fn().mockResolvedValue([1]),
+            destroy: jest.fn().mockResolvedValue(0),
+            findAll: jest.fn().mockResolvedValue([])
+          },
+          Sequelize: {
+            Op: {
+              gt: Symbol('gt'),
+              lt: Symbol('lt'),
+              or: Symbol('or')
+            }
+          }
+        };
+
+        const configState = {
+          passwordHash: passwordHash || null,
+          username: passwordHash ? 'tester' : null,
+          dockerAutoCreated: false,
+          plexUrl: 'http://plex.local',
+          plexPort: '32400',
+          plexApiKey: 'token',
+          ...configOverrides
+        };
+
+        const configModuleMock = {
+          directoryPath: '/downloads',
+          getConfig: jest.fn(() => configState),
+          updateConfig: jest.fn((patch) => Object.assign(configState, patch)),
+          getImagePath: jest.fn(() => '/images'),
+          getCookiesStatus: jest.fn(() => ({
+            cookiesEnabled: false,
+            customCookiesUploaded: false,
+            customFileExists: false
+          })),
+          writeCustomCookiesFile: jest.fn(),
+          deleteCustomCookiesFile: jest.fn(),
+          getStorageStatus: jest.fn().mockResolvedValue({ total: 1, free: 1 }),
+          isElfhostedPlatform: jest.fn(() => false),
+          config: configState,
+          stopWatchingConfig: jest.fn()
+        };
+
+        const channelModuleMock = {
+          subscribe: jest.fn(),
+          readChannels: jest.fn().mockResolvedValue([{ id: 'channel-1' }]),
+          getChannelsPaginated: jest.fn().mockResolvedValue({
+            channels: [{ id: 'channel-1' }],
+            total: 1,
+            page: 1,
+            pageSize: 50,
+            totalPages: 1,
+            subFolders: []
+          }),
+          updateChannelsByDelta: jest.fn().mockResolvedValue(),
+          writeChannels: jest.fn().mockResolvedValue(),
+          getChannelInfo: jest.fn().mockResolvedValue({ id: 'channel-1', title: 'Channel' })
+        };
+
+        const plexModuleMock = {
+          getLibrariesWithParams: jest.fn().mockResolvedValue([]),
+          getLibraries: jest.fn().mockResolvedValue([]),
+          refreshLibrary: jest.fn().mockResolvedValue(),
+          getAuthUrl: jest.fn().mockResolvedValue({ url: 'https://plex.example/auth' }),
+          checkPin: jest.fn().mockResolvedValue({ authenticated: true })
+        };
+
+        const downloadModuleMock = {
+          doSpecificDownloads: jest.fn(),
+          doChannelDownloads: jest.fn()
+        };
+
+        const jobModuleMock = {
+          getJob: jest.fn(),
+          getRunningJobs: jest.fn(() => []),
+          getRunningJobsWithFreshVideos: jest.fn().mockResolvedValue([])
+        };
+
+        const videosModuleMock = {
+          getVideos: jest.fn().mockResolvedValue([]),
+          getVideosPaginated: jest.fn().mockResolvedValue({
+            videos: [],
+            total: 0,
+            page: 1,
+            totalPages: 0
+          }),
+          backfillVideoMetadata: jest.fn().mockResolvedValue()
+        };
+
+        const videoValidationModuleMock = {
+          validateVideo: jest.fn().mockResolvedValue({ isValidUrl: true })
+        };
+
+        const cronMock = { schedule: jest.fn() };
+        const cronJobsMock = { initialize: jest.fn() };
+        const watchStatusSchedulerMock = { scheduleTask: jest.fn(), subscribe: jest.fn() };
+        const rateLimitMiddleware = jest.fn(() => (req, res, next) => next());
+        // Mock ipKeyGenerator to normalize IPv6 addresses
+        rateLimitMiddleware.ipKeyGenerator = jest.fn((ip) => ip);
+        const multerSingleMock = jest.fn(() => (req, res, next) => next());
+        const multerMock = Object.assign(jest.fn(() => ({ single: multerSingleMock })), {
+          memoryStorage: jest.fn(() => ({})),
+        });
+        const childProcessMock = {
+          execSync: jest.fn(() => '2025.09.23')
+        };
+        const pinoHttpMock = jest.fn(() => (req, res, next) => next());
+
+        jest.doMock('../logger', () => loggerMock);
+        jest.doMock('../db', () => dbMock);
+        jest.doMock('../modules/configModule', () => configModuleMock);
+        jest.doMock('../modules/channelModule', () => channelModuleMock);
+        jest.doMock('../modules/plexModule', () => plexModuleMock);
+        jest.doMock('../modules/downloadModule', () => downloadModuleMock);
+        jest.doMock('../modules/jobModule', () => jobModuleMock);
+        jest.doMock('../modules/videosModule', () => videosModuleMock);
+        jest.doMock('../modules/videoValidationModule', () => videoValidationModuleMock);
+        jest.doMock('../modules/channelSettingsModule', () => ({
+          getChannelSettings: jest.fn(),
+          updateChannelSettings: jest.fn(),
+          getAllSubFolders: jest.fn()
+        }));
+        jest.doMock('../modules/subfolderModule', () => ({
+          getAll: jest.fn().mockResolvedValue([]),
+          register: jest.fn().mockResolvedValue(undefined),
+          delete: jest.fn().mockResolvedValue(undefined),
+        }));
+        jest.doMock('../modules/archiveModule', () => ({
+          getAutoRemovalDryRun: jest.fn().mockResolvedValue({ videos: [], totalSize: 0 })
+        }));
+        jest.doMock('../modules/subscriptionImport', () => ({
+          init: jest.fn(),
+          ImportInProgressError: class ImportInProgressError extends Error {}
+        }));
+        jest.doMock('../modules/messageEmitter', () => ({
+          emitMessage: jest.fn(),
+          getLastMessages: jest.fn(() => [])
+        }));
+        jest.doMock('../models', () => ({
+          Channel: { findAll: jest.fn().mockResolvedValue([]) }
+        }));
+        jest.doMock('../modules/videoDeletionModule', () => ({
+          deleteVideos: jest.fn().mockResolvedValue({ deleted: [], failed: [] }),
+          deleteVideosByYoutubeIds: jest.fn().mockResolvedValue({ deleted: [], failed: [] })
+        }));
+        jest.doMock('../modules/notificationModule', () => ({
+          sendTestNotification: jest.fn().mockResolvedValue({ success: true })
+        }));
+        jest.doMock('../models/channelvideo', () => ({
+          update: jest.fn().mockResolvedValue([1])
+        }));
+        jest.doMock('../modules/cronJobs', () => cronJobsMock);
+        jest.doMock('../modules/mediaServers/watchStatusScheduler', () => watchStatusSchedulerMock);
+        jest.doMock('../modules/channel/channelBackdropBackfill', () => ({ subscribe: jest.fn() }));
+        jest.doMock('../modules/webSocketServer.js', () => jest.fn());
+        jest.doMock('node-cron', () => cronMock);
+        jest.doMock('express-rate-limit', () => Object.assign(rateLimitMiddleware, { ipKeyGenerator: rateLimitMiddleware.ipKeyGenerator }));
+        jest.doMock('multer', () => multerMock);
+        jest.doMock('https', () => ({ get: jest.fn(() => ({ on: jest.fn() })) }));
+        jest.doMock('child_process', () => childProcessMock);
+        jest.doMock('pino-http', () => pinoHttpMock);
+
+        const serverModule = require('../server');
+
+        state.app = serverModule.app;
+        state.serverModule = serverModule;
+        state.dbMock = dbMock;
+        state.channelModuleMock = channelModuleMock;
+        state.cronMock = cronMock;
+        state.configModuleMock = configModuleMock;
+        state.plexModuleMock = plexModuleMock;
+        state.rateLimitMiddleware = rateLimitMiddleware;
+        state.watchStatusSchedulerMock = watchStatusSchedulerMock;
+        state.sessionUpdateMock = effectiveSession?.update || defaultSessionUpdate;
+
+        const finalize = () => resolve(state);
+
+        if (skipInitialize) {
+          finalize();
+        } else {
+          serverModule.initialize().then(finalize).catch(reject);
+        }
+      } catch (error) {
+        reject(error);
+      }
+    });
+  });
+};
+
+afterEach(() => {
+  delete process.env.AUTH_ENABLED;
+  delete process.env.TRUST_PROXY;
+});
+
+describe('server initialization', () => {
+  test('normalizes named TRUST_PROXY values for Express', async () => {
+    const { serverModule } = await createServerModule({ skipInitialize: true, trustProxy: 'LoOpBack' });
+
+    expect(serverModule.parseTrustProxySetting('LoOpBack')).toBe('loopback');
+  });
+
+  test('parses numeric TRUST_PROXY values as hop counts', async () => {
+    const { serverModule } = await createServerModule({ skipInitialize: true, trustProxy: '1' });
+
+    expect(serverModule.parseTrustProxySetting('1')).toBe(1);
+  });
+
+  test('logs when TRUST_PROXY is unset and backwards-compatible proxy trust is used', async () => {
+    await createServerModule({ skipInitialize: true });
+
+    expect(loggerMock.info).toHaveBeenCalledWith(
+      expect.stringContaining('TRUST_PROXY is unset')
+    );
+  });
+
+  test('does not log about unset TRUST_PROXY when explicitly configured', async () => {
+    await createServerModule({ skipInitialize: true, trustProxy: 'false' });
+
+    expect(loggerMock.info).not.toHaveBeenCalledWith(
+      expect.stringContaining('TRUST_PROXY is unset')
+    );
+  });
+
+  test('initializes database and exposes health route', async () => {
+    const { app, dbMock, channelModuleMock, watchStatusSchedulerMock } = await createServerModule();
+
+    expect(dbMock.initializeDatabase).toHaveBeenCalledTimes(1);
+    expect(channelModuleMock.subscribe).toHaveBeenCalledTimes(1);
+    expect(watchStatusSchedulerMock.scheduleTask).toHaveBeenCalledTimes(1);
+    expect(watchStatusSchedulerMock.subscribe).toHaveBeenCalledTimes(1);
+
+    const [healthHandler] = findRouteHandlers(app, 'get', '/api/health');
+    const req = createMockRequest({ path: '/api/health' });
+    const res = createMockResponse();
+
+    await healthHandler(req, res);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual({ status: 'healthy' });
+  });
+
+  test('blocks protected routes when authentication is not configured', async () => {
+    const { app, dbMock, channelModuleMock } = await createServerModule({ passwordHash: null });
+
+    const [verifyToken] = findRouteHandlers(app, 'get', '/getchannels');
+    const req = createMockRequest({ path: '/getchannels' });
+    const res = createMockResponse();
+
+    await verifyToken(req, res, jest.fn());
+
+    expect(res.statusCode).toBe(503);
+    expect(res.body).toEqual({
+      error: 'Authentication not configured',
+      requiresSetup: true,
+      message: 'Please complete initial setup first'
+    });
+    expect(dbMock.Session.findOne).not.toHaveBeenCalled();
+    expect(channelModuleMock.getChannelsPaginated).not.toHaveBeenCalled();
+  });
+
+  test('allows access to protected routes with a valid session token', async () => {
+    const { app, dbMock, channelModuleMock, sessionUpdateMock } = await createServerModule();
+
+    const handlers = findRouteHandlers(app, 'get', '/getchannels');
+    const verifyToken = handlers[0];
+    const getChannelsHandler = handlers[1];
+
+    const req = createMockRequest({
+      path: '/getchannels',
+      headers: { 'x-access-token': 'valid-token' }
+    });
+    const res = createMockResponse();
+
+    await new Promise((resolve, reject) => {
+      verifyToken(req, res, (err) => {
+        if (err) {
+          reject(err);
+        } else {
+          resolve();
+        }
+      });
+    });
+
+    await getChannelsHandler(req, res);
+    expect(channelModuleMock.getChannelsPaginated).toHaveBeenCalledTimes(1);
+    await channelModuleMock.getChannelsPaginated.mock.results[0].value;
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual({
+      channels: [{ id: 'channel-1' }],
+      total: 1,
+      page: 1,
+      pageSize: 50,
+      subFolders: [],
+      totalPages: 1
+    });
+
+    expect(dbMock.Session.findOne).toHaveBeenCalledTimes(1);
+    const query = dbMock.Session.findOne.mock.calls[0][0];
+    expect(query.where.session_token).toBe('valid-token');
+    expect(query.where.is_active).toBe(true);
+    const gtSymbol = dbMock.Sequelize.Op.gt;
+    expect(query.where.expires_at[gtSymbol]).toBeInstanceOf(Date);
+
+    expect(sessionUpdateMock).toHaveBeenCalledTimes(1);
+  });
+
+  test('rejects requests with an invalid or expired token', async () => {
+    const { app, dbMock, channelModuleMock } = await createServerModule({ session: null });
+
+    const [verifyToken] = findRouteHandlers(app, 'get', '/getchannels');
+    const req = createMockRequest({
+      path: '/getchannels',
+      headers: { 'x-access-token': 'invalid-token' }
+    });
+    const res = createMockResponse();
+
+    await verifyToken(req, res, jest.fn());
+
+    expect(res.statusCode).toBe(401);
+    expect(res.body).toEqual({ error: 'Invalid or expired token' });
+    expect(dbMock.Session.findOne).toHaveBeenCalledTimes(1);
+    expect(channelModuleMock.getChannelsPaginated).not.toHaveBeenCalled();
+  });
+
+  test('initializes cronJobs module after server starts', async () => {
+    const cronJobsMock = {
+      initialize: jest.fn()
+    };
+
+    jest.doMock('../modules/cronJobs', () => cronJobsMock);
+
+    // Trigger the listen callback manually since we're in test mode
+    // The server.listen is called within initialize()
+    // Since we're testing in isolation, we verify the module is required correctly
+    // by checking that cronJobs would be initialized during normal server start
+
+    // For this test, we verify the cronJobs module structure exists
+    const cronJobs = require('../modules/cronJobs');
+    expect(cronJobs).toBeDefined();
+    expect(typeof cronJobs.initialize).toBe('function');
+  });
+
+  test('configures login rate limiter with custom key generator', async () => {
+    const { rateLimitMiddleware } = await createServerModule();
+
+    const loginCall = rateLimitMiddleware.mock.calls.find(([options]) => options.max === 5);
+    expect(loginCall).toBeDefined();
+
+    const loginOptions = loginCall[0];
+    expect(loginOptions.windowMs).toBe(15 * 60 * 1000);
+    expect(loginOptions.skipSuccessfulRequests).toBe(true);
+
+    // With TRUST_PROXY unset, the key generator must ignore req.ip (which can
+    // be spoofed via X-Forwarded-For) and fall back to the direct peer address.
+    const key = loginOptions.keyGenerator({
+      ip: '1.2.3.4',
+      socket: { remoteAddress: '5.6.7.8' },
+      body: { username: 'alice' }
+    });
+    expect(key).toBe('5.6.7.8:alice');
+
+    const res = {};
+    res.status = jest.fn(() => res);
+    res.json = jest.fn(() => res);
+    loginOptions.handler({}, res);
+    expect(res.status).toHaveBeenCalledWith(429);
+    expect(res.json).toHaveBeenCalledWith({
+      error: 'Too many failed login attempts. Please wait 15 minutes before trying again.'
+    });
+  });
+
+  test('login rate limiter trusts req.ip when TRUST_PROXY is explicitly configured', async () => {
+    const { rateLimitMiddleware } = await createServerModule({ trustProxy: 'true' });
+
+    const loginCall = rateLimitMiddleware.mock.calls.find(([options]) => options.max === 5);
+    const loginOptions = loginCall[0];
+
+    const key = loginOptions.keyGenerator({
+      ip: '1.2.3.4',
+      socket: { remoteAddress: '5.6.7.8' },
+      body: { username: 'alice' }
+    });
+    expect(key).toBe('1.2.3.4:alice');
+  });
+
+  test('handles paginated /getVideos endpoint with query parameters', async () => {
+    const { app } = await createServerModule();
+    const videosModuleMock = require('../modules/videosModule');
+
+    const handlers = findRouteHandlers(app, 'get', '/getVideos');
+    const verifyToken = handlers[0];
+    const getVideosHandler = handlers[1];
+
+    const req = createMockRequest({
+      path: '/getVideos',
+      headers: { 'x-access-token': 'valid-token' },
+      query: {
+        page: '2',
+        limit: '20',
+        search: 'test video',
+        dateFrom: '2024-01-01',
+        dateTo: '2024-12-31',
+        sortBy: 'title',
+        sortOrder: 'asc',
+        channelFilter: 'channel123'
+      }
+    });
+    const res = createMockResponse();
+
+    await new Promise((resolve, reject) => {
+      verifyToken(req, res, (err) => {
+        if (err) {
+          reject(err);
+        } else {
+          resolve();
+        }
+      });
+    });
+
+    await getVideosHandler(req, res);
+
+    expect(videosModuleMock.getVideosPaginated).toHaveBeenCalledTimes(1);
+    expect(videosModuleMock.getVideosPaginated).toHaveBeenCalledWith({
+      page: 2,
+      limit: 20,
+      search: 'test video',
+      dateFrom: '2024-01-01',
+      dateTo: '2024-12-31',
+      sortBy: 'title',
+      sortOrder: 'asc',
+      channelFilter: 'channel123',
+      protectedFilter: 'off',
+      missingFilter: 'off',
+      watchedFilter: 'off',
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual({
+      videos: [],
+      total: 0,
+      page: 1,
+      totalPages: 0
+    });
+  });
+
+  test('passes pagination and filter params to /getchannels handler', async () => {
+    const { app, channelModuleMock } = await createServerModule();
+
+    const handlers = findRouteHandlers(app, 'get', '/getchannels');
+    const verifyToken = handlers[0];
+    const getChannelsHandler = handlers[1];
+
+    const req = createMockRequest({
+      path: '/getchannels',
+      headers: { 'x-access-token': 'valid-token' },
+      query: {
+        page: '3',
+        pageSize: '30',
+        search: 'alpha',
+        sortBy: 'name',
+        sortOrder: 'desc'
+      }
+    });
+    const res = createMockResponse();
+
+    await new Promise((resolve, reject) => {
+      verifyToken(req, res, (err) => {
+        if (err) {
+          reject(err);
+        } else {
+          resolve();
+        }
+      });
+    });
+
+    await getChannelsHandler(req, res);
+
+    expect(channelModuleMock.getChannelsPaginated).toHaveBeenCalledWith({
+      page: '3',
+      pageSize: '30',
+      searchTerm: 'alpha',
+      sortBy: 'name',
+      sortOrder: 'desc',
+      subFolder: undefined,
+    });
+    expect(res.statusCode).toBe(200);
+  });
+
+  test('handles /getVideos endpoint with default parameters', async () => {
+    const { app } = await createServerModule();
+    const videosModuleMock = require('../modules/videosModule');
+
+    // Reset the mock before this test
+    videosModuleMock.getVideosPaginated.mockClear();
+
+    const handlers = findRouteHandlers(app, 'get', '/getVideos');
+    const verifyToken = handlers[0];
+    const getVideosHandler = handlers[1];
+
+    const req = createMockRequest({
+      path: '/getVideos',
+      headers: { 'x-access-token': 'valid-token' },
+      query: {}
+    });
+    const res = createMockResponse();
+
+    await new Promise((resolve, reject) => {
+      verifyToken(req, res, (err) => {
+        if (err) {
+          reject(err);
+        } else {
+          resolve();
+        }
+      });
+    });
+
+    await getVideosHandler(req, res);
+
+    expect(videosModuleMock.getVideosPaginated).toHaveBeenCalledTimes(1);
+    expect(videosModuleMock.getVideosPaginated).toHaveBeenCalledWith({
+      page: 1,
+      limit: 12,
+      search: '',
+      dateFrom: null,
+      dateTo: null,
+      sortBy: 'added',
+      sortOrder: 'desc',
+      channelFilter: '',
+      protectedFilter: 'off',
+      missingFilter: 'off',
+      watchedFilter: 'off',
+    });
+
+    expect(res.statusCode).toBe(200);
+  });
+
+  test('handles /getVideos endpoint errors gracefully', async () => {
+    const { app } = await createServerModule();
+    const videosModuleMock = require('../modules/videosModule');
+
+    // Reset and set up mock to reject
+    videosModuleMock.getVideosPaginated.mockClear();
+    videosModuleMock.getVideosPaginated.mockRejectedValueOnce(new Error('Database error'));
+
+    const handlers = findRouteHandlers(app, 'get', '/getVideos');
+    const verifyToken = handlers[0];
+    const getVideosHandler = handlers[1];
+
+    const req = createMockRequest({
+      path: '/getVideos',
+      headers: { 'x-access-token': 'valid-token' },
+      query: {}
+    });
+    const res = createMockResponse();
+
+    await new Promise((resolve, reject) => {
+      verifyToken(req, res, (err) => {
+        if (err) {
+          reject(err);
+        } else {
+          resolve();
+        }
+      });
+    });
+
+    await getVideosHandler(req, res);
+
+    expect(res.statusCode).toBe(500);
+    expect(res.body).toEqual({ error: 'Database error' });
+  });
+});

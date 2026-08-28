@@ -1,0 +1,316 @@
+import React, { useEffect, useId, useState } from 'react';
+import {
+  Alert,
+  Button,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  Divider,
+  FormControl,
+  InputLabel,
+  MenuItem,
+  Select,
+  Typography,
+} from '../../ui';
+import { SubfolderAutocomplete } from '../../shared/SubfolderAutocomplete';
+import { ResolutionSelect } from '../../shared/ResolutionSelect';
+import { AudioFormatSelect } from '../../shared/AudioFormatSelect';
+import { RatingSelect } from '../../shared/RatingSelect';
+import { useSubfolders } from '../../../hooks/useSubfolders';
+import { useConfig } from '../../../hooks/useConfig';
+import { usePlaylistMutations } from '../../../hooks/usePlaylistMutations';
+import { Playlist, PlaylistSortOrderSetting, PlaylistSubscribeSettings } from '../../../types/playlist';
+import { MEDIA_MODE_LABEL } from '../../../utils/mediaMode';
+import { LIBRARY_MODE_LABEL } from '../../../utils/libraryMode';
+
+interface PlaylistSettingsDialogProps {
+  open: boolean;
+  playlist: Playlist;
+  token: string | null;
+  onClose: () => void;
+  onSaved: (next: PlaylistSubscribeSettings) => void;
+}
+
+// Settings surfaced by this dialog. The playlist also has min_duration,
+// max_duration and title_filter_regex columns; they only pre-seed auto-created
+// source channels (not the playlist download resolver) and are intentionally not
+// exposed here yet. They are left untouched on save.
+interface FormState {
+  default_sub_folder: string | null;
+  video_quality: string | null;
+  audio_format: string | null;
+  default_rating: string | null;
+  sort_order: PlaylistSortOrderSetting;
+  media_mode: string | null;
+  library_mode: string | null;
+}
+
+function fromPlaylist(p: Playlist): FormState {
+  return {
+    default_sub_folder: p.default_sub_folder ?? null,
+    video_quality: p.video_quality ?? null,
+    audio_format: p.audio_format ?? null,
+    default_rating: p.default_rating ?? null,
+    sort_order: p.sort_order ?? 'default',
+    media_mode: p.media_mode ?? null,
+    library_mode: p.library_mode ?? null,
+  };
+}
+
+const MP3_HELPER_TEXT = 'MP3 files are saved at 192kbps in the same folder as videos.';
+const MP3_ONLY_SYNC_HINT =
+  ' MP3 Only playlists sync to media servers as music playlists: the server needs a music-type library that includes your Youtarr output folder.';
+
+const PlaylistSettingsDialog: React.FC<PlaylistSettingsDialogProps> = ({
+  open,
+  playlist,
+  token,
+  onClose,
+  onSaved,
+}) => {
+  const [form, setForm] = useState<FormState>(() => fromPlaylist(playlist));
+  const sortOrderLabelId = useId();
+  const mediaModeLabelId = useId();
+  const libraryModeLabelId = useId();
+
+  const { subfolders, loading: subfoldersLoading, createSubfolder } = useSubfolders(token);
+  const { config, refetch: refetchConfig } = useConfig(token);
+  const { updateSettings, pending, error } = usePlaylistMutations({ token });
+
+  useEffect(() => {
+    if (open) {
+      setForm(fromPlaylist(playlist));
+      refetchConfig().catch(() => {
+        /* non-critical: dialog still works without the latest global default */
+      });
+    }
+  }, [open, playlist, refetchConfig]);
+
+  const update = <K extends keyof FormState>(field: K, value: FormState[K]) => {
+    setForm((prev) => ({ ...prev, [field]: value }));
+  };
+
+  // Media-server playlists are typed by the Download Type setting (MP3 Only =
+  // music playlist, anything else = video playlist), so crossing that boundary
+  // replaces the synced playlist on the next sync. Warn before saving.
+  const wasAudio = playlist.audio_format === 'mp3_only';
+  const willBeAudio = form.audio_format === 'mp3_only';
+  const syncTypeChanges = wasAudio !== willBeAudio;
+
+  // Saving a new order doesn't sync anything by itself.
+  const sortOrderChanges = form.sort_order !== (playlist.sort_order ?? 'default');
+
+  const handleSave = async () => {
+    const settings: PlaylistSubscribeSettings = {
+      default_sub_folder: form.default_sub_folder,
+      video_quality: form.video_quality,
+      audio_format: form.audio_format,
+      default_rating: form.default_rating,
+      sort_order: form.sort_order,
+      media_mode: form.media_mode,
+      library_mode: form.library_mode,
+    };
+    const ok = await updateSettings(playlist.playlist_id, settings);
+    if (ok) {
+      onSaved(settings);
+      onClose();
+    }
+  };
+
+  return (
+    <Dialog open={open} onClose={onClose} maxWidth="lg" fullWidth>
+      <DialogTitle>Playlist Settings</DialogTitle>
+      <DialogContent>
+        <div className="flex flex-col gap-4 mt-2">
+          {error && <Alert severity="error">{error}</Alert>}
+
+          <Alert severity="info">
+            <Typography variant="body2">
+              Defaults for videos downloaded from this playlist. A video&apos;s own channel
+              settings take precedence; these apply when the channel has no override. They also
+              seed new channels auto-created from this playlist. The Download Type additionally
+              decides whether this playlist syncs to media servers as a video or music playlist.
+            </Typography>
+          </Alert>
+
+          <div>
+            <Typography variant="subtitle2" gutterBottom style={{ fontWeight: 600 }}>
+              Subfolder
+            </Typography>
+            <SubfolderAutocomplete
+              mode="channel"
+              value={form.default_sub_folder}
+              onChange={(value) => update('default_sub_folder', value)}
+              subfolders={subfolders}
+              loading={subfoldersLoading}
+              createSubfolder={createSubfolder}
+              defaultSubfolderDisplay={config.defaultSubfolder || null}
+              label="Default Subfolder"
+              helperText="Where this playlist's videos are saved when the channel has no subfolder of its own."
+            />
+          </div>
+
+          <Divider />
+
+          <div>
+            <Typography variant="subtitle2" gutterBottom style={{ fontWeight: 600 }}>
+              Resolution Override
+            </Typography>
+            <ResolutionSelect
+              value={form.video_quality}
+              onChange={(value) => update('video_quality', value)}
+              label="Video Quality"
+              emptyLabel="Using Global Setting"
+            />
+          </div>
+
+          <div>
+            <Typography variant="subtitle2" gutterBottom style={{ fontWeight: 600 }}>
+              Download Type
+            </Typography>
+            <AudioFormatSelect
+              value={form.audio_format}
+              onChange={(value) => update('audio_format', value)}
+              helperText={
+                form.audio_format
+                  ? form.audio_format === 'mp3_only'
+                    ? MP3_HELPER_TEXT + MP3_ONLY_SYNC_HINT
+                    : MP3_HELPER_TEXT
+                  : undefined
+              }
+            />
+            {syncTypeChanges && (
+              <div className="mt-2">
+                <Alert severity="warning">
+                  <Typography variant="body2">
+                    {willBeAudio
+                      ? 'On the next sync, media servers will replace the synced video playlist with a music playlist. Items downloaded as video without an MP3 will not appear in it; existing downloads are never converted or re-downloaded.'
+                      : 'On the next sync, media servers will replace the synced music playlist with a video playlist. Items downloaded as MP3 only will not appear in it; existing downloads are never converted or re-downloaded.'}
+                  </Typography>
+                </Alert>
+              </div>
+            )}
+          </div>
+
+          <div>
+            <Typography variant="subtitle2" gutterBottom style={{ fontWeight: 600 }}>
+              Media Mode
+            </Typography>
+            <FormControl style={{ minWidth: 260 }}>
+              <InputLabel id={mediaModeLabelId} shrink>
+                Media mode
+              </InputLabel>
+              <Select
+                labelId={mediaModeLabelId}
+                size="small"
+                value={form.media_mode ?? 'default'}
+                onValueChange={(next) => update('media_mode', next === 'default' ? null : (next as string))}
+              >
+                <MenuItem value="default">
+                  Use global setting ({MEDIA_MODE_LABEL[config.mediaMode || 'download']})
+                </MenuItem>
+                <MenuItem value="download">Download full files</MenuItem>
+                <MenuItem value="strm">STRM only (no media download)</MenuItem>
+                <MenuItem value="both">Both (download + STRM)</MenuItem>
+              </Select>
+            </FormControl>
+            <Typography variant="caption" color="text.secondary" className="block mt-1">
+              STRM only writes .strm pointer files (+ NFO/thumbnail) instead of downloading media,
+              so this playlist streams on demand rather than saving full files. A video&apos;s own
+              channel setting takes precedence over this. Only affects new downloads.
+            </Typography>
+          </div>
+
+          <div>
+            <Typography variant="subtitle2" gutterBottom style={{ fontWeight: 600 }}>
+              Library Mode
+            </Typography>
+            <FormControl style={{ minWidth: 260 }}>
+              <InputLabel id={libraryModeLabelId} shrink>
+                Library mode
+              </InputLabel>
+              <Select
+                labelId={libraryModeLabelId}
+                size="small"
+                value={form.library_mode ?? 'default'}
+                onValueChange={(next) => update('library_mode', next === 'default' ? null : (next as string))}
+              >
+                <MenuItem value="default">
+                  Use global setting ({LIBRARY_MODE_LABEL[config.defaultLibraryMode || 'movie']})
+                </MenuItem>
+                <MenuItem value="movie">{LIBRARY_MODE_LABEL.movie}</MenuItem>
+                <MenuItem value="series">{LIBRARY_MODE_LABEL.series}</MenuItem>
+              </Select>
+            </FormControl>
+            <Typography variant="caption" color="text.secondary" className="block mt-1">
+              TV Series groups videos into Season/Episode folders for Jellyfin/Kodi show browsing.
+              A video&apos;s own channel setting takes precedence over this. Only affects new
+              downloads; existing files are not reorganized.
+            </Typography>
+          </div>
+
+          <Divider />
+
+          <div>
+            <Typography variant="subtitle2" gutterBottom style={{ fontWeight: 600 }}>
+              Playlist Order
+            </Typography>
+            <FormControl style={{ minWidth: 230 }}>
+              <InputLabel id={sortOrderLabelId} shrink>
+                Playlist order
+              </InputLabel>
+              <Select
+                labelId={sortOrderLabelId}
+                size="small"
+                value={form.sort_order}
+                onValueChange={(next) => update('sort_order', next as PlaylistSortOrderSetting)}
+              >
+                <MenuItem value="default">YouTube playlist order</MenuItem>
+                <MenuItem value="reversed">Reverse playlist order</MenuItem>
+              </Select>
+            </FormControl>
+            <Typography variant="caption" color="text.secondary" className="block mt-1">
+              Order of the .m3u file and synced media server playlists. Some playlists add new
+              videos at the top; Reverse playlist order keeps those playing oldest-first as new
+              videos are added.
+            </Typography>
+            {sortOrderChanges && (
+              <div className="mt-2">
+                <Alert severity="info">
+                  <Typography variant="body2">
+                    The new order applies the next time this playlist syncs. Use Sync now and
+                    Rebuild .m3u file on the playlist page, or wait for the next download.
+                  </Typography>
+                </Alert>
+              </div>
+            )}
+          </div>
+
+          <Divider />
+
+          <div>
+            <Typography variant="subtitle2" gutterBottom style={{ fontWeight: 600 }}>
+              Default Rating
+            </Typography>
+            <RatingSelect
+              value={form.default_rating}
+              onChange={(value) => update('default_rating', value)}
+              label="Default Rating"
+            />
+          </div>
+        </div>
+      </DialogContent>
+      <DialogActions>
+        <Button variant="text" onClick={onClose} disabled={pending}>
+          Cancel
+        </Button>
+        <Button variant="contained" onClick={handleSave} disabled={pending}>
+          {pending ? 'Saving…' : 'Save'}
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+};
+
+export default PlaylistSettingsDialog;

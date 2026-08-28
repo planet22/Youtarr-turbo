@@ -1,0 +1,354 @@
+name: Production Release
+run-name: ${{ github.event_name == 'workflow_dispatch' && (inputs.dry_run && 'Production Release — Dry Run' || 'Production Release — Manual') || 'Production Release — Auto' }}
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run (test mode - no tags, no Docker push)'
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: ${{ inputs.dry_run && 'Release (Dry Run)' || 'Release' }}
+    runs-on: ubuntu-latest
+    # Skip if commit message contains [skip ci]
+    if: "!contains(github.event.head_commit.message, '[skip ci]')"
+    permissions:
+      contents: write
+      packages: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.ACTION_RUNNER_TOKEN }}
+
+      - name: Configure Git user
+        run: |
+          git config --global user.email "dial.chris+youtarr_service@gmail.com"
+          git config --global user.name "Youtarr Service Account[bot]"
+
+      - name: Calculate next version (dry run)
+        id: calculate_version
+        uses: mathieudutour/github-tag-action@a22cf08638b34d5badda920f9daf6e72c477b07b # v6.2
+        with:
+          github_token: ${{ secrets.ACTION_RUNNER_TOKEN }}
+          tag_prefix: v
+          default_bump: patch
+          release_branches: main
+          dry_run: true  # Always dry run first to get the version
+
+      - name: No changes since last release
+        if: ${{ steps.calculate_version.outputs.release_type == 'none' && !inputs.dry_run }}
+        run: |
+          echo "No conventional commit changes since last tag (${{ steps.calculate_version.outputs.previous_tag }}). Skipping release."
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '20'
+
+      - name: Pin npm
+        run: npm install -g npm@11.15.0 --ignore-scripts
+
+      - name: Install server dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Install client dependencies
+        run: |
+          cd client
+          npm ci --ignore-scripts
+          cd ..
+
+      - name: Set up QEMU (multi-arch)
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Login to Docker Hub
+        if: ${{ !inputs.dry_run && steps.calculate_version.outputs.release_type != 'none' }}
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Update version in package.json files
+        if: ${{ !inputs.dry_run && steps.calculate_version.outputs.release_type != 'none' }}
+        run: |
+          npm version ${{ steps.calculate_version.outputs.new_tag }} --no-git-tag-version
+          cd client
+          npm version ${{ steps.calculate_version.outputs.new_tag }} --no-git-tag-version
+          cd ..
+          git add package.json package-lock.json client/package.json client/package-lock.json
+          git commit -m "Bump version to ${{ steps.calculate_version.outputs.new_tag }} [skip ci]"
+          git push
+
+      - name: Build client (verification)
+        if: ${{ steps.calculate_version.outputs.release_type != 'none' }}
+        run: |
+          cd client
+          npm run build
+          cd ..
+          echo "✅ Client build successful"
+
+      - name: Verify MSW worker excluded from production bundle
+        if: ${{ steps.calculate_version.outputs.release_type != 'none' }}
+        run: |
+          if [ -e client/build/mockServiceWorker.js ]; then
+            echo "❌ client/build/mockServiceWorker.js should not exist in production output"
+            exit 1
+          fi
+          echo "✅ MSW worker correctly excluded from production bundle"
+
+      - name: Build Docker image (verification)
+        if: ${{ steps.calculate_version.outputs.release_type != 'none' }}
+        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # v5
+        with:
+          context: .
+          push: false
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ vars.DOCKERHUB_USERNAME }}/youtarr:test-${{ github.run_id }}
+          no-cache: true
+
+      - name: Record bump commit SHA
+        if: ${{ !inputs.dry_run && steps.calculate_version.outputs.release_type != 'none' }}
+        run: |
+          echo "BUMP_COMMIT=$(git rev-parse HEAD)" >> $GITHUB_ENV
+
+      - name: Create and push tag
+        if: ${{ !inputs.dry_run && steps.calculate_version.outputs.release_type != 'none' }}
+        id: tag_version
+        uses: mathieudutour/github-tag-action@a22cf08638b34d5badda920f9daf6e72c477b07b # v6.2
+        with:
+          github_token: ${{ secrets.ACTION_RUNNER_TOKEN }}
+          tag_prefix: v
+          default_bump: patch
+          release_branches: main
+          custom_tag: ${{ steps.calculate_version.outputs.new_tag }}
+          create_release: false
+
+
+      - name: Create GitHub Release
+        if: ${{ !inputs.dry_run && steps.calculate_version.outputs.release_type != 'none' }}
+        uses: ncipollo/release-action@339a81892b84b4eeb0f6e744e4574d79d0d9b8dd # v1
+        with:
+          tag: ${{ steps.calculate_version.outputs.new_tag }}
+          name: Release ${{ steps.calculate_version.outputs.new_tag }}
+          body: |
+            ## What's Changed
+            ${{ steps.calculate_version.outputs.changelog }}
+
+            ## Docker Image
+            ```bash
+            docker pull ${{ vars.DOCKERHUB_USERNAME }}/youtarr:${{ steps.calculate_version.outputs.new_tag }}
+            ```
+
+            Or use `latest`:
+            ```bash
+            docker pull ${{ vars.DOCKERHUB_USERNAME }}/youtarr:latest
+            ```
+
+            ## Full Changelog
+            **Full Changelog**: https://github.com/${{ github.repository }}/compare/${{ steps.calculate_version.outputs.previous_tag }}...${{ steps.calculate_version.outputs.new_tag }}
+          draft: false
+          prerelease: false
+          token: ${{ secrets.ACTION_RUNNER_TOKEN }}
+          allowUpdates: true
+
+      - name: Update CHANGELOG.md
+        if: ${{ !inputs.dry_run && steps.calculate_version.outputs.release_type != 'none' }}
+        env:
+          NEW_TAG: ${{ steps.calculate_version.outputs.new_tag }}
+          CHANGELOG_BODY: ${{ steps.calculate_version.outputs.changelog }}
+          REPO: ${{ github.repository }}
+        run: |
+          # Create or update CHANGELOG.md
+          # Values are passed via env vars (see `env:` above) so quotes/parens
+          # in commit messages do not break bash parsing.
+          CHANGELOG_ENTRY="## [${NEW_TAG}](https://github.com/${REPO}/releases/tag/${NEW_TAG}) - $(date +%Y-%m-%d)
+
+          ${CHANGELOG_BODY}
+
+          "
+
+          if [ -f CHANGELOG.md ]; then
+            # Prepend new entry after the header
+            echo "# Changelog
+
+          $CHANGELOG_ENTRY" > CHANGELOG.tmp
+            tail -n +2 CHANGELOG.md >> CHANGELOG.tmp
+            mv CHANGELOG.tmp CHANGELOG.md
+          else
+            # Create new CHANGELOG
+            echo "# Changelog
+
+          $CHANGELOG_ENTRY" > CHANGELOG.md
+          fi
+
+          # Commit the CHANGELOG update
+          git add CHANGELOG.md
+          git commit -m "docs: update CHANGELOG for ${NEW_TAG} [skip ci]"
+          git push
+
+      - name: Record CHANGELOG commit SHA
+        if: ${{ !inputs.dry_run && steps.calculate_version.outputs.release_type != 'none' }}
+        run: |
+          echo "CHANGELOG_COMMIT=$(git rev-parse HEAD)" >> $GITHUB_ENV
+
+      - name: Build and push Docker images
+        if: ${{ !inputs.dry_run && steps.calculate_version.outputs.release_type != 'none' }}
+        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # v5
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: |
+            ${{ vars.DOCKERHUB_USERNAME }}/youtarr:${{ steps.calculate_version.outputs.new_tag }}
+            ${{ vars.DOCKERHUB_USERNAME }}/youtarr:latest
+          no-cache: true
+
+      - name: Announce release on Discord
+        if: ${{ !inputs.dry_run && steps.calculate_version.outputs.release_type != 'none' }}
+        continue-on-error: true
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_ANNOUNCEMENT_WEBHOOK_URL }}
+          NEW_TAG: ${{ steps.calculate_version.outputs.new_tag }}
+          CHANGELOG: ${{ steps.calculate_version.outputs.changelog }}
+          RELEASE_URL: https://github.com/${{ github.repository }}/releases/tag/${{ steps.calculate_version.outputs.new_tag }}
+        run: |
+          if [ -z "$DISCORD_WEBHOOK" ]; then
+            echo "⚠️ DISCORD_ANNOUNCEMENT_WEBHOOK_URL secret not set, skipping Discord notification"
+            exit 0
+          fi
+
+          # Strip the leading ### [version](url) (date) header line — it's redundant with the embed title
+          CLEAN_CHANGELOG=$(echo "$CHANGELOG" | sed '1{/^### \[/d}')
+
+          # Truncate if too long for Discord embed description (max 4096, keep under 3800 for safety)
+          MAX_LEN=3800
+          if [ ${#CLEAN_CHANGELOG} -gt $MAX_LEN ]; then
+            CLEAN_CHANGELOG="${CLEAN_CHANGELOG:0:$MAX_LEN}..."$'\n\n'"[See full release notes](${RELEASE_URL})"
+          fi
+
+          jq -n \
+            --arg title "Youtarr ${NEW_TAG} Released!" \
+            --arg desc "$CLEAN_CHANGELOG" \
+            --arg url "$RELEASE_URL" \
+            '{
+              username: "Youtarr Releases",
+              embeds: [{
+                title: $title,
+                description: $desc,
+                url: $url,
+                color: 5763719,
+                timestamp: (now | strftime("%Y-%m-%dT%H:%M:%SZ")),
+                footer: { text: "Youtarr" }
+              }]
+            }' \
+          | curl -sf -X POST "$DISCORD_WEBHOOK" \
+              -H "Content-Type: application/json" \
+              -d @-
+
+          echo "✅ Discord announcement sent"
+
+      - name: Revert release commits on failure
+        if: ${{ failure() && !inputs.dry_run && steps.calculate_version.outputs.release_type != 'none' }}
+        run: |
+          set -e
+          git config --global user.email "dial.chris+youtarr_service@gmail.com"
+          git config --global user.name "Youtarr Service Account[bot]"
+          git fetch origin main
+          git checkout main
+          git reset --hard origin/main
+          REVERTED=0
+          if [ -n "${CHANGELOG_COMMIT}" ]; then
+            if git merge-base --is-ancestor "${CHANGELOG_COMMIT}" HEAD; then
+              git revert --no-edit "${CHANGELOG_COMMIT}" || true
+              REVERTED=1
+            fi
+          fi
+          if [ -n "${BUMP_COMMIT}" ]; then
+            if git merge-base --is-ancestor "${BUMP_COMMIT}" HEAD; then
+              git revert --no-edit "${BUMP_COMMIT}" || true
+              REVERTED=1
+            fi
+          fi
+          if [ "$REVERTED" = "1" ]; then
+            git push
+          else
+            echo "No release commits to revert"
+          fi
+
+      - name: Cleanup tag and release on failure
+        if: ${{ failure() && !inputs.dry_run && steps.calculate_version.outputs.release_type != 'none' }}
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        with:
+          github-token: ${{ secrets.ACTION_RUNNER_TOKEN }}
+          script: |
+            const tag = `${{ toJSON(steps.calculate_version.outputs.new_tag) }}`.replace(/^"|"$/g, '');
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            if (!tag) {
+              core.info('No tag available from version calculation; skipping cleanup.');
+            } else {
+              core.info(`Cleanup: attempting to delete release and tag for ${tag}`);
+              // Delete release by tag if it exists
+              try {
+                const rel = await github.rest.repos.getReleaseByTag({ owner, repo, tag });
+                await github.rest.repos.deleteRelease({ owner, repo, release_id: rel.data.id });
+                core.info(`Deleted release id ${rel.data.id} for tag ${tag}`);
+              } catch (e) {
+                core.info(`No release found for ${tag} or delete failed: ${e.message}`);
+              }
+              // Delete tag ref if it exists
+              try {
+                await github.rest.git.deleteRef({ owner, repo, ref: `tags/${tag}` });
+                core.info(`Deleted ref tags/${tag}`);
+              } catch (e) {
+                core.info(`No tag ref tags/${tag} or delete failed: ${e.message}`);
+              }
+            }
+
+      - name: Display dry run results
+        if: ${{ inputs.dry_run }}
+        env:
+          NEW_TAG: ${{ steps.calculate_version.outputs.new_tag }}
+          PREVIOUS_TAG: ${{ steps.calculate_version.outputs.previous_tag }}
+          RELEASE_TYPE: ${{ steps.calculate_version.outputs.release_type }}
+          CHANGELOG_BODY: ${{ steps.calculate_version.outputs.changelog }}
+          DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
+        run: |
+          echo "🔍 DRY RUN RESULTS:"
+          echo "==================="
+          echo "Would have created tag: ${NEW_TAG}"
+          echo "Previous tag: ${PREVIOUS_TAG}"
+          echo "Bump type: ${RELEASE_TYPE}"
+          echo ""
+          echo "Would have created GitHub Release: ${NEW_TAG}"
+          echo ""
+          echo "Release Notes Preview:"
+          echo "----------------------"
+          echo "${CHANGELOG_BODY}"
+          echo ""
+          echo "Docker images that would be pushed:"
+          echo "  - ${DOCKERHUB_USERNAME}/youtarr:${NEW_TAG}"
+          echo "  - ${DOCKERHUB_USERNAME}/youtarr:latest"
+          echo ""
+          if [ "${RELEASE_TYPE}" = "none" ]; then
+            echo "No changes detected since the last release; no build attempted in dry run."
+          else
+            echo "✅ Build verification steps succeeded (client and Docker)"
+          fi
+          echo "No actual changes were made (dry run mode)"

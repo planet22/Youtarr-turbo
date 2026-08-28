@@ -1,0 +1,181 @@
+import React from 'react';
+import {
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
+  FormControlLabel,
+  Switch,
+  TextField,
+  FormHelperText,
+  Grid,
+  Box,
+  Alert,
+  AlertTitle,
+  Typography,
+} from '../../ui';
+import { ConfigurationAccordion } from '../common/ConfigurationAccordion';
+import { InfoTooltip } from '../common/InfoTooltip';
+import { ConfigState } from '../types';
+
+interface DownloadPerformanceSectionProps {
+  config: ConfigState;
+  onConfigChange: (updates: Partial<ConfigState>) => void;
+  onMobileTooltipClick?: (text: string) => void;
+}
+
+export const DownloadPerformanceSection: React.FC<DownloadPerformanceSectionProps> = ({
+  config,
+  onConfigChange,
+  onMobileTooltipClick,
+}) => {
+  return (
+    <ConfigurationAccordion
+      title="Download Performance Settings"
+      statusBanner={{
+        enabled: config.enableStallDetection !== false,
+        label: 'Enable Stall Detection',
+        onToggle: (enabled) => onConfigChange({ enableStallDetection: enabled }),
+        onText: 'Stall Detection On',
+        offText: 'Stall Detection Off',
+      }}
+      defaultExpanded={false}
+    >
+      <Alert severity="info" className="mb-4">
+        <AlertTitle>Performance Optimization</AlertTitle>
+        <Typography variant="body2">
+          Configure download timeouts, retry attempts, and stall detection to handle slow or interrupted downloads automatically.
+        </Typography>
+      </Alert>
+
+      <Grid container spacing={2}>
+        <Grid item xs={12} md={6}>
+          <FormControl fullWidth>
+            <InputLabel>Socket Timeout</InputLabel>
+            <Select
+              value={config.downloadSocketTimeoutSeconds ?? 30}
+              onChange={(e) => onConfigChange({ downloadSocketTimeoutSeconds: Number(e.target.value) })}
+              label="Socket Timeout"
+            >
+              <MenuItem value={5}>5 seconds</MenuItem>
+              <MenuItem value={10}>10 seconds</MenuItem>
+              <MenuItem value={20}>20 seconds</MenuItem>
+              <MenuItem value={30}>30 seconds</MenuItem>
+            </Select>
+            <FormHelperText>
+              Connection timeout for each download attempt
+            </FormHelperText>
+          </FormControl>
+        </Grid>
+
+        <Grid item xs={12} md={6}>
+          <FormControl fullWidth>
+            <InputLabel>Throttled Rate Detection</InputLabel>
+            <Select
+              value={config.downloadThrottledRate ?? '100K'}
+              onChange={(e) => onConfigChange({ downloadThrottledRate: e.target.value })}
+              label="Throttled Rate Detection"
+            >
+              <MenuItem value="20K">20 KB/s</MenuItem>
+              <MenuItem value="50K">50 KB/s</MenuItem>
+              <MenuItem value="100K">100 KB/s</MenuItem>
+              <MenuItem value="250K">250 KB/s</MenuItem>
+              <MenuItem value="500K">500 KB/s</MenuItem>
+              <MenuItem value="1M">1 MB/s</MenuItem>
+              <MenuItem value="2M">2 MB/s</MenuItem>
+            </Select>
+            <FormHelperText>
+              Minimum speed before considering download throttled
+            </FormHelperText>
+          </FormControl>
+        </Grid>
+
+        <Grid item xs={12} md={6}>
+          <FormControl fullWidth>
+            <InputLabel>Download Retries</InputLabel>
+            <Select
+              value={config.downloadRetryCount ?? 2}
+              onChange={(e) => onConfigChange({ downloadRetryCount: Number(e.target.value) })}
+              label="Download Retries"
+            >
+              <MenuItem value={0}>No retries</MenuItem>
+              <MenuItem value={1}>1 retry</MenuItem>
+              <MenuItem value={2}>2 retries</MenuItem>
+              <MenuItem value={3}>3 retries</MenuItem>
+            </Select>
+            <FormHelperText>
+              Number of retry attempts for failed downloads
+            </FormHelperText>
+          </FormControl>
+        </Grid>
+
+        <Grid item xs={12} md={6}>
+          <FormControl fullWidth>
+            <InputLabel>Auto-Retry Failed Videos</InputLabel>
+            <Select
+              value={config.downloadAutoRetryCount ?? 1}
+              onChange={(e) => onConfigChange({ downloadAutoRetryCount: Number(e.target.value) })}
+              label="Auto-Retry Failed Videos"
+            >
+              <MenuItem value={0}>Disabled</MenuItem>
+              <MenuItem value={1}>1 auto-retry</MenuItem>
+              <MenuItem value={2}>2 auto-retries</MenuItem>
+              <MenuItem value={3}>3 auto-retries</MenuItem>
+            </Select>
+            <FormHelperText>
+              Re-run videos that fail with a transient HTTP 403 in a fresh download job
+            </FormHelperText>
+          </FormControl>
+        </Grid>
+
+        {config.enableStallDetection && (
+          <>
+            <Grid item xs={12} md={6}>
+              <FormControl fullWidth>
+                <InputLabel htmlFor="stall-detection-window-input">Stall Detection Window (seconds)</InputLabel>
+                <TextField
+                  id="stall-detection-window-input"
+                  fullWidth
+                  type="number"
+                  inputProps={{
+                    min: 5,
+                    max: 120,
+                    step: 5,
+                    style: { backgroundColor: 'var(--input)', minHeight: 48 },
+                  }}
+                  value={config.stallDetectionWindowSeconds ?? 30}
+                  onChange={(e) => onConfigChange({ stallDetectionWindowSeconds: Number(e.target.value) })}
+                />
+                <FormHelperText>
+                  How long the download must stay below the stall threshold before retry logic kicks in
+                </FormHelperText>
+              </FormControl>
+            </Grid>
+
+            <Grid item xs={12} md={6}>
+              <FormControl fullWidth>
+                <InputLabel>Stall Threshold Rate</InputLabel>
+                <Select
+                  value={config.stallDetectionRateThreshold ?? config.downloadThrottledRate ?? '100K'}
+                  onChange={(e) => onConfigChange({ stallDetectionRateThreshold: e.target.value })}
+                  label="Stall Threshold Rate"
+                >
+                  <MenuItem value="20K">20 KB/s</MenuItem>
+                  <MenuItem value="50K">50 KB/s</MenuItem>
+                  <MenuItem value="100K">100 KB/s</MenuItem>
+                  <MenuItem value="250K">250 KB/s</MenuItem>
+                  <MenuItem value="500K">500 KB/s</MenuItem>
+                  <MenuItem value="1M">1 MB/s</MenuItem>
+                  <MenuItem value="2M">2 MB/s</MenuItem>
+                </Select>
+                <FormHelperText>
+                  Speed threshold for stall detection (defaults to throttled rate)
+                </FormHelperText>
+              </FormControl>
+            </Grid>
+          </>
+        )}
+      </Grid>
+    </ConfigurationAccordion>
+  );
+};

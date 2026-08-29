@@ -832,7 +832,9 @@ class DownloadModule {
       // For manual downloads, we don't apply duration filters but still exclude members-only
       // Subfolder override is passed to post-processor via environment variable
       // Pass audioFormat for MP3 downloads
-      const args = YtdlpCommandBuilder.getBaseCommandArgsForManualDownload(resolution, allowRedownload, audioFormat, skipVideoFolder);
+      const args = YtdlpCommandBuilder.getBaseCommandArgsForManualDownload(resolution, allowRedownload, audioFormat, skipVideoFolder, {
+        rateLimitOverride: overrideSettings.ytdlpRateLimitOverride || null,
+      });
 
       // Check if any URLs are for videos marked as ignored, and remove them from archive
       // This allows users to manually download videos they've marked to ignore for channel downloads

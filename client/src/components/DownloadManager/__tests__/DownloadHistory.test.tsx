@@ -510,6 +510,76 @@ describe('DownloadHistory', () => {
     });
   });
 
+  test('shows an NZB-grab job with an empty videos array by default, since job.data.nzb still has enough to display', () => {
+    const nzbJobWithoutVideoRow: Job = {
+      id: 'nzb-untracked',
+      jobType: 'Sonarr/Radarr: TV [nzbvid123]',
+      status: 'Completed',
+      output: '',
+      timeCreated: Date.now(),
+      timeInitiated: Date.now(),
+      data: {
+        videos: [],
+        nzb: { categoryName: 'TV', youtubeId: 'nzbvid123', nzbName: 'Some Show S01E01' },
+      },
+    };
+    const plainEmptyJob: Job = {
+      id: 'plain-empty',
+      jobType: 'Channel Downloads',
+      status: 'Completed',
+      output: '',
+      timeCreated: Date.now(),
+      timeInitiated: Date.now(),
+      data: { videos: [] },
+    };
+
+    render(<DownloadHistory {...defaultProps} jobs={[nzbJobWithoutVideoRow, plainEmptyJob]} />);
+
+    // The NZB job renders via its nzb fallback (title text, no live Video row)...
+    expect(screen.getByText('Some Show S01E01')).toBeInTheDocument();
+    // ...while the plain job with no videos and no nzb data stays hidden.
+    expect(screen.queryByText('No jobs currently running')).not.toBeInTheDocument();
+    const rows = screen.getAllByRole('row');
+    expect(rows.length).toBe(2); // 1 header + the NZB job only
+  });
+
+  test('Source filter narrows the list to jobs matching the selected source', async () => {
+    const user = userEvent.setup();
+    const jobs: Job[] = [
+      {
+        id: 'channel-job',
+        jobType: 'Channel Downloads',
+        status: 'Completed',
+        output: '',
+        timeCreated: Date.now(),
+        timeInitiated: Date.now(),
+        data: { videos: [makeVideo({ youtubeId: 'c1', youTubeVideoName: 'Channel Vid' })] },
+      },
+      {
+        id: 'manual-job',
+        jobType: 'Manually Added Urls',
+        status: 'Completed',
+        output: '',
+        timeCreated: Date.now(),
+        timeInitiated: Date.now(),
+        data: { videos: [makeVideo({ youtubeId: 'm1', youTubeVideoName: 'Manual Vid' })] },
+      },
+    ];
+
+    render(<DownloadHistory {...defaultProps} jobs={jobs} />);
+
+    expect(screen.getByText('Channel Vid')).toBeInTheDocument();
+    expect(screen.getByText('Manual Vid')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /Filter by Source/i }));
+    await user.click(screen.getByTestId('filter-menu-Channels'));
+
+    await waitFor(() => {
+      expect(screen.getByText('Channel Vid')).toBeInTheDocument();
+      expect(screen.queryByText('Manual Vid')).not.toBeInTheDocument();
+    });
+  });
+
   describe('API Source Indicator', () => {
     test('displays "Manual Videos" for standard manual downloads', () => {
       const manualJob: Job[] = [{

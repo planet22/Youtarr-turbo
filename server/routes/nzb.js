@@ -333,7 +333,12 @@ function titleMatchesEpisodeCode(title, season, ep) {
     // (e.g. an air date).
     patterns.push(new RegExp(`\\bs(?:eason|eries)?\\.?\\s*0*${season}\\D{0,20}?e(?:p(?:isode)?)?\\.?\\s*0*${ep}\\b`, 'i'));
   } else if (season != null) {
-    patterns.push(new RegExp(`\\bs(?:eason|eries)?\\.?\\s*0*${season}\\b`, 'i'));
+    // No trailing \b here: a real title like "Celebrity Juice S22E01" has no
+    // word boundary between the season digits and the following "E" (both
+    // are word characters), so a \b would silently fail to match every
+    // properly-coded title. A negative lookahead against another digit
+    // still keeps "S22" from matching inside "S220".
+    patterns.push(new RegExp(`\\bs(?:eason|eries)?\\.?\\s*0*${season}(?!\\d)`, 'i'));
   } else {
     patterns.push(new RegExp(`\\be(?:p(?:isode)?)?\\.?\\s*0*${ep}\\b`, 'i'));
     // "#5"-style numbering - common on YouTube for numbered series that
@@ -478,7 +483,7 @@ module.exports = function createNzbRoutes() {
           );
         }
 
-        logger.info({ results }, 'nzb: search complete');
+        logger.debug({ results }, 'nzb: search complete');
 
         res.type('application/xml').send(nzbFeedModule.buildSearchXml(results, responseOpts));
       } catch (err) {
@@ -562,19 +567,25 @@ module.exports = function createNzbRoutes() {
       const downloadModule = require('../modules/downloadModule');
       const file = (req.files || [])[0];
       if (!file || !file.buffer) {
-        res.status(400).json({ status: false, error: 'No NZB file uploaded' });
+        // Real SABnzbd always answers addfile with HTTP 200 and a JSON
+        // status field, even for a rejected upload - Sonarr/Radarr's
+        // SabnzbdProxy treats any non-2xx as a DownloadClientException
+        // (connection/health failure), which would incorrectly mark the
+        // whole download client unavailable instead of just skipping this
+        // one release.
+        res.status(200).json({ status: false, error: 'No NZB file uploaded' });
         return;
       }
 
       const { youtubeId, categoryName, nzbName, season, ep } = nzbFeedModule.parseNzbXml(file.buffer);
       if (!youtubeId) {
-        res.status(400).json({ status: false, error: 'Could not recover video id from NZB' });
+        res.status(200).json({ status: false, error: 'Could not recover video id from NZB' });
         return;
       }
 
       const category = findCategory(categories, { name: categoryName });
       if (!category) {
-        res.status(400).json({ status: false, error: `Unknown category: ${categoryName}` });
+        res.status(200).json({ status: false, error: `Unknown category: ${categoryName}` });
         return;
       }
 
@@ -601,7 +612,7 @@ module.exports = function createNzbRoutes() {
         res.json({ status: true, nzo_ids: [String(jobId)] });
       } catch (err) {
         logger.error({ err, youtubeId, categoryName }, 'nzb: addfile failed to enqueue download');
-        res.status(500).json({ status: false, error: err.message || 'Failed to enqueue download' });
+        res.status(200).json({ status: false, error: err.message || 'Failed to enqueue download' });
       }
       return;
     }
@@ -785,7 +796,7 @@ module.exports = function createNzbRoutes() {
       return;
     }
 
-    res.status(400).json({ status: false, error: `Unsupported mode: ${mode}` });
+    res.status(200).json({ status: false, error: `Unsupported mode: ${mode}` });
   });
 
   return router;

@@ -14,6 +14,16 @@ const logger = require('../logger');
 
 const STRM_CACHE_LABEL_PREFIX = 'STRM Cache: ';
 
+// This job runs silently in the background while someone may be actively
+// watching this exact video live through /api/ytstream - an unthrottled
+// download easily saturates bandwidth the live session's own yt-dlp/ffmpeg
+// fetch needs, which can stall it indefinitely (observed live: a seek's
+// direct-URL ffmpeg fetch never completed, error or otherwise, while this
+// job pulled the same video at 10-20MB/s). Independent of the user's own
+// (opt-in, often unset) global ytdlpDownloadRateLimit - this cap applies
+// only to this specific background-while-watching job.
+const CACHE_ON_PLAY_RATE_LIMIT = '3M';
+
 // Synchronous race guard only - closes the window between two concurrent
 // requests for the same video both passing the DB/job checks before either
 // has actually finished calling jobModule.addOrUpdateJob (which happens
@@ -89,10 +99,14 @@ async function maybeEnqueueCacheDownload(youtubeId) {
       body: {
         urls: [`https://www.youtube.com/watch?v=${youtubeId}`],
         jobLabel: `${STRM_CACHE_LABEL_PREFIX}${video.youTubeVideoName || youtubeId} [${youtubeId}]`,
-        // Forces a real download regardless of the channel/global mediaMode
-        // ('strm' or 'both'), which would otherwise re-materialize the .strm
-        // via doSpecificDownloads's own STRM early-exit branch.
-        overrideSettings: { mediaMode: 'download' },
+        overrideSettings: {
+          // Forces a real download regardless of the channel/global mediaMode
+          // ('strm' or 'both'), which would otherwise re-materialize the .strm
+          // via doSpecificDownloads's own STRM early-exit branch.
+          mediaMode: 'download',
+          // See CACHE_ON_PLAY_RATE_LIMIT above.
+          ytdlpRateLimitOverride: CACHE_ON_PLAY_RATE_LIMIT,
+        },
         channelId: video.channel_id || undefined,
         // Path-consistency pin - see videoDownloadPostProcessFiles.js's
         // strmCacheTargetDir/strmCacheFileStem handling. Bypasses re-resolving

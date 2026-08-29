@@ -34,6 +34,8 @@ client/node_modules
 jobs/*
 config/jobs/*
 config/images/*
+config/.ytdlp-cache/*
+config/ytstream-clips/*
 
 # misc
 .DS_Store
@@ -78,5 +80,4 @@ client/build-storybook/
 (org)Dockerfile
 docker-compose.yaml
 docker-compose.yml
-youtube - planet22birthdaycake.txt
 Dockerfile

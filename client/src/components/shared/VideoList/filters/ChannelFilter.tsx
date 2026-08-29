@@ -19,9 +19,14 @@ export interface ChannelFilterProps {
   options: string[];
   onChange: (value: string) => void;
   buttonLabel?: string;
+  // Despite the component's name, it's a generic single-select string
+  // dropdown reused for other option lists (e.g. Download History's "Source"
+  // filter) - this swaps the "Channel" wording in the button/search/empty
+  // text for whatever entity the options represent.
+  entityLabel?: string;
 }
 
-function ChannelFilter({ value, options, onChange, buttonLabel }: ChannelFilterProps) {
+function ChannelFilter({ value, options, onChange, buttonLabel, entityLabel = 'Channel' }: ChannelFilterProps) {
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
   const [searchTerm, setSearchTerm] = useState('');
 
@@ -33,7 +38,7 @@ function ChannelFilter({ value, options, onChange, buttonLabel }: ChannelFilterP
     channel.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  const label = value ? `Channel: ${value}` : (buttonLabel ?? 'Filter by Channel');
+  const label = value ? `${entityLabel}: ${value}` : (buttonLabel ?? `Filter by ${entityLabel}`);
 
   return (
     <>
@@ -58,7 +63,7 @@ function ChannelFilter({ value, options, onChange, buttonLabel }: ChannelFilterP
             type="text"
             size="small"
             fullWidth
-            placeholder="Search channels..."
+            placeholder={`Search ${entityLabel.toLowerCase()}s...`}
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             onClick={(e) => e.stopPropagation()}
@@ -95,7 +100,7 @@ function ChannelFilter({ value, options, onChange, buttonLabel }: ChannelFilterP
         {filtered.length === 0 ? (
           <div style={{ padding: '8px 16px' }}>
             <Typography variant="body2" color="text.secondary">
-              No channels found
+              No {entityLabel.toLowerCase()}s found
             </Typography>
           </div>
         ) : (

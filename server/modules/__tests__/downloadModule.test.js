@@ -1296,7 +1296,7 @@ describe('DownloadModule', () => {
         }),
         false
       );
-      expect(YtdlpCommandBuilderMock.getBaseCommandArgsForManualDownload).toHaveBeenCalledWith('1080', false, null, false);
+      expect(YtdlpCommandBuilderMock.getBaseCommandArgsForManualDownload).toHaveBeenCalledWith('1080', false, null, false, { rateLimitOverride: null });
       expect(mockDownloadExecutor.doDownload).toHaveBeenCalledWith(
         expect.arrayContaining([
           '--format', 'best[height<=1080]',
@@ -1385,7 +1385,7 @@ describe('DownloadModule', () => {
 
       await downloadModule.doSpecificDownloads(request);
 
-      expect(YtdlpCommandBuilderMock.getBaseCommandArgsForManualDownload).toHaveBeenCalledWith('480', false, null, false);
+      expect(YtdlpCommandBuilderMock.getBaseCommandArgsForManualDownload).toHaveBeenCalledWith('480', false, null, false, { rateLimitOverride: null });
     });
 
     it('should respect channel-level quality override when present', async () => {
@@ -1405,7 +1405,7 @@ describe('DownloadModule', () => {
         where: { channel_id: 'UC123456' },
         attributes: ['video_quality', 'audio_format', 'skip_video_folder']
       });
-      expect(YtdlpCommandBuilderMock.getBaseCommandArgsForManualDownload).toHaveBeenCalledWith('720', false, null, false);
+      expect(YtdlpCommandBuilderMock.getBaseCommandArgsForManualDownload).toHaveBeenCalledWith('720', false, null, false, { rateLimitOverride: null });
     });
 
     it('should respect channel-level audio_format when no override provided', async () => {
@@ -1421,7 +1421,7 @@ describe('DownloadModule', () => {
 
       await downloadModule.doSpecificDownloads(request);
 
-      expect(YtdlpCommandBuilderMock.getBaseCommandArgsForManualDownload).toHaveBeenCalledWith('720', false, 'mp3_only', false);
+      expect(YtdlpCommandBuilderMock.getBaseCommandArgsForManualDownload).toHaveBeenCalledWith('720', false, 'mp3_only', false, { rateLimitOverride: null });
     });
 
     it('should prioritize override audioFormat over channel audio_format', async () => {
@@ -1440,7 +1440,7 @@ describe('DownloadModule', () => {
 
       await downloadModule.doSpecificDownloads(request);
 
-      expect(YtdlpCommandBuilderMock.getBaseCommandArgsForManualDownload).toHaveBeenCalledWith('720', false, 'video_mp3', false);
+      expect(YtdlpCommandBuilderMock.getBaseCommandArgsForManualDownload).toHaveBeenCalledWith('720', false, 'video_mp3', false, { rateLimitOverride: null });
     });
 
     it('should allow null audioFormat override to bypass channel mp3_only setting', async () => {
@@ -1459,7 +1459,7 @@ describe('DownloadModule', () => {
 
       await downloadModule.doSpecificDownloads(request);
 
-      expect(YtdlpCommandBuilderMock.getBaseCommandArgsForManualDownload).toHaveBeenCalledWith('720', false, null, false);
+      expect(YtdlpCommandBuilderMock.getBaseCommandArgsForManualDownload).toHaveBeenCalledWith('720', false, null, false, { rateLimitOverride: null });
     });
 
     it('should handle allowRedownload override setting', async () => {
@@ -1476,7 +1476,7 @@ describe('DownloadModule', () => {
 
       await downloadModule.doSpecificDownloads(request);
 
-      expect(YtdlpCommandBuilderMock.getBaseCommandArgsForManualDownload).toHaveBeenCalledWith('720', true, null, false);
+      expect(YtdlpCommandBuilderMock.getBaseCommandArgsForManualDownload).toHaveBeenCalledWith('720', true, null, false, { rateLimitOverride: null });
       expect(mockDownloadExecutor.doDownload).toHaveBeenCalledWith(
         expect.arrayContaining([
           '--format', 'best[height<=720]',
@@ -1511,7 +1511,7 @@ describe('DownloadModule', () => {
 
       await downloadModule.doSpecificDownloads(request);
 
-      expect(YtdlpCommandBuilderMock.getBaseCommandArgsForManualDownload).toHaveBeenCalledWith('480', false, null, false);
+      expect(YtdlpCommandBuilderMock.getBaseCommandArgsForManualDownload).toHaveBeenCalledWith('480', false, null, false, { rateLimitOverride: null });
       expect(mockDownloadExecutor.doDownload).toHaveBeenCalledWith(
         expect.arrayContaining([
           '--format', 'best[height<=480]',
@@ -1542,7 +1542,7 @@ describe('DownloadModule', () => {
 
       await downloadModule.doSpecificDownloads(request);
 
-      expect(YtdlpCommandBuilderMock.getBaseCommandArgsForManualDownload).toHaveBeenCalledWith('1080', false, null, false);
+      expect(YtdlpCommandBuilderMock.getBaseCommandArgsForManualDownload).toHaveBeenCalledWith('1080', false, null, false, { rateLimitOverride: null });
       expect(mockDownloadExecutor.doDownload).toHaveBeenCalledWith(
         expect.arrayContaining([
           '--download-archive', './config/complete.list',
@@ -1650,7 +1650,7 @@ describe('DownloadModule', () => {
 
       await downloadModule.doSpecificDownloads(request);
 
-      expect(YtdlpCommandBuilderMock.getBaseCommandArgsForManualDownload).toHaveBeenCalledWith('1080', false, null, true);
+      expect(YtdlpCommandBuilderMock.getBaseCommandArgsForManualDownload).toHaveBeenCalledWith('1080', false, null, true, { rateLimitOverride: null });
       expect(mockDownloadExecutor.doDownload).toHaveBeenCalledWith(
         expect.any(Array),
         mockJobId,
@@ -1676,7 +1676,7 @@ describe('DownloadModule', () => {
 
       await downloadModule.doSpecificDownloads(request);
 
-      expect(YtdlpCommandBuilderMock.getBaseCommandArgsForManualDownload).toHaveBeenCalledWith('1080', false, null, true);
+      expect(YtdlpCommandBuilderMock.getBaseCommandArgsForManualDownload).toHaveBeenCalledWith('1080', false, null, true, { rateLimitOverride: null });
       expect(mockDownloadExecutor.doDownload).toHaveBeenCalledWith(
         expect.any(Array),
         mockJobId,
@@ -1705,7 +1705,7 @@ describe('DownloadModule', () => {
 
       await downloadModule.doSpecificDownloads(request);
 
-      expect(YtdlpCommandBuilderMock.getBaseCommandArgsForManualDownload).toHaveBeenCalledWith('1080', false, null, false);
+      expect(YtdlpCommandBuilderMock.getBaseCommandArgsForManualDownload).toHaveBeenCalledWith('1080', false, null, false, { rateLimitOverride: null });
       expect(mockDownloadExecutor.doDownload).toHaveBeenCalledWith(
         expect.any(Array),
         mockJobId,
@@ -1733,7 +1733,7 @@ describe('DownloadModule', () => {
 
       await downloadModule.doSpecificDownloads(request);
 
-      expect(YtdlpCommandBuilderMock.getBaseCommandArgsForManualDownload).toHaveBeenCalledWith('1080', false, null, true);
+      expect(YtdlpCommandBuilderMock.getBaseCommandArgsForManualDownload).toHaveBeenCalledWith('1080', false, null, true, { rateLimitOverride: null });
       expect(mockDownloadExecutor.doDownload).toHaveBeenCalledWith(
         expect.any(Array),
         mockJobId,
@@ -1761,7 +1761,7 @@ describe('DownloadModule', () => {
 
       await downloadModule.doSpecificDownloads(request);
 
-      expect(YtdlpCommandBuilderMock.getBaseCommandArgsForManualDownload).toHaveBeenCalledWith('1080', false, null, false);
+      expect(YtdlpCommandBuilderMock.getBaseCommandArgsForManualDownload).toHaveBeenCalledWith('1080', false, null, false, { rateLimitOverride: null });
       expect(mockDownloadExecutor.doDownload).toHaveBeenCalledWith(
         expect.any(Array),
         mockJobId,
@@ -1844,7 +1844,7 @@ describe('DownloadModule', () => {
       });
       // Template always nested: 4th arg (skipVideoFolder) is false
       expect(YtdlpCommandBuilderMock.getBaseCommandArgsForManualDownload)
-        .toHaveBeenCalledWith(expect.anything(), false, null, false);
+        .toHaveBeenCalledWith(expect.anything(), false, null, false, { rateLimitOverride: null });
       // Executor options (8th positional arg) carry the per-video directives
       const options = mockDownloadExecutor.doDownload.mock.calls[0][7];
       expect(options.structurePerVideo).toBe(true);

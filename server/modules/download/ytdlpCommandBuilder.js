@@ -606,10 +606,17 @@ class YtdlpCommandBuilder {
    * @param {boolean} allowRedownload - Allow re-downloading previously fetched videos
    * @param {string|null} audioFormat - Audio format ('video_mp3', 'mp3_only', or null for video only)
    * @param {boolean} skipVideoFolder - If true, skip the video subfolder level (flat structure)
+   * @param {Object} [options]
+   * @param {string|null} [options.rateLimitOverride] - overrides config.ytdlpDownloadRateLimit
+   *   for this call only (e.g. yt-dlp's own "5M" syntax), regardless of whether the user has a
+   *   global rate limit configured. Used by STRM cache-on-play (see strmCacheOnPlay.js) so that
+   *   background job can't saturate bandwidth a live ytstream session for the same video needs.
    * @returns {string[]} - Array of yt-dlp command arguments
    */
-  static getBaseCommandArgsForManualDownload(resolution, allowRedownload = false, audioFormat = null, skipVideoFolder = false) {
-    const config = configModule.getConfig();
+  static getBaseCommandArgsForManualDownload(resolution, allowRedownload = false, audioFormat = null, skipVideoFolder = false, options = {}) {
+    const { rateLimitOverride = null } = options;
+    const baseConfig = configModule.getConfig();
+    const config = rateLimitOverride ? { ...baseConfig, ytdlpDownloadRateLimit: rateLimitOverride } : baseConfig;
     const res = resolution || config.preferredResolution || '1080';
     const videoCodec = config.videoCodec || 'default';
 

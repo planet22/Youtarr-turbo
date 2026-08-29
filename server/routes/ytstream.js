@@ -712,6 +712,22 @@ const HLS_IDLE_SWEEP_INTERVAL_MS = 60 * 1000;
 // a seek and restarting the encode pass unnecessarily.
 const HLS_SEEK_GRACE_MS = 2500;
 
+// After a seek-restart, once the actual target segment is ready, wait
+// (briefly, best-effort) for this many segments right after it to also be
+// ready before handing the target back to the player. Without this, a
+// restart that used to take 60s+ (which gave the encode pass a long,
+// accidental head start before the player ever asked for the next segment)
+// now often finishes in ~15s - correctly faster, but with far less of that
+// incidental cushion built up, so the player catches up to the encoder's
+// real-time production rate almost immediately and stutters/rebuffers every
+// few seconds until the pipe naturally gets back ahead. This trades a
+// little more of the *already-successful* wait for a smoother resume.
+const HLS_POST_RESTART_LOOKAHEAD_SEGMENTS = 3;
+// Hard cap on the extra wait above - never blocks the *target* segment
+// (already confirmed ready by this point) waiting on a cushion that isn't
+// materializing; just returns what's ready so far.
+const HLS_POST_RESTART_LOOKAHEAD_TIMEOUT_MS = 10000;
+
 // ytstream.hotSwapToCache: throttles how often the segment route checks the
 // DB for "has STRM cache-on-play finished downloading this video yet" — a
 // per-segment-request check would be needless load once a session has run
@@ -1614,6 +1630,19 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
     return headers;
   }
 
+  // ffArgs for a direct-URL pass embeds the full YouTube auth cookie
+  // (session tokens like __Secure-3PSID/LOGIN_INFO) inside a -headers blob -
+  // logging ffArgs verbatim for debugging would leak live account
+  // credentials into the log file. Only used for the logged copy; the real
+  // ffArgs passed to spawn() must keep the actual cookie intact.
+  function redactFfArgsForLogging(args) {
+    return args.map((arg) => (
+      typeof arg === 'string' && /Cookie:/i.test(arg)
+        ? arg.replace(/Cookie:\s*[^\r\n]*/gi, 'Cookie: [REDACTED]')
+        : arg
+    ));
+  }
+
   /**
    * Streams a resolved googlevideo.com URL back through this server rather
    * than handing the client a bare 302 redirect.
@@ -1745,26 +1774,16 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
    *   restartHlsEncodePassAtSegment. Omitted (the default) for every other
    *   caller/path, and internally for this call's own fallback re-attempt
    *   if the direct fetch fails.
+   * @param {boolean} [forceFullPipe] - skips the yt-dlp `--download-sections`
+   *   optimization (see useSectionedPipe) and always does the classic
+   *   full-from-zero pipe with ffmpeg's decode-and-discard `-ss`. Only ever
+   *   passed by this function's own maybeFallbackToFullPipe retry.
    */
-  function spawnHlsEncodePass(session, { startSegmentIndex, seekSeconds, isInitialPass, playerClientOverride, source, directUrls }) {
+  function spawnHlsEncodePass(session, { startSegmentIndex, seekSeconds, isInitialPass, playerClientOverride, source, directUrls, forceFullPipe }) {
     const { youtubeId, quality, transcode, hardwareMode, config, sessionKey, segmentType, segmentExt } = session;
     const hw = normalizeHardwareMode(hardwareMode);
     const isLocalSource = !!(source && source.type === 'local');
     const isDirectSource = !isLocalSource && !!directUrls;
-
-    let videoFormat = null;
-    let audioFormat = null;
-    let ytVideoArgs = null;
-    let ytAudioArgs = null;
-    if (!isLocalSource && !isDirectSource) {
-      ({ videoFormat, audioFormat } = getDashFormatSelectors(quality));
-      const watchUrl = `https://youtube.com/watch?v=${youtubeId}`;
-      const commonYtArgs = [...buildBaseArgs(config, { playerClient: playerClientOverride }), '-o', '-', '--no-playlist', '--no-warnings'];
-      ytVideoArgs = [...commonYtArgs, '-f', videoFormat, watchUrl];
-      ytAudioArgs = [...commonYtArgs, '-f', audioFormat, watchUrl];
-    }
-
-    const encoder = transcode === 'h264' ? buildVideoEncoderArgs(hw, resolveQualityHeight(quality)) : null;
 
     // calculatedLength restarts and cached-source hot-swaps both always seek to
     // the exact segment-boundary timestamp (never mid-segment) so ffmpeg's
@@ -1775,6 +1794,50 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
     const effectiveSeek = (session.calculatedLength || isLocalSource)
       ? (startSegmentIndex > 0 ? startSegmentIndex * HLS_SEGMENT_DURATION_SECONDS : null)
       : (seekSeconds || null);
+
+    // The yt-dlp-pipe path's `-ss` (below, on the non-seekable pipe:3/pipe:4
+    // inputs) can't actually seek — ffmpeg has to decode-and-discard every
+    // frame from 0:00 up to the target, which for a seek deep into a long
+    // video can take minutes (see HLS_SEEK_RESTART_READY_TIMEOUT_MS's own
+    // comment). When there's a real seek target and we're not already on
+    // the direct-URL/local (genuinely seekable) paths, ask yt-dlp itself to
+    // only download from roughly that point via --download-sections, so the
+    // pipe never carries the discarded prefix.
+    //
+    // --download-sections alone isn't enough on these fragmented DASH
+    // formats: yt-dlp's internal ffmpeg extraction for it defaults to a
+    // non-fragmented MP4 ('ipod' muxer), which requires a seekable output -
+    // piped to `-o -` it's not, so it fails 100% of the time with "muxer
+    // does not support non seekable output" (confirmed live). Forcing that
+    // internal extraction to Matroska instead (--downloader-args
+    // "ffmpeg:-f matroska") avoids the seekable-output requirement entirely
+    // - verified live for both the video (itag 137) and audio (itag 140-3)
+    // halves independently. Our own ffmpeg below auto-detects the container
+    // from the pipe's actual bytes (via -analyzeduration/-probesize), so it
+    // doesn't care that this is Matroska instead of the usual raw MP4/DASH
+    // stream - no change needed on that side.
+    //
+    // Still approximate (byte/keyframe-estimated, not frame-exact) and only
+    // verified against this one yt-dlp version/video, hence
+    // maybeFallbackToFullPipe below as a safety net if it ever errors.
+    const useSectionedPipe = !isLocalSource && !isDirectSource && !!effectiveSeek && !forceFullPipe;
+
+    let videoFormat = null;
+    let audioFormat = null;
+    let ytVideoArgs = null;
+    let ytAudioArgs = null;
+    if (!isLocalSource && !isDirectSource) {
+      ({ videoFormat, audioFormat } = getDashFormatSelectors(quality));
+      const watchUrl = `https://youtube.com/watch?v=${youtubeId}`;
+      const commonYtArgs = [...buildBaseArgs(config, { playerClient: playerClientOverride }), '-o', '-', '--no-playlist', '--no-warnings'];
+      const sectionArgs = useSectionedPipe
+        ? ['--download-sections', `*${effectiveSeek}-inf`, '--downloader-args', 'ffmpeg:-f matroska']
+        : [];
+      ytVideoArgs = [...commonYtArgs, ...sectionArgs, '-f', videoFormat, watchUrl];
+      ytAudioArgs = [...commonYtArgs, ...sectionArgs, '-f', audioFormat, watchUrl];
+    }
+
+    const encoder = transcode === 'h264' ? buildVideoEncoderArgs(hw, resolveQualityHeight(quality)) : null;
 
     const ffArgs = [
       // 'warning' (not the usual 'error') for a direct-URL seek-restart
@@ -1812,9 +1875,16 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
       ffArgs.push('-headers', headers, '-i', directUrls.audioUrl);
       ffArgs.push('-map', '0:v:0', '-map', '1:a:0?', '-sn', '-dn', '-max_muxing_queue_size', '4096');
     } else {
-      if (effectiveSeek) ffArgs.push('-ss', String(effectiveSeek));
+      // useSectionedPipe: yt-dlp's --download-sections already starts the
+      // pipe near effectiveSeek, so an additional ffmpeg -ss here would
+      // either skip past more real content or land somewhere arbitrary
+      // (the pipe's own timestamps start near, not at, effectiveSeek) -
+      // leave ffmpeg's input un-seeked and accept whatever offset yt-dlp
+      // actually landed on.
+      const pipeSeek = useSectionedPipe ? null : effectiveSeek;
+      if (pipeSeek) ffArgs.push('-ss', String(pipeSeek));
       ffArgs.push('-thread_queue_size', '4096', '-i', 'pipe:3');
-      if (effectiveSeek) ffArgs.push('-ss', String(effectiveSeek));
+      if (pipeSeek) ffArgs.push('-ss', String(pipeSeek));
       ffArgs.push('-thread_queue_size', '4096', '-i', 'pipe:4');
       ffArgs.push('-map', '0:v:0', '-map', '1:a:0?', '-sn', '-dn', '-max_muxing_queue_size', '4096');
     }
@@ -1874,12 +1944,17 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
     );
 
     logger.info(
-      { youtubeId, sessionKey, quality, playerClient: playerClientOverride, hardwareMode: hw, startSegmentIndex, videoFormat, audioFormat, dir: session.dir, ffArgs, source: isLocalSource ? 'cache' : (isDirectSource ? 'direct-url' : 'network') },
+      {
+        youtubeId, sessionKey, quality, playerClient: playerClientOverride, hardwareMode: hw, startSegmentIndex, videoFormat, audioFormat, dir: session.dir, ffArgs: redactFfArgsForLogging(ffArgs),
+        source: isLocalSource ? 'cache' : (isDirectSource ? 'direct-url' : (useSectionedPipe ? 'sectioned-pipe' : 'network')),
+      },
       isLocalSource
         ? 'ytstream: spawning HLS encode pass from cached local file'
         : isDirectSource
           ? 'ytstream: spawning HLS encode pass from directly-resolved DASH URLs (seek-restart fix)'
-          : 'ytstream: spawning HLS encode pass (yt-dlp video + yt-dlp audio + ffmpeg)'
+          : useSectionedPipe
+            ? 'ytstream: spawning HLS encode pass (yt-dlp --download-sections + matroska + ffmpeg, sectioned seek)'
+            : 'ytstream: spawning HLS encode pass (yt-dlp video + yt-dlp audio + ffmpeg)'
     );
 
     ensureProcessExitHandlers();
@@ -1969,12 +2044,38 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
       return true;
     };
 
+    // Safety net for useSectionedPipe: --download-sections + the matroska
+    // downloader override is verified against this one yt-dlp version/video
+    // combo, not guaranteed for every one - if yt-dlp or ffmpeg chokes on
+    // it, fall back exactly once to the classic full-pipe decode-and-discard
+    // path (forceFullPipe), which is slower but has always worked. Mutually
+    // exclusive with maybeFallbackToPipe in practice (useSectionedPipe never
+    // true alongside isDirectSource), so trying both below is safe either way.
+    let fallbackToFullPipeAttempted = false;
+    const maybeFallbackToFullPipe = (reason, message) => {
+      if (!useSectionedPipe || fallbackToFullPipeAttempted || !isCurrentPass()) return false;
+      fallbackToFullPipeAttempted = true;
+      logger.warn(
+        { sessionKey, startSegmentIndex, reason, message },
+        'ytstream: sectioned yt-dlp seek-restart pass failed; falling back to full yt-dlp pipe (slow decode-and-discard)'
+      );
+      spawnHlsEncodePass(session, { startSegmentIndex, isInitialPass: false, source, forceFullPipe: true });
+      return true;
+    };
+
     if (needsYtDlpChildren) {
-      ytVideo.on('error', (err) => markFailed(err.message));
-      ytAudio.on('error', (err) => markFailed(err.message));
+      ytVideo.on('error', (err) => {
+        if (maybeFallbackToFullPipe('ytdlp-video-spawn-error', err.message)) return;
+        markFailed(err.message);
+      });
+      ytAudio.on('error', (err) => {
+        if (maybeFallbackToFullPipe('ytdlp-audio-spawn-error', err.message)) return;
+        markFailed(err.message);
+      });
     }
     ff.on('error', (err) => {
       if (maybeFallbackToPipe('ffmpeg-spawn-error', err.message)) return;
+      if (maybeFallbackToFullPipe('ffmpeg-spawn-error', err.message)) return;
       markFailed(err.message);
     });
 
@@ -1983,6 +2084,7 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
         if (!isCurrentPass()) return;
         if (code !== 0 && code !== null && !isKilledByUs(signal)) {
           logger.error({ sessionKey, code, signal, ytVideoErr: ytVideoErr.slice(-800) }, 'ytstream: HLS yt-dlp (video) exited non-zero');
+          if (maybeFallbackToFullPipe('ytdlp-video-exit', ytVideoErr || `yt-dlp (video) exited with code ${code}`)) return;
           markFailed(ytVideoErr || `yt-dlp (video) exited with code ${code}`);
         }
       });
@@ -1990,6 +2092,7 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
         if (!isCurrentPass()) return;
         if (code !== 0 && code !== null && !isKilledByUs(signal)) {
           logger.error({ sessionKey, code, signal, ytAudioErr: ytAudioErr.slice(-800) }, 'ytstream: HLS yt-dlp (audio) exited non-zero');
+          if (maybeFallbackToFullPipe('ytdlp-audio-exit', ytAudioErr || `yt-dlp (audio) exited with code ${code}`)) return;
           markFailed(ytAudioErr || `yt-dlp (audio) exited with code ${code}`);
         }
       });
@@ -1999,6 +2102,7 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
       if (code !== 0 && code !== null && !isKilledByUs(signal)) {
         logger.error({ sessionKey, code, signal, ffErr: ffErr.slice(-800) }, 'ytstream: HLS ffmpeg exited non-zero');
         if (maybeFallbackToPipe('ffmpeg-exit', ffErr || `ffmpeg exited with code ${code}`)) return;
+        if (maybeFallbackToFullPipe('ffmpeg-exit', ffErr || `ffmpeg exited with code ${code}`)) return;
         markFailed(ytVideoErr || ytAudioErr || ffErr || `ffmpeg exited with code ${code}`);
         // A clean finish already gets #EXT-X-ENDLIST from ffmpeg itself
         // for the non-calculatedLength case. A crash mid-transcode doesn't —
@@ -2025,15 +2129,20 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
    * HLS_SEEK_GRACE_MS of each other (e.g. several HLS.js byte-range
    * retries for the same seek) into a single restart.
    *
-   * Seek-restart fix (docs/YTSTREAM_SEEK_FIX.md): for a live network
-   * source, tries to resolve the DASH URLs directly first (an async yt-dlp
-   * -g call) so the new pass can seek them with a real input-side -ss
-   * instead of decode-and-discarding through a pipe — see
-   * resolveDashUrlsForSeek/spawnHlsEncodePass. `session.restartToken`
-   * guards against a second, newer restart landing while this one is
-   * still awaiting that resolution: only the most recent restart may ever
-   * actually spawn a pass, exactly like passGeneration does for the
-   * synchronous spawn path below it.
+   * Seek-restart fix (docs/YTSTREAM_SEEK_FIX.md) history: this used to try
+   * resolving the DASH URLs directly first (an async yt-dlp -g call) so the
+   * new pass could seek them with a real input-side -ss, before falling
+   * back to the yt-dlp-pipe path - see resolveDashUrlsForSeek/
+   * spawnHlsEncodePass's isDirectSource branch, still present and still
+   * used by that fallback path itself. Dropped from here entirely: across
+   * every seek observed against this deployment, the direct-URL fetch 403'd
+   * 100% of the time (see spawnHlsEncodePass's maybeFallbackToPipe comment)
+   * - it never once worked, so trying it first just taxed every seek with a
+   * guaranteed-to-fail network round-trip (yt-dlp resolve + a doomed ffmpeg
+   * fetch) before falling through to what actually works. Going straight to
+   * spawnHlsEncodePass (no directUrls) lets its own useSectionedPipe logic
+   * - yt-dlp `--download-sections` + a matroska downloader override,
+   * verified live - take the first real attempt instead.
    */
   async function restartHlsEncodePassAtSegment(session, segmentIndex) {
     const now = Date.now();
@@ -2046,20 +2155,6 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
     killChildProcess(session.ytVideo, 'hls-fakelength-restart');
     killChildProcess(session.ytAudio, 'hls-fakelength-restart');
     killChildProcess(session.ff, 'hls-fakelength-restart');
-    // Bump the generation *now*, not just inside spawnHlsEncodePass below -
-    // the direct-URL resolution this restart is about to await takes real
-    // time (a network round-trip to YouTube), and the pass just killed above
-    // typically dies (fires 'close') within milliseconds of that SIGTERM,
-    // well before this function reaches spawnHlsEncodePass. Without this,
-    // that dying pass's own isCurrentPass() check still reads the *old*
-    // passGeneration (unchanged until spawnHlsEncodePass runs) and matches
-    // its own captured myGeneration, so its close handler misfires as if it
-    // were still the current pass - logging a spurious "ffmpeg exited
-    // non-zero" for a process we deliberately killed. Bumping here
-    // immediately invalidates it; spawnHlsEncodePass's own bump further
-    // down still correctly captures whichever value is current by the time
-    // it actually spawns.
-    session.passGeneration = (session.passGeneration || 0) + 1;
     // Once a session has hot-swapped to the cached file, every subsequent
     // restart (including a calculatedLength seek past what's encoded) must keep
     // reading from that same local file - omitting `source` here would
@@ -2068,30 +2163,7 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
       ? { type: 'local', filePath: session.cachedFilePath }
       : undefined;
 
-    const restartToken = (session.restartToken = (session.restartToken || 0) + 1);
-    let directUrls = null;
-    if (!source) {
-      try {
-        const { videoUrl, audioUrl } = await resolveDashUrlsForSeek(session.youtubeId, session.config, session.quality, undefined);
-        const cookiesPath = configModule.getCookiesPath && configModule.getCookiesPath();
-        directUrls = { videoUrl, audioUrl, cookieHeader: loadYoutubeCookieHeader(cookiesPath) };
-      } catch (err) {
-        logger.warn(
-          { err: err.message, sessionKey: session.key, segmentIndex },
-          'ytstream: direct DASH URL resolution for seek-restart failed; falling back to yt-dlp pipe'
-        );
-      }
-    }
-
-    if (session.restartToken !== restartToken || session.destroying) {
-      // A newer restart (or a full session teardown) superseded this one
-      // while the resolution above was in flight - that newer call already
-      // killed whatever we killed above and is spawning (or spawned) its
-      // own pass. Spawning here too would leave two encode passes running
-      // against the same session.dir at once.
-      return;
-    }
-    spawnHlsEncodePass(session, { startSegmentIndex: segmentIndex, isInitialPass: false, source, directUrls });
+    spawnHlsEncodePass(session, { startSegmentIndex: segmentIndex, isInitialPass: false, source });
   }
 
   /**
@@ -2194,12 +2266,32 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
       logger.error({ err, sessionKey: session.key, targetIndex }, 'ytstream: seek-restart threw unexpectedly');
     });
     const readyDeadline = Date.now() + HLS_SEEK_RESTART_READY_TIMEOUT_MS;
+    let targetReady = false;
     while (Date.now() < readyDeadline) {
-      if (fs.existsSync(filePath)) return true;
+      if (fs.existsSync(filePath)) { targetReady = true; break; }
       if (session.destroying) return false;
       await new Promise((resolve) => setTimeout(resolve, HLS_READY_POLL_INTERVAL_MS));
     }
-    return fs.existsSync(filePath);
+    if (!targetReady) targetReady = fs.existsSync(filePath);
+    if (!targetReady) return false;
+
+    // This restart's target is confirmed ready - see
+    // HLS_POST_RESTART_LOOKAHEAD_SEGMENTS's comment for why it's worth a
+    // short additional wait for a few segments right behind it too, rather
+    // than handing the target back the instant it alone exists.
+    await waitForPostRestartLookahead(session, targetIndex);
+    return true;
+  }
+
+  async function waitForPostRestartLookahead(session, targetIndex) {
+    const cushionDeadline = Date.now() + HLS_POST_RESTART_LOOKAHEAD_TIMEOUT_MS;
+    for (let i = 1; i <= HLS_POST_RESTART_LOOKAHEAD_SEGMENTS; i++) {
+      const cushionPath = path.join(session.dir, `segment${String(targetIndex + i).padStart(5, '0')}.${session.segmentExt}`);
+      while (!fs.existsSync(cushionPath)) {
+        if (session.destroying || Date.now() >= cushionDeadline) return;
+        await new Promise((resolve) => setTimeout(resolve, HLS_READY_POLL_INTERVAL_MS));
+      }
+    }
   }
 
   async function createHlsSessionInternal(sessionKey, { youtubeId, quality, transcode, hardwareMode, container, config, baseUrl, seekSeconds, clientIp, userAgent, calculatedLength, hotSwapToCache }, playerClientOverride) {
@@ -2600,7 +2692,7 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
       ffArgs.push('pipe:1');
 
       logger.info(
-        { youtubeId, quality, playerClient, hardwareMode: hw, videoFormat, audioFormat, ffArgs, source: directUrls ? 'direct-url' : 'network' },
+        { youtubeId, quality, playerClient, hardwareMode: hw, videoFormat, audioFormat, ffArgs: redactFfArgsForLogging(ffArgs), source: directUrls ? 'direct-url' : 'network' },
         directUrls
           ? 'ytstream: spawning ffmpeg pipeline from directly-resolved DASH URLs (seek-restart fix)'
           : 'ytstream: spawning yt-dlp(video) + yt-dlp(audio) | ffmpeg pipeline'

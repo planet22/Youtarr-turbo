@@ -74,12 +74,6 @@ export const AutoRemovalRulesSummary: React.FC<AutoRemovalRulesSummaryProps> = (
       ))}
       <Typography variant="body2" className="mt-2">
         Always kept: <strong>Protected</strong> videos
-        {config.autoRemovalKeepRecentCount > 0 && (
-          <>, and the <strong>{config.autoRemovalKeepRecentCount}</strong> newest downloads</>
-        )}.
-
-      
-        Always kept: <strong>Protected</strong> videos
         {keptExtras.map((extra, index) => (
           <React.Fragment key={`kept-${index}`}>
             {index === keptExtras.length - 1 ? ', and ' : ', '}

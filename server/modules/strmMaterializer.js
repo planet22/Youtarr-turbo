@@ -20,6 +20,7 @@ const {
   composeEpisodeFileTemplate,
 } = require('./filesystem/constants');
 const { buildSeasonFolderPath } = require('./filesystem/pathBuilder');
+const { copySyncWithFallback } = require('./filesystem');
 
 /**
  * Materialize a video as STRM (+ optional NFO/thumbnail) without downloading media.
@@ -304,27 +305,27 @@ class StrmMaterializer {
     });
     fs.mkdirSync(paths.videoDir, { recursive: true });
 
-    // Written before the .strm itself so the sidecar is guaranteed to exist
-    // the instant Jellyfin's real-time monitor could possibly notice the
-    // .strm being created - StrmTool only writes real codec/MediaStreams
-    // data to Jellyfin's DB on that immediate "new item" path (ItemAdded);
-    // if it scans the .strm before this sidecar lands (a real risk on a
+    // Everything below is written before the .strm itself so every sidecar
+    // (media info cache, NFO, thumbnail, posters) is guaranteed to exist the
+    // instant Jellyfin's real-time monitor could possibly notice the .strm
+    // being created - StrmTool only writes real codec/MediaStreams data to
+    // Jellyfin's DB on that immediate "new item" path (ItemAdded); if it
+    // scans the .strm before a sidecar lands (a real risk on a
     // network-mounted share like this one), the item is already "known" by
-    // the time the sidecar shows up, so StrmTool's ItemUpdated handler for
-    // existing items only ever restores Size/RunTimeTicks/Container - never
-    // MediaStreams - leaving codec info missing until StrmTool's own nightly
-    // rescan (or a manual one) picks it up.
+    // the time the sidecar shows up. For MediaStreams specifically,
+    // StrmTool's ItemUpdated handler for existing items only ever restores
+    // Size/RunTimeTicks/Container - never MediaStreams - leaving codec info
+    // missing until StrmTool's own nightly rescan (or a manual one) picks it
+    // up. For the thumbnail, a missing image at first-scan time means
+    // Jellyfin's Home screen (Continue Watching/Next Up cards, which read
+    // from that initial scan rather than re-checking later) keeps showing a
+    // blank placeholder even after a later full library scan fixes the
+    // image everywhere else (detail page, season grid).
     let mediaInfoCachePath = null;
     if (strmCfg.target !== 'youtube' && strmCfg.writeMediaInfoCache !== false) {
       const ytstreamParams = strmGenerator.resolveYtstreamParams(cfg, options.strmOpts || {});
       mediaInfoCachePath = strmMediaInfoCache.writeMediaInfoCacheFile(paths.mediaBasePath, meta, ytstreamParams);
     }
-
-    const strmPath = strmGenerator.writeStrmFile(
-      paths.mediaBasePath,
-      meta.id,
-      options.strmOpts || {}
-    );
 
     // NZB grabs (see server/routes/nzb.js): Sonarr/Radarr generate their own
     // artwork/nfo on import, so skip Youtarr's nfo/season.nfo/tvshow.nfo/
@@ -365,6 +366,12 @@ class StrmMaterializer {
         await this._ensureSeasonPoster(meta, paths.videoDir);
       }
     }
+
+    const strmPath = strmGenerator.writeStrmFile(
+      paths.mediaBasePath,
+      meta.id,
+      options.strmOpts || {}
+    );
 
     const fileSize = fs.statSync(strmPath).size;
     const videoRow = {
@@ -571,7 +578,17 @@ class StrmMaterializer {
           await this._downloadFile(thumbUrl, uiThumbPath);
         }
       } catch (err) {
-        logger.warn({ err, youtubeId: meta.id }, 'STRM: UI thumbnail download failed (NZB grab)');
+        // thumbUrl is often maxresdefault.jpg, which YouTube doesn't
+        // generate for every video (routine 404, not worth a full stack
+        // trace) - hqdefault.jpg is generated for effectively all videos.
+        logger.debug({ message: err.message, youtubeId: meta.id }, 'STRM: UI thumbnail download failed (NZB grab), retrying with hqdefault');
+        try {
+          if (imageDir) {
+            await this._downloadFile(`https://i.ytimg.com/vi/${meta.id}/hqdefault.jpg`, uiThumbPath);
+          }
+        } catch (cdnErr) {
+          logger.warn({ err: cdnErr, youtubeId: meta.id }, 'STRM: UI thumbnail hqdefault fallback failed (NZB grab)');
+        }
       }
       return null;
     }
@@ -642,21 +659,42 @@ class StrmMaterializer {
     }
   }
 
+  // The channel's own avatar (cached at <imageDir>/channelthumb-<channelId>.jpg
+  // by channel subscription/provisioning - see channelThumbnails.js) is the
+  // real show artwork; regular (non-STRM) downloads already use it for both
+  // the channel-level and season-level poster.jpg (videoDownloadPostProcessFiles.js's
+  // copyChannelPosterIfNeeded/copySeasonPosterIfNeeded). Only falls back to a
+  // per-video thumbnail when that cache doesn't exist yet (e.g. the channel's
+  // avatar hasn't been fetched yet) so STRM materializing never blocks on a
+  // fresh yt-dlp channel-metadata fetch.
+  _cachedChannelThumbPath(channelId) {
+    if (!channelId) return null;
+    const thumbPath = path.join(configModule.getImagePath(), `channelthumb-${channelId}.jpg`);
+    return fs.existsSync(thumbPath) ? thumbPath : null;
+  }
+
   async _ensureChannelPoster(meta, channelDir) {
     const posterPath = path.join(channelDir, 'poster.jpg');
     if (fs.existsSync(posterPath)) return;
     const cfg = configModule.getConfig();
     if (cfg.writeChannelPosters === false) return;
 
-    const url =
-      meta.channel_id
-        ? `https://i.ytimg.com/vi/${meta.id}/mqdefault.jpg`
-        : null;
+    fs.mkdirSync(channelDir, { recursive: true });
+
+    const cachedChannelThumb = this._cachedChannelThumbPath(meta.channel_id);
+    if (cachedChannelThumb) {
+      try {
+        copySyncWithFallback(cachedChannelThumb, posterPath);
+        return;
+      } catch (err) {
+        logger.debug({ err }, 'Channel poster copy skip');
+      }
+    }
+
     // Best-effort: use video thumb as temporary channel art if nothing else
-    if (!url) return;
+    if (!meta.channel_id) return;
     try {
-      fs.mkdirSync(channelDir, { recursive: true });
-      await this._downloadFile(url, posterPath);
+      await this._downloadFile(`https://i.ytimg.com/vi/${meta.id}/mqdefault.jpg`, posterPath);
     } catch (err) {
       logger.debug({ err }, 'Channel poster skip');
     }
@@ -665,10 +703,11 @@ class StrmMaterializer {
   /**
    * Jellyfin/Kodi show a season's own poster.jpg (or folder.jpg) placed
    * inside that season's folder instead of a blank/random image, once one
-   * exists there. YouTube has no per-season artwork of its own (seasons
-   * here are just upload years), so reuse this video's thumbnail the same
-   * way _ensureChannelPoster reuses one for the channel-level poster.jpg.
-   * Idempotent - only writes once per season folder.
+   * exists there. Prefers the same cached channel avatar the show-level
+   * poster.jpg uses (see _ensureChannelPoster) for visual consistency across
+   * show/season/episode views; only falls back to this video's own thumbnail
+   * when the channel avatar isn't cached yet. Idempotent - only writes once
+   * per season folder.
    */
   async _ensureSeasonPoster(meta, seasonFolderPath) {
     const posterPath = path.join(seasonFolderPath, 'poster.jpg');
@@ -676,10 +715,20 @@ class StrmMaterializer {
     const cfg = configModule.getConfig();
     if (cfg.writeChannelPosters === false) return;
 
-    const url = `https://i.ytimg.com/vi/${meta.id}/mqdefault.jpg`;
+    fs.mkdirSync(seasonFolderPath, { recursive: true });
+
+    const cachedChannelThumb = this._cachedChannelThumbPath(meta.channel_id);
+    if (cachedChannelThumb) {
+      try {
+        copySyncWithFallback(cachedChannelThumb, posterPath);
+        return;
+      } catch (err) {
+        logger.debug({ err }, 'Season poster copy skip');
+      }
+    }
+
     try {
-      fs.mkdirSync(seasonFolderPath, { recursive: true });
-      await this._downloadFile(url, posterPath);
+      await this._downloadFile(`https://i.ytimg.com/vi/${meta.id}/mqdefault.jpg`, posterPath);
     } catch (err) {
       logger.debug({ err }, 'Season poster skip');
     }

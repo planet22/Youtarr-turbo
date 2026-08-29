@@ -31,6 +31,7 @@ import VideoThumbnail from './VideoThumbnail';
 import MissingVideoChip from './MissingVideoChip';
 import FailedVideoChip from './FailedVideoChip';
 import FailedDownloadsDetail from './FailedDownloadsDetail';
+import ChannelFilter from '../shared/VideoList/filters/ChannelFilter';
 
 interface DownloadHistoryProps {
   jobs: Job[];
@@ -54,6 +55,23 @@ function cleanJobTypeLabel(jobType: string): string {
     return match ? `NZB grab (${match[1]}): ${match[2]}` : 'NZB grab';
   }
   return jobType;
+}
+
+// Shared with the "Source" column and its filter dropdown, so the filter's
+// option list always matches exactly what's displayed in that column.
+function getJobSourceLabel(jobType: string): string {
+  if (jobType.startsWith('Auto-retry')) return 'Auto-retry';
+  if (jobType.includes('Channel Downloads')) return 'Channels';
+  if (jobType.includes('Manually Added Urls')) {
+    const apiKeyMatch = jobType.match(/\(via API: (.+)\)/);
+    return apiKeyMatch ? `API: ${apiKeyMatch[1]}` : 'Manual Videos';
+  }
+  if (jobType === 'Playlist Downloads' || jobType.startsWith('Playlist: ')) return 'Playlists';
+  if (jobType.startsWith('Sonarr/Radarr: ')) {
+    const categoryMatch = jobType.match(/^Sonarr\/Radarr: (.+?) \[/);
+    return categoryMatch ? `NZB (${categoryMatch[1]})` : 'NZB';
+  }
+  return 'Other';
 }
 
 // NZB-grab jobs (server/routes/nzb.js) are always single-video, but when the
@@ -140,6 +158,7 @@ const DownloadHistory: React.FC<DownloadHistoryProps> = ({
 }) => {
   const [modalVideo, setModalVideo] = useState<VideoData | null>(null);
   const [showNoVideoJobs, setShowNoVideoJobs] = useState(false);
+  const [sourceFilter, setSourceFilter] = useState('');
   const [imageErrors, setImageErrors] = useState<Record<string, boolean>>({});
   const buttonRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const [currentPage, setCurrentPage] = useState(1);
@@ -153,14 +172,28 @@ const DownloadHistory: React.FC<DownloadHistoryProps> = ({
     setImageErrors((prev) => ({ ...prev, [youtubeId]: true }));
   };
 
-  const jobsToDisplay = jobs
-    .filter((job) => !job.jobType?.includes('Import Subscriptions'))
+  const jobsForSourceOptions = jobs.filter((job) => !job.jobType?.includes('Import Subscriptions'));
+  const sourceOptions = Array.from(
+    new Set(jobsForSourceOptions.map((job) => getJobSourceLabel(job.jobType)))
+  ).sort();
+
+  const jobsToDisplay = jobsForSourceOptions
+    .filter((job) => (sourceFilter ? getJobSourceLabel(job.jobType) === sourceFilter : true))
     .filter((job) => {
       if (showNoVideoJobs) {
         return true;
       }
 
       if (!job.data?.videos) {
+        return true;
+      }
+
+      // NZB-grab jobs whose Video row was already deleted (Sonarr/Radarr's
+      // 'untracked' import strategy) legitimately have an empty videos
+      // array, but job.data.nzb still carries enough (youtubeId/title) to
+      // render a real row via nzbFallbackVideo - hiding those by default
+      // would throw away a displayable job just because its DB row is gone.
+      if (job.data?.nzb?.youtubeId) {
         return true;
       }
 
@@ -182,7 +215,7 @@ const DownloadHistory: React.FC<DownloadHistoryProps> = ({
   React.useEffect(() => {
     setCurrentPage(1);
     setVisibleCount(itemsPerPage);
-  }, [showNoVideoJobs, itemsPerPage]);
+  }, [showNoVideoJobs, sourceFilter, itemsPerPage]);
 
   React.useEffect(() => {
     if (!useInfiniteScroll) {
@@ -240,10 +273,16 @@ const DownloadHistory: React.FC<DownloadHistoryProps> = ({
           <Card>
             <CardHeader title="Download History" />
             <CardContent>
-              <Toolbar disableGutters className="mb-2">
+              <Toolbar disableGutters className="mb-2 flex-wrap gap-2">
                 <FormControlLabel
                   control={<Checkbox checked={showNoVideoJobs} onChange={(e) => { setShowNoVideoJobs(e.target.checked); setCurrentPage(1); }} />}
                   label="Show jobs without videos"
+                />
+                <ChannelFilter
+                  value={sourceFilter}
+                  options={sourceOptions}
+                  onChange={setSourceFilter}
+                  entityLabel="Source"
                 />
               </Toolbar>
               {!useInfiniteScroll && (
@@ -282,18 +321,7 @@ const DownloadHistory: React.FC<DownloadHistoryProps> = ({
                     let hours = timeCreated.getHours();
                     const period = hours >= 12 ? 'PM' : 'AM';
 
-                    let formattedJobType = '';
-                    if (job.jobType.startsWith('Auto-retry')) formattedJobType = 'Auto-retry';
-                    else if (job.jobType.includes('Channel Downloads')) formattedJobType = 'Channels';
-                    else if (job.jobType.includes('Manually Added Urls')) {
-                      const apiKeyMatch = job.jobType.match(/\(via API: (.+)\)/);
-                      formattedJobType = apiKeyMatch ? `API: ${apiKeyMatch[1]}` : 'Manual Videos';
-                    }
-                    else if (job.jobType === 'Playlist Downloads' || job.jobType.startsWith('Playlist: ')) formattedJobType = 'Playlists';
-                    else if (job.jobType.startsWith('Sonarr/Radarr: ')) {
-                      const categoryMatch = job.jobType.match(/^Sonarr\/Radarr: (.+?) \[/);
-                      formattedJobType = categoryMatch ? `NZB (${categoryMatch[1]})` : 'NZB';
-                    }
+                    const formattedJobType = getJobSourceLabel(job.jobType);
 
                     hours = hours % 12;
                     hours = hours ? hours : 12;
@@ -474,10 +502,16 @@ const DownloadHistory: React.FC<DownloadHistoryProps> = ({
       <Grid item xs={12}>
         <Box>
           <CardHeader title="Download History" className="px-0 pt-0" />
-          <Toolbar disableGutters className="justify-between mb-2">
+          <Toolbar disableGutters className="justify-between mb-2 flex-wrap gap-2">
             <FormControlLabel
               control={<Checkbox checked={showNoVideoJobs} onChange={(e) => { setShowNoVideoJobs(e.target.checked); setCurrentPage(1); }} />}
               label="Show jobs with no videos"
+            />
+            <ChannelFilter
+              value={sourceFilter}
+              options={sourceOptions}
+              onChange={setSourceFilter}
+              entityLabel="Source"
             />
           </Toolbar>
 
@@ -524,18 +558,7 @@ const DownloadHistory: React.FC<DownloadHistoryProps> = ({
                     let hours = timeCreated.getHours();
                     const period = hours >= 12 ? 'PM' : 'AM';
 
-                    let formattedJobType = '';
-                    if (job.jobType.startsWith('Auto-retry')) formattedJobType = 'Auto-retry';
-                    else if (job.jobType.includes('Channel Downloads')) formattedJobType = 'Channels';
-                    else if (job.jobType.includes('Manually Added Urls')) {
-                      const apiKeyMatch = job.jobType.match(/\(via API: (.+)\)/);
-                      formattedJobType = apiKeyMatch ? `API: ${apiKeyMatch[1]}` : 'Manual Videos';
-                    }
-                    else if (job.jobType === 'Playlist Downloads' || job.jobType.startsWith('Playlist: ')) formattedJobType = 'Playlists';
-                    else if (job.jobType.startsWith('Sonarr/Radarr: ')) {
-                      const categoryMatch = job.jobType.match(/^Sonarr\/Radarr: (.+?) \[/);
-                      formattedJobType = categoryMatch ? `NZB (${categoryMatch[1]})` : 'NZB';
-                    }
+                    const formattedJobType = getJobSourceLabel(job.jobType);
 
                     hours = hours % 12;
                     hours = hours ? hours : 12;

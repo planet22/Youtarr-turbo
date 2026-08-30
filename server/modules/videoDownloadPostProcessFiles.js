@@ -445,6 +445,60 @@ async function copySeasonPosterIfNeeded(channelId, seasonFolderPath) {
   }
 }
 
+// Jellyfin/Kodi's "logo" (clearlogo) has no YouTube equivalent, so reuse the
+// channel avatar the same way copySeasonPosterIfNeeded reuses it for
+// poster.jpg - same source image, just filed under the role Jellyfin looks
+// for when rendering a logo overlay instead of a poster.
+async function copyChannelLogoIfNeeded(channelId, channelFolderPath) {
+  if (!shouldWriteChannelPosters()) {
+    return;
+  }
+
+  try {
+    const channelLogoPath = path.join(channelFolderPath, 'logo.jpg');
+    if (!fs.existsSync(channelLogoPath)) {
+      await downloadChannelThumbnailIfMissing(channelId);
+
+      const channelThumbPath = path.join(
+        configModule.getImagePath(),
+        `channelthumb-${channelId}.jpg`
+      );
+
+      if (fs.existsSync(channelThumbPath)) {
+        copySyncWithFallback(channelThumbPath, channelLogoPath);
+        logger.info({ channelFolderPath }, 'Channel logo.jpg created');
+      }
+    }
+  } catch (err) {
+    logger.warn({ err }, 'Error copying channel logo');
+  }
+}
+
+async function copySeasonLogoIfNeeded(channelId, seasonFolderPath) {
+  if (!shouldWriteChannelPosters()) {
+    return;
+  }
+
+  try {
+    const seasonLogoPath = path.join(seasonFolderPath, 'logo.jpg');
+    if (!fs.existsSync(seasonLogoPath)) {
+      await downloadChannelThumbnailIfMissing(channelId);
+
+      const channelThumbPath = path.join(
+        configModule.getImagePath(),
+        `channelthumb-${channelId}.jpg`
+      );
+
+      if (fs.existsSync(channelThumbPath)) {
+        copySyncWithFallback(channelThumbPath, seasonLogoPath);
+        logger.info({ seasonFolderPath }, 'Season logo.jpg created');
+      }
+    }
+  } catch (err) {
+    logger.warn({ err }, 'Error copying season logo');
+  }
+}
+
 // Copy-only: the banner cache is populated at channel-add time and by the on-enable sweep.
 async function copyChannelBackdropIfNeeded(channelId, channelFolderPath) {
   if (!shouldWriteBackdropImages()) {
@@ -466,6 +520,33 @@ async function copyChannelBackdropIfNeeded(channelId, channelFolderPath) {
     }
   } catch (err) {
     logger.warn({ err }, 'Error copying channel backdrop');
+  }
+}
+
+// YouTube's channel banner is a wide strip image, matching the aspect ratio
+// Jellyfin/Kodi expect for banner.jpg (not the full-screen backdrop.jpg role
+// it was previously only saved as). Same cached source as
+// copyChannelBackdropIfNeeded, filed under the correct role name as well.
+async function copyChannelBannerIfNeeded(channelId, channelFolderPath) {
+  if (!shouldWriteBackdropImages()) {
+    return;
+  }
+
+  try {
+    const channelBannerJellyfinPath = path.join(channelFolderPath, 'banner.jpg');
+    if (!fs.existsSync(channelBannerJellyfinPath)) {
+      const channelBannerPath = path.join(
+        configModule.getImagePath(),
+        `channelbanner-${channelId}.jpg`
+      );
+
+      if (fs.existsSync(channelBannerPath)) {
+        copySyncWithFallback(channelBannerPath, channelBannerJellyfinPath);
+        logger.info({ channelFolderPath }, 'Channel banner.jpg created');
+      }
+    }
+  } catch (err) {
+    logger.warn({ err }, 'Error copying channel banner');
   }
 }
 
@@ -1428,7 +1509,9 @@ async function resolveTrackedOwnerChannelId(youtubeId, metadataChannelId) {
         : path.dirname(path.dirname(finalVideoPath)));
     if (jsonData.channel_id) {
       await copyChannelPosterIfNeeded(jsonData.channel_id, finalChannelFolderPath);
+      await copyChannelLogoIfNeeded(jsonData.channel_id, finalChannelFolderPath);
       await copyChannelBackdropIfNeeded(jsonData.channel_id, finalChannelFolderPath);
+      await copyChannelBannerIfNeeded(jsonData.channel_id, finalChannelFolderPath);
     }
 
     // TV Series library mode: write/refresh tvshow.nfo and season.nfo.
@@ -1440,6 +1523,7 @@ async function resolveTrackedOwnerChannelId(youtubeId, metadataChannelId) {
       nfoGenerator.writeSeasonNfoFile(seasonFolderPath, { showTitle, season: seriesSeason });
       if (jsonData.channel_id) {
         await copySeasonPosterIfNeeded(jsonData.channel_id, seasonFolderPath);
+        await copySeasonLogoIfNeeded(jsonData.channel_id, seasonFolderPath);
       }
     }
 

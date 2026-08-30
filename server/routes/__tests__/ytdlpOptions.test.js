@@ -5,8 +5,13 @@ const supertest = require('supertest');
 jest.mock('../../modules/download/ytdlpValidator', () => ({
   dryRun: jest.fn(),
 }));
+jest.mock('../../modules/streamTuningBenchmark', () => ({
+  runBenchmark: jest.fn(),
+  isBenchmarkRunning: jest.fn().mockReturnValue(false),
+}));
 
 const ytdlpValidator = require('../../modules/download/ytdlpValidator');
+const streamTuningBenchmark = require('../../modules/streamTuningBenchmark');
 const createYtdlpOptionsRoutes = require('../ytdlpOptions');
 
 function makeApp({ verifyToken } = {}) {
@@ -88,6 +93,58 @@ describe('POST /api/ytdlp/validate-args', () => {
     expect(res.status).toBe(200);
     expect(res.body.ok).toBe(false);
     expect(res.body.stderr).toContain('--bogus');
+  });
+});
+
+describe('POST /api/ytdlp/test-tuning-benchmark', () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  test('returns 401 when verifyToken rejects', async () => {
+    const app = makeApp({
+      verifyToken: (_req, res) => res.status(401).json({ error: 'unauthorized' }),
+    });
+    const res = await supertest(app).post('/api/ytdlp/test-tuning-benchmark').send({ hardwareMode: 'none' });
+    expect(res.status).toBe(401);
+    expect(streamTuningBenchmark.runBenchmark).not.toHaveBeenCalled();
+  });
+
+  test('returns 400 when hardwareMode is missing or invalid', async () => {
+    const app = makeApp();
+    const missing = await supertest(app).post('/api/ytdlp/test-tuning-benchmark').send({});
+    expect(missing.status).toBe(400);
+    expect(missing.body.error).toMatch(/hardwareMode/);
+
+    const invalid = await supertest(app).post('/api/ytdlp/test-tuning-benchmark').send({ hardwareMode: 'bogus' });
+    expect(invalid.status).toBe(400);
+    expect(streamTuningBenchmark.runBenchmark).not.toHaveBeenCalled();
+  });
+
+  test('returns 409 when a benchmark is already running', async () => {
+    streamTuningBenchmark.isBenchmarkRunning.mockReturnValueOnce(true);
+    const app = makeApp();
+    const res = await supertest(app).post('/api/ytdlp/test-tuning-benchmark').send({ hardwareMode: 'none' });
+    expect(res.status).toBe(409);
+    expect(streamTuningBenchmark.runBenchmark).not.toHaveBeenCalled();
+  });
+
+  test('returns 200 with the matrix and recommendation map, scoped to the requested hardwareMode', async () => {
+    const matrix = { 1080: { fast: { ok: true, realtime: true } } };
+    const recommended = { 1080: 'fast' };
+    streamTuningBenchmark.runBenchmark.mockResolvedValueOnce({ matrix, recommended });
+
+    const app = makeApp();
+    const res = await supertest(app).post('/api/ytdlp/test-tuning-benchmark').send({ hardwareMode: 'qsv' });
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ ok: true, hardwareMode: 'qsv', matrix, recommended });
+    expect(streamTuningBenchmark.runBenchmark).toHaveBeenCalledWith('qsv', [480, 720, 1080, 1440, 2160]);
+  });
+
+  test('returns 500 with an error message when the benchmark throws', async () => {
+    streamTuningBenchmark.runBenchmark.mockRejectedValueOnce(new Error('ffmpeg not found'));
+    const app = makeApp();
+    const res = await supertest(app).post('/api/ytdlp/test-tuning-benchmark').send({ hardwareMode: 'none' });
+    expect(res.status).toBe(500);
+    expect(res.body).toEqual({ ok: false, error: 'ffmpeg not found' });
   });
 });
 

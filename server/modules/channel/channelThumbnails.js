@@ -79,35 +79,46 @@ class ChannelThumbnails {
    * @returns {Promise<void>}
    */
   async downloadImageToFile(imageUrl, targetFileName) {
+    const imageDir = configModule.getImagePath();
+    return this.downloadImageToPath(imageUrl, path.join(imageDir, targetFileName));
+  }
+
+  /**
+   * Download an image from a URL to an arbitrary absolute destination path
+   * (not confined to the image cache directory) - same request/redirect/
+   * timeout handling as downloadImageToFile, which now delegates here.
+   * @param {string} imageUrl - Direct URL to the image
+   * @param {string} destPath - Absolute path to write the image to
+   * @returns {Promise<void>}
+   */
+  async downloadImageToPath(imageUrl, destPath) {
     const https = require('https');
     const http = require('http');
-    const imageDir = configModule.getImagePath();
-    const imagePath = path.join(imageDir, targetFileName);
 
     return new Promise((resolve, reject) => {
       const protocol = imageUrl.startsWith('https') ? https : http;
-      const file = fs.createWriteStream(imagePath);
+      const file = fs.createWriteStream(destPath);
 
       const req = protocol.get(imageUrl, { timeout: 15000 }, (response) => {
         // Handle redirects
         if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
           file.close();
-          fs.unlinkSync(imagePath);
-          return this.downloadImageToFile(response.headers.location, targetFileName)
+          fs.unlinkSync(destPath);
+          return this.downloadImageToPath(response.headers.location, destPath)
             .then(resolve)
             .catch(reject);
         }
 
         if (response.statusCode !== 200) {
           file.close();
-          fs.unlinkSync(imagePath);
+          fs.unlinkSync(destPath);
           return reject(new Error(`Failed to download thumbnail: HTTP ${response.statusCode}`));
         }
 
         response.pipe(file);
         file.on('finish', () => {
           file.close();
-          logger.debug({ targetFileName, imagePath }, 'Image downloaded via HTTP');
+          logger.debug({ destPath }, 'Image downloaded via HTTP');
           resolve();
         });
       });
@@ -115,16 +126,16 @@ class ChannelThumbnails {
       req.on('timeout', () => {
         req.destroy();
         file.close();
-        if (fs.existsSync(imagePath)) {
-          fs.unlinkSync(imagePath);
+        if (fs.existsSync(destPath)) {
+          fs.unlinkSync(destPath);
         }
         reject(new Error('Thumbnail download timed out'));
       });
 
       req.on('error', (err) => {
         file.close();
-        if (fs.existsSync(imagePath)) {
-          fs.unlinkSync(imagePath);
+        if (fs.existsSync(destPath)) {
+          fs.unlinkSync(destPath);
         }
         reject(err);
       });
@@ -196,7 +207,7 @@ class ChannelThumbnails {
   }
 
   /**
-   * Backfill poster.jpg and backdrop.jpg files for existing channel folders.
+   * Backfill poster.jpg/logo.jpg and backdrop.jpg/banner.jpg files for existing channel folders.
    * @param {Array} channels - Array of channel database records
    * @returns {Promise<void>}
    */
@@ -241,11 +252,21 @@ class ChannelThumbnails {
             path.join(channelFolderPath, 'poster.jpg'),
             channelFolderName
           );
+          this.copyChannelImageIfMissing(
+            path.join(imageDir, `channelthumb-${channel.channel_id}.jpg`),
+            path.join(channelFolderPath, 'logo.jpg'),
+            channelFolderName
+          );
         }
         if (shouldWriteBackdrops) {
           this.copyChannelImageIfMissing(
             path.join(imageDir, `channelbanner-${channel.channel_id}.jpg`),
             path.join(channelFolderPath, 'backdrop.jpg'),
+            channelFolderName
+          );
+          this.copyChannelImageIfMissing(
+            path.join(imageDir, `channelbanner-${channel.channel_id}.jpg`),
+            path.join(channelFolderPath, 'banner.jpg'),
             channelFolderName
           );
         }
@@ -270,6 +291,251 @@ class ChannelThumbnails {
       copySyncWithFallback(sourcePath, targetPath);
     } catch (copyErr) {
       logger.error({ err: copyErr, channelFolderName, targetPath }, 'Error backfilling channel image');
+    }
+  }
+
+  /**
+   * Force re-copy poster.jpg/logo.jpg/backdrop.jpg/banner.jpg for every given
+   * channel's folder from this app's own cached channel images, overwriting
+   * whatever's already there. Deliberately a separate method from
+   * backfillChannelImages/copyChannelImageIfMissing above rather than a
+   * shared "force" flag on it - that method's exact skip-if-existing
+   * behavior is relied on (and covered) by existing tests, and this is a
+   * maintenance-only action, not a hot path, so a little duplication here
+   * is safer than risking that behavior.
+   *
+   * Exists because copyChannelImageIfMissing can never repair an image that
+   * already exists but is broken (e.g. wrong permissions from before
+   * copySyncWithFallback started normalizing them - see fileOperations.js)
+   * — this is the explicit "make it match the cache now" action, backing
+   * POST /api/maintenance/regenerate-channel-images.
+   *
+   * Also covers TV Series library mode's per-season poster.jpg/logo.jpg
+   * (see regenerateSeasonImagesForChannel) - those live one level deeper
+   * than the channel folder this loop already resolves, and use the same
+   * channel-thumbnail source image, so it's natural to fold in here rather
+   * than as a separate maintenance action.
+   *
+   * Also fills in each video/episode's own missing library-adjacent
+   * thumbnail (see regenerateVideoThumbnailsForChannel) - governed by its
+   * own `strm.writeThumbnail` setting, independent of the channel
+   * poster/backdrop flags above, so it runs even when both of those are
+   * disabled.
+   * @param {Array} channels - Array of channel database records
+   * @returns {Promise<{copied: number, skippedNoSource: number, skippedNoFolder: number, errors: number, videoThumbsCopied: number, videoThumbsDownloaded: number, videoThumbsSkipped: number, videoThumbsErrors: number}>}
+   */
+  async regenerateChannelImages(channels) {
+    const counts = {
+      copied: 0, skippedNoSource: 0, skippedNoFolder: 0, errors: 0,
+      videoThumbsCopied: 0, videoThumbsDownloaded: 0, videoThumbsSkipped: 0, videoThumbsErrors: 0,
+    };
+    try {
+      const config = configModule.getConfig() || {};
+      const shouldWritePosters = config.writeChannelPosters !== false;
+      const shouldWriteBackdrops = config.writeBackdropImages === true;
+      const shouldWriteVideoThumbs = (config.strm || {}).writeThumbnail !== false;
+
+      const outputDir = configModule.directoryPath;
+      const imageDir = configModule.getImagePath();
+
+      if (!outputDir || !fs.existsSync(outputDir)) {
+        return counts;
+      }
+
+      for (const channel of channels) {
+        if (!channel.channel_id) continue;
+
+        const channelFolderName = resolveChannelFolderName(channel);
+        if (!channelFolderName) continue;
+
+        let channelFolderPath;
+        try {
+          const subfolder = resolveEffectiveSubfolder(channel.sub_folder, configModule.getDefaultSubfolder());
+          channelFolderPath = buildChannelPath(outputDir, subfolder, channelFolderName);
+        } catch (pathErr) {
+          logger.warn({ err: pathErr, channelId: channel.channel_id }, 'Skipping channel with unresolvable folder path during image regeneration');
+          continue;
+        }
+        if (!fs.existsSync(channelFolderPath)) {
+          counts.skippedNoFolder++;
+          continue;
+        }
+
+        if (shouldWritePosters) {
+          this.copyChannelImageForce(
+            path.join(imageDir, `channelthumb-${channel.channel_id}.jpg`),
+            path.join(channelFolderPath, 'poster.jpg'),
+            channelFolderName,
+            counts
+          );
+          this.copyChannelImageForce(
+            path.join(imageDir, `channelthumb-${channel.channel_id}.jpg`),
+            path.join(channelFolderPath, 'logo.jpg'),
+            channelFolderName,
+            counts
+          );
+          try {
+            // eslint-disable-next-line no-await-in-loop -- deliberately sequential, matches the rest of this loop
+            await this.regenerateSeasonImagesForChannel(channel, imageDir, counts);
+          } catch (seasonErr) {
+            // Scoped to this channel only - a failure here (e.g. a DB
+            // hiccup) must not abort the whole batch the way it would if
+            // it escaped to the outer catch below.
+            counts.errors++;
+            logger.error({ err: seasonErr, channelId: channel.channel_id }, 'Error regenerating season images for channel');
+          }
+        }
+        if (shouldWriteBackdrops) {
+          this.copyChannelImageForce(
+            path.join(imageDir, `channelbanner-${channel.channel_id}.jpg`),
+            path.join(channelFolderPath, 'backdrop.jpg'),
+            channelFolderName,
+            counts
+          );
+          this.copyChannelImageForce(
+            path.join(imageDir, `channelbanner-${channel.channel_id}.jpg`),
+            path.join(channelFolderPath, 'banner.jpg'),
+            channelFolderName,
+            counts
+          );
+        }
+        if (shouldWriteVideoThumbs) {
+          try {
+            // eslint-disable-next-line no-await-in-loop -- deliberately sequential, matches the rest of this loop
+            await this.regenerateVideoThumbnailsForChannel(channel, imageDir, counts);
+          } catch (thumbErr) {
+            // Scoped to this channel only - same reasoning as the season-images catch above.
+            counts.videoThumbsErrors++;
+            logger.error({ err: thumbErr, channelId: channel.channel_id }, 'Error regenerating video thumbnails for channel');
+          }
+        }
+      }
+    } catch (err) {
+      logger.error({ err }, 'Error during channel image regeneration');
+    }
+    return counts;
+  }
+
+  /**
+   * Fills in each of this channel's videos' own missing library-adjacent
+   * thumbnail - `<video-or-episode-file-stem>.jpg` next to the video/.strm
+   * file, exactly what the video/episode NFO's <thumb> tag references (see
+   * nfoGenerator.js's writeVideoNfoFile/writeEpisodeNfoFile). "Fill in if
+   * missing" semantics, not force-overwrite like the channel/season poster
+   * methods above - a missing video thumbnail means it was never
+   * successfully written in the first place (see strmMaterializer.js's
+   * _writeThumbnail fix for the bug this repairs after the fact - a
+   * maxresdefault.jpg 404 used to leave this file permanently missing),
+   * not a stale-permissions problem on a file that already exists, so
+   * there's nothing to force-overwrite.
+   *
+   * Prefers copying the app's own UI-grid thumbnail cache
+   * (imageDir/videothumb-<youtubeId>.jpg, already on disk for essentially
+   * every video Youtarr has ever shown in its library view) over a fresh
+   * network fetch - only falls back to downloading hqdefault.jpg from
+   * YouTube (reliably generated for effectively all videos, unlike
+   * maxresdefault.jpg) when that cache entry is also missing.
+   * @param {object} channel - channel database record
+   * @param {string} imageDir - configModule.getImagePath()
+   * @param {object} counts - tallied into: videoThumbsCopied, videoThumbsDownloaded, videoThumbsSkipped, videoThumbsErrors
+   */
+  async regenerateVideoThumbnailsForChannel(channel, imageDir, counts) {
+    const { Video } = require('../../models');
+    const videos = await Video.findAll({
+      where: { channel_id: channel.channel_id },
+      attributes: ['filePath', 'youtubeId'],
+      raw: true,
+    });
+
+    for (const video of videos) {
+      if (!video.filePath || !video.youtubeId) continue;
+
+      const parsed = path.parse(video.filePath);
+      if (!fs.existsSync(parsed.dir)) continue; // video's own folder is gone - nothing to write into
+
+      const thumbPath = path.join(parsed.dir, `${parsed.name}.jpg`);
+      if (fs.existsSync(thumbPath)) {
+        counts.videoThumbsSkipped++;
+        continue;
+      }
+
+      const uiThumbPath = path.join(imageDir, `videothumb-${video.youtubeId}.jpg`);
+      try {
+        if (fs.existsSync(uiThumbPath)) {
+          copySyncWithFallback(uiThumbPath, thumbPath);
+          counts.videoThumbsCopied++;
+        } else {
+          // eslint-disable-next-line no-await-in-loop -- deliberately sequential, matches the rest of this loop
+          await this.downloadImageToPath(`https://i.ytimg.com/vi/${video.youtubeId}/hqdefault.jpg`, thumbPath);
+          counts.videoThumbsDownloaded++;
+        }
+      } catch (err) {
+        counts.videoThumbsErrors++;
+        logger.warn({ err, youtubeId: video.youtubeId, thumbPath }, 'Error regenerating missing video thumbnail');
+      }
+    }
+  }
+
+  /**
+   * Force re-copies poster.jpg/logo.jpg into every existing season folder
+   * for this channel, when it's in TV Series library mode. A season folder
+   * isn't derivable from the channel record alone (the season is decoded
+   * per-video, from upload date or a channel-specific regex - see
+   * videoDownloadPostProcessFiles.js) - so instead of recomputing that,
+   * this reads the actual season folders back off already-downloaded
+   * videos' own filePath (one level below the video: `path.dirname`),
+   * matching exactly what copySeasonPosterIfNeeded/copySeasonLogoIfNeeded
+   * wrote them into originally.
+   * @param {object} channel - channel database record
+   * @param {string} imageDir - configModule.getImagePath()
+   * @param {object} counts - tallied into, same shape as regenerateChannelImages'
+   */
+  async regenerateSeasonImagesForChannel(channel, imageDir, counts) {
+    const downloadSettingsResolver = require('../download/downloadSettingsResolver');
+    const { Video } = require('../../models');
+
+    const libraryMode = downloadSettingsResolver.resolveFinalLibraryMode({
+      channelRecord: channel,
+      globalDefault: (configModule.getConfig() || {}).defaultLibraryMode,
+    });
+    if (libraryMode !== 'series') return;
+
+    const videos = await Video.findAll({
+      where: { channel_id: channel.channel_id },
+      attributes: ['filePath'],
+      raw: true,
+    });
+    const seasonFolders = new Set(
+      videos
+        .map((v) => v.filePath)
+        .filter(Boolean)
+        .map((filePath) => path.dirname(filePath))
+        .filter((dir) => fs.existsSync(dir))
+    );
+
+    const channelThumbPath = path.join(imageDir, `channelthumb-${channel.channel_id}.jpg`);
+    for (const seasonFolderPath of seasonFolders) {
+      this.copyChannelImageForce(channelThumbPath, path.join(seasonFolderPath, 'poster.jpg'), seasonFolderPath, counts);
+      this.copyChannelImageForce(channelThumbPath, path.join(seasonFolderPath, 'logo.jpg'), seasonFolderPath, counts);
+    }
+  }
+
+  /**
+   * Copy a cached channel image to a target path unconditionally
+   * (overwriting an existing target), tallying the outcome into `counts`.
+   * See regenerateChannelImages; contrast with copyChannelImageIfMissing.
+   */
+  copyChannelImageForce(sourcePath, targetPath, channelFolderName, counts) {
+    if (!fs.existsSync(sourcePath)) {
+      counts.skippedNoSource++;
+      return;
+    }
+    try {
+      copySyncWithFallback(sourcePath, targetPath);
+      counts.copied++;
+    } catch (copyErr) {
+      counts.errors++;
+      logger.error({ err: copyErr, channelFolderName, targetPath }, 'Error regenerating channel image');
     }
   }
 }

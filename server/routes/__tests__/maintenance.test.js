@@ -21,7 +21,9 @@ describe('Maintenance routes', () => {
 
     mockVideosModule = {
       isBackfillRunning: jest.fn().mockReturnValue(false),
-      tryStartBackfill: jest.fn()
+      tryStartBackfill: jest.fn(),
+      isImageRegenRunning: jest.fn().mockReturnValue(false),
+      tryStartImageRegen: jest.fn()
     };
     mockConfigModule = {
       getConfig: jest.fn().mockReturnValue({})
@@ -87,6 +89,60 @@ describe('Maintenance routes', () => {
       mockConfigModule.getConfig.mockReturnValue({ rescanLastRun: lastRun });
 
       const res = await request(app).get('/api/maintenance/rescan-status');
+
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ running: true, lastRun });
+    });
+  });
+
+  describe('POST /api/maintenance/regenerate-channel-images', () => {
+    test('returns 202 when started', async () => {
+      mockVideosModule.tryStartImageRegen.mockReturnValue({ started: true });
+
+      const res = await request(app).post('/api/maintenance/regenerate-channel-images');
+
+      expect(res.status).toBe(202);
+      expect(res.body).toEqual({ status: 'started', trigger: 'manual' });
+      expect(mockVideosModule.tryStartImageRegen).toHaveBeenCalledWith({ trigger: 'manual' });
+    });
+
+    test('returns 409 when already running', async () => {
+      mockVideosModule.tryStartImageRegen.mockReturnValue({ started: false, reason: 'already-running' });
+
+      const res = await request(app).post('/api/maintenance/regenerate-channel-images');
+
+      expect(res.status).toBe(409);
+      expect(res.body).toEqual({ error: 'Channel image regeneration already in progress' });
+    });
+  });
+
+  describe('GET /api/maintenance/regenerate-channel-images-status', () => {
+    test('returns running false and lastRun null when nothing has run', async () => {
+      mockVideosModule.isImageRegenRunning.mockReturnValue(false);
+      mockConfigModule.getConfig.mockReturnValue({});
+
+      const res = await request(app).get('/api/maintenance/regenerate-channel-images-status');
+
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ running: false, lastRun: null });
+    });
+
+    test('returns running true and lastRun from config', async () => {
+      mockVideosModule.isImageRegenRunning.mockReturnValue(true);
+      const lastRun = {
+        startedAt: '2026-05-04T15:00:00.000Z',
+        completedAt: '2026-05-04T15:01:00.000Z',
+        trigger: 'manual',
+        status: 'completed',
+        channelsScanned: 5,
+        copied: 8,
+        skippedNoSource: 1,
+        skippedNoFolder: 0,
+        errors: 0
+      };
+      mockConfigModule.getConfig.mockReturnValue({ channelImageRegenLastRun: lastRun });
+
+      const res = await request(app).get('/api/maintenance/regenerate-channel-images-status');
 
       expect(res.status).toBe(200);
       expect(res.body).toEqual({ running: true, lastRun });

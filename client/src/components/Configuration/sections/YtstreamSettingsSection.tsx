@@ -12,11 +12,15 @@ import {
   SelectChangeEvent,
   Switch,
   FormControlLabel,
+  Chip,
 } from '../../ui';
 import { InfoTooltip } from '../common/InfoTooltip';
 import { ConfigState } from '../types';
 import { useHardwareCapabilities } from '../hooks/useHardwareCapabilities';
+import { useTuningBenchmark } from '../hooks/useTuningBenchmark';
 import { HardwareCapabilitiesTable } from './components/HardwareCapabilitiesTable';
+import { TuningBenchmarkTable } from './components/TuningBenchmarkTable';
+import { TuningHistoryTable } from './components/TuningHistoryTable';
 
 type YtstreamConfig = ConfigState['ytstream'];
 
@@ -35,6 +39,7 @@ const DEFAULT_YTSTREAM: YtstreamConfig = {
   transcode: '',
   quality: null,
   hardwareMode: 'none',
+  tuning: 'fast',
   playerClient: '',
   calculatedLength: false,
   hotSwapToCache: false,
@@ -59,6 +64,16 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
 }) => {
   const ytstream = config.ytstream || DEFAULT_YTSTREAM;
   const { testing: testingHardware, matrix: hardwareMatrix, error: hardwareTestError, runTest: runHardwareTest } = useHardwareCapabilities(token);
+  const {
+    testing: testingTuning,
+    progress: tuningProgress,
+    matrix: tuningMatrix,
+    recommended: tuningRecommended,
+    resultHardwareMode: tuningResultHardwareMode,
+    history: tuningHistory,
+    error: tuningTestError,
+    runBenchmark: runTuningBenchmark,
+  } = useTuningBenchmark(token);
 
   const setYtstream = (patch: Partial<YtstreamConfig>) => {
     onConfigChange({ ytstream: { ...ytstream, ...patch } });
@@ -70,17 +85,42 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
   // means different things — see the checkbox's tooltip below.
   const enhancedMode = mode === 'ffmpeg' || mode === 'hls';
   const forceH264 = ytstream.transcode === 'h264';
+  const currentHardwareMode = ytstream.hardwareMode || 'none';
+  // Maps the "Stream quality" dropdown's value onto the resolution keys the
+  // tuning benchmark matrix uses (480/720/1080/1440/2160) - '' (Auto) falls
+  // back to 720 (this route's own default - see resolveQualityHeight in
+  // ytstream.js), and 'best' has no fixed height for the benchmark to key
+  // on, so no recommendation applies there.
+  const qualityHeightForTuning = !ytstream.quality ? '720' : ytstream.quality === 'best' ? null : ytstream.quality;
+  // Only trust tuningRecommended when it was actually measured for the
+  // encoder currently selected - switching Hardware encoder after running
+  // the benchmark shouldn't silently apply a different encoder's results.
+  const recommendedTierForCurrentQuality = qualityHeightForTuning && tuningResultHardwareMode === currentHardwareMode
+    ? tuningRecommended?.[qualityHeightForTuning]
+    : undefined;
+  // The tuning benchmark (and its "Recommended" badges above) only means
+  // anything once H.264 re-encoding via Enhanced mode is actually in play.
+  const tuningTestDisabledReason = !enhancedMode
+    ? 'Set Playback mode to Enhanced (ffmpeg) or Enhanced HLS to test tuning.'
+    : !forceH264
+      ? 'Set Transcode to "Force re-encode (H.264/AAC)" to test tuning.'
+      : null;
   // When on, these fields' values are what every playback request actually
   // uses — query-string overrides (a caller's own URL, or values baked into
   // an already-written .strm file) are ignored server-side. Highlighted so
   // it's clear which settings that guarantee applies to.
   const forced = ytstream.forceServerSettings === true;
+  // padding/margin are equal-and-opposite (self-cancelling) so the highlight
+  // grows outward from each field without shifting layout when `forced`
+  // toggles on/off. Kept small (3px, not the field's full Grid gutter of
+  // 8px/side at spacing={2}) so adjacent highlighted fields still have
+  // visible breathing room between their boxes instead of nearly touching.
   const forcedFieldStyle: React.CSSProperties = {
     borderRadius: 'var(--radius-ui)',
     boxShadow: '0 0 0 1px var(--warning)',
     backgroundColor: 'color-mix(in srgb, var(--warning) 8%, transparent)',
-    padding: 6,
-    margin: -6,
+    padding: 3,
+    margin: -3,
   };
 
   return (
@@ -240,6 +280,42 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
         </FormControl>
       </Grid>
 
+      <Grid item xs={12} md={4}>
+        <FormControl fullWidth style={forced ? forcedFieldStyle : undefined}>
+          <InputLabel>Encoding tuning</InputLabel>
+          <Box className="flex items-center gap-1">
+            <Select
+              value={ytstream.tuning || 'fast'}
+              label="Encoding tuning"
+              onChange={(e: SelectChangeEvent<string>) =>
+                setYtstream({ tuning: e.target.value as 'fast' | 'balanced' | 'quality' })
+              }
+              className="flex-1 min-w-0"
+              disabled={disabled || !enhancedMode || !forceH264}
+            >
+              {[
+                { value: 'fast', label: 'Fast (real-time safe)' },
+                { value: 'balanced', label: 'Balanced' },
+                { value: 'quality', label: 'Quality' },
+              ].map((opt) => (
+                <MenuItem key={opt.value} value={opt.value}>
+                  <Box className="flex items-center gap-1 justify-between w-full">
+                    <span>{opt.label}</span>
+                    {recommendedTierForCurrentQuality === opt.value && (
+                      <Chip label="Recommended" size="small" color="success" />
+                    )}
+                  </Box>
+                </MenuItem>
+              ))}
+            </Select>
+            <InfoTooltip
+              text="Trades encode speed for picture quality at a given resolution/hardware encoder. 'Fast' is this app's long-standing default and the safest choice for real-time HLS/live-pipe streaming; 'Balanced'/'Quality' push CRF/QP lower and presets slower, which can fall behind real time on weaker hardware at higher resolutions. Run the 'Test real-time tuning' benchmark below to see which tier is actually safe on this host, per resolution — the recommended tier (based on the current Hardware encoder and Stream quality) is marked above once benchmarked."
+              onMobileClick={onMobileTooltipClick}
+            />
+          </Box>
+        </FormControl>
+      </Grid>
+
       <Grid item xs={12}>
         <HardwareCapabilitiesTable
           matrix={hardwareMatrix}
@@ -248,6 +324,22 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
           onRunTest={runHardwareTest}
           onMobileTooltipClick={onMobileTooltipClick}
         />
+      </Grid>
+
+      <Grid item xs={12}>
+        <TuningBenchmarkTable
+          hardwareMode={currentHardwareMode}
+          matrix={tuningMatrix}
+          recommended={tuningRecommended}
+          resultHardwareMode={tuningResultHardwareMode}
+          progress={tuningProgress}
+          testing={testingTuning}
+          error={tuningTestError}
+          onRunTest={() => runTuningBenchmark(currentHardwareMode)}
+          disabledReason={tuningTestDisabledReason}
+          onMobileTooltipClick={onMobileTooltipClick}
+        />
+        <TuningHistoryTable history={tuningHistory} />
       </Grid>
 
       <Grid item xs={12} md={4}>

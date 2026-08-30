@@ -25,6 +25,7 @@ class VideosModule {
   constructor() {
     this._backfillRunning = false;
     this._resolutionTagBackfillRunning = false;
+    this._imageRegenRunning = false;
   }
 
   async getVideosPaginated(options = {}) {
@@ -1045,6 +1046,99 @@ class VideosModule {
       logger.error({ err }, 'Manual resolution tag backfill run failed');
     });
     return { started: true };
+  }
+
+  /**
+   * One-time maintenance pass: force re-copies every enabled channel's
+   * poster.jpg/logo.jpg/backdrop.jpg/banner.jpg from this app's own cached
+   * channel images, overwriting whatever's already on disk - see
+   * channelThumbnails.regenerateChannelImages for why this is a separate
+   * action from the normal (skip-if-existing) backfill that runs
+   * automatically on channel add/download-complete: that path can never
+   * repair an image that already exists but is broken (e.g. permissions
+   * from before copySyncWithFallback started normalizing them).
+   */
+  async regenerateChannelImages(arg = {}) {
+    const trigger = arg.trigger ?? 'manual';
+
+    if (this._imageRegenRunning) {
+      logger.info({ trigger }, 'Channel image regeneration already running, skipping');
+      return { skipped: true, reason: 'already-running' };
+    }
+    this._imageRegenRunning = true;
+
+    const { Channel } = require('../models');
+    const channelThumbnails = require('./channel/channelThumbnails');
+    const startTime = Date.now();
+    const startedAtIso = new Date(startTime).toISOString();
+    let result;
+
+    try {
+      messageEmitter.emitMessage('broadcast', null, 'server', 'channelImageRegenStatus', { running: true, trigger });
+      logger.info({ trigger }, 'Starting channel image regeneration...');
+
+      const channels = await Channel.findAll({ where: { enabled: true }, raw: true });
+      const counts = await channelThumbnails.regenerateChannelImages(channels);
+
+      result = {
+        channelsScanned: channels.length,
+        ...counts,
+        trigger,
+        startedAt: startedAtIso,
+        completedAt: new Date().toISOString(),
+        status: 'completed',
+      };
+      logger.info(result, 'Channel image regeneration completed');
+      return result;
+    } catch (err) {
+      logger.error({ err }, 'Error during channel image regeneration');
+      result = {
+        trigger,
+        startedAt: startedAtIso,
+        completedAt: new Date().toISOString(),
+        status: 'error',
+        errorMessage: err.message || 'Unknown error',
+      };
+      throw err;
+    } finally {
+      this._imageRegenRunning = false;
+
+      if (result) {
+        try {
+          const currentConfig = configModule.getConfig();
+          configModule.updateConfig({ ...currentConfig, channelImageRegenLastRun: result });
+        } catch (persistErr) {
+          logger.error({ err: persistErr }, 'Failed to persist channelImageRegenLastRun');
+        }
+      }
+
+      try {
+        messageEmitter.emitMessage('broadcast', null, 'server', 'channelImageRegenStatus', {
+          running: false,
+          lastRun: result || null,
+        });
+      } catch (emitErr) {
+        logger.error({ err: emitErr }, 'Failed to emit channelImageRegenStatus completion');
+      }
+    }
+  }
+
+  /**
+   * Atomically check the lock and kick off a channel image regeneration.
+   * Mirrors tryStartBackfill/tryStartResolutionTagBackfill.
+   */
+  tryStartImageRegen({ trigger = 'manual' } = {}) {
+    if (this._imageRegenRunning) {
+      return { started: false, reason: 'already-running' };
+    }
+    this.regenerateChannelImages({ trigger }).catch((err) => {
+      logger.error({ err }, 'Manual channel image regeneration run failed');
+    });
+    return { started: true };
+  }
+
+  isImageRegenRunning() {
+    return this._imageRegenRunning;
   }
 
   isResolutionTagBackfillRunning() {

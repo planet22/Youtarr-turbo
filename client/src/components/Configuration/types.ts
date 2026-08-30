@@ -64,6 +64,51 @@ export interface AutoRemovalDryRunResult {
   } | null;
 }
 
+// Mirrors resolvePlaybackPlan()'s return shape and the GET
+// /api/ytstream/:youtubeId/simulate route's JSON envelope - see
+// server/routes/ytstream.js.
+export interface YtstreamDryRunStep {
+  step: string;
+  detail: string;
+  probed: boolean;
+}
+
+export interface YtstreamDryRunProbeShortcut {
+  wouldFire: boolean;
+  reason: string;
+  isMetadataProbe: boolean;
+  transcode: string;
+}
+
+export interface YtstreamDryRunPlan {
+  mode: 'direct' | 'ffmpeg' | 'hls';
+  requestedMode: string;
+  ffmpegAvailable: boolean;
+  container: string;
+  transcode: string;
+  hardwareMode: string;
+  tuning: string;
+  requestedQuality: string;
+  quality: string;
+  qualityCapped: boolean;
+  seekSeconds: number | null;
+  calculatedLength: boolean;
+  hotSwapToCache: boolean;
+  forceServerSettings: boolean;
+  ignoredQueryParams: string[];
+  probeShortcut: YtstreamDryRunProbeShortcut;
+  steps: YtstreamDryRunStep[];
+}
+
+export interface YtstreamDryRunResult {
+  youtubeId: string;
+  probed: boolean;
+  plan: YtstreamDryRunPlan;
+  formatSelectors: Record<string, string>;
+  hls: { sessionKey: string; sessionAlreadyActive: boolean } | null;
+  wouldCall: string;
+}
+
 export interface SponsorBlockCategories {
   sponsor: boolean;
   intro: boolean;

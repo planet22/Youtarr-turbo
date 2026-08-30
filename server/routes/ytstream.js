@@ -1071,6 +1071,50 @@ function isLikelyMetadataProbeRequest(req) {
   return /^Lavf\//i.test(String(req.headers['user-agent'] || ''));
 }
 
+/**
+ * Single source of truth for whether the ytstream.probeShortcut early-exit
+ * (see tryServeProbeClip's doc comment) would fire for a given request -
+ * used both by the real early-exit block in the main route (which does the
+ * actual work: resolveVideoTargetResolution/capResolutionToHeight/
+ * tryServeProbeClip once this says wouldFire) and by resolvePlaybackPlan's
+ * debug trace, so the two can never drift apart the way they used to
+ * (each independently re-implementing the same condition).
+ */
+function evaluateProbeShortcut(req, config) {
+  const probeCfg = config.ytstream || {};
+  const probeQueryOverride = (name) => (probeCfg.forceServerSettings === true ? undefined : req.query[name]);
+  const isMetadataProbe = isLikelyMetadataProbeRequest(req);
+  const transcode = VALID_TRANSCODE.includes(probeQueryOverride('transcode'))
+    ? probeQueryOverride('transcode')
+    : (probeCfg.transcode || 'copy');
+
+  if (probeCfg.probeShortcut !== true) {
+    return { wouldFire: false, reason: 'probeShortcut is off', isMetadataProbe, transcode };
+  }
+  if (!isMetadataProbe) {
+    return {
+      wouldFire: false,
+      reason: 'probeShortcut is on, but this request does not look like a metadata-probe request (see isLikelyMetadataProbeRequest)',
+      isMetadataProbe,
+      transcode,
+    };
+  }
+  if (transcode !== 'h264') {
+    return {
+      wouldFire: false,
+      reason: `probeShortcut is on and this looks like a metadata-probe request, but transcode="${transcode}" (not h264) so it does not apply`,
+      isMetadataProbe,
+      transcode,
+    };
+  }
+  return {
+    wouldFire: true,
+    reason: 'probeShortcut is on, this looks like a metadata-probe request, and transcode=h264 - the real request short-circuits here (tryServeProbeClip) and never reaches the mode/quality logic below',
+    isMetadataProbe,
+    transcode,
+  };
+}
+
 // Persistent, same reasoning as HLS_PLACEHOLDER_CACHE_DIR above.
 const PROBE_CLIP_CACHE_DIR = path.join(YTSTREAM_CLIPS_DIR, 'probe-shortcut');
 const PROBE_CLIP_DURATION_SECONDS = 2;
@@ -1633,6 +1677,95 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
           isAbortedByClient = true;
           upstreamReq.destroy();
           resolve();
+        }
+      });
+    });
+  }
+
+  /**
+   * Last-resort fallback for mode=direct when the resolved URL's own fetch
+   * gets rejected (see serveDirect's catch) - pipes the SAME format
+   * selector/client through yt-dlp's own process instead of proxying a
+   * separately-resolved URL. Sidesteps the vprv=1/session-bound URL
+   * problem that causes that 403 in the first place: yt-dlp fetching
+   * within the same process/session it resolved the format in isn't
+   * subject to it, the same reason the DASH pipe modes
+   * (streamViaFfmpeg/spawnHlsEncodePass) never hit this at all.
+   *
+   * Deliberately NOT a switch to a different player_client the way the
+   * old retry was (see the 2026-08-30 investigation this replaced):
+   * android's own format list doesn't include the legacy progressive
+   * itag (18/360p) that's effectively the only muxed format any video has
+   * left, so re-resolving with android can never satisfy a direct-mode
+   * request - it was actively counterproductive, not just unhelpful.
+   *
+   * Stays "direct" in spirit - one yt-dlp child process, zero ffmpeg, zero
+   * re-encode, just a different way of getting the same bytes onto the
+   * wire. Trade-off, deliberate and known: this is a live sequential pipe,
+   * not a seekable byte-range fetch, so it can't honor Range requests the
+   * way the primary proxy path can - always serves a plain 200 from the
+   * start of the file. Only reached on this specific 403 fallback (not
+   * the common path), so a player restarting from 0 beats a 502 outright.
+   */
+  function pipeDirectStreamViaYtDlp(youtubeId, config, quality, playerClient, res) {
+    return new Promise((resolve, reject) => {
+      const format = getDirectFormatSelector(quality);
+      const args = [
+        ...buildBaseArgs(config, { playerClient }),
+        '-f', format,
+        '-o', '-',
+        '--no-playlist',
+        '--no-warnings',
+        `https://youtube.com/watch?v=${youtubeId}`,
+      ];
+      logger.info(
+        { youtubeId, format, quality, playerClient },
+        'ytstream: piping direct stream via yt-dlp (fallback after upstream fetch rejection)'
+      );
+
+      const proc = spawn('yt-dlp', args, { stdio: ['ignore', 'pipe', 'pipe'] });
+      registerChildProcess(proc);
+
+      let stderr = '';
+      proc.stderr.on('data', (chunk) => {
+        stderr = (stderr + chunk.toString()).slice(-8000);
+      });
+
+      let settled = false;
+      let headersSent = false;
+      proc.stdout.once('data', () => {
+        if (!res.headersSent) {
+          headersSent = true;
+          res.removeHeader('Accept-Ranges'); // no range/seek support on this fallback - see doc comment
+          res.set({ 'Content-Type': 'video/mp4', 'Cache-Control': 'no-store' });
+          res.status(200);
+        }
+      });
+      proc.stdout.pipe(res);
+
+      const onClientGone = () => {
+        if (settled) return;
+        settled = true;
+        killChildProcess(proc, 'client-disconnected');
+        resolve();
+      };
+      res.once('close', onClientGone);
+
+      proc.once('error', (err) => {
+        if (settled) return;
+        settled = true;
+        res.removeListener('close', onClientGone);
+        reject(err);
+      });
+
+      proc.once('exit', (code) => {
+        if (settled) return;
+        settled = true;
+        res.removeListener('close', onClientGone);
+        if (code === 0 || headersSent) {
+          resolve();
+        } else {
+          reject(new Error(stderr.trim() || `yt-dlp exited with code ${code}`));
         }
       });
     });
@@ -3052,6 +3185,242 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
     }
   });
 
+  /**
+   * Resolves every playback setting (mode/container/transcode/hardwareMode/
+   * tuning/quality/calculatedLength/hotSwapToCache/forceServerSettings) the
+   * same way for both the real streaming route below and the read-only
+   * `/simulate` debug route - a single source of truth so the debug trace
+   * can never silently drift from what a real request would actually do.
+   * Also folds the ffmpeg-availability fallback into `mode` itself (rather
+   * than leaving each mode branch to special-case it), so a caller never
+   * has to remember that mode=ffmpeg/hls can silently become direct - see
+   * the ytstream 2026-08-30 fix this replaced, which is why that fallback
+   * used to reuse a DASH-capped quality height that direct mode couldn't
+   * use.
+   *
+   * `probe: true` (what the real route always passes) runs the two real
+   * yt-dlp lookups this logic depends on for full accuracy - the DASH-based
+   * best-available-height auto-cap (resolveEffectiveQualityHeight) and the
+   * transcode=copy->h264 codec auto-upgrade check (resolveVideoCodec).
+   * `probe: false` (the /simulate route's default) skips both and reports
+   * the pre-probe values instead, so a debug call is instant and never
+   * touches yt-dlp/YouTube. isFfmpegAvailable() and the probeShortcut check
+   * are always evaluated for real either way - both are cheap, pure/cached,
+   * side-effect-free reads.
+   */
+  async function resolvePlaybackPlan(youtubeId, req, config, { probe }) {
+    const ytCfg = config.ytstream || {};
+    const steps = [];
+
+    // probeShortcut - evaluateProbeShortcut is the same function the real
+    // early-exit block above this route calls, so this can never drift
+    // from what actually decides whether a real request short-circuits
+    // there. A real request that matches this never reaches any of the
+    // logic below at all - this is computed here purely for the trace.
+    const probeShortcut = evaluateProbeShortcut(req, config);
+    steps.push({ step: 'probeShortcut', detail: probeShortcut.reason, probed: false });
+
+    const forceServerSettings = ytCfg.forceServerSettings === true;
+    const queryOverride = (name) => (forceServerSettings ? undefined : req.query[name]);
+    const ignoredQueryParams = forceServerSettings
+      ? ['mode', 'container', 'transcode', 'hardware', 'tuning', 'quality', 'calculatedLength', 'fakeLength'].filter(
+        (name) => req.query[name] !== undefined
+      )
+      : [];
+    steps.push({
+      step: 'forceServerSettings',
+      detail: forceServerSettings
+        ? `on - every setting below comes from Settings→Streaming only; ignoring query params present on this request: ${
+          ignoredQueryParams.length ? ignoredQueryParams.join(', ') : '(none present on this request)'
+        }`
+        : 'off - query-string overrides are honored',
+      probed: false,
+    });
+
+    const requestedMode = String(queryOverride('mode') || ytCfg.defaultMode || 'direct').toLowerCase();
+    const requestedModeValid = VALID_MODES.includes(requestedMode);
+    let mode = requestedModeValid ? requestedMode : 'direct';
+    if (!requestedModeValid) {
+      steps.push({ step: 'mode', detail: `requested mode "${requestedMode}" isn't one of ${VALID_MODES.join('/')}; falling back to direct`, probed: false });
+    }
+
+    const ffmpegAvailable = isFfmpegAvailable();
+    if ((mode === 'ffmpeg' || mode === 'hls') && !ffmpegAvailable) {
+      steps.push({ step: 'mode', detail: `mode=${mode} requested but ffmpeg is unavailable on this host; falling back to direct`, probed: false });
+      mode = 'direct';
+    } else {
+      steps.push({ step: 'mode', detail: `resolved to ${mode}`, probed: false });
+    }
+
+    const container = VALID_CONTAINERS.includes(queryOverride('container'))
+      ? queryOverride('container')
+      : (ytCfg.container || 'mp4');
+
+    let transcode = VALID_TRANSCODE.includes(queryOverride('transcode'))
+      ? queryOverride('transcode')
+      : (ytCfg.transcode || 'copy');
+
+    const hardwareMode = normalizeHardwareMode(queryOverride('hardware') || ytCfg.hardwareMode || 'none');
+    const tuning = normalizeTuning(queryOverride('tuning') || ytCfg.tuning || 'fast');
+
+    if (mode === 'direct') {
+      steps.push({
+        step: 'container/transcode/hardwareMode/tuning',
+        detail: 'ignored - direct mode always proxies the raw progressive YouTube stream as-is (no remux/transcode)',
+        probed: false,
+      });
+    }
+
+    const requestedQuality = String(queryOverride('quality') || ytCfg.quality || config.preferredResolution || '720');
+
+    let quality = requestedQuality;
+    let qualityCapped = false;
+    if (mode === 'direct') {
+      steps.push({
+        step: 'quality',
+        detail: `requested "${requestedQuality}" used as-is - direct mode's format selector already self-limits to whatever's actually available, so it is never auto-capped (see the ytstream 2026-08-30 fix)`,
+        probed: false,
+      });
+    } else if (!probe) {
+      steps.push({
+        step: 'quality',
+        detail: `requested "${requestedQuality}"; not probed - pass probe=true for this video's real auto-capped value (resolveEffectiveQualityHeight)`,
+        probed: false,
+      });
+    } else {
+      const cappedQualityHeight = await resolveEffectiveQualityHeight(youtubeId, requestedQuality, config, ytCfg.playerClient);
+      if (cappedQualityHeight) {
+        quality = String(cappedQualityHeight);
+        qualityCapped = quality !== requestedQuality;
+      }
+      steps.push({
+        step: 'quality',
+        detail: qualityCapped
+          ? `checked this video's real best-available height via yt-dlp (-f bv*) - requested "${requestedQuality}" auto-capped to "${quality}"`
+          : `checked this video's real best-available height via yt-dlp (-f bv*) - requested "${requestedQuality}" used as-is (not capped - already within range, or "best")`,
+        probed: true,
+      });
+    }
+
+    const seekSeconds = req.query.t ? Number(req.query.t) : null;
+
+    const calculatedLengthRaw = queryOverride('calculatedLength') ?? queryOverride('fakeLength') ?? ytCfg.calculatedLength;
+    const calculatedLength = calculatedLengthRaw === true || /^(1|true|yes)$/i.test(String(calculatedLengthRaw ?? ''));
+    if (calculatedLength && mode === 'direct') {
+      steps.push({
+        step: 'calculatedLength',
+        detail: 'on, but ignored - only mode=ffmpeg (estimated) and mode=hls (exact) use it; direct mode proxies YouTube\'s own real Content-Length',
+        probed: false,
+      });
+    }
+
+    const hotSwapToCache = ytCfg.hotSwapToCache === true;
+    if (hotSwapToCache && mode !== 'hls') {
+      steps.push({ step: 'hotSwapToCache', detail: 'on, but ignored - only mode=hls uses it', probed: false });
+    }
+
+    if (transcode === 'copy' && (mode === 'ffmpeg' || mode === 'hls')) {
+      if (!probe) {
+        steps.push({
+          step: 'transcode',
+          detail: 'copy requested; not probed - pass probe=true to check whether this video\'s selected format is actually H.264 (resolveVideoCodec auto-upgrade)',
+          probed: false,
+        });
+      } else {
+        try {
+          const selectedCodec = await resolveVideoCodec(youtubeId, quality, config, ytCfg.playerClient);
+          if (selectedCodec && !isH264Codec(selectedCodec)) {
+            steps.push({
+              step: 'transcode',
+              detail: `probed selected format's codec via yt-dlp (--print vcodec) - copy requested but codec is "${selectedCodec}" (not H.264); auto-upgraded to h264`,
+              probed: true,
+            });
+            transcode = 'h264';
+          } else {
+            steps.push({
+              step: 'transcode',
+              detail: `probed selected format's codec via yt-dlp (--print vcodec) - copy requested and codec is "${selectedCodec}" (H.264); kept as copy`,
+              probed: true,
+            });
+          }
+        } catch (err) {
+          steps.push({
+            step: 'transcode',
+            detail: `probed selected format's codec via yt-dlp (--print vcodec) - probe failed (${err.message}); falling back to proceeding with copy as requested, same as the real route does on this same failure`,
+            probed: true,
+          });
+        }
+      }
+    }
+
+    // Execution/fallback narrative - describes what actually happens once
+    // the resolved mode/quality/transcode above is handed off to the real
+    // serve function, including the retry chains those functions run on
+    // failure (see serveDirect/resolveDirectUrl for direct,
+    // streamViaFfmpeg/runPipeline's handleFailure for ffmpeg,
+    // getOrCreateHlsSession's retry block for hls). Static/descriptive -
+    // this never actually executes any of it - so it's kept in sync by
+    // hand with those functions rather than derived from them; skipped
+    // entirely when probeShortcut would fire, since the real request never
+    // reaches any of this.
+    if (!probeShortcut.wouldFire) {
+      if (mode === 'direct') {
+        steps.push({ step: 'execution', detail: 'resolve a direct playback URL via yt-dlp (-g)', probed: false });
+        steps.push({ step: 'execution', detail: 'if that yt-dlp call fails with a client/session extraction error, retry once with player_client=android', probed: false });
+        steps.push({
+          step: 'execution',
+          detail: 'once a URL is resolved, fetch it; if that fetch is rejected with HTTP 403, fall back to piping the same format/client directly through yt-dlp itself instead (avoids the session-bound URL issue that causes the 403; no Range/seek support on this fallback - see the ytstream 2026-08-30 investigation)',
+          probed: false,
+        });
+        steps.push({ step: 'execution', detail: 'if that also fails, respond 502 (Stream resolution failed / Direct stream proxy failed)', probed: false });
+      } else {
+        const pipelineDesc = mode === 'hls'
+          ? 'fetch video+audio via yt-dlp (DASH format selectors) piped into ffmpeg, writing real HLS segment files'
+          : 'fetch video+audio via yt-dlp (DASH format selectors) piped into a single live ffmpeg connection';
+        steps.push({ step: 'execution', detail: pipelineDesc, probed: false });
+        steps.push({
+          step: 'execution',
+          detail: 'if yt-dlp fails to fetch (a client/session extraction error, or a 403) and nothing has reached the client yet, retry once with player_client=android',
+          probed: false,
+        });
+        if (transcode === 'h264' && hardwareMode !== 'none') {
+          steps.push({
+            step: 'execution',
+            detail: `if the hardware encoder (${hardwareMode}) fails to initialize before any bytes are sent, retry once in software (libx264)`,
+            probed: false,
+          });
+        }
+        steps.push({
+          step: 'execution',
+          detail: mode === 'hls'
+            ? 'if it still fails, respond 502 (HLS stream failed to start)'
+            : 'if it still fails, respond 502 (Stream failed)',
+          probed: false,
+        });
+      }
+    }
+
+    return {
+      mode,
+      requestedMode,
+      ffmpegAvailable,
+      container,
+      transcode,
+      hardwareMode,
+      tuning,
+      requestedQuality,
+      quality,
+      qualityCapped,
+      seekSeconds,
+      calculatedLength,
+      hotSwapToCache,
+      forceServerSettings,
+      ignoredQueryParams,
+      probeShortcut,
+      steps,
+    };
+  }
+
     router.get('/api/ytstream/:youtubeId', async (req, res) => {
     logger.info(
       {
@@ -3077,23 +3446,18 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
     {
       const probeCfg = (configModule.getConfig().ytstream) || {};
       const probeQueryOverride = (name) => (probeCfg.forceServerSettings === true ? undefined : req.query[name]);
-      if (probeCfg.probeShortcut === true && isLikelyMetadataProbeRequest(req)) {
-        const requestedTranscode = VALID_TRANSCODE.includes(probeQueryOverride('transcode'))
-          ? probeQueryOverride('transcode')
-          : (probeCfg.transcode || 'copy');
-        if (requestedTranscode === 'h264') {
-          const sourceResolution = await resolveVideoTargetResolution(youtubeId, models);
-          const probeQuality = probeQueryOverride('quality') || probeCfg.quality || configModule.getConfig().preferredResolution || '720';
-          const { width, height } = capResolutionToHeight(sourceResolution.width, sourceResolution.height, resolveQualityHeight(probeQuality));
-          const served = await tryServeProbeClip(req, res, {
-            hardwareMode: normalizeHardwareMode(probeQueryOverride('hardware') || probeCfg.hardwareMode || 'none'),
-            tuning: normalizeTuning(probeQueryOverride('tuning') || probeCfg.tuning || 'fast'),
-            width,
-            height,
-          });
-          if (served) return;
-          // Generation failed - fall through to normal handling below.
-        }
+      if (evaluateProbeShortcut(req, configModule.getConfig()).wouldFire) {
+        const sourceResolution = await resolveVideoTargetResolution(youtubeId, models);
+        const probeQuality = probeQueryOverride('quality') || probeCfg.quality || configModule.getConfig().preferredResolution || '720';
+        const { width, height } = capResolutionToHeight(sourceResolution.width, sourceResolution.height, resolveQualityHeight(probeQuality));
+        const served = await tryServeProbeClip(req, res, {
+          hardwareMode: normalizeHardwareMode(probeQueryOverride('hardware') || probeCfg.hardwareMode || 'none'),
+          tuning: normalizeTuning(probeQueryOverride('tuning') || probeCfg.tuning || 'fast'),
+          width,
+          height,
+        });
+        if (served) return;
+        // Generation failed - fall through to normal handling below.
       }
     }
 
@@ -3108,91 +3472,27 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
     const config = configModule.getConfig();
     const ytCfg = config.ytstream || {};
 
-    // When on, every playback setting below comes from the current Settings
-    // → Streaming config only - query-string overrides (from a caller, or
-    // baked into an already-written .strm file's URL from before a settings
-    // change) are ignored. See client's YtstreamSettingsSection.tsx.
-    const forceServerSettings = ytCfg.forceServerSettings === true;
-    const queryOverride = (name) => (forceServerSettings ? undefined : req.query[name]);
+    // Every playback setting (mode/container/transcode/hardwareMode/tuning/
+    // quality/calculatedLength/hotSwapToCache), including the
+    // forceServerSettings query-override gate and the ffmpeg-availability
+    // mode fallback, is resolved by the shared resolvePlaybackPlan - see
+    // its doc comment above. Also used (with probe:false) by the read-only
+    // GET /api/ytstream/:youtubeId/simulate debug route below, so the two
+    // can never drift out of sync.
+    const plan = await resolvePlaybackPlan(youtubeId, req, config, { probe: true });
+    const {
+      mode,
+      container,
+      transcode,
+      hardwareMode,
+      tuning,
+      quality,
+      seekSeconds,
+      calculatedLength,
+      hotSwapToCache,
+    } = plan;
 
-    const requestedMode = String(queryOverride('mode') || ytCfg.defaultMode || 'direct').toLowerCase();
-    const mode = VALID_MODES.includes(requestedMode) ? requestedMode : 'direct';
-
-    const container = VALID_CONTAINERS.includes(queryOverride('container'))
-      ? queryOverride('container')
-      : (ytCfg.container || 'mp4');
-
-    let transcode = VALID_TRANSCODE.includes(queryOverride('transcode'))
-      ? queryOverride('transcode')
-      : (ytCfg.transcode || 'copy');
-
-    const hardwareMode = normalizeHardwareMode(
-      queryOverride('hardware') || ytCfg.hardwareMode || 'none'
-    );
-
-    // ytstream.tuning: 'fast' (default, unchanged historical behavior) |
-    // 'balanced' | 'quality' - see server/modules/streamEncoderTuning.js.
-    const tuning = normalizeTuning(queryOverride('tuning') || ytCfg.tuning || 'fast');
-
-    const requestedQuality = String(
-      queryOverride('quality') || ytCfg.quality || config.preferredResolution || '720'
-    );
-    // Auto-cap to this video's real best-available height (see
-    // resolveEffectiveQualityHeight) - so requesting/configuring e.g. 2160
-    // for a video that only actually has up to 1080p available streams at
-    // 1080p, instead of handing yt-dlp a height ceiling that silently falls
-    // back on its own while every other decision downstream (encoder
-    // scale/bitrate caps, the placeholder/probe clip resolution) stays
-    // sized for the requested-but-nonexistent height. Cached per video
-    // after the first request, so this is a one-time cost, not a
-    // per-request one.
-    const cappedQualityHeight = await resolveEffectiveQualityHeight(youtubeId, requestedQuality, config, ytCfg.playerClient);
-    const quality = cappedQualityHeight ? String(cappedQualityHeight) : requestedQuality;
-    const seekSeconds = req.query.t ? Number(req.query.t) : null;
-
-    // calculatedLength: opt-in (renamed from fakeLength; 'fakeLength' is
-    // still accepted as a query param for .strm files written before the
-    // rename - see strmGenerator.js). For mode=ffmpeg, see the
-    // responseShaping block below and the helpers above streamViaFfmpeg —
-    // it's a synthetic Content-Length/Range approximation there. For
-    // mode=hls it's exact (a real, pre-declared VOD playlist — see
-    // createHlsSessionInternal / buildFullHlsPlaylist /
-    // restartHlsEncodePassAtSegment).
-    const calculatedLengthRaw = queryOverride('calculatedLength') ?? queryOverride('fakeLength') ?? ytCfg.calculatedLength;
-    const calculatedLength = calculatedLengthRaw === true || /^(1|true|yes)$/i.test(String(calculatedLengthRaw ?? ''));
-    // mode=hls only - see maybeHotSwapToCache. No query-param override
-    // (unlike calculatedLength above): this isn't something a player/media-server
-    // URL would ever need to vary per-request, just a Settings toggle.
-    const hotSwapToCache = ytCfg.hotSwapToCache === true;
-
-    // transcode=copy auto-upgrade: getDashFormatSelectors prefers an H.264
-    // (avc1) video-only format but falls back to whatever's available at
-    // this height, which for videos with no H.264 track that high is
-    // commonly VP9/AV1. A `copy` remux of that isn't broadly compatible —
-    // see resolveVideoCodec's comment — so probe the format `copy` would
-    // actually use and upgrade to `h264` (real re-encode) when it isn't
-    // already H.264, keeping `copy`'s speed for the common case while not
-    // silently handing players an unplayable stream. Only ffmpeg/hls modes
-    // transcode at all; direct mode never remuxes, so skip the probe there.
-    if (transcode === 'copy' && (mode === 'ffmpeg' || mode === 'hls')) {
-      try {
-        const selectedCodec = await resolveVideoCodec(youtubeId, quality, config, ytCfg.playerClient);
-        if (selectedCodec && !isH264Codec(selectedCodec)) {
-          logger.info(
-            { youtubeId, quality, selectedCodec },
-            'ytstream: transcode=copy requested but the selected format is not H.264; auto-upgrading to transcode=h264 for player compatibility'
-          );
-          transcode = 'h264';
-        }
-      } catch (err) {
-        logger.warn(
-          { err, youtubeId, quality },
-          'ytstream: codec probe for transcode=copy auto-upgrade failed; proceeding with copy as requested'
-        );
-      }
-    }
-
-    const serveDirect = async (playerClient, isRetry = false) => {
+    const serveDirect = async (playerClient) => {
       const url = await resolveDirectUrl(youtubeId, config, quality, playerClient);
       const cookiesPath = configModule.getCookiesPath && configModule.getCookiesPath();
       const cookieHeader = loadYoutubeCookieHeader(cookiesPath);
@@ -3202,15 +3502,32 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
         await proxyDirectStream(url, req, res, cookieHeader);
       } catch (err) {
         // Same vprv=1/PO-token 403 that ffmpeg mode can hit — the "web"
-        // client's googlevideo URL gets rejected outright. Retry once
-        // with the android client, whose URLs don't need a PO token.
+        // client's googlevideo URL gets rejected outright when fetched by
+        // a separate process/session. Switching player_client (the old
+        // approach here) doesn't help: android's own format list doesn't
+        // include the legacy progressive itag (18/360p) that's
+        // effectively the only muxed format any video has left, so it can
+        // never satisfy this request - see the ytstream 2026-08-30
+        // investigation. Instead, fetch the SAME already-resolved
+        // format/client, just via yt-dlp's own process (immune to the
+        // session-binding issue) instead of our separate proxy fetch.
         const is403 = err.status === 403 || /\b403\b|forbidden/i.test(err.message || '');
-        if (is403 && !isRetry && !res.headersSent) {
+        if (is403 && !res.headersSent) {
           logger.warn(
             { youtubeId, err: err.message },
-            `ytstream: direct upstream URL was rejected (403); retrying with player_client=${RETRY_PLAYER_CLIENT}`
+            'ytstream: direct upstream URL was rejected (403); falling back to piping the same format via yt-dlp'
           );
-          return serveDirect(RETRY_PLAYER_CLIENT, true);
+          try {
+            await pipeDirectStreamViaYtDlp(youtubeId, config, quality, playerClient, res);
+          } catch (pipeErr) {
+            logger.error({ youtubeId, err: pipeErr.message }, 'ytstream: direct yt-dlp-pipe fallback also failed');
+            if (!res.headersSent) {
+              res.status(502).send(`Direct stream proxy failed: ${pipeErr.message}`);
+            } else if (!res.writableEnded) {
+              try { res.end(); } catch { /* ignore */ }
+            }
+          }
+          return;
         }
         logger.error({ youtubeId, err: err.message }, 'ytstream: direct proxy failed');
         if (!res.headersSent) {
@@ -3223,11 +3540,9 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
 
     try {
       if (mode === 'ffmpeg') {
-        if (!isFfmpegAvailable()) {
-          logger.warn({ youtubeId }, 'ytstream: mode=ffmpeg requested but ffmpeg is unavailable; falling back to direct mode');
-          return await serveDirect();
-        }
-
+        // ffmpeg-availability fallback to direct is handled inside
+        // resolvePlaybackPlan (plan.mode is already 'direct' in that case),
+        // so `mode` here is never 'ffmpeg' unless ffmpeg is actually present.
         res.set({
           'Content-Type': container === 'ts' ? 'video/mp2t' : 'video/mp4',
           'Cache-Control': 'no-store',
@@ -3342,11 +3657,9 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
       }
 
       if (mode === 'hls') {
-        if (!isFfmpegAvailable()) {
-          logger.warn({ youtubeId }, 'ytstream: mode=hls requested but ffmpeg is unavailable; falling back to direct mode');
-          return await serveDirect();
-        }
-
+        // ffmpeg-availability fallback to direct is handled inside
+        // resolvePlaybackPlan (plan.mode is already 'direct' in that case),
+        // so `mode` here is never 'hls' unless ffmpeg is actually present.
         const sessionKey = buildHlsSessionKey({ youtubeId, quality, transcode, hardwareMode, tuning, container, playerClient: ytCfg.playerClient, calculatedLength });
         const baseUrl = `${req.protocol}://${req.get('host')}/api/ytstream/${encodeURIComponent(youtubeId)}/hls/${sessionKey}/`;
 
@@ -3426,6 +3739,66 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
       res.type('text/plain').send(stdout);
     } catch (err) {
       res.status(502).send(`Failed to list formats: ${err.message}`);
+    }
+  });
+
+  /**
+   * Dry-run for the main streaming route: accepts the exact same query
+   * params a real .strm URL would (mode/quality/container/transcode/
+   * hardware/tuning/calculatedLength|fakeLength/t), runs them through the
+   * same resolvePlaybackPlan() the real route uses, and reports what would
+   * happen - without ever resolving a real playback URL, spawning yt-dlp/
+   * ffmpeg, creating an HLS session, proxying bytes, or triggering the
+   * cache-on-play download. Safe to hit repeatedly.
+   *
+   * `?probe=true` additionally runs the two real yt-dlp lookups
+   * resolvePlaybackPlan can optionally do (the best-available-height auto
+   * cap and the transcode=copy codec check), so the trace matches exactly
+   * what a real request against this video would decide - at the cost of
+   * the same yt-dlp latency a real request would pay. Omit it (the
+   * default) for an instant, no-network structural check of the decision
+   * flow itself.
+   */
+  router.get('/api/ytstream/:youtubeId/simulate', authMiddleware, async (req, res) => {
+    const { youtubeId } = req.params;
+    if (!/^[A-Za-z0-9_-]{6,20}$/.test(youtubeId)) {
+      return res.status(400).send('Invalid video id');
+    }
+    try {
+      const config = configModule.getConfig();
+      const probe = /^(1|true|yes)$/i.test(String(req.query.probe || ''));
+      const plan = await resolvePlaybackPlan(youtubeId, req, config, { probe });
+
+      const formatSelectors = plan.mode === 'direct'
+        ? { direct: getDirectFormatSelector(plan.quality) }
+        : getDashFormatSelectors(plan.quality);
+
+      let hls = null;
+      let wouldCall;
+      if (plan.probeShortcut.wouldFire) {
+        wouldCall = 'tryServeProbeClip(...) [probeShortcut - real request never reaches the mode/quality logic above]';
+      } else if (plan.mode === 'ffmpeg') {
+        wouldCall = `streamViaFfmpeg({ quality: "${plan.quality}", container: "${plan.container}", transcode: "${plan.transcode}", hardwareMode: "${plan.hardwareMode}", tuning: "${plan.tuning}" })`;
+      } else if (plan.mode === 'hls') {
+        const sessionKey = buildHlsSessionKey({
+          youtubeId,
+          quality: plan.quality,
+          transcode: plan.transcode,
+          hardwareMode: plan.hardwareMode,
+          tuning: plan.tuning,
+          container: plan.container,
+          playerClient: (config.ytstream || {}).playerClient,
+          calculatedLength: plan.calculatedLength,
+        });
+        hls = { sessionKey, sessionAlreadyActive: hlsSessions.has(sessionKey) };
+        wouldCall = `getOrCreateHlsSession(sessionKey: "${sessionKey}")`;
+      } else {
+        wouldCall = `serveDirect(quality: "${plan.quality}")`;
+      }
+
+      res.json({ youtubeId, probed: probe, plan, formatSelectors, hls, wouldCall });
+    } catch (err) {
+      res.status(500).json({ error: `Simulation failed: ${err.message}` });
     }
   });
 

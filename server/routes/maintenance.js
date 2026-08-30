@@ -105,6 +105,53 @@ function createMaintenanceRoutes({ verifyToken, videosModule, configModule }) {
     }
   });
 
+  /**
+   * @swagger
+   * /api/maintenance/regenerate-channel-images:
+   *   post:
+   *     summary: Force re-copy poster/logo/backdrop/banner images for every enabled channel (and its season folders), overwriting existing files; also fills in any missing video/episode thumbnails
+   *     description: Unlike the automatic image backfill (which only fills in missing images), the channel/season images here always overwrite - use it to repair images that already exist on disk but are broken (e.g. wrong permissions from before a fix). Also regenerates each season folder's poster.jpg/logo.jpg for channels in TV Series library mode. Separately, fills in any video or episode's own missing library-adjacent thumbnail (what its NFO's <thumb> tag references) - "fill in if missing" semantics there, not force-overwrite, since a missing thumbnail means it was never written at all (see strmMaterializer.js's maxresdefault-404 fix), not a stale-permissions problem on an existing file.
+   *     tags: [Maintenance]
+   *     responses:
+   *       202:
+   *         description: Regeneration started
+   *       409:
+   *         description: A regeneration is already in progress
+   */
+  router.post('/api/maintenance/regenerate-channel-images', verifyToken, (req, res) => {
+    try {
+      const result = videosModule.tryStartImageRegen({ trigger: 'manual' });
+      if (!result.started) {
+        return res.status(409).json({ error: 'Channel image regeneration already in progress' });
+      }
+      return res.status(202).json({ status: 'started', trigger: 'manual' });
+    } catch (err) {
+      logger.error({ err }, 'Failed to start manual channel image regeneration');
+      return res.status(500).json({ error: 'Failed to start channel image regeneration' });
+    }
+  });
+
+  /**
+   * @swagger
+   * /api/maintenance/regenerate-channel-images-status:
+   *   get:
+   *     summary: Get current channel image regeneration running state and last-run summary
+   *     tags: [Maintenance]
+   *     responses:
+   *       200:
+   *         description: Status object
+   */
+  router.get('/api/maintenance/regenerate-channel-images-status', verifyToken, (req, res) => {
+    try {
+      const running = videosModule.isImageRegenRunning();
+      const lastRun = configModule.getConfig().channelImageRegenLastRun ?? null;
+      return res.status(200).json({ running, lastRun });
+    } catch (err) {
+      logger.error({ err }, 'Failed to read channel image regeneration status');
+      return res.status(500).json({ error: 'Failed to read channel image regeneration status' });
+    }
+  });
+
   return router;
 }
 

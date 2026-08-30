@@ -2,6 +2,11 @@ const express = require('express');
 const customArgsParser = require('../modules/download/customArgsParser');
 const ytdlpValidator = require('../modules/download/ytdlpValidator');
 const hardwareCapabilityTester = require('../modules/hardwareCapabilityTester');
+const streamTuningBenchmark = require('../modules/streamTuningBenchmark');
+const streamEncoderTuning = require('../modules/streamEncoderTuning');
+
+// Matches the numeric values in the Ytstream Settings "Stream quality" dropdown.
+const TUNING_BENCHMARK_HEIGHTS = [480, 720, 1080, 1440, 2160];
 
 /**
  * @swagger
@@ -98,6 +103,62 @@ function createYtdlpOptionsRoutes({ verifyToken, ytdlpValidationRateLimiter }) {
         res.json({ ok: true, matrix });
       } catch (err) {
         res.status(500).json({ ok: false, error: err.message || 'Hardware capability test failed' });
+      }
+    }
+  );
+
+  /**
+   * @swagger
+   * /api/ytdlp/test-tuning-benchmark:
+   *   post:
+   *     summary: Benchmark real-time encode speed for one hardware encoder's tuning tiers, at every Stream quality resolution
+   *     description: Scoped to the single hardwareMode passed in the body (the one actually selected in Settings - not every possible encoder). For every tuning tier (fast/balanced/quality) x resolution (480/720/1080/1440/2160), runs a real timed ffmpeg encode using the exact args ytstream.js's live playback path would use, and reports whether it ran fast enough (with safety margin) to be safe for real-time HLS/live-pipe streaming at that resolution. Broadcasts tuningBenchmarkProgress WebSocket messages as it goes. Sequential; 3 x 5 = 15 short encodes, typically well under a minute.
+   *     tags: [Configuration]
+   *     security:
+   *       - bearerAuth: []
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             required: [hardwareMode]
+   *             properties:
+   *               hardwareMode:
+   *                 type: string
+   *                 enum: [none, qsv, nvenc, vaapi, amf]
+   *     responses:
+   *       200:
+   *         description: '{ hardwareMode, matrix: { [height]: { [tuning]: { ok, wallSeconds?, realtimeFactor?, realtime?, error? } } }, recommended: { [height]: tuningTierId|null } }'
+   *       400:
+   *         description: Missing or invalid hardwareMode.
+   *       401:
+   *         description: Missing or invalid auth token.
+   *       409:
+   *         description: A tuning benchmark is already running.
+   *       429:
+   *         description: Rate limit exceeded.
+   */
+  router.post(
+    '/api/ytdlp/test-tuning-benchmark',
+    verifyToken,
+    ytdlpValidationRateLimiter,
+    async (req, res) => {
+      const { hardwareMode } = req.body || {};
+      if (!streamEncoderTuning.VALID_HARDWARE.includes(hardwareMode)) {
+        return res.status(400).json({
+          ok: false,
+          error: `hardwareMode must be one of: ${streamEncoderTuning.VALID_HARDWARE.join(', ')}`,
+        });
+      }
+      if (streamTuningBenchmark.isBenchmarkRunning()) {
+        return res.status(409).json({ ok: false, error: 'A tuning benchmark is already running' });
+      }
+      try {
+        const { matrix, recommended } = await streamTuningBenchmark.runBenchmark(hardwareMode, TUNING_BENCHMARK_HEIGHTS);
+        res.json({ ok: true, hardwareMode, matrix, recommended });
+      } catch (err) {
+        res.status(500).json({ ok: false, error: err.message || 'Encoding tuning benchmark failed' });
       }
     }
   );

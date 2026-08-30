@@ -43,6 +43,7 @@ const configModule = require('../modules/configModule');
 const ytDlpRunner = require('../modules/ytDlpRunner');
 const YtdlpCommandBuilder = require('../modules/download/ytdlpCommandBuilder');
 const messageEmitter = require('../modules/messageEmitter');
+const streamEncoderTuning = require('../modules/streamEncoderTuning');
 
 const UPSTREAM_USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
@@ -92,7 +93,7 @@ const VALID_CONTAINERS = ['mp4', 'ts'];
 const VALID_TRANSCODE = ['copy', 'h264'];
 
 /** Matches ManagedTranscodeHardwareModes in the reference plugin. */
-const VALID_HARDWARE = ['none', 'qsv', 'nvenc', 'vaapi', 'amf'];
+const { normalizeHardwareMode, normalizeTuning, buildVideoEncoderArgs } = streamEncoderTuning;
 
 /**
  * Default yt-dlp player-client selection for extraction.
@@ -298,6 +299,7 @@ function snapshotStream(entry) {
     container: entry.container,
     transcode: entry.transcode,
     hardwareMode: entry.hardwareMode,
+    tuning: entry.tuning,
     clientIp: entry.clientIp,
     userAgent: entry.userAgent,
     viewerCount: entry.viewers ? entry.viewers.size : undefined,
@@ -520,15 +522,6 @@ function isH264Codec(codec) {
  * approximation, not a real seekable file.
  */
 
-/** Rough KB/s per resolution tier, video only (see estimateBitrateBytesPerSecond). */
-const RESOLUTION_BITRATE_KBPS = {
-  2160: 20000,
-  1440: 10000,
-  1080: 5000,
-  720: 2800,
-  480: 1500,
-  360: 800,
-};
 const AUDIO_BITRATE_KBPS = 192; // matches the AAC encode target / typical source audio
 // Under-estimating the total size truncates real content (the response
 // closes before all the promised bytes arrive — broken playback in any
@@ -543,50 +536,15 @@ const CALCULATED_LENGTH_PADDING_FACTOR = 1.2;
  *   treated as the top tier since the actual resolution yt-dlp picks isn't
  *   known ahead of time.
  * @returns {number} estimated encoded bytes/sec, padded high.
+ *
+ * Uses streamEncoderTuning's lookupResolutionTierKbps (same table the
+ * encoder's own -maxrate/-bufsize is derived from — see
+ * resolveEncoderBitrateCaps there) so this estimate and the real encoder
+ * cap stay in sync off one shared table instead of drifting.
  */
-/**
- * Video-only kbps for the resolution tier at/below `height`, or the top
- * tier for null/"best" (the actual resolution yt-dlp picks isn't known
- * ahead of time - same treatment as estimateBitrateBytesPerSecond used to
- * inline itself). Shared so the calculatedLength Content-Length estimate
- * and the encoder's own -maxrate/-bufsize (see resolveEncoderBitrateCaps)
- * stay in sync off the same table instead of drifting.
- */
-function lookupResolutionTierKbps(height) {
-  const tiers = Object.keys(RESOLUTION_BITRATE_KBPS).map(Number).sort((a, b) => b - a);
-  if (!height) return RESOLUTION_BITRATE_KBPS[tiers[0]];
-  for (const tier of tiers) {
-    if (height >= tier) return RESOLUTION_BITRATE_KBPS[tier];
-  }
-  return RESOLUTION_BITRATE_KBPS[tiers[tiers.length - 1]];
-}
-
 function estimateBitrateBytesPerSecond(height) {
-  const totalKbps = lookupResolutionTierKbps(height) + AUDIO_BITRATE_KBPS;
+  const totalKbps = streamEncoderTuning.lookupResolutionTierKbps(height) + AUDIO_BITRATE_KBPS;
   return Math.ceil(((totalKbps * 1000) / 8) * CALCULATED_LENGTH_PADDING_FACTOR);
-}
-
-// The old flat cap this replaced, kept as a floor (see resolveEncoderBitrateCaps)
-// so this change can only ever raise the ceiling relative to before, never lower it.
-const LEGACY_FLAT_MAXRATE_KBPS = 12000;
-
-/**
- * `-maxrate`/`-bufsize` for the qsv/nvenc encoders, scaled to the requested
- * quality via the same RESOLUTION_BITRATE_KBPS table used for the
- * calculatedLength estimate. Previously these were a flat 12M/24M
- * regardless of resolution - starving 1440p/2160p of bitrate (visible
- * blocking on complex scenes). maxrate is 1.5x the table's average-bitrate
- * figure (peak headroom above average for complex scenes, not a hard
- * target), floored at the old flat 12M so 1080p/720p/480p - where 1.5x the
- * table would actually compute *below* 12M - never regress below what they
- * had before; bufsize is 2x maxrate, the same ratio the old flat 12M/24M
- * values used.
- */
-function resolveEncoderBitrateCaps(targetHeight) {
-  const avgKbps = lookupResolutionTierKbps(targetHeight);
-  const maxrateKbps = Math.max(Math.round(avgKbps * 1.5), LEGACY_FLAT_MAXRATE_KBPS);
-  const bufsizeKbps = maxrateKbps * 2;
-  return { maxrate: `${maxrateKbps}k`, bufsize: `${bufsizeKbps}k` };
 }
 
 /**
@@ -746,6 +704,21 @@ const HLS_BASE_TEMP_DIR = path.join(os.tmpdir(), 'youtarr-ytstream-hls');
 const hlsSessions = new Map();
 
 /**
+ * Single-flight guard for getOrCreateHlsSession: two requests for the same
+ * not-yet-existing sessionKey landing before the first one's
+ * createHlsSessionInternal call finishes would otherwise both see no
+ * existing entry in hlsSessions and both spawn their own yt-dlp/ffmpeg
+ * pipeline for the same key - a real race, not theoretical (a player's own
+ * two initial requests, e.g. an app-level manifest fetch and its player
+ * engine's own fetch, routinely land within single-digit milliseconds of
+ * each other). The second creation would silently overwrite the first in
+ * hlsSessions, leaking the first's processes/temp dir while leaving
+ * whichever survives to race the client's own retries for segments it
+ * hasn't produced yet. Keyed the same as hlsSessions itself.
+ */
+const hlsSessionCreationPromises = new Map();
+
+/**
  * HLS segment container mapping for the existing `container` param.
  * `ts` (MPEG-TS) is the traditional, most universally compatible HLS
  * segment format; `mp4` maps to fragmented MP4 (.m4s + an init segment),
@@ -759,9 +732,9 @@ function getHlsContainerInfo(container) {
 }
 
 /** Identifies an HLS session across requests for the same effective params. */
-function buildHlsSessionKey({ youtubeId, quality, transcode, hardwareMode, container, playerClient, calculatedLength }) {
+function buildHlsSessionKey({ youtubeId, quality, transcode, hardwareMode, tuning, container, playerClient, calculatedLength }) {
   const raw = JSON.stringify({
-    youtubeId, quality, transcode, hardwareMode, container,
+    youtubeId, quality, transcode, hardwareMode, tuning, container,
     playerClient: playerClient || '',
     calculatedLength: !!calculatedLength,
   });
@@ -858,8 +831,8 @@ const HLS_PLACEHOLDER_FALLBACK_HEIGHT = 720;
  * instead of each spawning their own. */
 const placeholderGenerationPromises = new Map();
 
-function getPlaceholderSignature({ segmentType, hardwareMode, width, height }) {
-  return `${segmentType}-${normalizeHardwareMode(hardwareMode)}-${width}x${height}`;
+function getPlaceholderSignature({ segmentType, hardwareMode, tuning, width, height }) {
+  return `${segmentType}-${normalizeHardwareMode(hardwareMode)}-${normalizeTuning(tuning)}-${width}x${height}`;
 }
 
 /**
@@ -964,8 +937,8 @@ function runFfmpegOnce(args, { timeoutMs = 30000 } = {}) {
  * @param {number} height
  * @returns {Promise<{segmentPath: string, initPath: string|null}|null>}
  */
-async function ensurePlaceholderSegment({ segmentType, segmentExt, hardwareMode, width, height }) {
-  const signature = getPlaceholderSignature({ segmentType, hardwareMode, width, height });
+async function ensurePlaceholderSegment({ segmentType, segmentExt, hardwareMode, tuning, width, height }) {
+  const signature = getPlaceholderSignature({ segmentType, hardwareMode, tuning, width, height });
   const dir = path.join(HLS_PLACEHOLDER_CACHE_DIR, signature);
   const segmentPath = path.join(dir, `placeholder.${segmentExt}`);
   const initPath = segmentType === 'fmp4' ? path.join(dir, 'placeholder-init.mp4') : null;
@@ -980,7 +953,7 @@ async function ensurePlaceholderSegment({ segmentType, segmentExt, hardwareMode,
 
   const generate = (async () => {
     fs.mkdirSync(dir, { recursive: true });
-    const encoder = buildVideoEncoderArgs(hardwareMode, height);
+    const encoder = buildVideoEncoderArgs(hardwareMode, height, tuning);
     const args = ['-y', '-loglevel', 'error'];
     if (encoder.preInputArgs && encoder.preInputArgs.length) {
       args.push(...encoder.preInputArgs);
@@ -1067,101 +1040,6 @@ function isManifestUrl(url) {
   );
 }
 
-function normalizeHardwareMode(mode) {
-  const m = String(mode || 'none').toLowerCase().trim();
-  return VALID_HARDWARE.includes(m) ? m : 'none';
-}
-
-/**
- * Build video encoder args for transcode=h264, matching the plugin's
- * ManagedTranscodeService.AddVideoEncoderArguments.
- * @param {string} hardwareMode
- * @param {number|null} [targetHeight] - caps the encode at this height
- *   (matching yt-dlp's own `height<=X` source selection elsewhere in this
- *   file - see resolveQualityHeight), decrease-only so a source already
- *   smaller than this is never upscaled. null (the "best" quality, or an
- *   unresolvable value) skips scaling entirely - the source's own
- *   resolution passes through untouched. Previously this always hardcoded
- *   a 1920-wide (~1080p) cap regardless of the requested quality, so a
- *   caller asking for 1440p/2160p/best silently got 1080p back.
- * Returns { videoFilters: string[], encoderArgs: string[] }.
- */
-function buildVideoEncoderArgs(hardwareMode, targetHeight) {
-const mode = normalizeHardwareMode(hardwareMode);
-const heightCap = Number.isFinite(targetHeight) && targetHeight > 0 ? targetHeight : null;
-const { maxrate, bufsize } = resolveEncoderBitrateCaps(heightCap);
-
-// Common GOP / threshold settings from the plugin
- const common = ['-g', '120', '-keyint_min', '120', '-sc_threshold', '0'];
-
- if (mode === 'vaapi') {
-    // VAAPI replaces the software scale filter with nv12+hwupload
-    const scaleFilter = heightCap
-      ? `scale=-2:'min(${heightCap},ih)':force_original_aspect_ratio=decrease,format=nv12,hwupload`
-      : 'format=nv12,hwupload';
-    return {
-        preInputArgs: ['-vaapi_device', '/dev/dri/renderD128'],
-        videoFilters: [scaleFilter],
-        pixFmt: null,
-        encoderArgs: ['-c:v', 'h264_vaapi', '-qp', '21', ...common],
-    };
-}
-if (mode === 'qsv') {
-    const scaleFilter = heightCap
-      ? `scale_qsv=h='min(${heightCap},ih)':w='trunc(iw*min(${heightCap},ih)/ih/2)*2':format=nv12`
-      : "scale_qsv=w=iw:h=ih:format=nv12";
-    // preset: no default was set before, leaving ffmpeg/the driver to pick
-    // its own (a slower, higher-quality target usage). 'veryfast' trades
-    // some compression efficiency for encode speed - only worth that
-    // tradeoff at 1440p+ (or uncapped "best"), where real-time encoding
-    // genuinely struggled (the observed 2160p stalling/buffering). At
-    // 1080p and below, real-time was never the problem, so the driver's
-    // own (higher-quality) default preset is left alone rather than
-    // trading quality away for speed nothing here needed.
-    const needsFastPreset = !heightCap || heightCap >= 1440;
-    const presetArgs = needsFastPreset ? ['-preset', 'veryfast'] : [];
-    return {
-        preInputArgs: ['-init_hw_device', 'vaapi=va:/dev/dri/renderD128','-init_hw_device', 'qsv=qsv@va','-filter_hw_device', 'qsv'],
-        videoFilters: ['hwupload=extra_hw_frames=64','format=qsv', scaleFilter],
-        pixFmt: '',
-        encoderArgs: ['-c:v', 'h264_qsv',...presetArgs,'-global_quality', '21','-look_ahead', '0','-maxrate', maxrate,'-bufsize', bufsize,...common,],
-    };
-}
-if (mode === 'nvenc') {
-    const scaleFilter = heightCap
-      ? `scale=-2:'min(${heightCap},ih)':force_original_aspect_ratio=decrease,format=yuv420p`
-      : 'format=yuv420p';
-    return {preInputArgs: [],
-        videoFilters: [scaleFilter],
-        pixFmt: 'yuv420p',
-        encoderArgs: ['-c:v', 'h264_nvenc','-preset', 'p5','-cq', '21','-rc', 'vbr','-maxrate', maxrate,'-bufsize', bufsize,...common,],
-    };
-}
-if (mode === 'amf') {
-    const scaleFilter = heightCap
-      ? `scale=-2:'min(${heightCap},ih)':force_original_aspect_ratio=decrease,format=yuv420p`
-      : 'format=yuv420p';
-    return {preInputArgs: [],
-        videoFilters: [scaleFilter],
-        pixFmt: 'yuv420p',
-        // 'quality' here previously meant AMF's *slowest* -quality preset
-        // (its three levels are named speed/balanced/quality) - wrong
-        // tradeoff for a live real-time stream, same reasoning as qsv's
-        // new -preset veryfast above.
-        encoderArgs: ['-c:v', 'h264_amf','-quality', 'speed','-rc', 'qvbr','-qvbr_quality_level', '21',...common,],
-    };
-}
-// Software (None) — libx264
- const scaleFilter = heightCap
-   ? `scale=-2:'min(${heightCap},ih)':force_original_aspect_ratio=decrease,format=yuv420p`
-   : 'format=yuv420p';
- return {
-    preInputArgs: [],
-    videoFilters: [scaleFilter],
-    pixFmt: 'yuv420p',encoderArgs: ['-c:v', 'libx264','-preset', 'veryfast','-crf', '23',...common,],
-};
-}
-
 /**
  * `ytstream.probeShortcut` (opt-in). See strmGenerator.js's doc comment on
  * the pipe-syntax User-Agent it writes into every .strm when this is on,
@@ -1210,8 +1088,8 @@ const probeClipGenerationPromises = new Map();
  * @param {number} height
  * @returns {Promise<{filePath: string}|null>}
  */
-async function ensureProbeClip({ hardwareMode, width, height }) {
-  const signature = `${normalizeHardwareMode(hardwareMode)}-${width}x${height}`;
+async function ensureProbeClip({ hardwareMode, tuning, width, height }) {
+  const signature = `${normalizeHardwareMode(hardwareMode)}-${normalizeTuning(tuning)}-${width}x${height}`;
   const dir = path.join(PROBE_CLIP_CACHE_DIR, signature);
   const filePath = path.join(dir, 'probe.mkv');
   if (fs.existsSync(filePath)) return { filePath };
@@ -1223,7 +1101,7 @@ async function ensureProbeClip({ hardwareMode, width, height }) {
 
   const generate = (async () => {
     fs.mkdirSync(dir, { recursive: true });
-    const encoder = buildVideoEncoderArgs(hardwareMode, height);
+    const encoder = buildVideoEncoderArgs(hardwareMode, height, tuning);
     const args = ['-y', '-loglevel', 'error'];
     if (encoder.preInputArgs && encoder.preInputArgs.length) {
       args.push(...encoder.preInputArgs);
@@ -1261,9 +1139,9 @@ async function ensureProbeClip({ hardwareMode, width, height }) {
  * @returns {Promise<boolean>} true if a response was sent (caller must
  *   return immediately without falling through to normal handling).
  */
-async function tryServeProbeClip(req, res, { hardwareMode, width, height }) {
+async function tryServeProbeClip(req, res, { hardwareMode, tuning, width, height }) {
   try {
-    const clip = await ensureProbeClip({ hardwareMode, width, height });
+    const clip = await ensureProbeClip({ hardwareMode, tuning, width, height });
     if (!clip) return false;
     const stat = await fs.promises.stat(clip.filePath);
     logger.info(
@@ -1643,6 +1521,31 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
     ));
   }
 
+  // Diagnostic-only: names of incoming request headers never worth logging
+  // verbatim, in case a caller ever attaches one of these to a plain media
+  // URL (unexpected for /api/ytstream, which is intentionally unauthenticated
+  // - .strm files embed it as a bare URL - but redact defensively anyway).
+  const SENSITIVE_INCOMING_HEADER_NAMES = new Set(['cookie', 'authorization', 'proxy-authorization', 'x-access-token']);
+
+  /**
+   * ytstream.debugRequestHeaders (temporary diagnostic aid, see the
+   * 'ytstream: incoming request' log call below): dumps every header a
+   * caller (Jellyfin, a browser, curl, ...) actually sent on a request to
+   * this route, alongside our own isLikelyMetadataProbeRequest verdict for
+   * it - so a real playback request and whatever Jellyfin sends for other
+   * actions (a library scan/ffprobe, a "Refresh metadata", a thumbnail
+   * preview, etc.) can be diffed side by side from the log alone, without
+   * needing packet capture. Intentionally verbose; strip this call (and
+   * this helper) once the investigation it's for is done.
+   */
+  function redactIncomingHeadersForLogging(headers) {
+    const out = {};
+    for (const [key, value] of Object.entries(headers || {})) {
+      out[key] = SENSITIVE_INCOMING_HEADER_NAMES.has(key.toLowerCase()) ? '[REDACTED]' : value;
+    }
+    return out;
+  }
+
   /**
    * Streams a resolved googlevideo.com URL back through this server rather
    * than handing the client a bare 302 redirect.
@@ -1780,8 +1683,16 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
    *   passed by this function's own maybeFallbackToFullPipe retry.
    */
   function spawnHlsEncodePass(session, { startSegmentIndex, seekSeconds, isInitialPass, playerClientOverride, source, directUrls, forceFullPipe }) {
-    const { youtubeId, quality, transcode, hardwareMode, config, sessionKey, segmentType, segmentExt } = session;
+    // Tracks which segment the CURRENTLY RUNNING pass is already working
+    // toward - see ensureHlsSegmentAvailable's use of this: a request for
+    // this exact index isn't a real seek (the running pass will produce it
+    // on its own, just needs more time), so it must never trigger a
+    // same-target restart. Set unconditionally, including on a genuine
+    // restart, so it always reflects whatever pass is live right now.
+    session.activePassStartIndex = startSegmentIndex;
+    const { youtubeId, quality, transcode, hardwareMode, tuning, config, sessionKey, segmentType, segmentExt } = session;
     const hw = normalizeHardwareMode(hardwareMode);
+    const tier = normalizeTuning(tuning);
     const isLocalSource = !!(source && source.type === 'local');
     const isDirectSource = !isLocalSource && !!directUrls;
 
@@ -1837,7 +1748,7 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
       ytAudioArgs = [...commonYtArgs, ...sectionArgs, '-f', audioFormat, watchUrl];
     }
 
-    const encoder = transcode === 'h264' ? buildVideoEncoderArgs(hw, resolveQualityHeight(quality)) : null;
+    const encoder = transcode === 'h264' ? buildVideoEncoderArgs(hw, resolveQualityHeight(quality), tier) : null;
 
     const ffArgs = [
       // 'warning' (not the usual 'error') for a direct-URL seek-restart
@@ -2163,6 +2074,16 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
       ? { type: 'local', filePath: session.cachedFilePath }
       : undefined;
 
+    // A direct-URL seek attempt (resolveDashUrlsForSeek, mirroring
+    // mode=ffmpeg's tryResolveDirectUrlsForSeek) was tried here and
+    // reverted: in production these vprv=1 googlevideo URLs consistently
+    // 403'd when fetched by a bare ffmpeg HTTP client (matching the
+    // "unproven for this codebase's actual traffic" caveat already called
+    // out where mode=ffmpeg uses the same resolveDashUrlsForSeek), so it
+    // fell through to this exact sectioned-pipe path every time anyway -
+    // just ~5-10s slower for the wasted attempt first, with no A/V-sync
+    // benefit actually realized. Left as a real limitation, not something
+    // this route silently fixed.
     spawnHlsEncodePass(session, { startSegmentIndex: segmentIndex, isInitialPass: false, source });
   }
 
@@ -2256,6 +2177,25 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
       await new Promise((resolve) => setTimeout(resolve, HLS_READY_POLL_INTERVAL_MS));
     }
     if (fs.existsSync(filePath)) return true;
+
+    // The pass currently running is already working toward this exact
+    // segment - most commonly targetIndex 0 requested while the session's
+    // own initial pass hasn't produced its first segment yet (VAAPI/GPU
+    // init + yt-dlp resolve routinely takes longer than HLS_SEEK_GRACE_MS's
+    // short window). This isn't a seek at all, so restarting here would
+    // just kill and respawn an identical pass, throwing away whatever
+    // progress it already made for nothing. Keep waiting on the SAME pass
+    // instead, using the same budget a genuine cold start gets.
+    if (session.activePassStartIndex === targetIndex) {
+      const coldStartDeadline = Date.now() + HLS_READY_TIMEOUT_MS;
+      while (Date.now() < coldStartDeadline) {
+        if (fs.existsSync(filePath)) return true;
+        if (session.destroying) return false;
+        await new Promise((resolve) => setTimeout(resolve, HLS_READY_POLL_INTERVAL_MS));
+      }
+      return fs.existsSync(filePath);
+    }
+
     // Not awaited: restartHlsEncodePassAtSegment's own DASH-URL resolution
     // step happens in the background while this loop below polls the
     // filesystem for the target segment - that's the whole point of
@@ -2294,8 +2234,9 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
     }
   }
 
-  async function createHlsSessionInternal(sessionKey, { youtubeId, quality, transcode, hardwareMode, container, config, baseUrl, seekSeconds, clientIp, userAgent, calculatedLength, hotSwapToCache }, playerClientOverride) {
+  async function createHlsSessionInternal(sessionKey, { youtubeId, quality, transcode, hardwareMode, tuning, container, config, baseUrl, seekSeconds, clientIp, userAgent, calculatedLength, hotSwapToCache }, playerClientOverride) {
     const hw = normalizeHardwareMode(hardwareMode);
+    const tier = normalizeTuning(tuning);
     const { segmentType, segmentExt } = getHlsContainerInfo(container);
 
     // Unique per spawn attempt, not just per sessionKey: the 403/
@@ -2323,6 +2264,7 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
       quality,
       transcode,
       hardwareMode: hw,
+      tuning: tier,
       container,
       config,
       calculatedLength: !!calculatedLength,
@@ -2371,7 +2313,7 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
       if (ytCfgForSession.instantStart === true && transcode === 'h264') {
         const sourceResolution = await resolveVideoTargetResolution(youtubeId, models);
         const { width, height } = capResolutionToHeight(sourceResolution.width, sourceResolution.height, resolveQualityHeight(quality));
-        const generated = await ensurePlaceholderSegment({ segmentType, segmentExt, hardwareMode: hw, width, height });
+        const generated = await ensurePlaceholderSegment({ segmentType, segmentExt, hardwareMode: hw, tuning: tier, width, height });
         if (generated) {
           try {
             fs.copyFileSync(generated.segmentPath, path.join(dir, `placeholder.${segmentExt}`));
@@ -2408,6 +2350,7 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
       container,
       transcode,
       hardwareMode: hw,
+      tuning: tier,
       clientIp,
       userAgent,
       state: 'starting',
@@ -2472,47 +2415,64 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
       destroyHlsSession(existing, 'stale-failed');
     }
 
-    const session = await createHlsSessionInternal(sessionKey, params, undefined);
-    hlsSessions.set(sessionKey, session);
+    // Single-flight: a concurrent second call for the same not-yet-existing
+    // sessionKey (see hlsSessionCreationPromises' doc comment) joins this
+    // in-flight creation instead of starting its own.
+    const inFlight = hlsSessionCreationPromises.get(sessionKey);
+    if (inFlight) {
+      return inFlight;
+    }
+
+    const creationPromise = (async () => {
+      const session = await createHlsSessionInternal(sessionKey, params, undefined);
+      hlsSessions.set(sessionKey, session);
+      try {
+        await waitForHlsSessionReady(session, HLS_READY_TIMEOUT_MS);
+        return session;
+      } catch (err) {
+        const isFetchFailure = isRetryableExtractionError(err.message) || /\b403\b|forbidden/i.test(String(err.message));
+        if (isFetchFailure) {
+          logger.warn(
+            { sessionKey, err: err.message },
+            `ytstream: HLS session failed to start; retrying with player_client=${RETRY_PLAYER_CLIENT}`
+          );
+          destroyHlsSession(session, 'retry');
+          const retrySession = await createHlsSessionInternal(sessionKey, params, RETRY_PLAYER_CLIENT);
+          hlsSessions.set(sessionKey, retrySession);
+          await waitForHlsSessionReady(retrySession, HLS_READY_TIMEOUT_MS);
+          return retrySession;
+        }
+
+        // Nothing has reached a client yet (session never became ready) - if
+        // this attempt used a hardware encoder, retry once in software before
+        // giving up. Mirrors runPipeline's allowHwFallback behavior for the
+        // DASH/direct-pipe path; the HLS session path never had an equivalent,
+        // so a broken/missing QSV/VAAPI/NVENC/AMF device hard-failed every
+        // mode=hls request instead of falling back to libx264.
+        const hw = normalizeHardwareMode(params.hardwareMode);
+        if (hw !== 'none') {
+          logger.warn(
+            { sessionKey, hardwareMode: hw, err: err.message },
+            'ytstream: HLS session failed to start with hardware encoder; retrying with hardwareMode=none (software libx264)'
+          );
+          destroyHlsSession(session, 'hw-fallback-retry');
+          const softwareParams = { ...params, hardwareMode: 'none' };
+          const retrySession = await createHlsSessionInternal(sessionKey, softwareParams, undefined);
+          hlsSessions.set(sessionKey, retrySession);
+          await waitForHlsSessionReady(retrySession, HLS_READY_TIMEOUT_MS);
+          return retrySession;
+        }
+
+        destroyHlsSession(session, 'ready-failed');
+        throw err;
+      }
+    })();
+
+    hlsSessionCreationPromises.set(sessionKey, creationPromise);
     try {
-      await waitForHlsSessionReady(session, HLS_READY_TIMEOUT_MS);
-      return session;
-    } catch (err) {
-      const isFetchFailure = isRetryableExtractionError(err.message) || /\b403\b|forbidden/i.test(String(err.message));
-      if (isFetchFailure) {
-        logger.warn(
-          { sessionKey, err: err.message },
-          `ytstream: HLS session failed to start; retrying with player_client=${RETRY_PLAYER_CLIENT}`
-        );
-        destroyHlsSession(session, 'retry');
-        const retrySession = await createHlsSessionInternal(sessionKey, params, RETRY_PLAYER_CLIENT);
-        hlsSessions.set(sessionKey, retrySession);
-        await waitForHlsSessionReady(retrySession, HLS_READY_TIMEOUT_MS);
-        return retrySession;
-      }
-
-      // Nothing has reached a client yet (session never became ready) - if
-      // this attempt used a hardware encoder, retry once in software before
-      // giving up. Mirrors runPipeline's allowHwFallback behavior for the
-      // DASH/direct-pipe path; the HLS session path never had an equivalent,
-      // so a broken/missing QSV/VAAPI/NVENC/AMF device hard-failed every
-      // mode=hls request instead of falling back to libx264.
-      const hw = normalizeHardwareMode(params.hardwareMode);
-      if (hw !== 'none') {
-        logger.warn(
-          { sessionKey, hardwareMode: hw, err: err.message },
-          'ytstream: HLS session failed to start with hardware encoder; retrying with hardwareMode=none (software libx264)'
-        );
-        destroyHlsSession(session, 'hw-fallback-retry');
-        const softwareParams = { ...params, hardwareMode: 'none' };
-        const retrySession = await createHlsSessionInternal(sessionKey, softwareParams, undefined);
-        hlsSessions.set(sessionKey, retrySession);
-        await waitForHlsSessionReady(retrySession, HLS_READY_TIMEOUT_MS);
-        return retrySession;
-      }
-
-      destroyHlsSession(session, 'ready-failed');
-      throw err;
+      return await creationPromise;
+    } finally {
+      hlsSessionCreationPromises.delete(sessionKey);
     }
   }
 
@@ -2522,6 +2482,7 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
     container,
     transcode,
     hardwareMode,
+    tuning,
     seekSeconds,
     config,
     res,
@@ -2536,6 +2497,7 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
     // runPipeline attempt/retry so they all update the same entry.
     streamId,
   }) {
+    const tier = normalizeTuning(tuning);
     const sharedState = { retried: false, finalized: false, directFallbackDone: false };
 
     function attempt(attemptNumber) {
@@ -2630,7 +2592,7 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
         ytAudioArgs = [...commonYtArgs, '-f', audioFormat, watchUrl];
       }
 
-      const encoder = transcode === 'h264' ? buildVideoEncoderArgs(hw, resolveQualityHeight(quality)) : null;
+      const encoder = transcode === 'h264' ? buildVideoEncoderArgs(hw, resolveQualityHeight(quality), tier) : null;
 
       const ffArgs = [
         // 'warning' (not the usual 'error') for a direct-URL seek-restart
@@ -3091,7 +3053,17 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
   });
 
     router.get('/api/ytstream/:youtubeId', async (req, res) => {
-    logger.info({ url: req.originalUrl, query: req.query }, 'ytstream: incoming request');
+    logger.info(
+      {
+        url: req.originalUrl,
+        query: req.query,
+        method: req.method,
+        clientIp: resolveClientIp(req),
+        headers: redactIncomingHeadersForLogging(req.headers),
+        likelyMetadataProbe: isLikelyMetadataProbeRequest(req),
+      },
+      'ytstream: incoming request'
+    );
     const { youtubeId } = req.params;
     if (!/^[A-Za-z0-9_-]{6,20}$/.test(youtubeId)) {
       return res.status(400).send('Invalid video id');
@@ -3115,6 +3087,7 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
           const { width, height } = capResolutionToHeight(sourceResolution.width, sourceResolution.height, resolveQualityHeight(probeQuality));
           const served = await tryServeProbeClip(req, res, {
             hardwareMode: normalizeHardwareMode(probeQueryOverride('hardware') || probeCfg.hardwareMode || 'none'),
+            tuning: normalizeTuning(probeQueryOverride('tuning') || probeCfg.tuning || 'fast'),
             width,
             height,
           });
@@ -3156,6 +3129,10 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
     const hardwareMode = normalizeHardwareMode(
       queryOverride('hardware') || ytCfg.hardwareMode || 'none'
     );
+
+    // ytstream.tuning: 'fast' (default, unchanged historical behavior) |
+    // 'balanced' | 'quality' - see server/modules/streamEncoderTuning.js.
+    const tuning = normalizeTuning(queryOverride('tuning') || ytCfg.tuning || 'fast');
 
     const requestedQuality = String(
       queryOverride('quality') || ytCfg.quality || config.preferredResolution || '720'
@@ -3336,6 +3313,7 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
           container,
           transcode,
           hardwareMode,
+          tuning,
           clientIp: resolveClientIp(req),
           userAgent: req.headers['user-agent'] || null,
           state: 'starting',
@@ -3353,6 +3331,7 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
           container,
           transcode,
           hardwareMode,
+          tuning,
           seekSeconds: effectiveSeekSeconds,
           config,
           res,
@@ -3368,7 +3347,7 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
           return await serveDirect();
         }
 
-        const sessionKey = buildHlsSessionKey({ youtubeId, quality, transcode, hardwareMode, container, playerClient: ytCfg.playerClient, calculatedLength });
+        const sessionKey = buildHlsSessionKey({ youtubeId, quality, transcode, hardwareMode, tuning, container, playerClient: ytCfg.playerClient, calculatedLength });
         const baseUrl = `${req.protocol}://${req.get('host')}/api/ytstream/${encodeURIComponent(youtubeId)}/hls/${sessionKey}/`;
 
         let clientGoneWhileWaiting = false;
@@ -3385,7 +3364,7 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
         const waitStarted = Date.now();
         try {
           const session = await getOrCreateHlsSession(sessionKey, {
-            youtubeId, quality, transcode, hardwareMode, container, config, baseUrl, seekSeconds, calculatedLength, hotSwapToCache,
+            youtubeId, quality, transcode, hardwareMode, tuning, container, config, baseUrl, seekSeconds, calculatedLength, hotSwapToCache,
             clientIp: resolveClientIp(req),
             userAgent: req.headers['user-agent'] || null,
           });
@@ -3537,6 +3516,41 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
       if (!available) {
         logger.warn({ sessionKey, filename }, 'ytstream: HLS segment not available shortly after cache hot-swap');
         return res.status(404).send('Segment not found');
+      }
+    }
+
+    // The real encode pass's fMP4 init segment (`init.mp4`) is written
+    // once, early in its run - but with instant-start, the session can
+    // report "ready" (and the playlist gets served) the moment the
+    // PLACEHOLDER exists, well before the real pass has produced its own
+    // init.mp4. This filename never matches the `segment#####.ext`
+    // pattern the calculatedLength wait above looks for, so without this
+    // it 404s immediately on a miss - observed in production as a client
+    // (Moonfin/AVPlayer) retrying every few milliseconds with no backoff
+    // of its own, flooding the log with hundreds of failed requests until
+    // the encode finally caught up.
+    //
+    // Existence alone isn't enough, unlike numbered segments: those are
+    // protected by ffmpeg's `-hls_flags temp_file`, which writes each one
+    // to a temp path and atomically renames it into place only once
+    // complete - that protection does NOT extend to `-hls_fmp4_init_filename`,
+    // which ffmpeg writes directly. Polling fs.existsSync alone can catch
+    // it the instant it's created (open/truncate) but before its content
+    // is flushed, handing the client a 0-byte init segment - observed in
+    // production immediately after this wait was first added (a corrupt
+    // init segment breaks fMP4 parsing client-side). Waiting for the size
+    // to be non-zero AND unchanged across one full poll interval confirms
+    // the write has actually finished.
+    if (filename === 'init.mp4') {
+      const deadline = Date.now() + HLS_READY_TIMEOUT_MS;
+      let lastSize = -1;
+      for (;;) {
+        let size = -1;
+        try { size = fs.statSync(filePath).size; } catch { /* not created yet */ }
+        if (size > 0 && size === lastSize) break;
+        if (size > 0) lastSize = size;
+        if (session.destroying || Date.now() >= deadline) break;
+        await new Promise((resolve) => setTimeout(resolve, HLS_READY_POLL_INTERVAL_MS));
       }
     }
 

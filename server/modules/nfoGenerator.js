@@ -207,7 +207,9 @@ class NfoGenerator {
 
   /**
    * Appends the ratings block shared by movie and episode NFOs, if a
-   * normalized rating is present.
+   * normalized rating is present. Jellyfin's NFO parser (FetchFromRatingNode)
+   * reads the score from a nested <value> element, not from <rating>'s own
+   * text content - a bare `<rating ...>7</rating>` is silently ignored.
    * @param {object} jsonData - Parsed .info.json data
    * @returns {string} XML fragment, or '' if no rating is available
    */
@@ -219,13 +221,13 @@ class NfoGenerator {
     let xml = '\n  <!-- Ratings -->\n';
     xml += `  <mpaa>${displayCode}</mpaa>\n`;
     xml += '  <ratings>\n';
-    if (numeric !== null) {
-      xml += `    <rating name="mpaa" max="10">${numeric}</rating>\n`;
-    } else {
-      xml += `    <rating name="mpaa" max="10">${displayCode}</rating>\n`;
-    }
+    xml += '    <rating name="mpaa" max="10" default="true">\n';
+    xml += `      <value>${numeric !== null ? numeric : displayCode}</value>\n`;
+    xml += '    </rating>\n';
     if (jsonData.rating_source) {
-      xml += `    <rating name="source">${this.escapeXml(jsonData.rating_source)}</rating>\n`;
+      xml += '    <rating name="source">\n';
+      xml += `      <value>${this.escapeXml(jsonData.rating_source)}</value>\n`;
+      xml += '    </rating>\n';
     }
     xml += '  </ratings>\n';
     return xml;
@@ -256,6 +258,11 @@ class NfoGenerator {
       // Build the XML content
       let xml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n';
       xml += '<movie>\n';
+      // Tells Jellyfin not to let a remote metadata provider (TMDB etc.)
+      // overwrite these locally-authored fields on refresh - there's no real
+      // provider entry for a YouTube video, so a match would only clobber
+      // good data with a wrong one.
+      xml += '  <lockdata>true</lockdata>\n';
       xml += `  <title>${title}</title>\n`;
 
       if (plot) {
@@ -290,27 +297,7 @@ class NfoGenerator {
         }
       }
 
-      // Add rating information if available
-      if (jsonData.normalized_rating) {
-        const displayCode = this.escapeXml(jsonData.normalized_rating);
-        const numeric = ratingMapper.mapToNumericRating(jsonData.normalized_rating);
-
-        xml += '\n  <!-- Ratings -->\n';
-        // Keep the MPAA code for clients that prefer the textual code
-        xml += `  <mpaa>${displayCode}</mpaa>\n`;
-        xml += '  <ratings>\n';
-        // Include a numeric rating where possible (preferred by some media servers)
-        if (numeric !== null) {
-          xml += `    <rating name="mpaa" max="10">${numeric}</rating>\n`;
-        } else {
-          // Fall back to textual code if numeric mapping isn't available
-          xml += `    <rating name="mpaa" max="10">${displayCode}</rating>\n`;
-        }
-        if (jsonData.rating_source) {
-          xml += `    <rating name="source">${this.escapeXml(jsonData.rating_source)}</rating>\n`;
-        }
-        xml += '  </ratings>\n';
-      }
+      xml += this._buildRatingsXml(jsonData);
 
       if (durationSeconds > 0) {
         xml += '\n  <!-- Runtime -->\n';
@@ -366,6 +353,7 @@ class NfoGenerator {
 
       let xml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n';
       xml += '<episodedetails>\n';
+      xml += '  <lockdata>true</lockdata>\n';
       xml += `  <title>${title}</title>\n`;
       xml += `  <showtitle>${this.escapeXml(showTitle || studio)}</showtitle>\n`;
 
@@ -446,6 +434,7 @@ class NfoGenerator {
       const nfoPath = path.join(channelFolderPath, 'tvshow.nfo');
       let xml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n';
       xml += '<tvshow>\n';
+      xml += '  <lockdata>true</lockdata>\n';
       xml += `  <title>${this.escapeXml(title || 'Unknown Channel')}</title>\n`;
       if (plot) {
         xml += `  <plot>${this.escapeXml(plot)}</plot>\n`;
@@ -476,6 +465,7 @@ class NfoGenerator {
       const nfoPath = path.join(seasonFolderPath, 'season.nfo');
       let xml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n';
       xml += '<season>\n';
+      xml += '  <lockdata>true</lockdata>\n';
       xml += `  <title>${this.escapeXml(`Season ${season}`)}</title>\n`;
       xml += `  <showtitle>${this.escapeXml(showTitle || '')}</showtitle>\n`;
       xml += `  <seasonnumber>${season}</seasonnumber>\n`;

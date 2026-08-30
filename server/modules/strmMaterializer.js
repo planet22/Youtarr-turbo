@@ -627,21 +627,36 @@ class StrmMaterializer {
       logger.info({ youtubeId: meta.id, thumbPath, uiThumbPath }, 'STRM thumbnail written');
       return thumbPath;
     } catch (err) {
-      logger.warn({ err, youtubeId: meta.id }, 'STRM thumbnail download failed');
-      // Still try UI path from CDN so lists are not blank
+      // thumbUrl (often maxresdefault.jpg) 404s for videos YouTube never
+      // generated that resolution for - routine, not a real failure.
+      // hqdefault.jpg is generated for effectively all videos, so retry
+      // BOTH targets with it: the library-adjacent jpg (what the video/
+      // episode NFO's <thumb> tag actually references) and the UI-grid
+      // copy. Previously only the UI copy was recovered here, which left
+      // the NFO's <thumb> silently pointing at a file that was never
+      // written - the filename in the NFO was always correct, the file
+      // behind it just didn't exist.
+      logger.warn({ err, youtubeId: meta.id }, 'STRM thumbnail download failed, retrying with hqdefault');
+      const hqdefaultUrl = `https://i.ytimg.com/vi/${meta.id}/hqdefault.jpg`;
+      let recoveredThumbPath = null;
+      try {
+        fs.mkdirSync(paths.videoDir, { recursive: true });
+        await this._downloadFile(hqdefaultUrl, thumbPath);
+        recoveredThumbPath = thumbPath;
+        logger.info({ youtubeId: meta.id, thumbPath }, 'STRM library-adjacent thumbnail recovered from CDN');
+      } catch (thumbErr) {
+        logger.warn({ err: thumbErr, youtubeId: meta.id }, 'STRM library-adjacent thumbnail hqdefault fallback failed');
+      }
       try {
         if (imageDir) {
           fs.mkdirSync(imageDir, { recursive: true });
-          await this._downloadFile(
-            `https://i.ytimg.com/vi/${meta.id}/hqdefault.jpg`,
-            uiThumbPath
-          );
+          await this._downloadFile(hqdefaultUrl, uiThumbPath);
           logger.info({ youtubeId: meta.id, uiThumbPath }, 'STRM UI thumbnail recovered from CDN');
         }
       } catch (cdnErr) {
         logger.warn({ err: cdnErr, youtubeId: meta.id }, 'STRM CDN thumbnail recovery failed');
       }
-      return null;
+      return recoveredThumbPath;
     }
   }
 

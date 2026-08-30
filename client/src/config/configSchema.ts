@@ -166,6 +166,12 @@ export const CONFIG_FIELDS = {
       quality: null as string | null,
       // Hardware encoder for transcode=h264 (plugin ManagedTranscodeHardwareModes)
       hardwareMode: 'none' as 'none' | 'qsv' | 'nvenc' | 'vaapi' | 'amf',
+      // Encode tuning tier for transcode=h264 (server/modules/streamEncoderTuning.js).
+      // 'fast' matches this app's long-standing defaults (safest for real-time
+      // HLS/live-pipe streaming); 'balanced'/'quality' trade encode speed for
+      // picture quality. See the "Test real-time tuning" benchmark in Settings
+      // → Streaming for which tier is actually safe on this host, per resolution.
+      tuning: 'fast' as 'fast' | 'balanced' | 'quality',
       // Empty string = auto ('default,-tv' — avoids the yt-dlp "tv" client,
       // which is the most common cause of YouTube's "The page needs to be
       // reloaded." extraction error). Advanced override, e.g. "android" or

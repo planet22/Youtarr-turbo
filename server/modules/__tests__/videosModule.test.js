@@ -14,6 +14,8 @@ describe('VideosModule', () => {
   let mockMessageEmitter;
   let mockM3uGenerator;
   let mockExecFile;
+  let mockChannel;
+  let mockChannelThumbnails;
 
   beforeEach(() => {
     jest.resetModules();
@@ -27,8 +29,12 @@ describe('VideosModule', () => {
     };
 
     // Mock the Channel model
-    const mockChannel = {
+    mockChannel = {
       findAll: jest.fn().mockResolvedValue([])
+    };
+
+    mockChannelThumbnails = {
+      regenerateChannelImages: jest.fn().mockResolvedValue({ copied: 0, skippedNoSource: 0, skippedNoFolder: 0, errors: 0 })
     };
 
     mockWatchStatusQueries = {
@@ -95,7 +101,8 @@ describe('VideosModule', () => {
 
     // Mock the models
     jest.doMock('../../models', () => ({
-      Video: mockVideo
+      Video: mockVideo,
+      Channel: mockChannel
     }));
 
     // Mock the watch status query module (owns the watchedBy aggregation)
@@ -103,6 +110,9 @@ describe('VideosModule', () => {
 
     // Mock the Channel model
     jest.doMock('../../models/channel', () => mockChannel);
+
+    // Mock channelThumbnails (regenerateChannelImages's collaborator)
+    jest.doMock('../channel/channelThumbnails', () => mockChannelThumbnails);
 
     // Mock fs
     jest.doMock('fs', () => ({
@@ -1572,6 +1582,92 @@ describe('VideosModule', () => {
       const result = VideosModule.tryStartBackfill();
       expect(result).toEqual({ started: false, reason: 'already-running' });
       VideosModule._backfillRunning = false;
+    });
+  });
+
+  describe('regenerateChannelImages', () => {
+    test('scans enabled channels, force-regenerates their images, and persists a completed lastRun', async () => {
+      mockChannel.findAll.mockResolvedValue([{ channel_id: 'UC1' }, { channel_id: 'UC2' }]);
+      mockChannelThumbnails.regenerateChannelImages.mockResolvedValue({
+        copied: 3, skippedNoSource: 1, skippedNoFolder: 0, errors: 0
+      });
+      mockConfigModule.getConfig.mockReturnValue({});
+
+      const result = await VideosModule.regenerateChannelImages({ trigger: 'manual' });
+
+      expect(mockChannel.findAll).toHaveBeenCalledWith({ where: { enabled: true }, raw: true });
+      expect(mockChannelThumbnails.regenerateChannelImages).toHaveBeenCalledWith([{ channel_id: 'UC1' }, { channel_id: 'UC2' }]);
+      expect(result).toEqual(expect.objectContaining({
+        channelsScanned: 2,
+        copied: 3,
+        skippedNoSource: 1,
+        skippedNoFolder: 0,
+        errors: 0,
+        trigger: 'manual',
+        status: 'completed'
+      }));
+
+      // Broadcasts start and completion, and persists the summary to config.
+      expect(mockMessageEmitter.emitMessage).toHaveBeenCalledWith(
+        'broadcast', null, 'server', 'channelImageRegenStatus', { running: true, trigger: 'manual' }
+      );
+      expect(mockMessageEmitter.emitMessage).toHaveBeenCalledWith(
+        'broadcast', null, 'server', 'channelImageRegenStatus',
+        expect.objectContaining({ running: false, lastRun: expect.objectContaining({ status: 'completed' }) })
+      );
+      expect(mockConfigModule.updateConfig).toHaveBeenCalledWith(
+        expect.objectContaining({ channelImageRegenLastRun: expect.objectContaining({ status: 'completed' }) })
+      );
+    });
+
+    test('returns skipped without touching channels when already running', async () => {
+      VideosModule._imageRegenRunning = true;
+
+      const result = await VideosModule.regenerateChannelImages({ trigger: 'manual' });
+
+      expect(result).toEqual({ skipped: true, reason: 'already-running' });
+      expect(mockChannel.findAll).not.toHaveBeenCalled();
+      VideosModule._imageRegenRunning = false;
+    });
+
+    test('records an error-status lastRun and rethrows when the pass fails', async () => {
+      mockChannel.findAll.mockRejectedValue(new Error('db unavailable'));
+
+      await expect(VideosModule.regenerateChannelImages({ trigger: 'manual' })).rejects.toThrow('db unavailable');
+
+      expect(mockConfigModule.updateConfig).toHaveBeenCalledWith(
+        expect.objectContaining({
+          channelImageRegenLastRun: expect.objectContaining({ status: 'error', errorMessage: 'db unavailable' })
+        })
+      );
+      expect(VideosModule._imageRegenRunning).toBe(false);
+    });
+  });
+
+  describe('tryStartImageRegen', () => {
+    test('returns started: true when not running', () => {
+      VideosModule._imageRegenRunning = false;
+      const spy = jest.spyOn(VideosModule, 'regenerateChannelImages').mockResolvedValue();
+      const result = VideosModule.tryStartImageRegen({ trigger: 'manual' });
+      expect(result).toEqual({ started: true });
+      expect(spy).toHaveBeenCalledWith({ trigger: 'manual' });
+      spy.mockRestore();
+    });
+
+    test('returns started: false when already running', () => {
+      VideosModule._imageRegenRunning = true;
+      const result = VideosModule.tryStartImageRegen();
+      expect(result).toEqual({ started: false, reason: 'already-running' });
+      VideosModule._imageRegenRunning = false;
+    });
+  });
+
+  describe('isImageRegenRunning', () => {
+    test('reflects the internal running flag', () => {
+      VideosModule._imageRegenRunning = true;
+      expect(VideosModule.isImageRegenRunning()).toBe(true);
+      VideosModule._imageRegenRunning = false;
+      expect(VideosModule.isImageRegenRunning()).toBe(false);
     });
   });
 });

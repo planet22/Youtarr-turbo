@@ -49,6 +49,7 @@ import { validatePrefix } from '../../utils/filenameTemplate/validate';
 import { SETTINGS_PAGES, SettingsIndex } from './SettingsIndex';
 import { MaintenanceSection } from './MaintenanceSection';
 import { ResolutionTagBackfillSection } from './ResolutionTagBackfillSection';
+import { ChannelImageRegenSection } from './ChannelImageRegenSection';
 
 interface SettingsProps {
   token: string | null;
@@ -506,6 +507,7 @@ export function Settings({ token }: SettingsProps) {
               <>
                 <MaintenanceSection token={token} />
                 <ResolutionTagBackfillSection token={token} />
+                <ChannelImageRegenSection token={token} />
               </>
             }
           />

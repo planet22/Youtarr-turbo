@@ -98,9 +98,35 @@ async function safeRemove(filePath) {
   }
 }
 
+// Every current caller of copySyncWithFallback copies a single media image
+// file (poster/logo/backdrop/banner/fanart) into the library, where it's
+// read by other containers (e.g. Jellyfin) that often run as a different,
+// non-root uid/gid. Both fs.copySync and the `cp` fallback copy the SOURCE
+// file's permission bits verbatim rather than applying a fresh umask like a
+// normal write does - so if the cached image this copies from was ever
+// written with a restrictive mode, every copy made from it silently
+// inherits that, unlike videos (yt-dlp) and .nfo files (fs.writeFileSync),
+// which are always fresh writes and so always get a normal umask-derived
+// mode. Forcing a permissive mode after every copy makes images behave the
+// same way, regardless of the source file's own permissions.
+const MEDIA_COPY_FILE_MODE = 0o644;
+
+function chmodBestEffort(dest) {
+  try {
+    fs.chmodSync(dest, MEDIA_COPY_FILE_MODE);
+  } catch (err) {
+    // Some filesystems (FAT/exFAT, certain network mounts) don't support
+    // Unix permission bits at all - never let this break an otherwise-
+    // successful copy.
+    logger.warn({ err, dest }, 'Failed to set permissions after copying media file');
+  }
+}
+
 /**
  * Synchronous copy with the same EPERM/copy_file_range fallback as
- * moveWithRetries, for call sites that use fs.copySync directly.
+ * moveWithRetries, for call sites that use fs.copySync directly. Always
+ * followed by a best-effort chmod to a permissive mode - see
+ * MEDIA_COPY_FILE_MODE above.
  *
  * @param {string} src - Source path
  * @param {string} dest - Destination path
@@ -110,12 +136,14 @@ async function safeRemove(filePath) {
 function copySyncWithFallback(src, dest, { overwrite = true } = {}) {
   try {
     fs.copySync(src, dest, { overwrite });
+    chmodBestEffort(dest);
   } catch (err) {
     if (err && err.code === 'EPERM' && err.syscall === 'copyfile') {
       if (overwrite) {
         fs.removeSync(dest);
       }
       execFileSync('cp', ['-r', '--', src, dest]);
+      chmodBestEffort(dest);
       return;
     }
     throw err;

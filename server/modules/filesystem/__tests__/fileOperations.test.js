@@ -178,6 +178,23 @@ describe('filesystem/fileOperations', () => {
       expect(execFileSync).not.toHaveBeenCalled();
     });
 
+    it('should chmod the destination to a permissive mode after a successful copy', () => {
+      fs.copySync.mockReturnValueOnce();
+
+      copySyncWithFallback('/src', '/dest');
+
+      expect(fs.chmodSync).toHaveBeenCalledWith('/dest', 0o644);
+    });
+
+    it('should not throw if chmod fails after a successful copy (best-effort)', () => {
+      fs.copySync.mockReturnValueOnce();
+      fs.chmodSync.mockImplementationOnce(() => {
+        throw new Error('EPERM: chmod not supported');
+      });
+
+      expect(() => copySyncWithFallback('/src', '/dest')).not.toThrow();
+    });
+
     it('should fall back to cp -r on EPERM copyfile error', () => {
       fs.copySync.mockImplementationOnce(() => {
         throw eperm('copyfile');
@@ -188,6 +205,16 @@ describe('filesystem/fileOperations', () => {
 
       expect(fs.removeSync).toHaveBeenCalledWith('/dest');
       expect(execFileSync).toHaveBeenCalledWith('cp', ['-r', '--', '/src', '/dest']);
+    });
+
+    it('should chmod the destination to a permissive mode after the cp fallback too', () => {
+      fs.copySync.mockImplementationOnce(() => {
+        throw eperm('copyfile');
+      });
+
+      copySyncWithFallback('/src', '/dest');
+
+      expect(fs.chmodSync).toHaveBeenCalledWith('/dest', 0o644);
     });
 
     it('should not remove the destination first when overwrite is false', () => {
@@ -208,6 +235,7 @@ describe('filesystem/fileOperations', () => {
 
       expect(() => copySyncWithFallback('/src', '/dest')).toThrow();
       expect(execFileSync).not.toHaveBeenCalled();
+      expect(fs.chmodSync).not.toHaveBeenCalled();
     });
   });
 

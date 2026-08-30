@@ -364,13 +364,13 @@ module.exports = function createNzbRoutes() {
   // ---- Newznab ----
 
   router.get('/nzb/newznab', async (req, res) => {
-    logger.info({ query: req.query }, 'nzb: newznab request');
+    logger.debug({ query: req.query }, 'nzb: newznab request');
     const cfg = configModule.getConfig();
     const categories = cfg.nzb?.categories || [];
     const t = String(req.query.t || '').toLowerCase();
 
     if (t === 'caps') {
-      logger.info('nzb: caps request');
+      logger.debug('nzb: caps request');
       res.type('application/xml').send(nzbFeedModule.buildCapsXml(categories));
       return;
     }
@@ -448,7 +448,7 @@ module.exports = function createNzbRoutes() {
             const seasonStr = season !== null ? 'S' + String(season).padStart(2, '0') : '';
             const epStr = ep !== null ? 'E' + String(ep).padStart(2, '0') : '';
             newquery = `${query} ${seasonStr}${epStr}`;
-            logger.info({ query, season, ep , newquery}, 'nzb: tvsearch with episode mode - adjusted query');
+            logger.debug({ query, season, ep , newquery}, 'nzb: tvsearch with episode mode - adjusted query');
           }
 
           // Carry Sonarr/Radarr's real season+episode through to the grab so
@@ -525,19 +525,19 @@ module.exports = function createNzbRoutes() {
   // ---- SABnzbd ----
 
   router.all('/nzb/sab/api', upload.any(), async (req, res) => {
-    logger.info({ method: req.method, query: req.query, params: req.params, body: req.body }, 'nzb/sab/api request');
+    logger.debug({ method: req.method, query: req.query, params: req.params, body: req.body }, 'nzb/sab/api request');
     const mode = String(req.query.mode || '').toLowerCase();
     const cfg = configModule.getConfig();
     const categories = cfg.nzb?.categories || [];
 
     if (mode === 'version') {
-      logger.info('nzb: version request');
+      logger.debug('nzb: version request');
       res.json({ version: '1.0.0' });
       return;
     }
 
     if (mode === 'get_config') {
-      logger.info('nzb: get_config request');
+      logger.debug('nzb: get_config request');
       // Field names/types match iplayarr's SabNZBDConfigCategoryResponse
       // exactly, including the mandatory '*' catch-all category Sonarr/
       // Radarr expect as the first entry.
@@ -563,7 +563,13 @@ module.exports = function createNzbRoutes() {
     }
 
     if (mode === 'addfile') {
-      logger.info({ files: req.files, body: req.body }, 'nzb: addfile request');
+      logger.info(
+        {
+          files: (req.files || []).map((f) => ({ fieldname: f.fieldname, originalname: f.originalname, mimetype: f.mimetype, size: f.size })),
+          body: req.body,
+        },
+        'nzb: addfile request'
+      );
       const downloadModule = require('../modules/downloadModule');
       const file = (req.files || [])[0];
       if (!file || !file.buffer) {
@@ -618,7 +624,7 @@ module.exports = function createNzbRoutes() {
     }
 
     if (mode === 'queue') {
-      logger.info('nzb: queue request');
+      logger.debug('nzb: queue request');
       const jobs = jobModule.getRunningJobs().filter(
         (j) => j.data?.nzb && (j.status === 'Pending' || j.status === 'In Progress')
       );
@@ -638,7 +644,7 @@ module.exports = function createNzbRoutes() {
         const totalBytes = progress?.totalBytes || 0;
         const downloadedBytes = progress?.downloadedBytes || 0;
         const percent = progress?.percent ? Math.trunc(progress.percent) : 0;
-        logger.info({ jobId: j.id, isCurrent, totalBytes, downloadedBytes, percent }, 'nzb: queue entry');
+        logger.debug({ jobId: j.id, isCurrent, totalBytes, downloadedBytes, percent }, 'nzb: queue entry');
         return {
           status: j.status === 'In Progress' ? 'Downloading' : 'Queued',
           index,
@@ -659,7 +665,7 @@ module.exports = function createNzbRoutes() {
         };
       });
 
-      logger.info({ slots }, 'nzb: queue response');
+      logger.debug({ slots }, 'nzb: queue response');
 
       res.json({
         queue: {
@@ -710,13 +716,13 @@ module.exports = function createNzbRoutes() {
     }
 
     if (mode === 'history') {
-      logger.info('nzb: history request');
+      logger.debug('nzb: history request');
       const jobs = jobModule.getRunningJobs().filter(
         (j) => j.data?.nzb && !j.data.nzb.historyRemoved &&
           ['Complete', 'Complete with Warnings', 'Error', 'Terminated'].includes(j.status)
       );
 
-      logger.info({ jobs: jobs.map((j) => ({ jobId: j.id, status: j.status })) }, 'nzb: history entries');
+      logger.debug({ jobs: jobs.map((j) => ({ jobId: j.id, status: j.status })) }, 'nzb: history entries');
       
       // Field names/types match iplayarr's SabNZBDHistoryResponse/
       // SABNZBDHistoryEntryResponse exactly. storage/path is either a staged
@@ -738,14 +744,14 @@ module.exports = function createNzbRoutes() {
         if (!failed) {
           if (strategy === 'untracked') {
             filePath = videoRow?.filePath || null;
-            logger.info({ jobId: j.id, filePath }, 'nzb: history entry - untracked strategy');
+            logger.debug({ jobId: j.id, filePath }, 'nzb: history entry - untracked strategy');
           } else {
             filePath = stageForSonarrImport(j, j.data.nzb.categoryName || 'youtarr', videoRow);
           }
         }
-        logger.info({ jobId: j.id, failed, filePath, bytes, strategy }, 'nzb: history entry');
+        logger.debug({ jobId: j.id, failed, filePath, bytes, strategy }, 'nzb: history entry');
         const reportedPath = remapPathForSonarr(filePath);
-        logger.info({ jobId: j.id, reportedPath }, 'nzb: history entry remapped path for Sonarr/Radarr');
+        logger.debug({ jobId: j.id, reportedPath }, 'nzb: history entry remapped path for Sonarr/Radarr');
         const nowSeconds = Math.floor(Date.now() / 1000);
         return {
           action_line: '',

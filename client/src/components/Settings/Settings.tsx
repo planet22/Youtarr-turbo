@@ -30,6 +30,7 @@ import { SaveBar } from '../Configuration/sections/SaveBar';
 import { UnsavedChangesDialog } from '../Configuration/sections/UnsavedChangesDialog';
 import { YtdlpChannelApplyDialog } from '../Configuration/sections/components/YtdlpChannelApplyDialog';
 import { StrmSettingsSection } from '../Configuration/sections/StrmSettingsSection';
+import { YtstreamDryRunSection } from '../Configuration/sections/YtstreamDryRunSection';
 import { NzbSettingsSection } from '../Configuration/sections/NzbSettingsSection';
 
 import {
@@ -433,12 +434,15 @@ export function Settings({ token }: SettingsProps) {
           <Route
             path="streaming"
             element={
-              <StrmSettingsSection
-                config={config}
-                onConfigChange={handleConfigChange}
-                onMobileTooltipClick={setMobileTooltip}
-                token={token}
-              />
+              <>
+                <StrmSettingsSection
+                  config={config}
+                  onConfigChange={handleConfigChange}
+                  onMobileTooltipClick={setMobileTooltip}
+                  token={token}
+                />
+                <YtstreamDryRunSection config={config} token={token} />
+              </>
             }
           />
           <Route

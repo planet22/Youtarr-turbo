@@ -54,6 +54,7 @@ const blankCategory = (): NzbCategory => ({
   importStrategy: 'hardlink',
   newznabCategoryIds: ['5040'],
   additionalLocalFilter: false,
+  postEncode: false,
 });
 
 export const NzbSettingsSection: React.FC<Props> = ({
@@ -334,6 +335,25 @@ export const NzbSettingsSection: React.FC<Props> = ({
                     />
                     <InfoTooltip
                       text="Requires the YouTube title to actually contain the search terms (and, once Sonarr/Radarr supply a season/episode, an SxxExx-style code) before a result is returned - filters out loosely-related results YouTube search often returns."
+                      onMobileClick={onMobileTooltipClick}
+                    />
+                  </Box>
+                </Grid>
+                <Grid item xs={12} md={6}>
+                  <Box className="flex items-center">
+                    <FormControlLabel
+                      control={
+                        <Switch
+                          checked={cat.postEncode === true}
+                          onChange={(e) =>
+                            updateCategory(index, { postEncode: e.target.checked })
+                          }
+                        />
+                      }
+                      label="Transcode before reporting complete"
+                    />
+                    <InfoTooltip
+                      text="Only takes effect when Transcode downloaded video (Settings -> yt-dlp Options, downloadTranscodeVideoCodec) is also set to something other than Off - this switch narrows that global setting to this category, it can't turn transcoding on by itself. When both are on, a grab in this category is re-encoded to the configured codec before Sonarr/Radarr are told the download is complete - useful if you want it for, say, Movies but not TV Series."
                       onMobileClick={onMobileTooltipClick}
                     />
                   </Box>

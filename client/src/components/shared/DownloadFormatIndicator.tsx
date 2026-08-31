@@ -17,6 +17,10 @@ interface DownloadFormatIndicatorProps {
   // 'vertical' stacks the chips to fit narrow table columns
   orientation?: 'horizontal' | 'vertical';
   compact?: boolean;
+  // When set, the video chip (not audio) becomes a click target for
+  // switching this video between STRM and a real download - see
+  // VideosTable.tsx / VideoTableView.tsx for the confirm-dialog wiring.
+  onVideoChipClick?: () => void;
 }
 
 // Strip internal Docker paths from display
@@ -40,7 +44,8 @@ const DownloadFormatIndicator: React.FC<DownloadFormatIndicatorProps> = ({
   audioFileSize,
   videoResolution,
   orientation = 'horizontal',
-  compact = false
+  compact = false,
+  onVideoChipClick
 }) => {
   const hasVideo = !!filePath;
   const hasAudio = !!audioFilePath;
@@ -97,7 +102,14 @@ const DownloadFormatIndicator: React.FC<DownloadFormatIndicatorProps> = ({
       onClick={(e) => e.stopPropagation()}
     >
       {hasVideo && (
-        <Tooltip title={renderPathTooltip(displayVideoPath)} arrow placement="top" enterTouchDelay={0}>
+        <Tooltip
+          title={onVideoChipClick
+            ? <>{renderPathTooltip(displayVideoPath)}{isVideoStrm ? ' — click to download' : ' — click to switch to STRM'}</>
+            : renderPathTooltip(displayVideoPath)}
+          arrow
+          placement="top"
+          enterTouchDelay={0}
+        >
           <Chip
             size="small"
             icon={isVideoStrm
@@ -105,7 +117,11 @@ const DownloadFormatIndicator: React.FC<DownloadFormatIndicatorProps> = ({
               : <VideoFormatIcon size={14} className="text-primary" data-testid="VideoFormatIcon" />}
             label={isVideoStrm ? 'STRM' : videoSizeLabel}
             variant="outlined"
-            style={chipStyle}
+            style={onVideoChipClick ? { ...chipStyle, cursor: 'pointer' } : chipStyle}
+            onClick={onVideoChipClick ? (e: React.MouseEvent) => {
+              e.stopPropagation();
+              onVideoChipClick();
+            } : undefined}
             data-testid="video-format-chip"
           />
         </Tooltip>

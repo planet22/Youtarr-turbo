@@ -128,6 +128,13 @@ export const CONFIG_FIELDS = {
   sleepRequests: { default: 1, trackChanges: true },
   proxy: { default: '', trackChanges: true },
 
+  // Logging - empty string = use the LOG_LEVEL environment variable's value
+  // (documented in docs/ENVIRONMENT_VARIABLES.md) as the startup default;
+  // an explicit value here overrides it and takes effect immediately, live,
+  // no restart needed (server/logger.js's level is mutable at runtime) -
+  // see server/modules/configModule.js's config-save handler.
+  logLevel: { default: '' as '' | 'warn' | 'info' | 'debug', trackChanges: true },
+
   // Cookies
   cookiesEnabled: { default: false, trackChanges: true },
   customCookiesUploaded: { default: false, trackChanges: true },
@@ -148,6 +155,14 @@ export const CONFIG_FIELDS = {
       writeThumbnail: true,
       writeMediaInfoCache: true,
       cacheOnPlay: false,
+      // Hours after a STRM cache-on-play download finishes before the
+      // nightly sweep (cronJobs.js, 2:10 AM) reverts it back to STRM,
+      // freeing the disk space - null/0 = never auto-revert. Only ever
+      // applies to a video cache-on-play itself materialized (server's
+      // videoPersistence.js sets cached_at only for that transition) - a
+      // genuine/forced download is never a candidate, regardless of this
+      // setting.
+      cacheOnPlayExpiryHours: null as number | null,
       quality: null as string | null,
     },
     trackChanges: true,
@@ -158,12 +173,22 @@ export const CONFIG_FIELDS = {
   // what a full download would use unless explicitly overridden here.
   ytstream: {
     default: {
-      defaultMode: 'direct' as 'direct' | 'ffmpeg' | 'hls',
-      container: 'mp4' as 'mp4' | 'ts',
+      defaultMode: 'direct' as 'direct' | 'direct-pipe' | 'direct-redirect' | 'ffmpeg' | 'hls',
+      // mkv is ffmpeg-mode only (see YtstreamSettingsSection's Container select)
+      container: 'mp4' as 'mp4' | 'ts' | 'mkv',
       // Empty string = auto (derive from videoCodec); copy = remux; h264 = re-encode
       transcode: '' as '' | 'copy' | 'h264',
       // null = fall back to preferredResolution / 720
       quality: null as string | null,
+      // Controls how the configured `quality` height becomes a yt-dlp
+      // format selector. 'fallback' (default, matches this app's
+      // long-standing behavior) chains from the exact height down to
+      // best-available. 'fixed' matches only that exact height - yt-dlp
+      // fails cleanly (no silent substitution) if this video doesn't have
+      // it. 'best' ignores the configured height entirely and always takes
+      // the mode's true best-available format. See server/routes/ytstream.js
+      // getDirectFormatSelector/getDashFormatSelectors.
+      qualityStrictness: 'fallback' as 'fixed' | 'fallback' | 'best',
       // Hardware encoder for transcode=h264 (plugin ManagedTranscodeHardwareModes)
       hardwareMode: 'none' as 'none' | 'qsv' | 'nvenc' | 'vaapi' | 'amf',
       // Encode tuning tier for transcode=h264 (server/modules/streamEncoderTuning.js).
@@ -194,6 +219,15 @@ export const CONFIG_FIELDS = {
       // the video. No effect without cacheOnPlay (there's never a cached
       // file to switch to).
       hotSwapToCache: false as boolean,
+      // Any mode, any request - not tied to an in-progress session the way
+      // hotSwapToCache is. Checked first, before any mode/quality
+      // resolution or yt-dlp/ffmpeg work: if this video is already fully
+      // downloaded (STRM cache-on-play, or any genuine download), the real
+      // local file is served directly with genuine byte-range support
+      // (server/routes/ytstream.js's tryServeCachedVideoFile) instead of
+      // live-proxying/transcoding it all over again. Off by default -
+      // existing STRM playback behavior is unaffected unless opted in.
+      serveCachedFile: false as boolean,
       // mode=hls + calculatedLength only, transcode=h264 sessions only.
       // Normally the first HLS response blocks until the real yt-dlp/ffmpeg
       // pipeline produces its first segment (a real cold start can take
@@ -220,6 +254,9 @@ export const CONFIG_FIELDS = {
       // later change here). Off by default so per-request overrides keep
       // working as before.
       forceServerSettings: false as boolean,
+      // Nightly cron prune (server/modules/cronJobs.js, 3:15 AM) deletes
+      // stream_history rows older than this. <= 0 or unset falls back to 90.
+      historyRetentionDays: 90 as number,
     },
     trackChanges: true,
   },
@@ -273,6 +310,16 @@ export const CONFIG_FIELDS = {
         // that only share a keyword (see applyLocalTitleFilter in
         // server/routes/nzb.js).
         additionalLocalFilter: boolean;
+        // Gates the post-download transcode (downloadTranscodeVideoCodec,
+        // Settings -> yt-dlp Options) for this category specifically - the
+        // global setting must ALSO be on (not 'off') for this category to
+        // ever transcode; this can only narrow, never override it. Lets a
+        // user enable it for e.g. Movies but not TV Series. Applied before
+        // Sonarr/Radarr are told the grab is complete (see
+        // transcodeDownloadedVideo in server/modules/videoDownloadPostProcessFiles.js).
+        // Never applies to STRM cache-on-play downloads, which are never
+        // transcoded regardless of any setting.
+        postEncode: boolean;
       }>,
     },
     trackChanges: true,
@@ -414,6 +461,7 @@ export const DEFAULT_CONFIG: ConfigState = {
   stallDetectionRateThreshold: CONFIG_FIELDS.stallDetectionRateThreshold.default,
   sleepRequests: CONFIG_FIELDS.sleepRequests.default,
   proxy: CONFIG_FIELDS.proxy.default,
+  logLevel: CONFIG_FIELDS.logLevel.default,
   cookiesEnabled: CONFIG_FIELDS.cookiesEnabled.default,
   customCookiesUploaded: CONFIG_FIELDS.customCookiesUploaded.default,
   writeChannelPosters: CONFIG_FIELDS.writeChannelPosters.default,

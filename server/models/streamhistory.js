@@ -8,7 +8,7 @@ StreamHistory.init(
     id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true, allowNull: false },
     stream_id: { type: DataTypes.STRING, allowNull: false, unique: true },
     youtube_id: { type: DataTypes.STRING, allowNull: false },
-    mode: { type: DataTypes.ENUM('hls', 'ffmpeg'), allowNull: false },
+    mode: { type: DataTypes.STRING(32), allowNull: false },
     quality: { type: DataTypes.STRING, allowNull: true },
     container: { type: DataTypes.STRING, allowNull: true },
     transcode: { type: DataTypes.STRING, allowNull: true },

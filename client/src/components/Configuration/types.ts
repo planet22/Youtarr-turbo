@@ -81,7 +81,7 @@ export interface YtstreamDryRunProbeShortcut {
 }
 
 export interface YtstreamDryRunPlan {
-  mode: 'direct' | 'ffmpeg' | 'hls';
+  mode: 'direct' | 'direct-pipe' | 'direct-redirect' | 'ffmpeg' | 'hls';
   requestedMode: string;
   ffmpegAvailable: boolean;
   container: string;
@@ -90,6 +90,7 @@ export interface YtstreamDryRunPlan {
   tuning: string;
   requestedQuality: string;
   quality: string;
+  qualityStrictness: 'fixed' | 'fallback' | 'best';
   qualityCapped: boolean;
   seekSeconds: number | null;
   calculatedLength: boolean;

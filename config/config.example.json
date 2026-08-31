@@ -44,6 +44,7 @@
     "stallDetectionRateThreshold": "100K",
     "sleepRequests": 1,
     "proxy": "",
+    "logLevel": "",
     "useTmpForDownloads": false,
     "tmpFilePath": "/tmp/youtarr-downloads",
     "cookiesEnabled": true,
@@ -103,6 +104,7 @@
         "writeThumbnail": true,
         "writeMediaInfoCache": true,
         "cacheOnPlay": false,
+        "cacheOnPlayExpiryHours": null,
         "quality": null
     },
     "ytstream": {
@@ -110,10 +112,17 @@
         "container": "mp4",
         "transcode": "",
         "quality": null,
+        "qualityStrictness": "fallback",
         "hardwareMode": "none",
+        "tuning": "fast",
         "playerClient": "",
         "calculatedLength": false,
-        "hotSwapToCache": false
+        "hotSwapToCache": false,
+        "serveCachedFile": false,
+        "instantStart": false,
+        "probeShortcut": false,
+        "forceServerSettings": false,
+        "historyRetentionDays": 90
     },
     "nzb": {
         "enabled": false,

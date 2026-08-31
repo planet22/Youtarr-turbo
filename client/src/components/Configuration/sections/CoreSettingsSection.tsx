@@ -293,6 +293,31 @@ export const CoreSettingsSection: React.FC<CoreSettingsSectionProps> = ({
                   </Box>
                 </Grid>
 
+                <Grid item xs={12} md={6}>
+                  <FormControl fullWidth>
+                    <InputLabel>Log Level</InputLabel>
+                    <Box className="flex items-center gap-1">
+                      <Select
+                        value={config.logLevel || ''}
+                        onChange={(e: SelectChangeEvent<string>) =>
+                          onConfigChange({ logLevel: e.target.value as ConfigState['logLevel'] })
+                        }
+                        label="Log Level"
+                        className="flex-1 min-w-0"
+                      >
+                        <MenuItem value="">Use LOG_LEVEL environment variable</MenuItem>
+                        <MenuItem value="warn">Warn (errors and warnings only)</MenuItem>
+                        <MenuItem value="info">Info (standard)</MenuItem>
+                        <MenuItem value="debug">Debug (verbose)</MenuItem>
+                      </Select>
+                      <InfoTooltip
+                        text="Overrides the LOG_LEVEL environment variable for the running server, live - no restart needed, and no risk of a container recreate not picking up a changed .env file. Applies immediately on Save; 'Use LOG_LEVEL environment variable' reverts to whatever that was set to at startup."
+                        onMobileClick={onMobileTooltipClick}
+                      />
+                    </Box>
+                  </FormControl>
+                </Grid>
+
                 {config.subtitlesEnabled && (
                   <Grid item xs={12} md={6}>
                     <Box className="flex items-start">
@@ -423,12 +448,12 @@ export const CoreSettingsSection: React.FC<CoreSettingsSectionProps> = ({
                         <MenuItem value="h265">H.265/HEVC (Balanced)</MenuItem>
                       </Select>
                       <InfoTooltip
-                        text="Select your preferred video codec. Youtarr will download this codec when available, and fall back if it is not. H.264 is recommended for Apple TV and maximum device compatibility, but YouTube does not provide H.264 above 1080p so selecting it effectively caps downloads at 1080p regardless of the resolution preference above. Default lets YouTube pick the best codec (typically VP9 or AV1 at 1440p+)."
+                        text="Select your preferred video codec. Youtarr will download this codec when available, and fall back if it is not. H.264 is recommended for Apple TV and maximum device compatibility, but YouTube does not provide H.264 above 1080p so selecting it effectively caps downloads at 1080p regardless of the resolution preference above. Default lets YouTube pick the best codec (typically VP9 or AV1 at 1440p+). H.264/H.265 also enforce the codec after downloading: if YouTube didn't actually have a matching stream to select (common - YouTube rarely serves H.264 above 1080p, and never serves H.265 at all), the file is re-encoded to match before the download job is marked complete, using the Hardware encoder/Encoding tuning configured under Settings -> Streaming. Default performs no such enforcement - whatever gets selected is what you get, unchanged. Cache-on-play (opportunistic STRM caching) downloads are never enforced/re-encoded regardless of this setting, since they're temporary and already re-encoded live on playback."
                         onMobileClick={onMobileTooltipClick}
                       />
                     </Box>
                     <Box component="span" className="text-xs text-muted-foreground">
-                      Note: H.264 offers maximum compatibility (Apple TV HD, iOS, older Rokus direct-play) but YouTube caps H.264 at 1080p, so it will override any 1440p/2160p preference.
+                      Note: H.264 offers maximum compatibility (Apple TV HD, iOS, older Rokus direct-play) but YouTube caps H.264 at 1080p, so it will override any 1440p/2160p preference. H.264/H.265 re-encode after downloading when the selected format doesn't already match (see tooltip) - Default never does.
                     </Box>
                   </FormControl>
                 </Grid>

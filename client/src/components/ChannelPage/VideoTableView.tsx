@@ -39,6 +39,7 @@ interface VideoTableViewProps {
   onToggleProtection: (youtubeId: string) => void;
   onMobileTooltip?: (message: string) => void;
   onVideoClick?: (video: ChannelVideo) => void;
+  onStrmChipClick?: (video: ChannelVideo) => void;
 }
 
 function VideoTableView({
@@ -57,6 +58,7 @@ function VideoTableView({
   onToggleProtection,
   onMobileTooltip,
   onVideoClick,
+  onStrmChipClick,
 }: VideoTableViewProps) {
   const isDeleteMode = selectionMode === 'delete';
   const effectiveSelection = isDeleteMode ? selectedForDeletion : checkedBoxes;
@@ -338,6 +340,7 @@ function VideoTableView({
                       audioFileSize={video.audioFileSize}
                       videoResolution={video.video_resolution}
                       orientation="vertical"
+                      onVideoChipClick={onStrmChipClick && video.id != null ? () => onStrmChipClick(video) : undefined}
                     />
                   ) : '-'}
                 </td>

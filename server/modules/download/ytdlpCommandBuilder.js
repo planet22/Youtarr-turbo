@@ -3,6 +3,7 @@ const configModule = require('../configModule');
 const tempPathManager = require('./tempPathManager');
 const logger = require('../../logger');
 const customArgsParser = require('./customArgsParser');
+const archiveModule = require('../archiveModule');
 const {
   CHANNEL_TEMPLATE,
   composeVideoFileTemplate,
@@ -567,7 +568,13 @@ class YtdlpCommandBuilder {
 
     // Only use download archive if NOT allowing re-downloads
     if (!allowRedownload) {
-      args.push('--download-archive', './config/complete.list');
+      // Absolute path (matches archiveModule's own resolution) - a relative
+      // './config/complete.list' depends on whatever the spawned yt-dlp
+      // process's cwd happens to be, which failed at least once in
+      // production for a STRM cache-on-play job (ENOENT on the archive
+      // write, logged as a spurious download failure despite the download
+      // itself having already succeeded).
+      args.push('--download-archive', archiveModule.getArchivePath());
     }
 
     // Build match filter with any channel-specific filtering
@@ -659,7 +666,13 @@ class YtdlpCommandBuilder {
 
     // Only use download archive if NOT allowing re-downloads
     if (!allowRedownload) {
-      args.push('--download-archive', './config/complete.list');
+      // Absolute path (matches archiveModule's own resolution) - a relative
+      // './config/complete.list' depends on whatever the spawned yt-dlp
+      // process's cwd happens to be, which failed at least once in
+      // production for a STRM cache-on-play job (ENOENT on the archive
+      // write, logged as a spurious download failure despite the download
+      // itself having already succeeded).
+      args.push('--download-archive', archiveModule.getArchivePath());
     }
 
     args.push(

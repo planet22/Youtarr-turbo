@@ -46,6 +46,7 @@ export const YtstreamDryRunSection: React.FC<Props> = ({ config, token }) => {
   }, [
     ytstream?.defaultMode,
     ytstream?.quality,
+    ytstream?.qualityStrictness,
     ytstream?.container,
     ytstream?.transcode,
     ytstream?.hardwareMode,
@@ -70,6 +71,7 @@ export const YtstreamDryRunSection: React.FC<Props> = ({ config, token }) => {
       const result = await runDryRun(youtubeId, {
         mode: ytstream?.defaultMode || undefined,
         quality: ytstream?.quality || undefined,
+        qualityStrictness: ytstream?.qualityStrictness || undefined,
         container: ytstream?.container || undefined,
         transcode: ytstream?.transcode || undefined,
         hardwareMode: ytstream?.hardwareMode || undefined,

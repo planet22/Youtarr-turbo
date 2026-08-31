@@ -6,7 +6,7 @@ const REFETCH_DEBOUNCE_MS = 1000;
 
 export interface StreamSnapshot {
   streamId: string;
-  mode: 'ffmpeg' | 'hls';
+  mode: 'ffmpeg' | 'hls' | 'direct-pipe';
   youtubeId: string;
   title: string | null;
   quality: string;

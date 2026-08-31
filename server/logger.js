@@ -10,7 +10,7 @@ const pino = require('pino');
  * - Sensitive data redaction (passwords, tokens, API keys)
  * - Request correlation via request IDs
  */
-const logLevel = process.env.LOG_LEVEL || 'info';
+const logLevel = (process.env.LOG_LEVEL || 'info').toLowerCase();
 
 const pinoConfig = {
   level: logLevel,
@@ -76,5 +76,24 @@ const pinoConfig = {
 
 const logger = pino(pinoConfig);
 
+const VALID_LOG_LEVELS = new Set(['warn', 'info', 'debug']);
+
+/**
+ * Overrides the logger's level at runtime (see configModule.js's
+ * updateConfig, which calls this whenever the top-level `logLevel` Settings
+ * field changes) - pino's own `.level` is a live, mutable property, so this
+ * takes effect immediately for every log call from this point on, no
+ * container restart/recreate needed (unlike the LOG_LEVEL environment
+ * variable, which is only read once at startup - see the module comment
+ * above). A falsy/invalid value reverts to whatever LOG_LEVEL was set to
+ * at startup (or 'info' if that was unset too), i.e. back to this module's
+ * own original default.
+ */
+function setLevel(level) {
+  const normalized = typeof level === 'string' ? level.toLowerCase() : level;
+  logger.level = VALID_LOG_LEVELS.has(normalized) ? normalized : logLevel;
+}
+
 // Export logger instance
 module.exports = logger;
+module.exports.setLevel = setLevel;

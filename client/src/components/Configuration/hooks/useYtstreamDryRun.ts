@@ -8,6 +8,7 @@ interface UseYtstreamDryRunParams {
 export interface YtstreamDryRunOverrides {
   mode?: string;
   quality?: string | null;
+  qualityStrictness?: string;
   container?: string;
   transcode?: string;
   hardwareMode?: string;
@@ -36,6 +37,7 @@ export const useYtstreamDryRun = ({ token }: UseYtstreamDryRunParams) => {
     const params = new URLSearchParams({ probe: 'true' });
     if (overrides.mode) params.set('mode', overrides.mode);
     if (overrides.quality) params.set('quality', overrides.quality);
+    if (overrides.qualityStrictness) params.set('qualityStrictness', overrides.qualityStrictness);
     if (overrides.container) params.set('container', overrides.container);
     if (overrides.transcode) params.set('transcode', overrides.transcode);
     if (overrides.hardwareMode) params.set('hardware', overrides.hardwareMode);

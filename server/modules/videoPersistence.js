@@ -5,6 +5,7 @@ const ChannelVideo = require('../models/channelvideo');
 const channelVideoReanchor = require('./channelVideoReanchor');
 const { PUBLISHED_AT_SOURCE } = require('./constants/publishedAtSource');
 const VideoMetadataProcessor = require('./download/videoMetadataProcessor');
+const { STRM_CACHE_LABEL_PREFIX } = require('./strmCacheOnPlay');
 const logger = require('../logger');
 
 /**
@@ -95,6 +96,18 @@ class VideoPersistence {
       // During recovery (alwaysCreateJobVideo=true), treat updates like new videos
       // to ensure file metadata and last_downloaded_at are set
       const updateData = this.prepareVideoDataForSave(video, alwaysCreateJobVideo);
+
+      // cached_at: only for the exact STRM-cache-on-play transition (this
+      // job's own type carries strmCacheOnPlay's label prefix), never for a
+      // genuine/forced download - see the migration adding this column and
+      // videoDeletionModule.sweepExpiredCachedVideos for what reads it. Set
+      // alongside the same update below rather than a second write.
+      const isStrmCacheJob = typeof jobInstance?.jobType === 'string'
+        && jobInstance.jobType.startsWith(STRM_CACHE_LABEL_PREFIX);
+      if (previousStrmFilePath && updateData.is_strm === false && isStrmCacheJob) {
+        updateData.cached_at = new Date();
+      }
+
       await videoInstance.update(updateData);
 
       // This update just landed a verified real file on a row that was

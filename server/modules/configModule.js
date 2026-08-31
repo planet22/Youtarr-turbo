@@ -97,6 +97,11 @@ class ConfigModule extends EventEmitter {
       this.saveConfig();
     }
 
+    // Apply a persisted logLevel override immediately at startup - without
+    // this, it would only take effect after the first Settings save in a
+    // given process lifetime (updateConfig applies it too, below).
+    logger.setLevel(this.config.logLevel);
+
     this.watchConfig();
   }
 
@@ -351,6 +356,9 @@ class ConfigModule extends EventEmitter {
       this.config.useTmpForDownloads = true;
       this.config.tmpFilePath = '/app/config/temp_downloads';
     }
+
+    // Live, no restart needed - see logger.js's setLevel doc comment.
+    logger.setLevel(this.config.logLevel);
 
     this.saveConfig();
     // Emit a change event

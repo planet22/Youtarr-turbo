@@ -165,6 +165,47 @@ async function transcodeDownloadedVideo(inputPath) {
     return inputPath;
   }
 
+  // STRM cache-on-play: never transcode. strmCacheTargetDir (module-level,
+  // parsed from YOUTARR_STRM_CACHE_TARGET_DIR at the top of this file) is
+  // already this script's own signal for "this download is an opportunistic
+  // cache-on-play materialize, not a permanent one" - reused here rather
+  // than a second lookup. A cache-on-play file is temporary (may get
+  // reverted back to STRM - see cached_at/sweepExpiredCachedVideos) and
+  // already re-encoded live by ytstream on next play regardless, so
+  // spending real encode time on it here would be pure waste.
+  if (strmCacheTargetDir) {
+    logger.debug({ inputPath }, '[Post-Process] Transcode skipped - STRM cache-on-play download, never transcoded');
+    return inputPath;
+  }
+
+  // NZB grabs: gated by the triggering job's own category config
+  // (nzb.categories[].postEncode), on top of the global setting above - a
+  // category with postEncode !== true never transcodes, regardless of
+  // downloadTranscodeVideoCodec. Every other job type (channel, manual,
+  // playlist) has no category concept and just uses the global setting.
+  if (activeJobId) {
+    try {
+      const { Job } = require('../models');
+      const { parseAuxData } = require('./jobAuxData');
+      const { NZB_LABEL_PREFIX } = require('./download/jobTypes');
+      const job = await Job.findOne({ where: { id: activeJobId }, attributes: ['jobType', 'aux_data'] });
+      if (job && typeof job.jobType === 'string' && job.jobType.startsWith(NZB_LABEL_PREFIX)) {
+        const categoryName = parseAuxData(job.aux_data)?.nzb?.categoryName;
+        const category = (cfg.nzb?.categories || []).find((c) => c.name === categoryName);
+        if (!category || category.postEncode !== true) {
+          logger.debug({ inputPath, categoryName }, '[Post-Process] Transcode skipped - NZB category has post-download encode disabled');
+          return inputPath;
+        }
+      }
+    } catch (err) {
+      // Fail open toward the pre-existing (global-only) behavior rather
+      // than either blocking the download or silently transcoding an NZB
+      // category that asked to be excluded - log and let the global
+      // setting alone decide, same as a non-NZB job would.
+      logger.warn({ err, activeJobId }, '[Post-Process] Transcode: NZB category lookup failed, falling back to global setting only');
+    }
+  }
+
   const videoCodec = hardwareEncoderModule.normalizeVideoCodec(videoCodecSetting);
   const hardwareMode = hardwareEncoderModule.normalizeHardwareMode(cfg.downloadTranscodeHardwareMode);
   const audioCodec = hardwareEncoderModule.normalizeAudioCodec(cfg.downloadTranscodeAudioCodec);

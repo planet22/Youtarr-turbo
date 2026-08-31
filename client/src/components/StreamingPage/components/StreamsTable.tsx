@@ -18,7 +18,7 @@ import { Stop as StopIcon, Search as ProbeIcon } from '../../../lib/icons';
 import { formatFileSize } from '../../../utils/formatters';
 import { StreamSnapshot } from '../../../hooks/useActiveStreams';
 import { YOUTUBE_URL_BASE } from '../../shared/VideoModal/constants';
-import { formatBytesPerSecond, formatElapsed, parseClientLabel, isLikelyProbeRequest } from '../utils';
+import { formatBytesPerSecond, formatElapsed, parseClientLabel, isLikelyProbeRequest, formatModeLabel } from '../utils';
 
 export interface StreamsTableProps {
   streams: StreamSnapshot[];
@@ -103,7 +103,7 @@ function StreamRow({ stream, token, onStopped }: { stream: StreamSnapshot; token
         </Box>
       </TableCell>
       <TableCell>
-        <Chip size="small" label={stream.mode === 'hls' ? 'HLS' : 'FFmpeg'} variant="filled" />
+        <Chip size="small" label={formatModeLabel(stream.mode)} variant="filled" />
       </TableCell>
       <TableCell>
         <Tooltip title={`hardware: ${stream.hardwareMode}`}>

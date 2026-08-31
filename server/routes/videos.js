@@ -455,6 +455,123 @@ module.exports = function createVideoRoutes({ verifyToken, videosModule, downloa
    *       500:
    *         description: Failed to perform dry run
    */
+  /**
+   * @swagger
+   * /api/videos/strm/download:
+   *   post:
+   *     summary: Force-download STRM videos
+   *     description: Forces an immediate real download for one or more STRM (placeholder-only) videos, bypassing the global strm.cacheOnPlay setting - the same mechanism that normally only fires automatically on first play.
+   *     tags: [Videos]
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             required:
+   *               - videoIds
+   *             properties:
+   *               videoIds:
+   *                 type: array
+   *                 items:
+   *                   type: integer
+   *     responses:
+   *       200:
+   *         description: Processed
+   *       400:
+   *         description: Invalid request
+   */
+  router.post('/api/videos/strm/download', verifyToken, async (req, res) => {
+    try {
+      const { videoIds } = req.body;
+      if (!Array.isArray(videoIds) || videoIds.length === 0) {
+        return res.status(400).json({ success: false, error: 'videoIds array is required' });
+      }
+
+      const Video = require('../models/video');
+      const strmCacheOnPlay = require('../modules/strmCacheOnPlay');
+      const processed = [];
+      const failed = [];
+
+      for (const videoId of videoIds) {
+        try {
+          const video = await Video.findByPk(videoId);
+          if (!video) {
+            failed.push({ videoId, error: 'Video not found in database' });
+            continue;
+          }
+          const result = await strmCacheOnPlay.forceEnqueueCacheDownload(video.youtubeId);
+          if (result.queued) {
+            processed.push(videoId);
+          } else {
+            failed.push({ videoId, error: result.reason || 'Could not queue download' });
+          }
+        } catch (err) {
+          req.log.error({ err, videoId }, 'Failed to force-download STRM video');
+          failed.push({ videoId, error: err.message || 'Unknown error' });
+        }
+      }
+
+      res.json({ success: failed.length === 0, processed, failed });
+    } catch (error) {
+      req.log.error({ err: error }, 'Failed to force-download STRM videos');
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  /**
+   * @swagger
+   * /api/videos/strm/revert:
+   *   post:
+   *     summary: Revert cached videos back to STRM
+   *     description: Deletes the downloaded file and restores the STRM placeholder for one or more videos - only works for videos originally cached from STRM (have an archived .strm.cached backup); others are reported as failed.
+   *     tags: [Videos]
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             required:
+   *               - videoIds
+   *             properties:
+   *               videoIds:
+   *                 type: array
+   *                 items:
+   *                   type: integer
+   *     responses:
+   *       200:
+   *         description: Processed
+   *       400:
+   *         description: Invalid request
+   */
+  router.post('/api/videos/strm/revert', verifyToken, async (req, res) => {
+    try {
+      const { videoIds } = req.body;
+      if (!Array.isArray(videoIds) || videoIds.length === 0) {
+        return res.status(400).json({ success: false, error: 'videoIds array is required' });
+      }
+
+      const videoDeletionModule = require('../modules/videoDeletionModule');
+      const processed = [];
+      const failed = [];
+
+      for (const videoId of videoIds) {
+        const result = await videoDeletionModule.revertToStrm(videoId);
+        if (result.success) {
+          processed.push(videoId);
+        } else {
+          failed.push({ videoId, error: result.error || 'Could not revert to STRM' });
+        }
+      }
+
+      res.json({ success: failed.length === 0, processed, failed });
+    } catch (error) {
+      req.log.error({ err: error }, 'Failed to revert videos to STRM');
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
   router.post('/api/auto-removal/dry-run', verifyToken, async (req, res) => {
     try {
       const {

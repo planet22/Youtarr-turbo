@@ -62,6 +62,7 @@ const renderTable = (overrides: Partial<React.ComponentProps<typeof VideosTable>
     onOpenModal: jest.fn(),
     onToggleProtection: jest.fn(),
     onDeleteSingle: jest.fn(),
+    onStrmChipClick: jest.fn(),
     onImageError: jest.fn(),
     onAddChannel: jest.fn(),
   };

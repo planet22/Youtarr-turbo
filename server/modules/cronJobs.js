@@ -57,6 +57,27 @@ function initialize(deps = {}) {
   });
 
   // ============================================================================
+  // STRM CACHE-ON-PLAY EXPIRY SWEEP - 2:10 AM Daily
+  // ============================================================================
+  // Reverts videos that STRM cache-on-play opportunistically downloaded
+  // (server/modules/strmCacheOnPlay.js) back to STRM once older than
+  // strm.cacheOnPlayExpiryHours, so a cache-on-play download doesn't
+  // silently become a permanent one. No-op (returns immediately) when that
+  // threshold is unset/0 - see videoDeletionModule.sweepExpiredCachedVideos.
+  // Runs 10 minutes after the main auto-removal pass so both nightly jobs
+  // don't race on the same rows.
+  schedule.schedule('10 2 * * *', async () => {
+    try {
+      const result = await videoDeletionModule.sweepExpiredCachedVideos();
+      if (result.reverted > 0 || result.failed > 0) {
+        logger.info(result, 'STRM cache-on-play expiry sweep completed');
+      }
+    } catch (error) {
+      logger.error({ err: error }, 'Error during STRM cache-on-play expiry sweep');
+    }
+  });
+
+  // ============================================================================
   // SESSION CLEANUP - 3:00 AM Daily
   // ============================================================================
   schedule.schedule('0 3 * * *', async () => {
@@ -89,21 +110,22 @@ function initialize(deps = {}) {
   // ============================================================================
   // Keeps the audit trail from growing unbounded - every ytstream playback
   // session (server/routes/ytstream.js's trackStream/untrackStream) writes a
-  // row here, with no natural cap the way the job-history table has. 90 days
-  // is a fixed default for now rather than a user-configurable setting, to
-  // keep this a simple "look back at recent activity" log, not a permanent
-  // record.
+  // row here, with no natural cap the way the job-history table has. Retention
+  // is configurable (Settings -> Streaming -> ytstream.historyRetentionDays),
+  // defaulting to 90 days when unset.
   schedule.schedule('15 3 * * *', async () => {
     if (!db.StreamHistory) return;
     try {
+      const configuredDays = configModule.getConfig().ytstream?.historyRetentionDays;
+      const retentionDays = Number.isFinite(configuredDays) && configuredDays > 0 ? configuredDays : 90;
       const result = await db.StreamHistory.destroy({
         where: {
           started_at: {
-            [db.Sequelize.Op.lt]: new Date(Date.now() - 90 * 24 * 60 * 60 * 1000),
+            [db.Sequelize.Op.lt]: new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000),
           },
         },
       });
-      logger.info({ removed: result }, 'Pruned old stream-history rows');
+      logger.info({ removed: result, retentionDays }, 'Pruned old stream-history rows');
     } catch (error) {
       logger.error({ err: error }, 'Error pruning stream history');
     }

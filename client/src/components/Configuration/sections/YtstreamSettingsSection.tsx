@@ -13,6 +13,9 @@ import {
   Switch,
   FormControlLabel,
   Chip,
+  Accordion,
+  AccordionSummary,
+  AccordionDetails,
 } from '../../ui';
 import { InfoTooltip } from '../common/InfoTooltip';
 import { ConfigState } from '../types';
@@ -33,11 +36,12 @@ interface Props {
   token: string | null;
 }
 
-const DEFAULT_YTSTREAM: YtstreamConfig = {
+export const DEFAULT_YTSTREAM: YtstreamConfig = {
   defaultMode: 'direct',
   container: 'mp4',
   transcode: '',
   quality: null,
+  qualityStrictness: 'fallback',
   hardwareMode: 'none',
   tuning: 'fast',
   playerClient: '',
@@ -46,6 +50,19 @@ const DEFAULT_YTSTREAM: YtstreamConfig = {
   instantStart: false,
   probeShortcut: false,
   forceServerSettings: false,
+  historyRetentionDays: 90,
+};
+
+// Each mode's real limitation, stated plainly - see resolvePlaybackPlan's
+// execution steps (server/routes/ytstream.js) for the same information in
+// dry-run form. No mode falls back to a different mode's behavior; each
+// either works as described or fails outright (502).
+const MODE_TOOLTIPS: Record<string, string> = {
+  direct: 'Resolves a playback URL via yt-dlp, then proxies it directly - no ffmpeg, no re-encode. Progressive-only: YouTube currently serves exactly one muxed video+audio format for virtually any video (~360p), so Stream quality rarely changes anything here. If the resolved URL is rejected (a session-bound "vprv" 403), this mode just fails - no automatic retry beyond the same-request extraction-error retry. Use Direct (yt-dlp piped) if you want resilience against that specific failure instead.',
+  'direct-pipe': 'Same progressive-only ceiling as Direct (effectively ~360p), but fetches through yt-dlp\'s own process instead of proxying a separately-resolved URL - survives the session-bound-URL 403 plain Direct can\'t recover from. Trade-off: no Range/seek support, since this is a live sequential pipe, not a byte-range fetch - a seek restarts playback from 0. Still zero ffmpeg, zero re-encode.',
+  'direct-redirect': 'Resolves a playback URL via yt-dlp, then sends the player a 302 straight to it - Youtarr never touches the video bytes at all, the lightest mode on Youtarr\'s own bandwidth/CPU. Real trade-offs: no cookies/Referer/User-Agent travel with the redirect, so age-restricted or members-only videos (which need those) fail outright for a player that can\'t supply them; a session-bound "vprv" URL is if anything more likely to 403 here than under Direct, since the fetch now comes from the player\'s own network entirely; and whatever happens after the redirect is invisible to Youtarr - a failure here never reaches this server\'s logs.',
+  ffmpeg: 'Re-streams through a single live ffmpeg connection fed by yt-dlp\'s DASH (video-only + audio-only) formats - real quality up to whatever height this video truly has, not capped by progressive-format availability. Requires ffmpeg installed and working on the Youtarr host - if it isn\'t, this mode fails outright (502); it does not silently fall back to Direct.',
+  hls: 'Same DASH-based quality ceiling as Enhanced, but writes real segment files to local disk instead of a live pipe, only responding once the first segment exists - fixes players (Jellyfin included) that won\'t tolerate the live pipe\'s startup wait. Costs local disk space per active stream. Same ffmpeg-required, no-fallback rule as Enhanced.',
 };
 
 /**
@@ -124,7 +141,7 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
   };
 
   return (
-    <Grid container spacing={2}>
+    <Grid container spacing={3}>
       <Grid item xs={12}>
         <Typography variant="subtitle2" color="textSecondary">
           Playback &amp; Quality
@@ -153,7 +170,9 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
         </Box>
       </Grid>
 
-      <Grid item xs={12} md={4}>
+      {/* Row 1 - what stream gets built: mode, container, and the quality
+          knobs that shape it. */}
+      <Grid item xs={12} sm={6} md={3}>
         <FormControl fullWidth style={forced ? forcedFieldStyle : undefined}>
           <InputLabel>Playback mode</InputLabel>
           <Box className="flex items-center gap-1">
@@ -161,24 +180,53 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
               value={mode}
               label="Playback mode"
               onChange={(e: SelectChangeEvent<string>) =>
-                setYtstream({ defaultMode: e.target.value as 'direct' | 'ffmpeg' | 'hls' })
+                setYtstream({ defaultMode: e.target.value as 'direct' | 'direct-pipe' | 'direct-redirect' | 'ffmpeg' | 'hls' })
               }
               className="flex-1 min-w-0"
               disabled={disabled}
             >
-              <MenuItem value="direct">Direct / Simple (redirect, no ffmpeg)</MenuItem>
+              <MenuItem value="direct">Direct (resolve + proxy, no ffmpeg)</MenuItem>
+              <MenuItem value="direct-pipe">Direct (yt-dlp piped, no ffmpeg)</MenuItem>
+              <MenuItem value="direct-redirect">Direct (redirect, no proxy)</MenuItem>
               <MenuItem value="ffmpeg">Enhanced (ffmpeg, live pipe)</MenuItem>
               <MenuItem value="hls">Enhanced HLS (segmented, most compatible)</MenuItem>
             </Select>
             <InfoTooltip
-              text="Direct redirects the player to a resolved stream URL (plugin Simple mode). Enhanced (ffmpeg) re-streams through a single live ffmpeg connection. Enhanced HLS instead writes real segment files and only responds once the first one exists — fixes players (Jellyfin included) that won't tolerate the live pipe's startup wait and retry forever instead of playing; costs some local disk space per active stream. Both fall back to Direct automatically if ffmpeg is unavailable."
+              text={MODE_TOOLTIPS[mode] || MODE_TOOLTIPS.direct}
               onMobileClick={onMobileTooltipClick}
             />
           </Box>
         </FormControl>
       </Grid>
 
-      <Grid item xs={12} md={4}>
+      <Grid item xs={12} sm={6} md={3}>
+        <FormControl fullWidth style={forced ? forcedFieldStyle : undefined}>
+          <InputLabel>Container</InputLabel>
+          <Box className="flex items-center gap-1">
+            <Select
+              value={ytstream.container || 'mp4'}
+              label="Container"
+              onChange={(e: SelectChangeEvent<string>) =>
+                setYtstream({ container: e.target.value as 'mp4' | 'ts' | 'mkv' })
+              }
+              className="flex-1 min-w-0"
+              disabled={disabled || !enhancedMode}
+            >
+              <MenuItem value="mp4">MP4 (fragmented pipe, or fMP4 segments in HLS mode)</MenuItem>
+              <MenuItem value="ts">MPEG-TS (player-friendly; MPEG-TS segments in HLS mode)</MenuItem>
+              {mode !== 'hls' && (
+                <MenuItem value="mkv">Matroska (Enhanced only - accepts any codec, no MP4 box-signaling issues)</MenuItem>
+              )}
+            </Select>
+            <InfoTooltip
+              text="Matroska (mkv) is Enhanced (ffmpeg) mode only, not offered for Enhanced HLS - HLS segments must be fMP4 or MPEG-TS. Useful for Transcode=Copy when the source track isn't H.264: unlike MP4, Matroska's muxer accepts essentially any video/audio codec pair without container-specific signaling concerns."
+              onMobileClick={onMobileTooltipClick}
+            />
+          </Box>
+        </FormControl>
+      </Grid>
+
+      <Grid item xs={12} sm={6} md={3}>
         <FormControl fullWidth style={forced ? forcedFieldStyle : undefined}>
           <InputLabel>Stream quality</InputLabel>
           <Box className="flex items-center gap-1">
@@ -202,31 +250,41 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
               <MenuItem value="best">Best available</MenuItem>
             </Select>
             <InfoTooltip
-              text="Maps to yt-dlp format selectors used by the Jellyfin YouTube plugin: 720 = progressive MP4, 1080 = balanced, best = maximum quality (may be HLS). Enhanced mode uses separate AVC+AAC inputs capped at this height."
+              text="Maps to yt-dlp format selectors used by the Jellyfin YouTube plugin: 720 = progressive MP4, 1080 = balanced, best = maximum quality. Enhanced mode uses separate AVC+AAC inputs capped at this height; Direct/Direct (piped) can only ever reach whatever progressive (muxed) format YouTube actually serves for a video, which today is effectively just ~360p regardless of this setting - see Quality strictness for how a mismatch is handled."
               onMobileClick={onMobileTooltipClick}
             />
           </Box>
         </FormControl>
       </Grid>
 
-      <Grid item xs={12} md={4}>
+      <Grid item xs={12} sm={6} md={3}>
         <FormControl fullWidth style={forced ? forcedFieldStyle : undefined}>
-          <InputLabel>Container</InputLabel>
-          <Select
-            value={ytstream.container || 'mp4'}
-            label="Container"
-            onChange={(e: SelectChangeEvent<string>) =>
-              setYtstream({ container: e.target.value as 'mp4' | 'ts' })
-            }
-            disabled={disabled || !enhancedMode}
-          >
-            <MenuItem value="mp4">MP4 (fragmented pipe, or fMP4 segments in HLS mode)</MenuItem>
-            <MenuItem value="ts">MPEG-TS (player-friendly; MPEG-TS segments in HLS mode)</MenuItem>
-          </Select>
+          <InputLabel>Quality strictness</InputLabel>
+          <Box className="flex items-center gap-1">
+            <Select
+              value={ytstream.qualityStrictness || 'fallback'}
+              label="Quality strictness"
+              onChange={(e: SelectChangeEvent<string>) =>
+                setYtstream({ qualityStrictness: e.target.value as 'fixed' | 'fallback' | 'best' })
+              }
+              className="flex-1 min-w-0"
+              disabled={disabled}
+            >
+              <MenuItem value="fallback">Fall back to lower resolution (default)</MenuItem>
+              <MenuItem value="fixed">Fixed (exact height only, fail otherwise)</MenuItem>
+              <MenuItem value="best">Best available (ignore Stream quality)</MenuItem>
+            </Select>
+            <InfoTooltip
+              text="Controls how Stream quality's configured height is turned into a request. Fall back to lower resolution (default, unchanged behavior) chains from the exact height down to whatever's actually available. Fixed matches only that exact height and fails cleanly (no silent substitution) if this video doesn't have it - honest but likely to fail often in Direct/Direct (piped) mode, since YouTube serves almost no heights progressively other than ~360p. Best available ignores Stream quality entirely and always takes the mode's real ceiling (the best progressive format for Direct/Direct (piped), the video's true best DASH height for Enhanced/Enhanced HLS)."
+              onMobileClick={onMobileTooltipClick}
+            />
+          </Box>
         </FormControl>
       </Grid>
 
-      <Grid item xs={12} md={4}>
+      {/* Row 2 - how the encode pipeline behaves: transcode method, hardware,
+          tuning, and calculated-length's seek/duration behavior. */}
+      <Grid item xs={12} sm={6} md={3}>
         <FormControl fullWidth style={forced ? forcedFieldStyle : undefined}>
           <InputLabel>Transcode</InputLabel>
           <Box className="flex items-center gap-1">
@@ -251,7 +309,7 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
         </FormControl>
       </Grid>
 
-      <Grid item xs={12} md={4}>
+      <Grid item xs={12} sm={6} md={3}>
         <FormControl fullWidth style={forced ? forcedFieldStyle : undefined}>
           <InputLabel>Hardware encoder</InputLabel>
           <Box className="flex items-center gap-1">
@@ -280,7 +338,7 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
         </FormControl>
       </Grid>
 
-      <Grid item xs={12} md={4}>
+      <Grid item xs={12} sm={6} md={3}>
         <FormControl fullWidth style={forced ? forcedFieldStyle : undefined}>
           <InputLabel>Encoding tuning</InputLabel>
           <Box className="flex items-center gap-1">
@@ -316,30 +374,28 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
         </FormControl>
       </Grid>
 
-      <Grid item xs={12}>
-        <HardwareCapabilitiesTable
-          matrix={hardwareMatrix}
-          testing={testingHardware}
-          error={hardwareTestError}
-          onRunTest={runHardwareTest}
-          onMobileTooltipClick={onMobileTooltipClick}
-        />
-      </Grid>
-
-      <Grid item xs={12}>
-        <TuningBenchmarkTable
-          hardwareMode={currentHardwareMode}
-          matrix={tuningMatrix}
-          recommended={tuningRecommended}
-          resultHardwareMode={tuningResultHardwareMode}
-          progress={tuningProgress}
-          testing={testingTuning}
-          error={tuningTestError}
-          onRunTest={() => runTuningBenchmark(currentHardwareMode)}
-          disabledReason={tuningTestDisabledReason}
-          onMobileTooltipClick={onMobileTooltipClick}
-        />
-        <TuningHistoryTable history={tuningHistory} />
+      <Grid item xs={12} sm={6} md={3}>
+        <FormControl fullWidth style={forced ? forcedFieldStyle : undefined}>
+          <InputLabel>Calculated length</InputLabel>
+          <Box className="flex items-center gap-1">
+            <Select
+              value={ytstream.calculatedLength ? 'on' : 'off'}
+              label="Calculated length"
+              onChange={(e: SelectChangeEvent<string>) =>
+                setYtstream({ calculatedLength: e.target.value === 'on' })
+              }
+              className="flex-1 min-w-0"
+              disabled={disabled || !enhancedMode}
+            >
+              <MenuItem value="off">Off</MenuItem>
+              <MenuItem value="on">On</MenuItem>
+            </Select>
+            <InfoTooltip
+              text="Enhanced modes only. In Enhanced (ffmpeg): reports an estimated file size/duration and answers seek (Range) requests by restarting the live pipe at the matching estimated timestamp — the estimate is approximate, seeking has the same multi-second restart latency as a cold start, and playback near the very end can show a few seconds of silence if the real encode finished early. In Enhanced HLS: builds the real, exact-duration playlist upfront (no estimate) so the player sees a full seekable timeline immediately; seeking past what's been encoded so far restarts the encode at that segment instead of the whole stream, which is faster and only ever approximate for the segment currently being (re)encoded. Off, HLS still plays fine but the timeline only grows as segments are produced, so some players won't show a scrub bar until near the end."
+              onMobileClick={onMobileTooltipClick}
+            />
+          </Box>
+        </FormControl>
       </Grid>
 
       <Grid item xs={12} md={4}>
@@ -370,66 +426,15 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
         </Typography>
       </Grid>
 
-      <Grid item xs={12} md={4}>
-        <Box className="flex items-center gap-1" style={forced ? forcedFieldStyle : undefined}>
-          <FormControlLabel
-            control={
-              <Switch
-                checked={ytstream.calculatedLength ?? false}
-                onChange={(e) => setYtstream({ calculatedLength: e.target.checked })}
-                disabled={disabled || !enhancedMode}
-              />
-            }
-            label="Calculated length"
-          />
-          <InfoTooltip
-            text="Enhanced modes only. In Enhanced (ffmpeg): reports an estimated file size/duration and answers seek (Range) requests by restarting the live pipe at the matching estimated timestamp — the estimate is approximate, seeking has the same multi-second restart latency as a cold start, and playback near the very end can show a few seconds of silence if the real encode finished early. In Enhanced HLS: builds the real, exact-duration playlist upfront (no estimate) so the player sees a full seekable timeline immediately; seeking past what's been encoded so far restarts the encode at that segment instead of the whole stream, which is faster and only ever approximate for the segment currently being (re)encoded. Off, HLS still plays fine but the timeline only grows as segments are produced, so some players won't show a scrub bar until near the end."
-            onMobileClick={onMobileTooltipClick}
-          />
-        </Box>
-      </Grid>
-
-      {mode === 'hls' && (
-        <Grid item xs={12} md={4}>
-          <Box className="flex items-center gap-1">
-            <FormControlLabel
-              control={
-                <Switch
-                  checked={ytstream.hotSwapToCache ?? false}
-                  onChange={(e) => setYtstream({ hotSwapToCache: e.target.checked })}
-                  disabled={disabled}
-                />
-              }
-              label="Hot-swap to cached file"
-            />
-            <InfoTooltip
-              text="Enhanced HLS only. If the STRM 'Cache on play' background download finishes while this video is still playing, the session switches to producing the remaining segments from the local cached file instead of the live network pull - same picture, no restart, just faster and more reliable for the rest of the video. Has no effect unless Cache on play is also enabled."
-              onMobileClick={onMobileTooltipClick}
-            />
-          </Box>
-        </Grid>
-      )}
-
-      {mode === 'hls' && (
-        <Grid item xs={12} md={4}>
-          <Box className="flex items-center gap-1">
-            <FormControlLabel
-              control={
-                <Switch
-                  checked={ytstream.instantStart ?? false}
-                  onChange={(e) => setYtstream({ instantStart: e.target.checked })}
-                  disabled={disabled || !ytstream.calculatedLength || !forceH264}
-                />
-              }
-              label="Instant start"
-            />
-            <InfoTooltip
-              text="Enhanced HLS + Calculated length + Transcode=H.264 only. Normally the very first response blocks until the real encode produces its first segment (10-25s is typical for a cold start). This serves a small pre-generated 'loading' clip as segment 0 instead, so playback starts within milliseconds while the real encode catches up in the background - the placeholder is generated once (matching your codec/hardware settings) and reused after that. No effect for Transcode=Copy, since no single placeholder could match every video's own passthrough codec."
-              onMobileClick={onMobileTooltipClick}
-            />
-          </Box>
-        </Grid>
-      )}
+      {/* Calculated length now lives up in the forced-settings grid above,
+          as a dropdown alongside Transcode/Hardware encoder/Encoding tuning
+          - it's part of the same "how the encode pipeline behaves" group,
+          not a performance optimization proper. Instant start / Cache on
+          play / Hot-swap to cached file live together in
+          StrmSettingsSection's "File Output" area - they're all about
+          serving from a file (a placeholder segment, a cached download, or
+          a hot-swapped local file) rather than a playback setting proper.
+          That leaves Probe shortcut as the only thing here. */}
 
       {forceH264 && (
         <Grid item xs={12} md={4}>
@@ -464,6 +469,75 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
           </Typography>
         </Grid>
       )}
+
+      <Grid item xs={12}>
+        <Accordion style={{ border: 'var(--border-weight) solid var(--border)', borderRadius: 'var(--radius-ui)' }}>
+          <AccordionSummary>
+            <Typography variant="subtitle2" style={{ fontWeight: 700 }}>
+              Hardware Testing &amp; Tuning
+            </Typography>
+          </AccordionSummary>
+          <AccordionDetails>
+            <Grid container spacing={2}>
+              <Grid item xs={12}>
+                <HardwareCapabilitiesTable
+                  matrix={hardwareMatrix}
+                  testing={testingHardware}
+                  error={hardwareTestError}
+                  onRunTest={runHardwareTest}
+                  onMobileTooltipClick={onMobileTooltipClick}
+                />
+              </Grid>
+
+              <Grid item xs={12}>
+                <TuningBenchmarkTable
+                  hardwareMode={currentHardwareMode}
+                  matrix={tuningMatrix}
+                  recommended={tuningRecommended}
+                  resultHardwareMode={tuningResultHardwareMode}
+                  progress={tuningProgress}
+                  testing={testingTuning}
+                  error={tuningTestError}
+                  onRunTest={() => runTuningBenchmark(currentHardwareMode)}
+                  disabledReason={tuningTestDisabledReason}
+                  onMobileTooltipClick={onMobileTooltipClick}
+                />
+                <TuningHistoryTable history={tuningHistory} />
+              </Grid>
+            </Grid>
+          </AccordionDetails>
+        </Accordion>
+      </Grid>
+
+      <Grid item xs={12}>
+        <Divider className="my-2" />
+        <Typography variant="subtitle2" color="textSecondary" className="mb-1">
+          History
+        </Typography>
+      </Grid>
+
+      <Grid item xs={12} md={4}>
+        <Box className="flex items-center gap-1">
+          <TextField
+            fullWidth
+            type="number"
+            label="History retention (days)"
+            name="ytstreamHistoryRetentionDays"
+            value={String(ytstream.historyRetentionDays ?? 90)}
+            onChange={(e) => {
+              const parsed = Number.parseInt(e.target.value, 10);
+              setYtstream({ historyRetentionDays: Number.isFinite(parsed) && parsed > 0 ? parsed : 90 });
+            }}
+            disabled={disabled}
+            helperText="Stream history entries older than this are pruned nightly."
+            inputProps={{ min: 1 }}
+          />
+          <InfoTooltip
+            text="How long Settings -> Streaming -> History keeps past playback sessions (server/models/streamhistory.js). A nightly job (3:15 AM) deletes anything older than this. Doesn't affect the live Streaming page, which only ever shows currently-active sessions."
+            onMobileClick={onMobileTooltipClick}
+          />
+        </Box>
+      </Grid>
 
       <Grid item xs={12}>
         <Divider className="my-2" />

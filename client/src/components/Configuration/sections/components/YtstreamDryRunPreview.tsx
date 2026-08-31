@@ -6,6 +6,24 @@ interface YtstreamDryRunPreviewProps {
   result: YtstreamDryRunResult;
 }
 
+// step.detail alone is often ambiguous out of context (e.g. "on - every
+// setting below comes from..." doesn't say what's on) - these are the
+// human-readable labels for the step names resolvePlaybackPlan actually
+// emits (server/routes/ytstream.js). Falls back to the raw step name for
+// anything not listed here, so a new step type never renders blank.
+const STEP_LABELS: Record<string, string> = {
+  probeShortcut: 'Probe shortcut',
+  forceServerSettings: 'Force these settings',
+  mode: 'Playback mode',
+  qualityStrictness: 'Quality strictness',
+  quality: 'Quality',
+  'container/transcode/hardwareMode/tuning': 'Container / Transcode / Hardware / Tuning',
+  calculatedLength: 'Calculated length',
+  hotSwapToCache: 'Hot-swap to cache',
+  transcode: 'Transcode',
+  execution: 'What happens',
+};
+
 export const YtstreamDryRunPreview: React.FC<YtstreamDryRunPreviewProps> = ({ result }) => {
   const [showTechnical, setShowTechnical] = useState(false);
   const { plan, formatSelectors, hls, wouldCall } = result;
@@ -28,6 +46,7 @@ export const YtstreamDryRunPreview: React.FC<YtstreamDryRunPreviewProps> = ({ re
         <Box component="ul" className="mt-1 pl-4">
           {plan.steps.map((step, index) => (
             <Typography key={`dryrun-step-${index}`} component="li" variant="body2">
+              <Box component="span" className="font-medium">{STEP_LABELS[step.step] || step.step}: </Box>
               {step.detail}
             </Typography>
           ))}

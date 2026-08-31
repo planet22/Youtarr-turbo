@@ -57,6 +57,73 @@ function hasActiveCacheJob(youtubeId) {
 }
 
 /**
+ * Shared enqueue core for both the automatic (play-triggered) and manual
+ * (force-download button) callers. Looks up the video, runs the disk-space
+ * preflight, and enqueues the same STRM-cache download job either way.
+ * @param {string} youtubeId
+ * @returns {Promise<{queued: boolean, reason?: string}>}
+ */
+async function _enqueueCacheDownload(youtubeId) {
+  const Video = require('../models/video');
+  const video = await Video.findOne({
+    where: { youtubeId },
+    attributes: ['youtubeId', 'youTubeVideoName', 'filePath', 'is_strm', 'channel_id'],
+  });
+  // Already a real download (also covers mediaMode:'both' rows) - nothing to do.
+  if (!video || video.is_strm !== true || !video.filePath) {
+    return { queued: false, reason: 'not-strm' };
+  }
+  if (hasActiveCacheJob(youtubeId)) return { queued: false, reason: 'already-queued' };
+
+  const configModule = require('./configModule');
+  const config = configModule.getConfig();
+
+  // Pre-flight disk space check - never blocks/errors playback, log-only.
+  const threshold = config.autoRemovalFreeSpaceThreshold;
+  if (threshold) {
+    const status = await configModule.getStorageStatus();
+    if (status && configModule.isStorageBelowThreshold(status.available, threshold)) {
+      logger.info({ youtubeId, availableGB: status.availableGB }, 'STRM cache-on-play: skipped, storage below auto-removal threshold');
+      return { queued: false, reason: 'low-disk-space' };
+    }
+  }
+
+  const targetDir = path.dirname(video.filePath);
+  const fileStem = path.basename(video.filePath, path.extname(video.filePath)); // strip .strm
+
+  logger.info({ youtubeId, targetDir, fileStem }, 'STRM cache-on-play: enqueuing background download');
+
+  const downloadModule = require('./downloadModule');
+  await downloadModule.doSpecificDownloads({
+    body: {
+      urls: [`https://www.youtube.com/watch?v=${youtubeId}`],
+      jobLabel: `${STRM_CACHE_LABEL_PREFIX}${video.youTubeVideoName || youtubeId} [${youtubeId}]`,
+      overrideSettings: {
+        // Forces a real download regardless of the channel/global mediaMode
+        // ('strm' or 'both'), which would otherwise re-materialize the .strm
+        // via doSpecificDownloads's own STRM early-exit branch.
+        mediaMode: 'download',
+        // See CACHE_ON_PLAY_RATE_LIMIT above.
+        ytdlpRateLimitOverride: CACHE_ON_PLAY_RATE_LIMIT,
+      },
+      channelId: video.channel_id || undefined,
+      // Path-consistency pin - see videoDownloadPostProcessFiles.js's
+      // strmCacheTargetDir/strmCacheFileStem handling. Bypasses re-resolving
+      // libraryMode/subFolder/season/episode entirely: the real file must
+      // land in the exact folder the existing .strm/.nfo/.jpg already live
+      // in, not wherever current channel settings would independently
+      // resolve to (which may have changed since the .strm was written).
+      strmCacheTarget: { targetDir, fileStem },
+    },
+  });
+  // doSpecificDownloads only awaits through enqueueing (jobModule.addOrUpdateJob),
+  // not full job completion, same as every other caller. This enqueues as a
+  // normal 'Pending' job - the only existing concurrency guard (one global
+  // in-progress job) - it never jumps ahead of anything already queued.
+  return { queued: true };
+}
+
+/**
  * @param {string} youtubeId
  * @returns {Promise<void>} never throws; every failure is logged and swallowed
  */
@@ -70,57 +137,7 @@ async function maybeEnqueueCacheDownload(youtubeId) {
 
   pendingEnqueue.add(youtubeId);
   try {
-    const Video = require('../models/video');
-    const video = await Video.findOne({
-      where: { youtubeId },
-      attributes: ['youtubeId', 'youTubeVideoName', 'filePath', 'is_strm', 'channel_id'],
-    });
-    // Already a real download (also covers mediaMode:'both' rows) - nothing to do.
-    if (!video || video.is_strm !== true || !video.filePath) return;
-    if (hasActiveCacheJob(youtubeId)) return; // re-check post-await, cheap
-
-    // Pre-flight disk space check - never blocks/errors playback, log-only.
-    const threshold = config.autoRemovalFreeSpaceThreshold;
-    if (threshold) {
-      const status = await configModule.getStorageStatus();
-      if (status && configModule.isStorageBelowThreshold(status.available, threshold)) {
-        logger.info({ youtubeId, availableGB: status.availableGB }, 'STRM cache-on-play: skipped, storage below auto-removal threshold');
-        return;
-      }
-    }
-
-    const targetDir = path.dirname(video.filePath);
-    const fileStem = path.basename(video.filePath, path.extname(video.filePath)); // strip .strm
-
-    logger.info({ youtubeId, targetDir, fileStem }, 'STRM cache-on-play: enqueuing background download');
-
-    const downloadModule = require('./downloadModule');
-    await downloadModule.doSpecificDownloads({
-      body: {
-        urls: [`https://www.youtube.com/watch?v=${youtubeId}`],
-        jobLabel: `${STRM_CACHE_LABEL_PREFIX}${video.youTubeVideoName || youtubeId} [${youtubeId}]`,
-        overrideSettings: {
-          // Forces a real download regardless of the channel/global mediaMode
-          // ('strm' or 'both'), which would otherwise re-materialize the .strm
-          // via doSpecificDownloads's own STRM early-exit branch.
-          mediaMode: 'download',
-          // See CACHE_ON_PLAY_RATE_LIMIT above.
-          ytdlpRateLimitOverride: CACHE_ON_PLAY_RATE_LIMIT,
-        },
-        channelId: video.channel_id || undefined,
-        // Path-consistency pin - see videoDownloadPostProcessFiles.js's
-        // strmCacheTargetDir/strmCacheFileStem handling. Bypasses re-resolving
-        // libraryMode/subFolder/season/episode entirely: the real file must
-        // land in the exact folder the existing .strm/.nfo/.jpg already live
-        // in, not wherever current channel settings would independently
-        // resolve to (which may have changed since the .strm was written).
-        strmCacheTarget: { targetDir, fileStem },
-      },
-    });
-    // doSpecificDownloads only awaits through enqueueing (jobModule.addOrUpdateJob),
-    // not full job completion, same as every other caller. This enqueues as a
-    // normal 'Pending' job - the only existing concurrency guard (one global
-    // in-progress job) - it never jumps ahead of anything already queued.
+    await _enqueueCacheDownload(youtubeId);
   } catch (err) {
     logger.warn({ err, youtubeId }, 'STRM cache-on-play: enqueue failed');
   } finally {
@@ -128,4 +145,33 @@ async function maybeEnqueueCacheDownload(youtubeId) {
   }
 }
 
-module.exports = { maybeEnqueueCacheDownload, hasActiveCacheJob, isFeatureEnabled, STRM_CACHE_LABEL_PREFIX };
+/**
+ * Manual "force download now" trigger for the STRM chip's click action -
+ * unlike maybeEnqueueCacheDownload, this does NOT require the global
+ * `strm.cacheOnPlay` setting to be on: an explicit click is unambiguous
+ * intent on its own. Still respects the same in-flight/disk-space guards.
+ * @param {string} youtubeId
+ * @returns {Promise<{queued: boolean, reason?: string}>}
+ */
+async function forceEnqueueCacheDownload(youtubeId) {
+  if (pendingEnqueue.has(youtubeId)) return { queued: false, reason: 'already-queued' };
+  if (hasActiveCacheJob(youtubeId)) return { queued: false, reason: 'already-queued' };
+
+  pendingEnqueue.add(youtubeId);
+  try {
+    return await _enqueueCacheDownload(youtubeId);
+  } catch (err) {
+    logger.warn({ err, youtubeId }, 'STRM force-download: enqueue failed');
+    return { queued: false, reason: 'error' };
+  } finally {
+    pendingEnqueue.delete(youtubeId);
+  }
+}
+
+module.exports = {
+  maybeEnqueueCacheDownload,
+  forceEnqueueCacheDownload,
+  hasActiveCacheJob,
+  isFeatureEnabled,
+  STRM_CACHE_LABEL_PREFIX,
+};

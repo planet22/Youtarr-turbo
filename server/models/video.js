@@ -118,6 +118,12 @@ Video.init(
       defaultValue: false,
       comment: 'True when filePath points at a .strm stream shortcut instead of downloaded media',
     },
+    cached_at: {
+      type: DataTypes.DATE,
+      allowNull: true,
+      defaultValue: null,
+      comment: 'Set only when this row was materialized from STRM via cache-on-play (see videoPersistence.js) - never for a genuine/forced download. Powers the scheduled revert-to-STRM sweep.',
+    },
     season: {
       type: DataTypes.INTEGER,
       allowNull: true,

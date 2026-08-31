@@ -19,12 +19,16 @@ import {
   RefreshCw as RefreshIcon,
   Info as InfoIcon,
   ListChecks as ChannelFilterPreviewIcon,
+  Wifi as StrmIcon,
 } from '../../lib/icons';
 
 import useMediaQuery from '../../hooks/useMediaQuery';
 import { DownloadSettings } from '../DownloadManager/ManualDownload/types';
 import { useVideoDeletion } from '../shared/useVideoDeletion';
 import { useVideoProtection } from '../shared/useVideoProtection';
+import StrmDownloadDialog from '../shared/StrmDownloadDialog';
+import StrmRevertDialog from '../shared/StrmRevertDialog';
+import { useStrmSwitch } from '../shared/useStrmSwitch';
 import { getVideoStatus } from '../../utils/videoStatus';
 import VideoCard from './VideoCard';
 import VideoListItem from './VideoListItem';
@@ -72,6 +76,11 @@ type SortBy = 'date' | 'title' | 'duration' | 'size';
 type SortOrder = 'asc' | 'desc';
 
 const VIEW_MODE_STORAGE_KEY = 'youtarr:channelVideosViewMode';
+
+function deriveIsStrm(video: ChannelVideo): boolean {
+  return Boolean((video as { is_strm?: boolean }).is_strm) ||
+    (typeof video.filePath === 'string' && video.filePath.toLowerCase().endsWith('.strm'));
+}
 
 function channelVideoToModalData(
   video: ChannelVideo,
@@ -157,6 +166,11 @@ function ChannelVideos({
   const [refreshConfirmOpen, setRefreshConfirmOpen] = useState(false);
   const [downloadAllOpen, setDownloadAllOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [strmDownloadDialogOpen, setStrmDownloadDialogOpen] = useState(false);
+  const [strmRevertDialogOpen, setStrmRevertDialogOpen] = useState(false);
+  // Set for a single-row chip click (bypasses checkbox selection); null means
+  // the open STRM dialog acts on the current delete-mode selection instead.
+  const [pendingStrmVideoId, setPendingStrmVideoId] = useState<number | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const loadMoreRef = useRef<HTMLDivElement | null>(null);
@@ -181,6 +195,7 @@ function ChannelVideos({
   } = useChannelVideoFilters();
 
   const { deleteVideosByYoutubeIds, loading: deleteLoading } = useVideoDeletion();
+  const { forceDownload, revertToStrm, loading: strmSwitchLoading } = useStrmSwitch();
   const {
     toggleProtection,
     successMessage: protectionSuccess,
@@ -656,6 +671,129 @@ function ChannelVideos({
 
   const handleDeleteCancel = () => setDeleteDialogOpen(false);
 
+  // STRM/VIDEO switch shares the delete-mode checkbox selection (STRM/downloaded
+  // videos both fall in the "added" bucket that checkedBoxes excludes) unless a
+  // single-row chip click set pendingStrmVideoId - see its declaration above.
+  const strmTargetIds: number[] = pendingStrmVideoId !== null
+    ? [pendingStrmVideoId]
+    : selectedForDeletion
+        .map((youtubeId) => paginatedVideos.find((v) => v.youtube_id === youtubeId)?.id)
+        .filter((id): id is number => id != null);
+
+  const getStrmDownloadCounts = () => {
+    let eligible = 0;
+    let skipped = 0;
+    for (const id of strmTargetIds) {
+      const video = paginatedVideos.find((v) => v.id === id);
+      if (video && deriveIsStrm(video)) {
+        eligible += 1;
+      } else {
+        skipped += 1;
+      }
+    }
+    return { eligible, skipped };
+  };
+  const strmDownloadCounts = getStrmDownloadCounts();
+
+  const getStrmRevertCounts = () => {
+    let eligible = 0;
+    let skipped = 0;
+    for (const id of strmTargetIds) {
+      const video = paginatedVideos.find((v) => v.id === id);
+      if (video && !deriveIsStrm(video) && !video.removed) {
+        eligible += 1;
+      } else {
+        skipped += 1;
+      }
+    }
+    return { eligible, skipped };
+  };
+  const strmRevertCounts = getStrmRevertCounts();
+
+  const handleStrmChipClick = (video: ChannelVideo) => {
+    if (video.id == null) return;
+    setPendingStrmVideoId(video.id);
+    if (deriveIsStrm(video)) {
+      setStrmDownloadDialogOpen(true);
+    } else {
+      setStrmRevertDialogOpen(true);
+    }
+  };
+
+  const handleStrmDownloadConfirm = async () => {
+    setStrmDownloadDialogOpen(false);
+    const isSingle = pendingStrmVideoId !== null;
+    const eligibleIds = strmTargetIds.filter((id) => {
+      const video = paginatedVideos.find((v) => v.id === id);
+      return Boolean(video && deriveIsStrm(video));
+    });
+    setPendingStrmVideoId(null);
+    if (eligibleIds.length === 0) return;
+
+    const result = await forceDownload(eligibleIds, token);
+    if (result.success) {
+      setSuccessMessage(
+        `Queued ${result.processed.length} video${result.processed.length !== 1 ? 's' : ''} for download`
+      );
+      if (!isSingle) setSelectedForDeletion([]);
+      await refetchVideos();
+    } else {
+      const processedCount = result.processed.length;
+      const failedCount = result.failed.length;
+      if (processedCount > 0) {
+        setSuccessMessage(
+          `Queued ${processedCount} video${processedCount !== 1 ? 's' : ''}, but ${failedCount} failed`
+        );
+        if (!isSingle) setSelectedForDeletion([]);
+        await refetchVideos();
+      } else {
+        setErrorMessage(`Failed to queue download: ${result.failed[0]?.error || 'Unknown error'}`);
+      }
+    }
+  };
+
+  const handleStrmRevertConfirm = async () => {
+    setStrmRevertDialogOpen(false);
+    const isSingle = pendingStrmVideoId !== null;
+    const eligibleIds = strmTargetIds.filter((id) => {
+      const video = paginatedVideos.find((v) => v.id === id);
+      return Boolean(video && !deriveIsStrm(video) && !video.removed);
+    });
+    setPendingStrmVideoId(null);
+    if (eligibleIds.length === 0) return;
+
+    const result = await revertToStrm(eligibleIds, token);
+    if (result.success) {
+      setSuccessMessage(
+        `Switched ${result.processed.length} video${result.processed.length !== 1 ? 's' : ''} back to STRM`
+      );
+      if (!isSingle) setSelectedForDeletion([]);
+      await refetchVideos();
+    } else {
+      const processedCount = result.processed.length;
+      const failedCount = result.failed.length;
+      if (processedCount > 0) {
+        setSuccessMessage(
+          `Switched ${processedCount} video${processedCount !== 1 ? 's' : ''} back to STRM, but ${failedCount} failed`
+        );
+        if (!isSingle) setSelectedForDeletion([]);
+        await refetchVideos();
+      } else {
+        setErrorMessage(`Failed to switch to STRM: ${result.failed[0]?.error || 'Unknown error'}`);
+      }
+    }
+  };
+
+  const handleStrmDownloadDialogClose = () => {
+    setStrmDownloadDialogOpen(false);
+    setPendingStrmVideoId(null);
+  };
+
+  const handleStrmRevertDialogClose = () => {
+    setStrmRevertDialogOpen(false);
+    setPendingStrmVideoId(null);
+  };
+
   const toggleIgnore = async (youtubeId: string) => {
     if (!channelId || !token) return;
     const video = paginatedVideos.find((v) => v.youtube_id === youtubeId);
@@ -912,6 +1050,38 @@ function ChannelVideos({
       intent: 'danger',
       disabled: () => deleteLoading,
       onClick: () => handleDeleteClick(),
+    },
+    {
+      id: 'strm-download',
+      label: 'Force Download',
+      icon: <DownloadIcon size={14} />,
+      intent: 'success',
+      disabled: (ids) =>
+        strmSwitchLoading ||
+        !ids.some((youtubeId) => {
+          const video = paginatedVideos.find((v) => v.youtube_id === youtubeId);
+          return Boolean(video && deriveIsStrm(video));
+        }),
+      onClick: () => {
+        setPendingStrmVideoId(null);
+        setStrmDownloadDialogOpen(true);
+      },
+    },
+    {
+      id: 'strm-revert',
+      label: 'Switch to STRM',
+      icon: <StrmIcon size={14} />,
+      intent: 'warning',
+      disabled: (ids) =>
+        strmSwitchLoading ||
+        !ids.some((youtubeId) => {
+          const video = paginatedVideos.find((v) => v.youtube_id === youtubeId);
+          return Boolean(video && !deriveIsStrm(video) && !video.removed);
+        }),
+      onClick: () => {
+        setPendingStrmVideoId(null);
+        setStrmRevertDialogOpen(true);
+      },
     },
   ];
 
@@ -1252,6 +1422,7 @@ function ChannelVideos({
         onToggleProtection={handleToggleProtection}
         onMobileTooltip={setMobileTooltip}
         onVideoClick={setModalVideo}
+        onStrmChipClick={handleStrmChipClick}
       />
     );
   };
@@ -1378,6 +1549,22 @@ function ChannelVideos({
         defaultMediaModeSource={defaultMediaModeSource}
         runMetadataFetch={refreshVideos}
         onStarted={handleDownloadAllStarted}
+      />
+
+      <StrmDownloadDialog
+        open={strmDownloadDialogOpen}
+        onClose={handleStrmDownloadDialogClose}
+        onConfirm={handleStrmDownloadConfirm}
+        videoCount={strmDownloadCounts.eligible}
+        skippedCount={strmDownloadCounts.skipped}
+      />
+
+      <StrmRevertDialog
+        open={strmRevertDialogOpen}
+        onClose={handleStrmRevertDialogClose}
+        onConfirm={handleStrmRevertConfirm}
+        videoCount={strmRevertCounts.eligible}
+        skippedCount={strmRevertCounts.skipped}
       />
 
       {modalVideo && (

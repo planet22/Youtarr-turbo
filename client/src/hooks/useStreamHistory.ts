@@ -6,7 +6,7 @@ export interface StreamHistoryRow {
   streamId: string;
   youtubeId: string;
   title: string | null;
-  mode: 'hls' | 'ffmpeg';
+  mode: 'hls' | 'ffmpeg' | 'direct' | 'direct-pipe' | 'direct-redirect';
   quality: string | null;
   container: string | null;
   transcode: string | null;
@@ -84,5 +84,26 @@ export function useStreamHistory(token: string | null, page: number, limit = 25)
     return () => unsubscribe(stoppedCallback);
   }, [subscribe, unsubscribe, page, fetchHistory]);
 
-  return { rows, total, loading, refetch: fetchHistory };
+  const deleteEntries = useCallback(
+    async (streamIds: string[]): Promise<{ success: boolean; deleted: number }> => {
+      if (!token || streamIds.length === 0) {
+        return { success: false, deleted: 0 };
+      }
+      try {
+        const response = await axios.delete<{ success: boolean; deleted: number }>(
+          '/api/ytstream/history',
+          {
+            headers: { 'x-access-token': token },
+            data: { streamIds },
+          }
+        );
+        return response.data;
+      } catch {
+        return { success: false, deleted: 0 };
+      }
+    },
+    [token]
+  );
+
+  return { rows, total, loading, refetch: fetchHistory, deleteEntries };
 }

@@ -12,14 +12,18 @@ import {
   Tooltip,
   Box,
   Link,
+  Checkbox,
 } from '../../ui';
 import { formatFileSize } from '../../../utils/formatters';
 import { StreamHistoryRow } from '../../../hooks/useStreamHistory';
 import { YOUTUBE_URL_BASE } from '../../shared/VideoModal/constants';
-import { parseClientLabel, formatElapsed } from '../utils';
+import { parseClientLabel, formatElapsed, formatModeLabel } from '../utils';
 
 export interface StreamHistoryTableProps {
   rows: StreamHistoryRow[];
+  selectedIds: string[];
+  onToggleSelect: (streamId: string) => void;
+  onSelectAll: (checked: boolean) => void;
 }
 
 type ResultChip = { label: string; color: 'default' | 'success' | 'warning' | 'error' | 'info' };
@@ -30,6 +34,7 @@ type ResultChip = { label: string; color: 'default' | 'success' | 'warning' | 'e
 // module's own startup orphan-cleanup - see server/routes/ytstream.js.
 const RESULT_CHIPS: Record<string, ResultChip> = {
   completed: { label: 'Completed', color: 'success' },
+  redirected: { label: 'Redirected', color: 'success' },
   error: { label: 'Error', color: 'error' },
   'ready-failed': { label: 'Failed to start', color: 'error' },
   'client-disconnected': { label: 'Disconnected', color: 'warning' },
@@ -69,14 +74,29 @@ function formatDuration(row: StreamHistoryRow): string {
   return formatElapsed(startedAt, endedAt);
 }
 
-function StreamHistoryRowView({ row }: { row: StreamHistoryRow }) {
+function StreamHistoryRowView({
+  row,
+  isSelected,
+  onToggleSelect,
+}: {
+  row: StreamHistoryRow;
+  isSelected: boolean;
+  onToggleSelect: (streamId: string) => void;
+}) {
   const chip = resultChipFor(row);
   const chipElement = (
     <Chip size="small" label={chip.label} color={chip.color} variant="filled" />
   );
 
   return (
-    <TableRow hover>
+    <TableRow hover style={{ backgroundColor: isSelected ? 'var(--muted)' : undefined }}>
+      <TableCell style={{ width: 48 }}>
+        <Checkbox
+          checked={isSelected}
+          onChange={() => onToggleSelect(row.streamId)}
+          inputProps={{ 'aria-label': `Select ${row.title || row.youtubeId}` }}
+        />
+      </TableCell>
       <TableCell>
         <Box style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <Box
@@ -102,7 +122,7 @@ function StreamHistoryRowView({ row }: { row: StreamHistoryRow }) {
         </Box>
       </TableCell>
       <TableCell>
-        <Chip size="small" label={row.mode === 'hls' ? 'HLS' : 'FFmpeg'} variant="filled" />
+        <Chip size="small" label={formatModeLabel(row.mode)} variant="filled" />
       </TableCell>
       <TableCell>
         <Tooltip title={`hardware: ${row.hardwareMode || 'none'}`}>
@@ -135,13 +155,24 @@ function StreamHistoryRowView({ row }: { row: StreamHistoryRow }) {
   );
 }
 
-function StreamHistoryTable({ rows }: StreamHistoryTableProps) {
+function StreamHistoryTable({ rows, selectedIds, onToggleSelect, onSelectAll }: StreamHistoryTableProps) {
+  const allSelected = rows.length > 0 && rows.every((row) => selectedIds.includes(row.streamId));
+  const someSelected = !allSelected && rows.some((row) => selectedIds.includes(row.streamId));
+
   return (
     <Paper style={{ overflow: 'hidden' }}>
       <TableContainer>
         <Table size="small">
           <TableHead>
             <TableRow>
+              <TableCell component="th" style={{ width: 48 }}>
+                <Checkbox
+                  indeterminate={someSelected}
+                  checked={allSelected}
+                  onChange={(event) => onSelectAll(event.target.checked)}
+                  inputProps={{ 'aria-label': 'Select all history entries' }}
+                />
+              </TableCell>
               <TableCell component="th">Video</TableCell>
               <TableCell component="th" style={{ width: 90 }}>Mode</TableCell>
               <TableCell component="th" style={{ width: 160 }}>Format</TableCell>
@@ -154,7 +185,12 @@ function StreamHistoryTable({ rows }: StreamHistoryTableProps) {
           </TableHead>
           <TableBody>
             {rows.map((row) => (
-              <StreamHistoryRowView key={row.streamId} row={row} />
+              <StreamHistoryRowView
+                key={row.streamId}
+                row={row}
+                isSelected={selectedIds.includes(row.streamId)}
+                onToggleSelect={onToggleSelect}
+              />
             ))}
           </TableBody>
         </Table>

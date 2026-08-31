@@ -48,6 +48,7 @@ export interface VideosTableProps {
   onOpenModal: (video: VideoData) => void;
   onToggleProtection: (videoId: number) => void;
   onDeleteSingle: (videoId: number) => void;
+  onStrmChipClick: (video: VideoData) => void;
   onImageError: (youtubeId: string) => void;
   onAddChannel: (channelName: string, channelUrl: string) => void;
 }
@@ -66,6 +67,7 @@ function VideosTable({
   onOpenModal,
   onToggleProtection,
   onDeleteSingle,
+  onStrmChipClick,
   onImageError,
   onAddChannel,
 }: VideosTableProps) {
@@ -301,6 +303,7 @@ function VideosTable({
                           fileSize={video.fileSize}
                           audioFileSize={video.audioFileSize}
                           videoResolution={video.video_resolution}
+                          onVideoChipClick={() => onStrmChipClick(video)}
                         />
                       )}
                       {mediaTypeInfo && (

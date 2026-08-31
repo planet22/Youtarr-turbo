@@ -27,7 +27,12 @@ export function parseClientLabel(userAgent: string | null | undefined): string {
   if (ua.includes('firefox')) return 'Firefox';
   if (ua.includes('chrome')) return 'Chrome';
   if (ua.includes('safari')) return 'Safari';
-  return 'Unknown client';
+  // No known pattern matched - fall back to the UA's own product token
+  // (e.g. "Youtarr-Playback/1.0" -> "Youtarr-Playback", "Lavf/61.7.103" ->
+  // "Lavf") instead of a flat "Unknown client" that hides information the
+  // raw UA - already shown in this cell's own tooltip - already has.
+  const productToken = userAgent.trim().match(/^([^\s/(]+)/);
+  return productToken ? productToken[1] : 'Unknown client';
 }
 
 /**
@@ -45,6 +50,19 @@ export function parseClientLabel(userAgent: string | null | undefined): string {
  */
 export function isLikelyProbeRequest(userAgent: string | null | undefined): boolean {
   return !!userAgent && /^Lavf\//i.test(userAgent);
+}
+
+const MODE_LABELS: Record<string, string> = {
+  hls: 'HLS',
+  ffmpeg: 'FFmpeg',
+  direct: 'Direct',
+  'direct-pipe': 'Direct (piped)',
+  'direct-redirect': 'Direct (redirect)',
+};
+
+/** Falls back to the raw mode string for anything not listed above, rather than mislabeling it. */
+export function formatModeLabel(mode: string): string {
+  return MODE_LABELS[mode] || mode;
 }
 
 export function formatElapsed(startedAt: number, now: number = Date.now()): string {

@@ -16,7 +16,7 @@ import {
 import { ConfigurationCard } from '../common/ConfigurationCard';
 import { InfoTooltip } from '../common/InfoTooltip';
 import { ConfigState } from '../types';
-import { YtstreamSettingsSection } from './YtstreamSettingsSection';
+import { YtstreamSettingsSection, DEFAULT_YTSTREAM } from './YtstreamSettingsSection';
 
 interface Props {
   config: ConfigState;
@@ -44,6 +44,16 @@ export const StrmSettingsSection: React.FC<Props> = ({
   const setStrm = (patch: Partial<typeof strm>) => {
     onConfigChange({ strm: { ...strm, ...patch } });
   };
+
+  const ytstream = config.ytstream || DEFAULT_YTSTREAM;
+  const setYtstream = (patch: Partial<ConfigState['ytstream']>) => {
+    onConfigChange({ ytstream: { ...ytstream, ...patch } });
+  };
+  // Instant start and Hot-swap to cached file are Enhanced HLS-only (see
+  // their tooltips below) - mirrors the same mode/forceH264 gating
+  // YtstreamSettingsSection uses for its own fields.
+  const ytstreamMode = ytstream.defaultMode || 'direct';
+  const ytstreamForceH264 = ytstream.transcode === 'h264';
 
   const mediaIsDownload = (config.mediaMode || 'download') === 'download';
   const ytstreamSelected = strm.target === 'ytstream';
@@ -104,6 +114,27 @@ export const StrmSettingsSection: React.FC<Props> = ({
             </Box>
           </FormControl>
         </Grid>
+
+        {ytstreamSelected && (
+          <Grid item xs={12}>
+            <Box className="flex items-center gap-1">
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={ytstream.serveCachedFile ?? false}
+                    onChange={(e) => setYtstream({ serveCachedFile: e.target.checked })}
+                    disabled={mediaIsDownload}
+                  />
+                }
+                label="Serve already-downloaded files directly"
+              />
+              <InfoTooltip
+                text="Checked on every /api/ytstream request, before anything else - if this video is already fully downloaded (via STRM cache-on-play, or any genuine download), the real local file is served directly with real Range/seek support, instead of live-proxying or transcoding it all over again through yt-dlp/ffmpeg. Off by default; safe to enable any time - it never affects a video that's still STRM-only, and Jellyfin never needs to rescan for this to take effect since it's the same /api/ytstream URL either way, just answered faster once a real file exists."
+                onMobileClick={onMobileTooltipClick}
+              />
+            </Box>
+          </Grid>
+        )}
 
         <Grid item xs={12}>
           <Box className="flex items-center gap-1">
@@ -192,6 +223,27 @@ export const StrmSettingsSection: React.FC<Props> = ({
           </Grid>
         )}
 
+        {ytstreamSelected && ytstreamMode === 'hls' && (
+          <Grid item xs={12} md={4}>
+            <Box className="flex items-center gap-1">
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={ytstream.instantStart ?? false}
+                    onChange={(e) => setYtstream({ instantStart: e.target.checked })}
+                    disabled={mediaIsDownload || !ytstream.calculatedLength || !ytstreamForceH264}
+                  />
+                }
+                label="Instant start"
+              />
+              <InfoTooltip
+                text="Enhanced HLS + Calculated length + Transcode=H.264 only. Normally the very first response blocks until the real encode produces its first segment (10-25s is typical for a cold start). This serves a small pre-generated 'loading' clip as segment 0 instead, so playback starts within milliseconds while the real encode catches up in the background - the placeholder is generated once (matching your codec/hardware settings) and reused after that. No effect for Transcode=Copy, since no single placeholder could match every video's own passthrough codec."
+                onMobileClick={onMobileTooltipClick}
+              />
+            </Box>
+          </Grid>
+        )}
+
         {ytstreamSelected && (
           <Grid item xs={12} md={4}>
             <Box className="flex items-center gap-1">
@@ -207,6 +259,58 @@ export const StrmSettingsSection: React.FC<Props> = ({
               />
               <InfoTooltip
                 text="When a STRM item is played, enqueue a real background download of it (same pipeline as a manual download) so later plays use a cached file instead of live proxying. Uses disk space; off by default. Pairs with the Automatic Video Removal settings, which can revert a cached video back to STRM instead of deleting it outright."
+                onMobileClick={onMobileTooltipClick}
+              />
+            </Box>
+          </Grid>
+        )}
+
+        {ytstreamSelected && strm.cacheOnPlay === true && (
+          <Grid item xs={12} md={4}>
+            <Box className="flex items-center gap-1">
+              <TextField
+                fullWidth
+                type="number"
+                label="Revert to STRM after (hours)"
+                name="cacheOnPlayExpiryHours"
+                value={strm.cacheOnPlayExpiryHours ?? ''}
+                onChange={(e) => {
+                  const raw = e.target.value;
+                  if (raw === '') {
+                    setStrm({ cacheOnPlayExpiryHours: null });
+                    return;
+                  }
+                  const parsed = Number.parseInt(raw, 10);
+                  setStrm({ cacheOnPlayExpiryHours: Number.isFinite(parsed) && parsed > 0 ? parsed : null });
+                }}
+                disabled={mediaIsDownload}
+                placeholder="Never"
+                helperText="Blank = never auto-revert. A nightly sweep (2:10 AM) checks for cached videos older than this."
+                inputProps={{ min: 1 }}
+              />
+              <InfoTooltip
+                text="How long a cache-on-play download stays a real file before Youtarr automatically reverts it back to STRM (freeing the disk space), reusing the same revert-to-STRM logic Automatic Video Removal already uses. Only ever applies to videos cache-on-play itself downloaded - a genuine/forced download (mediaMode=download, or a channel switched to download mode) is never touched by this, regardless of age."
+                onMobileClick={onMobileTooltipClick}
+              />
+            </Box>
+          </Grid>
+        )}
+
+        {ytstreamSelected && ytstreamMode === 'hls' && (
+          <Grid item xs={12} md={4}>
+            <Box className="flex items-center gap-1">
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={ytstream.hotSwapToCache ?? false}
+                    onChange={(e) => setYtstream({ hotSwapToCache: e.target.checked })}
+                    disabled={mediaIsDownload}
+                  />
+                }
+                label="Hot-swap to cached file"
+              />
+              <InfoTooltip
+                text="Enhanced HLS only. If the STRM 'Cache on play' background download finishes while this video is still playing, the session switches to producing the remaining segments from the local cached file instead of the live network pull - same picture, no restart, just faster and more reliable for the rest of the video. Has no effect unless Cache on play is also enabled."
                 onMobileClick={onMobileTooltipClick}
               />
             </Box>

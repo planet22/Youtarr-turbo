@@ -274,9 +274,30 @@ class VideoDeletionModule {
         audioFileSize: null,
         is_strm: true,
         removed: false,
+        // Clears the cache-on-play expiry timer this revert is satisfying
+        // (see sweepExpiredCachedVideos) - a later re-cache of this same
+        // video sets a fresh cached_at itself (videoPersistence.js), so
+        // this never needs to be re-armed here.
+        cached_at: null,
       });
 
       logger.info({ videoId: video.id, restoredStrmPath }, '[Auto-Removal] Reverted cached video to STRM playback');
+
+      // yt-dlp's download-archive (complete.list) otherwise still remembers
+      // this video as already downloaded, so a later cache-on-play attempt
+      // (or a regular re-download) would silently skip it - yt-dlp logs
+      // "has already been recorded in the archive" and does nothing, even
+      // though the real file this revert just deleted no longer exists.
+      // Same fix purgeVideoById already applies for the same reason - see
+      // its own comment for the matching NZB-side fix in nzb.js.
+      if (video.youtubeId) {
+        try {
+          const archiveModule = require('./archiveModule');
+          await archiveModule.removeVideoFromArchive(video.youtubeId);
+        } catch (archiveErr) {
+          logger.warn({ err: archiveErr, videoId: video.id, youtubeId: video.youtubeId }, '[Auto-Removal] Failed to remove reverted video from yt-dlp archive');
+        }
+      }
 
       return {
         success: true,
@@ -288,6 +309,93 @@ class VideoDeletionModule {
       logger.error({ err, videoId: video.id, filePath: video.filePath }, '[Auto-Removal] Revert-to-STRM failed, falling back to normal deletion');
       return null;
     }
+  }
+
+  /**
+   * Explicit, user-initiated counterpart to _tryRevertToStrm's use inside
+   * deleteVideoById's auto-removal flow: reverts a single downloaded video
+   * back to STRM if (and only if) it has an archived `.strm.cached` backup,
+   * i.e. it was originally STRM and got cached via strmCacheOnPlay. Unlike
+   * the auto-removal path, this ignores autoRemovalPreserveStrmFallback -
+   * that flag only controls the automatic fallback, not an explicit click.
+   * @param {number} videoId
+   * @returns {Promise<{success:boolean,videoId:number,channelId?:string,message?:string,error?:string}>}
+   */
+  async revertToStrm(videoId) {
+    const video = await Video.findByPk(videoId);
+
+    if (!video) {
+      return { success: false, videoId, error: 'Video not found in database' };
+    }
+    if (video.removed) {
+      return { success: false, videoId, error: 'Video is already marked as removed' };
+    }
+    if (video.is_strm) {
+      return { success: false, videoId, error: 'Video is already STRM' };
+    }
+    if (!video.filePath) {
+      return { success: false, videoId, error: 'Video has no file path' };
+    }
+
+    const reverted = await this._tryRevertToStrm(video);
+    if (reverted) {
+      return reverted;
+    }
+    return {
+      success: false,
+      videoId,
+      error: 'This video was not originally STRM (or has no cached backup), so it can\'t be switched back.',
+    };
+  }
+
+  /**
+   * Scheduled counterpart to _tryRevertToStrm/revertToStrm (see cronJobs.js) -
+   * reverts every video whose cached_at (set only by the STRM cache-on-play
+   * transition in videoPersistence.js, never by a genuine/forced download -
+   * see the migration adding that column) is older than
+   * strm.cacheOnPlayExpiryHours, so an opportunistic cache doesn't silently
+   * become a permanent download. A no-op when the threshold is unset/<=0.
+   * @returns {Promise<{success:boolean, reverted:number, failed:number, thresholdHours:number}>}
+   */
+  async sweepExpiredCachedVideos() {
+    const configModule = require('./configModule');
+    const { Op } = require('sequelize');
+    const config = configModule.getConfig();
+    const thresholdHours = this._parsePositiveInt(config.strm?.cacheOnPlayExpiryHours);
+
+    if (thresholdHours <= 0) {
+      return { success: true, reverted: 0, failed: 0, thresholdHours };
+    }
+
+    const cutoff = new Date(Date.now() - thresholdHours * 60 * 60 * 1000);
+    const candidates = await Video.findAll({
+      where: {
+        is_strm: false,
+        removed: false,
+        cached_at: { [Op.ne]: null, [Op.lt]: cutoff },
+      },
+    });
+
+    let reverted = 0;
+    let failed = 0;
+    for (const video of candidates) {
+      const result = await this._tryRevertToStrm(video);
+      if (result && result.success) {
+        reverted += 1;
+      } else {
+        failed += 1;
+        logger.warn(
+          { videoId: video.id, youtubeId: video.youtubeId },
+          '[Cache Expiry] Failed to revert expired cached video to STRM (no backup found, or revert failed)'
+        );
+      }
+    }
+
+    if (reverted > 0 || failed > 0) {
+      logger.info({ reverted, failed, thresholdHours }, '[Cache Expiry] Swept expired cache-on-play videos back to STRM');
+    }
+
+    return { success: true, reverted, failed, thresholdHours };
   }
 
   /**

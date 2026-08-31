@@ -251,14 +251,14 @@ function findCategory(categories, { name, newznabCategoryId }) {
 /**
  * Handles a real SABnzbd/NZBGet-style "remove this history entry" call
  * (mode=history&name=delete&value=<nzo_id>[,<nzo_id2>,...]). Real clients
- * drop the slot from history the moment this is called - so regardless of
- * import strategy, the job is flagged via job.data.nzb.historyRemoved and
- * the mode=history handler below excludes anything so flagged. Without
- * this, Sonarr/Radarr's own history poll kept re-discovering the same
- * "already deleted" entry forever (up to jobModule's 14-day retention),
- * which for 'untracked' strategy meant reporting it with a null path/0
- * bytes once the video row was gone - a ghost entry that never actually
- * left.
+ * drop the slot from history the moment this is called, so the job's
+ * status is set to 'Deleted' - a status the mode=history handler below
+ * doesn't include in its list, so the entry stops showing up there, and
+ * job.data.nzb.historyRemoved is also set for explicit intent. Persisted
+ * immediately via jobModule.saveJobOnly: without that, this only lived in
+ * the in-memory job object and was lost on every server restart, so
+ * Sonarr/Radarr's next history poll saw the "deleted" job as if it had
+ * never been removed and deleted it all over again.
  *
  * Untracking the video from Youtarr's own DB (see
  * untrackFromYoutarrLibrary's doc comment for why) only happens for
@@ -276,6 +276,7 @@ async function handleHistoryDeleteRequest(jobIds) {
       const job = jobModule.getJob(jobId);
       if (!job?.data?.nzb) continue;
       job.data.nzb.historyRemoved = true;
+      job.status = 'Deleted';
       const category = findCategory(categories, { name: job.data.nzb.categoryName });
       if ((category?.importStrategy || 'hardlink') === 'untracked') {
         const videoRow = await resolveNzbVideoRow(job);
@@ -284,6 +285,7 @@ async function handleHistoryDeleteRequest(jobIds) {
       } else {
         logger.info({ jobId }, 'nzb: hid history entry in response to delete request (hardlink strategy - library video untouched)');
       }
+      await jobModule.saveJobOnly(jobId, job);
     } catch (err) {
       logger.warn({ err, jobId }, 'nzb: failed to process history delete request');
     }

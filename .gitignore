@@ -36,6 +36,7 @@ config/jobs/*
 config/images/*
 config/.ytdlp-cache/*
 config/ytstream-clips/*
+config/logs/*
 
 # misc
 .DS_Store
@@ -76,6 +77,8 @@ client/build-storybook/
 # Storybook test artifacts
 .out_storybook_
 .storyshots
+
+
 (org) docker-compose.yaml
 (org)Dockerfile
 docker-compose.yaml

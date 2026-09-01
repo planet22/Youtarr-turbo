@@ -54,6 +54,8 @@ export function isLikelyProbeRequest(userAgent: string | null | undefined): bool
 
 const MODE_LABELS: Record<string, string> = {
   hls: 'HLS',
+  'hls-tap': 'HLS + Download',
+  'hls-buffer': 'HLS + Buffered Download',
   ffmpeg: 'FFmpeg',
   direct: 'Direct',
   'direct-pipe': 'Direct (piped)',

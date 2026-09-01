@@ -47,6 +47,7 @@ export const DEFAULT_YTSTREAM: YtstreamConfig = {
   playerClient: '',
   calculatedLength: false,
   hotSwapToCache: false,
+  serveCachedFile: false,
   instantStart: false,
   probeShortcut: false,
   forceServerSettings: false,
@@ -63,6 +64,8 @@ const MODE_TOOLTIPS: Record<string, string> = {
   'direct-redirect': 'Resolves a playback URL via yt-dlp, then sends the player a 302 straight to it - Youtarr never touches the video bytes at all, the lightest mode on Youtarr\'s own bandwidth/CPU. Real trade-offs: no cookies/Referer/User-Agent travel with the redirect, so age-restricted or members-only videos (which need those) fail outright for a player that can\'t supply them; a session-bound "vprv" URL is if anything more likely to 403 here than under Direct, since the fetch now comes from the player\'s own network entirely; and whatever happens after the redirect is invisible to Youtarr - a failure here never reaches this server\'s logs.',
   ffmpeg: 'Re-streams through a single live ffmpeg connection fed by yt-dlp\'s DASH (video-only + audio-only) formats - real quality up to whatever height this video truly has, not capped by progressive-format availability. Requires ffmpeg installed and working on the Youtarr host - if it isn\'t, this mode fails outright (502); it does not silently fall back to Direct.',
   hls: 'Same DASH-based quality ceiling as Enhanced, but writes real segment files to local disk instead of a live pipe, only responding once the first segment exists - fixes players (Jellyfin included) that won\'t tolerate the live pipe\'s startup wait. Costs local disk space per active stream. Same ffmpeg-required, no-fallback rule as Enhanced.',
+  'hls-tap': 'Same DASH-based quality ceiling and disk cost as Enhanced HLS - but the same ffmpeg process also writes a second, untouched full-quality copy (-c copy, no re-encode, no scaling) straight to disk from the same yt-dlp video/audio pipes, before any Transcode/Container filtering is applied - no second network pull, and not a copy of the scaled-down stream. That file becomes this video\'s permanent downloaded copy once the whole video has played through once, uninterrupted, without a seek. Replaces STRM cache-on-play entirely for videos played this way - that separate background download is skipped whenever this mode\'s tap is active for a play. Limitation: only the very first, un-seeked play-through of a session can produce a complete file - if the very first request already starts mid-video (e.g. a media server resuming playback), or the viewer seeks before the video ends, the partial tap is discarded, not saved, and normal STRM cache-on-play (if enabled) picks it up instead. Same ffmpeg-required, no-fallback rule as Enhanced.',
+  'hls-buffer': 'Same DASH-based quality ceiling as Enhanced HLS - but instead of tapping the live encode, a completely independent yt-dlp+ffmpeg pull starts immediately and fetches the whole video once, unthrottled by anything the live stream is doing, remuxing it into a local MPEG-TS buffer file (a hard requirement of this mechanism - see the Container tooltip). Playback itself starts exactly like Enhanced HLS - network-sourced, no extra wait, so instant-start (if enabled) behaves identically. Only a later seek (or, with Calculated length on, catching up to a gap) waits briefly for the buffer to have already reached that point before reading it directly instead of pulling from the network again - fast once buffered. Once the fetch finishes, that MPEG-TS file becomes this video\'s permanent downloaded copy (always .ts, regardless of the Container setting below - only Tap-to-Download\'s permanent file follows Container) and STRM cache-on-play is skipped for this play, same as Tap-to-Download - but without Tap\'s limitation: the fetch keeps running and still finishes even if you seek early or stop watching partway through. Same ffmpeg-required, no-fallback rule as Enhanced.',
 };
 
 /**
@@ -100,7 +103,7 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
   // Container/transcode/hardware apply to both ffmpeg-mode's live pipe and
   // hls-mode's segmented output. calculatedLength applies to both too, but
   // means different things — see the checkbox's tooltip below.
-  const enhancedMode = mode === 'ffmpeg' || mode === 'hls';
+  const enhancedMode = mode === 'ffmpeg' || mode === 'hls' || mode === 'hls-tap' || mode === 'hls-buffer';
   const forceH264 = ytstream.transcode === 'h264';
   const currentHardwareMode = ytstream.hardwareMode || 'none';
   // Maps the "Stream quality" dropdown's value onto the resolution keys the
@@ -180,7 +183,7 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
               value={mode}
               label="Playback mode"
               onChange={(e: SelectChangeEvent<string>) =>
-                setYtstream({ defaultMode: e.target.value as 'direct' | 'direct-pipe' | 'direct-redirect' | 'ffmpeg' | 'hls' })
+                setYtstream({ defaultMode: e.target.value as 'direct' | 'direct-pipe' | 'direct-redirect' | 'ffmpeg' | 'hls' | 'hls-tap' | 'hls-buffer' })
               }
               className="flex-1 min-w-0"
               disabled={disabled}
@@ -190,6 +193,8 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
               <MenuItem value="direct-redirect">Direct (redirect, no proxy)</MenuItem>
               <MenuItem value="ffmpeg">Enhanced (ffmpeg, live pipe)</MenuItem>
               <MenuItem value="hls">Enhanced HLS (segmented, most compatible)</MenuItem>
+              <MenuItem value="hls-tap">Enhanced HLS + Tap-to-Download (writes a full download from the same stream)</MenuItem>
+              <MenuItem value="hls-buffer">Enhanced HLS + Buffered Download (fetches ahead into a local buffer)</MenuItem>
             </Select>
             <InfoTooltip
               text={MODE_TOOLTIPS[mode] || MODE_TOOLTIPS.direct}
@@ -214,12 +219,17 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
             >
               <MenuItem value="mp4">MP4 (fragmented pipe, or fMP4 segments in HLS mode)</MenuItem>
               <MenuItem value="ts">MPEG-TS (player-friendly; MPEG-TS segments in HLS mode)</MenuItem>
-              {mode !== 'hls' && (
+              {mode !== 'hls' && mode !== 'hls-tap' && mode !== 'hls-buffer' && (
                 <MenuItem value="mkv">Matroska (Enhanced only - accepts any codec, no MP4 box-signaling issues)</MenuItem>
               )}
             </Select>
             <InfoTooltip
-              text="Matroska (mkv) is Enhanced (ffmpeg) mode only, not offered for Enhanced HLS - HLS segments must be fMP4 or MPEG-TS. Useful for Transcode=Copy when the source track isn't H.264: unlike MP4, Matroska's muxer accepts essentially any video/audio codec pair without container-specific signaling concerns."
+              text={
+                'Matroska (mkv) is Enhanced (ffmpeg) mode only, not offered for Enhanced HLS - HLS segments must be fMP4 or MPEG-TS. Useful for Transcode=Copy when the source track isn\'t H.264: unlike MP4, Matroska\'s muxer accepts essentially any video/audio codec pair without container-specific signaling concerns.'
+                + (mode === 'hls-buffer'
+                  ? ' Note for Enhanced HLS + Buffered Download: this only picks the live segment format. The permanent downloaded file this mode produces is always saved as MPEG-TS regardless of this setting (a hard requirement of the buffer-fetch mechanism, unlike Tap-to-Download, which does follow this setting) - see the Playback mode tooltip.'
+                  : '')
+              }
               onMobileClick={onMobileTooltipClick}
             />
           </Box>

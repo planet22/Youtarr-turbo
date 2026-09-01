@@ -6,7 +6,7 @@ export interface StreamHistoryRow {
   streamId: string;
   youtubeId: string;
   title: string | null;
-  mode: 'hls' | 'ffmpeg' | 'direct' | 'direct-pipe' | 'direct-redirect';
+  mode: 'hls' | 'hls-tap' | 'hls-buffer' | 'ffmpeg' | 'direct' | 'direct-pipe' | 'direct-redirect';
   quality: string | null;
   container: string | null;
   transcode: string | null;

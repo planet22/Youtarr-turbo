@@ -265,6 +265,27 @@ export const StrmSettingsSection: React.FC<Props> = ({
           </Grid>
         )}
 
+        {ytstreamSelected && ytstreamMode === 'hls' && (
+          <Grid item xs={12} md={4}>
+            <Box className="flex items-center gap-1">
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={ytstream.hotSwapToCache ?? false}
+                    onChange={(e) => setYtstream({ hotSwapToCache: e.target.checked })}
+                    disabled={mediaIsDownload}
+                  />
+                }
+                label="Hot-swap to cached file"
+              />
+              <InfoTooltip
+                text="Enhanced HLS only. If the STRM 'Cache on play' background download finishes while this video is still playing, the session switches to producing the remaining segments from the local cached file instead of the live network pull - same picture, no restart, just faster and more reliable for the rest of the video. Has no effect unless Cache on play is also enabled."
+                onMobileClick={onMobileTooltipClick}
+              />
+            </Box>
+          </Grid>
+        )}
+
         {ytstreamSelected && strm.cacheOnPlay === true && (
           <Grid item xs={12} md={4}>
             <Box className="flex items-center gap-1">
@@ -296,26 +317,6 @@ export const StrmSettingsSection: React.FC<Props> = ({
           </Grid>
         )}
 
-        {ytstreamSelected && ytstreamMode === 'hls' && (
-          <Grid item xs={12} md={4}>
-            <Box className="flex items-center gap-1">
-              <FormControlLabel
-                control={
-                  <Switch
-                    checked={ytstream.hotSwapToCache ?? false}
-                    onChange={(e) => setYtstream({ hotSwapToCache: e.target.checked })}
-                    disabled={mediaIsDownload}
-                  />
-                }
-                label="Hot-swap to cached file"
-              />
-              <InfoTooltip
-                text="Enhanced HLS only. If the STRM 'Cache on play' background download finishes while this video is still playing, the session switches to producing the remaining segments from the local cached file instead of the live network pull - same picture, no restart, just faster and more reliable for the rest of the video. Has no effect unless Cache on play is also enabled."
-                onMobileClick={onMobileTooltipClick}
-              />
-            </Box>
-          </Grid>
-        )}
 
         {(config.mediaMode === 'strm' || config.mediaMode === 'both') && (
           <Grid item xs={12}>

@@ -91,7 +91,7 @@ function loadYoutubeCookieHeader(cookiePath) {
   }
 }
 
-const VALID_MODES = ['direct', 'direct-pipe', 'direct-redirect', 'ffmpeg', 'hls'];
+const VALID_MODES = ['direct', 'direct-pipe', 'direct-redirect', 'ffmpeg', 'hls', 'hls-tap', 'hls-buffer'];
 // mkv is ffmpeg-mode only (see the ffmpeg output-format switch below) -
 // hls mode's segments must be fmp4/mpegts, so getHlsContainerInfo simply
 // never special-cases it (falls through to its fmp4 default, same as any
@@ -707,6 +707,28 @@ const HLS_POST_RESTART_LOOKAHEAD_TIMEOUT_MS = 10000;
 // anyway, so this just avoids re-checking on every single one.
 const HOT_SWAP_CHECK_INTERVAL_MS = 5000;
 
+// mode=hls-buffer: how far ahead of a target playback timestamp the
+// independent buffer fetch (server/modules/ytstreamBufferFetch.js) must have
+// already written before an encode pass is allowed to read that region as a
+// plain local file (see waitForBufferedThrough) - a cushion against the
+// encode pass catching up to the fetch's still-growing write frontier mid-
+// segment, same purpose as HLS_POST_RESTART_LOOKAHEAD_SEGMENTS serves for
+// the network-pipe path.
+const BUFFER_SAFETY_MARGIN_SECONDS = 15;
+// Bounded wait for the buffer to reach BUFFER_SAFETY_MARGIN_SECONDS past a
+// target timestamp before giving up and falling back to today's proven
+// network-sourced path (sectioned pipe / direct-URL seek) for that one pass
+// - the fetch keeps running in the background regardless, so a timeout here
+// only affects this one pass's source, not whether the video still finishes
+// downloading.
+const BUFFER_CATCHUP_TIMEOUT_MS = 45000;
+// How much buffered-video progress (in video seconds, not wall-clock) must
+// pass between debug-level "still fetching" log lines - see startHlsBufferFetch's
+// ff.stdout progress handler. 60 video-seconds of progress happens almost
+// instantly on a healthy connection (one or two log lines for a typical
+// video) but keeps ticking visibly, at a bounded rate, if the fetch is slow.
+const BUFFER_PROGRESS_LOG_INTERVAL_SECONDS = 60;
+
 // Deliberately NOT under tempPathManager's temp base: that directory gets
 // wiped wholesale by cleanTempDirectory() on server startup and before
 // every download job — which would delete segments out from under an
@@ -746,12 +768,14 @@ function getHlsContainerInfo(container) {
 }
 
 /** Identifies an HLS session across requests for the same effective params. */
-function buildHlsSessionKey({ youtubeId, quality, qualityStrictness, transcode, hardwareMode, tuning, container, playerClient, calculatedLength }) {
+function buildHlsSessionKey({ youtubeId, quality, qualityStrictness, transcode, hardwareMode, tuning, container, playerClient, calculatedLength, tap, buffer }) {
   const raw = JSON.stringify({
     youtubeId, quality, transcode, hardwareMode, tuning, container,
     qualityStrictness: qualityStrictness || 'fallback',
     playerClient: playerClient || '',
     calculatedLength: !!calculatedLength,
+    tap: !!tap,
+    buffer: !!buffer,
   });
   return crypto.createHash('sha1').update(raw).digest('hex').slice(0, 20);
 }
@@ -2033,7 +2057,12 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
    *   filePath }` switches to a single local-file input with no yt-dlp
    *   children at all — used by maybeHotSwapToCache once STRM cache-on-play
    *   has finished downloading this video, so the rest of the session reads
-   *   from disk instead of pulling from YouTube.
+   *   from disk instead of pulling from YouTube. Also used by mode=hls-buffer
+   *   (see startHlsBufferFetch/waitForBufferedThrough) to read from its
+   *   independent buffer-fetch file — either mid-fetch (session.bufferTempPath)
+   *   once enough has been safely written, or the finalized file
+   *   (session.cachedFilePath) once the fetch has completed and flipped
+   *   session.usingCachedSource, same as a hot-swap.
    * @param {object} [directUrls] - seek-restart fix (docs/YTSTREAM_SEEK_FIX.md):
    *   `{ videoUrl, audioUrl, cookieHeader }` from resolveDashUrlsForSeek.
    *   When present (and `source` isn't), ffmpeg fetches these two DASH URLs
@@ -2070,6 +2099,18 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
     const effectiveSeek = (session.calculatedLength || isLocalSource)
       ? (startSegmentIndex > 0 ? startSegmentIndex * HLS_SEGMENT_DURATION_SECONDS : null)
       : (seekSeconds || null);
+
+    // mode=hls-tap: only a genuine, un-seeked play from the very start of
+    // the session gets tapped - isInitialPass is only ever true on the
+    // session's original network-sourced pass (no caller passes
+    // source/directUrls alongside isInitialPass: true), so this can never
+    // fire against a hot-swapped or local-source pass. tapAttempted is
+    // claimed immediately so a same-pass fallback/retry (info-json-cache
+    // fallback, sectioned-pipe fallback) doesn't treat itself as a second,
+    // independent tap - it just overwrites tapTempPath from scratch, safe
+    // since no bytes have reached the client yet at that point.
+    const tapActive = session.tapEnabled && !session.tapAttempted && isInitialPass && startSegmentIndex === 0 && !effectiveSeek;
+    if (tapActive) session.tapAttempted = true;
 
     // The yt-dlp-pipe path's `-ss` (below, on the non-seekable pipe:3/pipe:4
     // inputs) can't actually seek — ffmpeg has to decode-and-discard every
@@ -2210,6 +2251,25 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
       ffArgs.push('-thread_queue_size', '4096', '-i', 'pipe:3');
       if (pipeSeek) ffArgs.push('-ss', String(pipeSeek));
       ffArgs.push('-thread_queue_size', '4096', '-i', 'pipe:4');
+
+      if (tapActive) {
+        // mode=hls-tap: a second, fully independent OUTPUT from the SAME
+        // yt-dlp video/audio pipes - untouched (-c copy, no re-encode), no
+        // second network pull. Must be declared as its own complete output
+        // (own -map pair, own -c) BEFORE the primary HLS output's -map/-vf/
+        // -c:v/-c:a block below - ffmpeg's per-output options apply to
+        // whichever output TARGET comes next, so nothing carries between
+        // outputs either way, but placing this one first keeps the primary
+        // output's -vf/encoder args from ever being associated with it (an
+        // earlier version of this code declared the tap's target AFTER
+        // those options, which attached them to the tap output instead of
+        // HLS and produced a real, reproduced-live ffmpeg error: "Filtering
+        // and streamcopy cannot be used together" - killing the whole
+        // session, not just the tap). Finalized/discarded by the dedicated
+        // close listener below.
+        ffArgs.push('-map', '0:v:0', '-map', '1:a:0?', '-c', 'copy', session.tapTempPath);
+      }
+
       ffArgs.push('-map', '0:v:0', '-map', '1:a:0?', '-sn', '-dn', '-max_muxing_queue_size', '4096');
     }
 
@@ -2267,14 +2327,24 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
       ffmpegPlaylistPath
     );
 
+    // mode=hls-buffer's still-growing buffer.ts (read directly, ahead of
+    // finalization) and a genuinely finished file (hotSwapToCache, or
+    // hls-buffer/hls-tap post-finalize) both take the isLocalSource branch
+    // above - worth distinguishing in the log, since only the growing-file
+    // case has any theoretical exposure to the encode pass catching up to
+    // the write frontier (see waitForBufferedThrough's safety margin).
+    const isBufferInProgressSource = isLocalSource && session.bufferEnabled && !session.usingCachedSource
+      && source.filePath === session.bufferTempPath;
     logger.info(
       {
         youtubeId, sessionKey, quality, playerClient: playerClientOverride, hardwareMode: hw, startSegmentIndex, videoFormat, audioFormat, dir: session.dir, ffArgs: redactFfArgsForLogging(ffArgs),
-        source: isLocalSource ? 'cache' : (isDirectSource ? 'direct-url' : (useSectionedPipe ? 'sectioned-pipe' : 'network')),
+        source: isLocalSource ? (isBufferInProgressSource ? 'buffer-in-progress' : 'cache') : (isDirectSource ? 'direct-url' : (useSectionedPipe ? 'sectioned-pipe' : 'network')),
         usedCachedInfoJson: useInfoJson,
       },
       isLocalSource
-        ? 'ytstream: spawning HLS encode pass from cached local file'
+        ? (isBufferInProgressSource
+          ? 'ytstream: spawning HLS encode pass from the still-in-progress hls-buffer file'
+          : 'ytstream: spawning HLS encode pass from cached local file')
         : isDirectSource
           ? 'ytstream: spawning HLS encode pass from directly-resolved DASH URLs (seek-restart fix)'
           : useSectionedPipe
@@ -2379,6 +2449,40 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
       }
     };
     const isKilledByUs = (signal) => signal === 'SIGTERM' || signal === 'SIGKILL';
+
+    // mode=hls-tap finalization - deliberately a SEPARATE close listener
+    // from the main one below, not folded into it, because a superseded/
+    // torn-down pass's incomplete tap file still needs discarding even
+    // when the main handler's `if (!isCurrentPass()) return;` guard skips
+    // everything else. Only ever treats the tap file as complete on a
+    // clean close (exit code 0, not one of our own kill signals, session
+    // not mid-teardown) for the pass that actually owns it - anything
+    // else (a crash, a seek-triggered restart, a session stop) discards
+    // it rather than risk finalizing a corrupt partial file (a -c copy
+    // MP4's moov atom only gets flushed on a clean finish).
+    if (tapActive) {
+      const tapOwnerGeneration = myGeneration;
+      const tapTempPathForThisPass = session.tapTempPath;
+      ff.on('close', (code, signal) => {
+        const { finalizeTapOutput, discardTapOutput } = require('../modules/ytstreamTapFinalizer');
+        const cleanCompletion = !session.destroying
+          && session.passGeneration === tapOwnerGeneration
+          && code === 0
+          && !isKilledByUs(signal);
+        if (cleanCompletion) {
+          finalizeTapOutput({ youtubeId, tempPath: tapTempPathForThisPass, finalPath: session.tapFinalPath })
+            .then((finalPath) => {
+              if (finalPath) {
+                session.usingCachedSource = true;
+                session.cachedFilePath = finalPath;
+              }
+            })
+            .catch((err) => logger.warn({ err, sessionKey, youtubeId }, 'ytstream: hls-tap finalize failed'));
+        } else {
+          discardTapOutput({ youtubeId, tempPath: tapTempPathForThisPass });
+        }
+      });
+    }
 
     // Safety net for useInfoJson (see warmHlsInfoJsonCache): the cached
     // info-json's signed URLs are typically valid for a few hours, but
@@ -2504,6 +2608,193 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
   }
 
   /**
+   * mode=hls-buffer: an independent, one-shot yt-dlp(video)+yt-dlp(audio)+
+   * ffmpeg pipeline that pulls this session's video once, at full network
+   * speed, remuxing (-c copy, no re-encode, no HLS segmenting) into a single
+   * local MPEG-TS file - the same DASH video/audio pipes spawnHlsEncodePass's
+   * network branch uses, but run entirely on its own, never killed or
+   * restarted by a seek or session teardown the way the session's own `ff`
+   * is (see ytstreamBufferFetch.js's module doc comment for why that
+   * decoupling is the whole point of this mode: mode=hls-tap's tap shares
+   * the live encode's process, so it's bound by the live encode's own
+   * throughput for the entire session - this fetch has no such ceiling).
+   * Fire-and-forget - the caller does not await this; every encode pass
+   * instead polls session.bufferedSeconds via waitForBufferedThrough before
+   * reading the growing file.
+   */
+  function startHlsBufferFetch(session) {
+    const { isBufferFetchActive, markBufferFetchStarted, markBufferFetchFinished, parseBufferedSeconds } = require('../modules/ytstreamBufferFetch');
+    const { finalizeTapOutput, discardTapOutput } = require('../modules/ytstreamTapFinalizer');
+    const { youtubeId, quality, qualityStrictness, config } = session;
+
+    if (isBufferFetchActive(youtubeId)) {
+      // Another session is already fetching this same still-STRM video (a
+      // second device, or a different quality/transcode combo) - rather
+      // than tracking/sharing progress across sessions, this session just
+      // falls back to the network path for every pass, same as a failed
+      // fetch would (below). Rare enough in practice not to warrant it.
+      logger.info({ sessionKey: session.sessionKey, youtubeId }, 'ytstream: hls-buffer fetch already in flight for this video; this session will use the network path');
+      session.bufferFetchFailed = true;
+      // This session's own bufferDir was created (by createHlsSessionInternal,
+      // before calling this function) but will never be used - nothing else
+      // ever cleans it up otherwise, since finish() (which does) never runs.
+      if (session.bufferDir) fs.rm(session.bufferDir, { recursive: true, force: true }, () => {});
+      return;
+    }
+    markBufferFetchStarted(youtubeId);
+
+    const { videoFormat, audioFormat } = getDashFormatSelectors(quality, qualityStrictness);
+    const watchUrl = `https://youtube.com/watch?v=${youtubeId}`;
+    const commonYtArgs = [...buildBaseArgs(config, {}), '-o', '-', '--no-playlist', '--no-warnings'];
+    const ytVideoArgs = [...commonYtArgs, '-f', videoFormat, watchUrl];
+    const ytAudioArgs = [...commonYtArgs, '-f', audioFormat, watchUrl];
+
+    logger.info(
+      { sessionKey: session.sessionKey, youtubeId, quality, tempPath: session.bufferTempPath },
+      'ytstream: starting independent hls-buffer fetch (network-bound, decoupled from the live HLS serve)'
+    );
+
+    ensureProcessExitHandlers();
+
+    const ytVideo = spawn('yt-dlp', ytVideoArgs, { stdio: ['ignore', 'pipe', 'pipe'] });
+    const ytAudio = spawn('yt-dlp', ytAudioArgs, { stdio: ['ignore', 'pipe', 'pipe'] });
+    const ffArgs = [
+      '-loglevel', 'error',
+      '-progress', 'pipe:1',
+      '-thread_queue_size', '4096', '-i', 'pipe:3',
+      '-thread_queue_size', '4096', '-i', 'pipe:4',
+      '-map', '0:v:0', '-map', '1:a:0?', '-sn', '-dn', '-c', 'copy',
+      '-f', 'mpegts',
+      session.bufferTempPath,
+    ];
+    const ff = spawn('ffmpeg', ffArgs, { stdio: ['ignore', 'pipe', 'pipe', 'pipe', 'pipe'] });
+    registerChildProcess(ytVideo);
+    registerChildProcess(ytAudio);
+    registerChildProcess(ff);
+    session.bufferYtVideo = ytVideo;
+    session.bufferYtAudio = ytAudio;
+    session.bufferFf = ff;
+
+    const ffVideoIn = ff.stdio[3];
+    const ffAudioIn = ff.stdio[4];
+    ytVideo.stdout.on('error', () => { /* pipe destination gone; fetch is being torn down */ });
+    ytAudio.stdout.on('error', () => { /* pipe destination gone; fetch is being torn down */ });
+    ffVideoIn.on('error', () => { /* upstream (yt-dlp video) already gone or being killed */ });
+    ffAudioIn.on('error', () => { /* upstream (yt-dlp audio) already gone or being killed */ });
+    ytVideo.stdout.pipe(ffVideoIn);
+    ytAudio.stdout.pipe(ffAudioIn);
+
+    let ytVideoErr = '';
+    let ytAudioErr = '';
+    let ffErr = '';
+    ytVideo.stderr.on('data', (c) => { ytVideoErr = (ytVideoErr + c.toString()).slice(-2000); });
+    ytAudio.stderr.on('data', (c) => { ytAudioErr = (ytAudioErr + c.toString()).slice(-2000); });
+    ff.stderr.on('data', (c) => { ffErr = (ffErr + c.toString()).slice(-2000); });
+    // -progress pipe:1 output arrives on ffmpeg's stdout, not stderr.
+    // Logged (debug, throttled to once per BUFFER_PROGRESS_LOG_INTERVAL_SECONDS
+    // of buffered video, not per progress tick - those can arrive many times
+    // a second) so a stalled/slow fetch is visible in the logs instead of
+    // going completely silent between the start and finish/fail lines -
+    // without this, a hung fetch and a slow-but-healthy one look identical.
+    let lastLoggedBufferedSeconds = 0;
+    ff.stdout.on('data', (c) => {
+      const seconds = parseBufferedSeconds(c.toString());
+      if (seconds === null) return;
+      session.bufferedSeconds = seconds;
+      if (seconds - lastLoggedBufferedSeconds >= BUFFER_PROGRESS_LOG_INTERVAL_SECONDS) {
+        lastLoggedBufferedSeconds = seconds;
+        logger.debug({ sessionKey: session.sessionKey, youtubeId, bufferedSeconds: seconds }, 'ytstream: hls-buffer fetch progress');
+      }
+    });
+
+    const isKilledByUs = (signal) => signal === 'SIGTERM' || signal === 'SIGKILL';
+    // bufferDir holds only this one temp file (see the caller's doc comment
+    // on why it's a dedicated directory, not session.dir) - safe to remove
+    // wholesale once the file has been moved out (finalizeTapOutput's
+    // rename/copy) or unlinked (discardTapOutput), whichever happened.
+    const cleanupBufferDir = () => {
+      if (session.bufferDir) fs.rm(session.bufferDir, { recursive: true, force: true }, () => {});
+    };
+    let settled = false;
+    const finish = (ok, message) => {
+      if (settled) return;
+      settled = true;
+      markBufferFetchFinished(youtubeId);
+      if (!ok) {
+        logger.warn({ sessionKey: session.sessionKey, youtubeId, message }, 'ytstream: hls-buffer fetch failed; discarding partial file');
+        session.bufferFetchFailed = true;
+        discardTapOutput({ youtubeId, tempPath: session.bufferTempPath, sourceLabel: 'hls-buffer' });
+        cleanupBufferDir();
+        return;
+      }
+      finalizeTapOutput({ youtubeId, tempPath: session.bufferTempPath, finalPath: session.bufferFinalPath, sourceLabel: 'hls-buffer' })
+        .then((finalPath) => {
+          if (finalPath) {
+            session.usingCachedSource = true;
+            session.cachedFilePath = finalPath;
+            session.bufferFetchDone = true;
+            logger.info({ sessionKey: session.sessionKey, youtubeId, finalPath }, 'ytstream: hls-buffer fetch finalized as permanent download');
+          } else {
+            session.bufferFetchFailed = true;
+          }
+          cleanupBufferDir();
+        })
+        .catch((err) => {
+          logger.warn({ err, sessionKey: session.sessionKey, youtubeId }, 'ytstream: hls-buffer finalize failed');
+          session.bufferFetchFailed = true;
+          cleanupBufferDir();
+        });
+    };
+
+    ytVideo.once('error', (err) => finish(false, err.message));
+    ytAudio.once('error', (err) => finish(false, err.message));
+    ff.once('error', (err) => finish(false, err.message));
+    ytVideo.once('exit', (code, signal) => {
+      if (code !== 0 && !isKilledByUs(signal)) finish(false, ytVideoErr || `yt-dlp (video) exited with code ${code}`);
+    });
+    ytAudio.once('exit', (code, signal) => {
+      if (code !== 0 && !isKilledByUs(signal)) finish(false, ytAudioErr || `yt-dlp (audio) exited with code ${code}`);
+    });
+    ff.once('close', (code, signal) => {
+      if (code === 0 && !isKilledByUs(signal)) {
+        finish(true);
+      } else {
+        finish(false, ffErr || `ffmpeg exited with code ${code}, signal ${signal}`);
+      }
+    });
+  }
+
+  /**
+   * mode=hls-buffer: waits (bounded) for startHlsBufferFetch's independent
+   * fetch to have written at least BUFFER_SAFETY_MARGIN_SECONDS past
+   * `targetSeconds` before letting an encode pass read that region as a
+   * plain local file - see BUFFER_SAFETY_MARGIN_SECONDS's doc comment for
+   * why the margin exists.
+   * @returns {Promise<'buffer'|'network'>} 'buffer': safe to read
+   *   session.cachedFilePath (if usingCachedSource, i.e. the fetch already
+   *   finished) or session.bufferTempPath directly as a local source.
+   *   'network': give up - fall back to today's proven network-sourced path
+   *   for this one pass. The fetch itself keeps running regardless.
+   */
+  async function waitForBufferedThrough(session, targetSeconds) {
+    if (session.usingCachedSource) return 'buffer';
+    if (session.bufferFetchFailed) return 'network';
+    const deadline = Date.now() + BUFFER_CATCHUP_TIMEOUT_MS;
+    while (Date.now() < deadline) {
+      if (session.usingCachedSource) return 'buffer';
+      if (session.bufferFetchFailed) return 'network';
+      if (session.bufferedSeconds >= targetSeconds + BUFFER_SAFETY_MARGIN_SECONDS) return 'buffer';
+      if (session.destroying) return 'network';
+      await new Promise((resolve) => setTimeout(resolve, HLS_READY_POLL_INTERVAL_MS));
+    }
+    logger.warn(
+      { sessionKey: session.sessionKey, youtubeId: session.youtubeId, targetSeconds, bufferedSeconds: session.bufferedSeconds },
+      'ytstream: hls-buffer catch-up wait timed out; falling back to network path for this pass'
+    );
+    return 'network';
+  }
+
+  /**
    * calculatedLength only: kills the currently-running encode pass and starts a
    * new one at `segmentIndex`'s boundary, without touching the session's
    * entry in hlsSessions/activeStreams or its directory — this is much
@@ -2536,9 +2827,23 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
     // restart (including a calculatedLength seek past what's encoded) must keep
     // reading from that same local file - omitting `source` here would
     // silently fall back to spawning yt-dlp against the network again.
-    const source = session.usingCachedSource && session.cachedFilePath
+    let source = session.usingCachedSource && session.cachedFilePath
       ? { type: 'local', filePath: session.cachedFilePath }
       : undefined;
+    if (!source && session.bufferEnabled) {
+      // mode=hls-buffer: wait (bounded) for the independent buffer fetch
+      // (startHlsBufferFetch) to have safely written past this seek target
+      // before reading it as a plain local file - see
+      // waitForBufferedThrough/BUFFER_SAFETY_MARGIN_SECONDS. Falls through
+      // to the normal network-sourced restart below (source stays
+      // undefined) if the wait times out - the fetch itself keeps running
+      // in the background regardless of whether this pass used it.
+      const targetSeconds = segmentIndex * HLS_SEGMENT_DURATION_SECONDS;
+      const ready = await waitForBufferedThrough(session, targetSeconds);
+      if (ready === 'buffer') {
+        source = { type: 'local', filePath: session.usingCachedSource ? session.cachedFilePath : session.bufferTempPath };
+      }
+    }
 
     spawnHlsEncodePass(session, { startSegmentIndex: segmentIndex, isInitialPass: false, source });
   }
@@ -2733,7 +3038,7 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
     });
   }
 
-  async function createHlsSessionInternal(sessionKey, { youtubeId, quality, qualityStrictness, transcode, hardwareMode, tuning, container, config, baseUrl, seekSeconds, clientIp, userAgent, calculatedLength, hotSwapToCache }, playerClientOverride) {
+  async function createHlsSessionInternal(sessionKey, { youtubeId, quality, qualityStrictness, transcode, hardwareMode, tuning, container, config, baseUrl, seekSeconds, clientIp, userAgent, calculatedLength, hotSwapToCache, tapEnabled, bufferEnabled }, playerClientOverride) {
     const hw = normalizeHardwareMode(hardwareMode);
     const tier = normalizeTuning(tuning);
     const { segmentType, segmentExt } = getHlsContainerInfo(container);
@@ -2798,7 +3103,106 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
       // ends before it completes.
       infoJsonPath: null,
       infoJsonProc: null,
+      // mode=hls-tap - see spawnHlsEncodePass's tapActive logic and
+      // server/modules/ytstreamTapFinalizer.js. tapEnabled only ends up
+      // true below if this video is genuinely still STRM right now -
+      // nothing to tap into otherwise (same "skip already-done work"
+      // precedent as ytstream.serveCachedFile). tapAttempted guards
+      // against a same-pass fallback/retry (info-json-cache fallback,
+      // sectioned-pipe fallback) claiming a second tap slot.
+      tapEnabled: false,
+      tapAttempted: false,
+      tapTempPath: null,
+      tapFinalPath: null,
+      // mode=hls-buffer - see startHlsBufferFetch/waitForBufferedThrough.
+      // bufferEnabled only ends up true below if this video is genuinely
+      // still STRM right now (same "skip already-done work" precedent as
+      // tapEnabled above). bufferedSeconds is updated by the independent
+      // fetch's -progress output; bufferFetchFailed short-circuits any
+      // in-progress waitForBufferedThrough wait so a dead fetch doesn't
+      // make every pass wait out the full timeout individually.
+      bufferEnabled: false,
+      bufferDir: null,
+      bufferTempPath: null,
+      bufferFinalPath: null,
+      bufferedSeconds: 0,
+      bufferFetchFailed: false,
+      bufferFetchDone: false,
     };
+
+    if (tapEnabled) {
+      try {
+        const video = await models.Video.findOne({
+          where: { youtubeId },
+          attributes: ['is_strm', 'filePath'],
+        });
+        if (video && video.is_strm === true && video.filePath) {
+          const targetDir = path.dirname(video.filePath);
+          const fileStem = path.basename(video.filePath, path.extname(video.filePath));
+          const ext = container === 'ts' ? '.ts' : '.mp4';
+          session.tapEnabled = true;
+          // Staged under the session's own fast local HLS temp dir (same
+          // place segments already go), NOT inside the video's own library
+          // folder - confirmed live that writing the tap continuously to
+          // that (likely NAS/network-backed) location drags the whole
+          // shared ffmpeg pipeline down to it, throttling the LIVE stream
+          // too (observed: HLS segment production dropped from far faster
+          // than real-time to barely real-time once the tap was writing to
+          // the library path). Local /tmp has no such bottleneck. The
+          // one-time move to the real library path happens once, in
+          // ytstreamTapFinalizer, after encoding finishes - see its
+          // rename/cross-device-copy fallback. This also means an
+          // abandoned tap (a hard kill that bypasses the close listener)
+          // gets swept up for free by destroyHlsSession's existing
+          // delayed session.dir removal, instead of being an orphaned file
+          // sitting in the library folder forever.
+          session.tapTempPath = path.join(dir, `tap${ext}`);
+          session.tapFinalPath = path.join(targetDir, `${fileStem}${ext}`);
+        }
+      } catch (err) {
+        logger.warn({ err, sessionKey, youtubeId }, 'ytstream: hls-tap could not resolve STRM target; tap disabled for this session');
+      }
+    }
+
+    if (bufferEnabled) {
+      try {
+        const video = await models.Video.findOne({
+          where: { youtubeId },
+          attributes: ['is_strm', 'filePath'],
+        });
+        if (video && video.is_strm === true && video.filePath) {
+          const targetDir = path.dirname(video.filePath);
+          const fileStem = path.basename(video.filePath, path.extname(video.filePath));
+          session.bufferEnabled = true;
+          // Deliberately its OWN directory, NOT session.dir - unlike the
+          // session's HLS segments/hls-tap's tapTempPath, this fetch is
+          // designed to keep running and finalize even after the HLS
+          // session itself is torn down (idle reap, a 403/extraction-error
+          // retry, manual stop - see startHlsBufferFetch's doc comment), so
+          // it must not live inside a directory destroyHlsSession schedules
+          // for deletion on teardown - that would delete the buffer file
+          // out from under the still-running independent ffmpeg process.
+          // Always .ts regardless of the session's own `container` setting
+          // (which only governs the LIVE HLS segments) - MPEG-TS is the
+          // hard technical requirement for a file that's safely readable
+          // while still being appended to (no moov-atom-style trailing
+          // index the way MP4 has).
+          const bufferDir = path.join(HLS_BASE_TEMP_DIR, `buffer-${youtubeId}-${crypto.randomBytes(4).toString('hex')}`);
+          fs.mkdirSync(bufferDir, { recursive: true });
+          session.bufferDir = bufferDir;
+          session.bufferTempPath = path.join(bufferDir, 'buffer.ts');
+          session.bufferFinalPath = path.join(targetDir, `${fileStem}.ts`);
+          // Kicked off immediately, fire-and-forget - not awaited - so it
+          // gets every bit of this function's remaining setup time
+          // (duration lookup, placeholder generation, trackStream) as a
+          // free head start before the initial pass's waitForBufferedThrough
+          // wait even begins below.
+          startHlsBufferFetch(session);
+        }
+      } catch (err) {
+        logger.warn({ err, sessionKey, youtubeId }, 'ytstream: hls-buffer could not resolve STRM target; buffer disabled for this session');
+      }
+    }
 
     if (session.calculatedLength) {
       // Pre-declare the whole playlist (real duration, VOD, ENDLIST) up
@@ -2851,7 +3255,11 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
 
     trackStream({
       streamId: sessionKey,
-      mode: 'hls',
+      // session.tapEnabled/bufferEnabled reflect whether the tap/buffer
+      // actually resolved (video was genuinely still STRM), not just
+      // whether it was requested - a plain hls fallback still reads as
+      // 'hls' correctly.
+      mode: session.tapEnabled ? 'hls-tap' : (session.bufferEnabled ? 'hls-buffer' : 'hls'),
       youtubeId,
       quality,
       container,
@@ -2874,6 +3282,23 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
     // as early as possible to have any chance of beating an immediate
     // Jellyfin resume-from-middle seek.
     warmHlsInfoJsonCache(session, playerClientOverride);
+    // mode=hls-buffer: the cold-start/initial pass deliberately does NOT
+    // wait for the buffer fetch (see startHlsBufferFetch above) - it always
+    // starts network-sourced, exactly like plain mode=hls. An earlier
+    // version awaited waitForBufferedThrough here, which blocked this whole
+    // function (and therefore the HTTP response carrying the playlist -
+    // including the ytstream.instantStart placeholder segment written into
+    // playlistPath above) on the buffer catching up: up to
+    // BUFFER_SAFETY_MARGIN_SECONDS + real cold-start wait, which defeated
+    // instant-start's entire purpose (serve *something* immediately while
+    // the real pipeline is still spinning up) - the client got no response
+    // at all until the buffer had already produced almost enough data for
+    // the real segment anyway. The buffer still gets used for anything
+    // after this first pass - see restartHlsEncodePassAtSegment, which
+    // seeks (and, for calculatedLength sessions, missing-segment restarts)
+    // already route through waitForBufferedThrough, and that happens after
+    // the response has already gone out and playback has already started -
+    // a brief wait there doesn't block anything the way it would have here.
     spawnHlsEncodePass(session, { startSegmentIndex: 0, seekSeconds, isInitialPass: true, playerClientOverride });
 
     return session;
@@ -3650,10 +4075,10 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
     }
 
     const ffmpegAvailable = isFfmpegAvailable();
-    if ((mode === 'ffmpeg' || mode === 'hls') && !ffmpegAvailable) {
-      // No fallback to a different mode - mode=ffmpeg/hls requires ffmpeg,
-      // full stop. The real route responds 502 for this rather than
-      // silently serving direct/direct-pipe instead.
+    if ((mode === 'ffmpeg' || mode === 'hls' || mode === 'hls-tap' || mode === 'hls-buffer') && !ffmpegAvailable) {
+      // No fallback to a different mode - mode=ffmpeg/hls/hls-tap/hls-buffer
+      // requires ffmpeg, full stop. The real route responds 502 for this
+      // rather than silently serving direct/direct-pipe instead.
       steps.push({ step: 'mode', detail: `mode=${mode} requested but ffmpeg is unavailable on this host; fails outright (502), no fallback to a different mode`, probed: false });
     } else {
       steps.push({ step: 'mode', detail: `resolved to ${mode}`, probed: false });
@@ -3749,10 +4174,15 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
 
     const hotSwapToCache = ytCfg.hotSwapToCache === true;
     if (hotSwapToCache && mode !== 'hls') {
+      // mode=hls-tap/hls-buffer intentionally fall into this same "ignored"
+      // branch - both replace hotSwapToCache/cache-on-play entirely (via
+      // the tap or the independent buffer fetch, respectively) rather than
+      // layering on top of it, so there's nothing session-swap-shaped for
+      // either to use here.
       steps.push({ step: 'hotSwapToCache', detail: 'on, but ignored - only mode=hls uses it', probed: false });
     }
 
-    if (transcode === 'copy' && (mode === 'ffmpeg' || mode === 'hls')) {
+    if (transcode === 'copy' && (mode === 'ffmpeg' || mode === 'hls' || mode === 'hls-tap' || mode === 'hls-buffer')) {
       if (!probe) {
         steps.push({
           step: 'transcode',
@@ -3796,7 +4226,7 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
     // hand with those functions rather than derived from them; skipped
     // entirely when probeShortcut would fire, since the real request never
     // reaches any of this.
-    const ffmpegModeBlocked = (mode === 'ffmpeg' || mode === 'hls') && !ffmpegAvailable;
+    const ffmpegModeBlocked = (mode === 'ffmpeg' || mode === 'hls' || mode === 'hls-tap' || mode === 'hls-buffer') && !ffmpegAvailable;
     if (!probeShortcut.wouldFire && !ffmpegModeBlocked) {
       if (mode === 'direct') {
         steps.push({ step: 'execution', detail: 'resolve a direct playback URL via yt-dlp (-g)', probed: false });
@@ -3819,7 +4249,7 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
           probed: false,
         });
       } else {
-        const pipelineDesc = mode === 'hls'
+        const pipelineDesc = (mode === 'hls' || mode === 'hls-tap' || mode === 'hls-buffer')
           ? 'fetch video+audio via yt-dlp (DASH format selectors) piped into ffmpeg, writing real HLS segment files'
           : 'fetch video+audio via yt-dlp (DASH format selectors) piped into a single live ffmpeg connection';
         steps.push({ step: 'execution', detail: pipelineDesc, probed: false });
@@ -3835,9 +4265,43 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
             probed: false,
           });
         }
+        if (mode === 'hls-tap') {
+          steps.push({
+            step: 'execution',
+            detail: 'only on the session\'s first pass, if it starts at t=0 with no seek: the same ffmpeg process also writes a second, untouched -c copy output (same yt-dlp pipes, before any scale/transcode filter) to a temp file; on that pass completing cleanly, the temp file is moved into the video\'s library folder, the Video row is flipped off STRM (is_strm=false), and the old .strm/.strmtool.json are archived to .cached - this fully replaces strmCacheOnPlay\'s separate download job for this play',
+            probed: false,
+          });
+          steps.push({
+            step: 'execution',
+            detail: 'a seek before the tap completes (or a first request that already starts mid-video) abandons/never-attempts the tap - its temp file is discarded, never treated as complete',
+            probed: false,
+          });
+        }
+        if (mode === 'hls-buffer') {
+          steps.push({
+            step: 'execution',
+            detail: 'a separate, independent yt-dlp+yt-dlp+ffmpeg pipeline (its own network pull, not shared with the HLS encode above) starts immediately and pulls the whole video once, unthrottled, remuxing (-c copy) into a local MPEG-TS buffer file - not tied to this session\'s encode pass, so it keeps running even across seeks or if the viewer stops watching',
+            probed: false,
+          });
+          steps.push({
+            step: 'execution',
+            detail: 'the cold-start/first pass never waits on the buffer - it starts network-sourced immediately, identically to plain mode=hls (so instant-start\'s placeholder segment, if enabled, behaves exactly the same as it does for mode=hls too)',
+            probed: false,
+          });
+          steps.push({
+            step: 'execution',
+            detail: 'every later pass (a seek restart, or a calculatedLength missing-segment restart) waits up to 45s for the buffer to have safely written past its target timestamp, then reads that local file directly instead of pulling from the network; on timeout, that one pass falls back to the same network-sourced path plain mode=hls uses (the buffer fetch itself is unaffected and keeps running)',
+            probed: false,
+          });
+          steps.push({
+            step: 'execution',
+            detail: 'once the buffer fetch finishes cleanly, its file is moved into the video\'s library folder, the Video row is flipped off STRM (is_strm=false), and every subsequent pass (this session and any other) reads from that finished file - same as hotSwapToCache/mode=hls-tap\'s finalized output',
+            probed: false,
+          });
+        }
         steps.push({
           step: 'execution',
-          detail: mode === 'hls'
+          detail: (mode === 'hls' || mode === 'hls-tap' || mode === 'hls-buffer')
             ? 'if it still fails, respond 502 (HLS stream failed to start)'
             : 'if it still fails, respond 502 (Stream failed)',
           probed: false,
@@ -3955,7 +4419,24 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
     // or a media server reading the raw ytstream URL baked into its .strm
     // file) passes through here, so this is the one place that sees every
     // play. Never awaited - must add zero latency to the response below.
-    require('../modules/strmCacheOnPlay').maybeEnqueueCacheDownload(youtubeId).catch((err) =>
+    //
+    // Cheap, synchronous, hand-maintained mirror of resolvePlaybackPlan's
+    // mode/seek resolution (same trade-off/precedent as the probeShortcut
+    // pre-check above it) - only used to decide whether mode=hls-tap will
+    // actually attempt its own tap for THIS request, so the cache-on-play
+    // trigger below can be skipped without adding a DB/probe round trip to
+    // every single request just to make that call.
+    const cheapCfg = configModule.getConfig().ytstream || {};
+    const cheapForced = cheapCfg.forceServerSettings === true;
+    const cheapMode = String((cheapForced ? undefined : req.query.mode) || cheapCfg.defaultMode || 'direct').toLowerCase();
+    // mode=hls-buffer also replaces cache-on-play entirely (its own
+    // independent fetch does the same job, without hls-tap's "only a
+    // perfect uninterrupted play-through" limitation) - unlike tap, it
+    // isn't restricted to an un-seeked t=0 request, since the buffer fetch
+    // doesn't depend on which segment is being played at all.
+    const tapWillAttempt = cheapMode === 'hls-tap' && !req.query.t;
+    const bufferWillAttempt = cheapMode === 'hls-buffer';
+    require('../modules/strmCacheOnPlay').maybeEnqueueCacheDownload(youtubeId, { skip: tapWillAttempt || bufferWillAttempt }).catch((err) =>
       logger.warn({ err, youtubeId }, 'ytstream: cache-on-play trigger failed')
     );
 
@@ -4026,11 +4507,11 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
     };
 
     try {
-      if ((mode === 'ffmpeg' || mode === 'hls') && !plan.ffmpegAvailable) {
+      if ((mode === 'ffmpeg' || mode === 'hls' || mode === 'hls-tap' || mode === 'hls-buffer') && !plan.ffmpegAvailable) {
         // No fallback to direct - each mode does exactly what it says. If
         // ffmpeg genuinely isn't installed/working on this host,
-        // mode=ffmpeg/hls just fails outright instead of silently
-        // downgrading to a different mode's behavior.
+        // mode=ffmpeg/hls/hls-tap/hls-buffer just fails outright instead of
+        // silently downgrading to a different mode's behavior.
         logger.error({ youtubeId, mode }, `ytstream: mode=${mode} requested but ffmpeg is unavailable on this host`);
         res.status(502).send(`Stream failed: mode=${mode} requires ffmpeg, which is not available on this host`);
         return;
@@ -4199,8 +4680,10 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
         });
       }
 
-      if (mode === 'hls') {
-        const sessionKey = buildHlsSessionKey({ youtubeId, quality, qualityStrictness, transcode, hardwareMode, tuning, container, playerClient: ytCfg.playerClient, calculatedLength });
+      if (mode === 'hls' || mode === 'hls-tap' || mode === 'hls-buffer') {
+        const isTapMode = mode === 'hls-tap';
+        const isBufferMode = mode === 'hls-buffer';
+        const sessionKey = buildHlsSessionKey({ youtubeId, quality, qualityStrictness, transcode, hardwareMode, tuning, container, playerClient: ytCfg.playerClient, calculatedLength, tap: isTapMode, buffer: isBufferMode });
         const baseUrl = `${req.protocol}://${req.get('host')}/api/ytstream/${encodeURIComponent(youtubeId)}/hls/${sessionKey}/`;
 
         let clientGoneWhileWaiting = false;
@@ -4217,7 +4700,13 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
         const waitStarted = Date.now();
         try {
           const session = await getOrCreateHlsSession(sessionKey, {
-            youtubeId, quality, qualityStrictness, transcode, hardwareMode, tuning, container, config, baseUrl, seekSeconds, calculatedLength, hotSwapToCache,
+            youtubeId, quality, qualityStrictness, transcode, hardwareMode, tuning, container, config, baseUrl, seekSeconds, calculatedLength,
+            // mode=hls-tap/hls-buffer both replace hotSwapToCache/cache-on-play
+            // entirely rather than layering on top of it - see spawnHlsEncodePass's
+            // tap logic and startHlsBufferFetch respectively.
+            hotSwapToCache: (isTapMode || isBufferMode) ? false : hotSwapToCache,
+            tapEnabled: isTapMode,
+            bufferEnabled: isBufferMode,
             clientIp: resolveClientIp(req),
             userAgent: req.headers['user-agent'] || null,
           });
@@ -4319,14 +4808,14 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
 
       let hls = null;
       let wouldCall;
-      const ffmpegModeBlocked = (plan.mode === 'ffmpeg' || plan.mode === 'hls') && !plan.ffmpegAvailable;
+      const ffmpegModeBlocked = (plan.mode === 'ffmpeg' || plan.mode === 'hls' || plan.mode === 'hls-tap' || plan.mode === 'hls-buffer') && !plan.ffmpegAvailable;
       if (plan.probeShortcut.wouldFire) {
         wouldCall = 'tryServeProbeClip(...) [probeShortcut - real request never reaches the mode/quality logic above]';
       } else if (ffmpegModeBlocked) {
         wouldCall = `502 - mode=${plan.mode} requires ffmpeg, which is unavailable on this host (no fallback to a different mode)`;
       } else if (plan.mode === 'ffmpeg') {
         wouldCall = `streamViaFfmpeg({ quality: "${plan.quality}", container: "${plan.container}", transcode: "${plan.transcode}", hardwareMode: "${plan.hardwareMode}", tuning: "${plan.tuning}" })`;
-      } else if (plan.mode === 'hls') {
+      } else if (plan.mode === 'hls' || plan.mode === 'hls-tap' || plan.mode === 'hls-buffer') {
         const sessionKey = buildHlsSessionKey({
           youtubeId,
           quality: plan.quality,
@@ -4337,6 +4826,8 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
           container: plan.container,
           playerClient: (config.ytstream || {}).playerClient,
           calculatedLength: plan.calculatedLength,
+          tap: plan.mode === 'hls-tap',
+          buffer: plan.mode === 'hls-buffer',
         });
         hls = { sessionKey, sessionAlreadyActive: hlsSessions.has(sessionKey) };
         wouldCall = `getOrCreateHlsSession(sessionKey: "${sessionKey}")`;

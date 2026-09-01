@@ -125,14 +125,19 @@ async function _enqueueCacheDownload(youtubeId) {
 
 /**
  * @param {string} youtubeId
+ * @param {{skip?: boolean}} [opts] - skip: true when ytstream.js's own
+ *   mode=hls-tap is about to tap this exact play itself, or mode=hls-buffer
+ *   is about to start its own independent fetch (see its cheap, synchronous
+ *   pre-check ahead of this call) - no second pull needed either way.
  * @returns {Promise<void>} never throws; every failure is logged and swallowed
  */
-async function maybeEnqueueCacheDownload(youtubeId) {
+async function maybeEnqueueCacheDownload(youtubeId, opts = {}) {
   if (pendingEnqueue.has(youtubeId)) return;
 
   const configModule = require('./configModule');
   const config = configModule.getConfig();
   if (!isFeatureEnabled(config)) return;
+  if (opts.skip) return;
   if (hasActiveCacheJob(youtubeId)) return;
 
   pendingEnqueue.add(youtubeId);

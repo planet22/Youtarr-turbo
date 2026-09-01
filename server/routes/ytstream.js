@@ -620,6 +620,15 @@ function parseByteRange(rangeHeader, totalLength) {
 const durationCache = new Map();
 
 /**
+ * In-flight dedup for getVideoDurationSeconds's live yt-dlp fallback -
+ * without this, the instant-start warm-up kicking the same lookup off early
+ * (see the route handler's placeholder/duration warm-up block) and the real
+ * calculatedLength lookup a moment later would each spawn their own yt-dlp
+ * process for the same video, racing each other for no benefit.
+ */
+const durationLookupPromises = new Map();
+
+/**
  * In-memory cache of resolved video codecs, for transcode=copy's
  * auto-upgrade-to-h264 check (see resolveVideoCodec below). Keyed by
  * youtubeId|quality|playerClient since the DASH format yt-dlp selects — and
@@ -796,6 +805,36 @@ function buildHlsSessionKey({ youtubeId, quality, qualityStrictness, transcode, 
  * since it has different encoder init data than the real segments) — it
  * never reuses a real segment index, so nothing below needs to know it
  * exists.
+ *
+ * DELIBERATELY always VOD+ENDLIST, even with a placeholder present, and the
+ * full real segment range always listed alongside it - do not "fix" this
+ * without a live Jellyfin test confirming actual playback end to end, not
+ * just the manifest looking more spec-correct on paper. Two different
+ * EVENT-playlist variants were tried and reverted here, both confirmed live
+ * to break real playback worse than the problem they were chasing:
+ *
+ * 1. EVENT type + full real segment list + placeholder together: a
+ *    compliant player treated the LAST listed real segment (almost none of
+ *    which exist on disk yet) as the EVENT playlist's live edge and started
+ *    playback THERE instead of at position 0 - looked instantly finished,
+ *    Jellyfin skipped straight to the next item.
+ * 2. EVENT type + ONLY the placeholder listed (real segments added later by
+ *    maybeStripPlaceholderFromPlaylist once ready): avoided the live-edge
+ *    jump, but depends on the player correctly re-polling an EVENT playlist
+ *    that hasn't changed yet if the real segment0 isn't ready before the
+ *    placeholder's own 3s runs out - confirmed live that Jellyfin's player
+ *    does not reliably do this: playback got stuck showing the placeholder,
+ *    never loading further, until Jellyfin gave up and skipped to the next
+ *    video anyway.
+ *
+ * Both variants were chasing a real but purely cosmetic bug (the scrubber
+ * showing 0 for the whole video on some players, from a player unable to
+ * compute total duration across the placeholder's discontinuity + dual
+ * #EXT-X-MAP) - not worth trading working playback for. This original
+ * VOD+ENDLIST-from-the-start form is the one confirmed live to actually
+ * play correctly end to end; the duration-display quirk is a known,
+ * accepted cosmetic limitation until a fix is found that doesn't regress
+ * playback itself.
  */
 function buildFullHlsPlaylist({ totalSegments, durationSeconds, segmentExt, segmentType, placeholder }) {
   const lines = [
@@ -828,6 +867,49 @@ function buildFullHlsPlaylist({ totalSegments, durationSeconds, segmentExt, segm
 }
 
 /**
+ * `ytstream.instantStart`'s placeholder is written into the playlist ONCE,
+ * at session creation, and that playlist FILE is what every later request
+ * for it re-serves verbatim (both the entry route's own read and the asset
+ * route's plain `playlist.m3u8` fetch) - nothing rewrites it afterwards on
+ * its own. That's fine for the single request that's actually waiting on a
+ * cold start, but a SECOND top-level request that lands on this same
+ * already-running session (a player's own double-GET, a reload, a resumed
+ * connection, ...) gets the exact same on-disk playlist back - placeholder
+ * included - even if the real encode has long since caught up. Observed
+ * live: a session's second `waitMs` log fired ~15s after its first, and
+ * the client re-fetched `placeholder-init.mp4`/`placeholder.m4s` all over
+ * again despite `segment00000` having been ready for seconds already -
+ * visually, the video appears to "restart into another loading screen"
+ * instead of just continuing.
+ *
+ * Called from both playlist-serving sites right before the file is read,
+ * so it's a no-op (one fs.existsSync check) on every request except the
+ * one that happens to be first to notice the real segment0 exists - that
+ * one rewrites the file in place, and every request after it (including
+ * ones already in flight, since it's a plain synchronous file rewrite, not
+ * an in-memory swap) sees the placeholder-free version from then on.
+ */
+function maybeStripPlaceholderFromPlaylist(session) {
+  if (!session.hasPlaceholder || session.placeholderStripped) return;
+  const realFirstSegment = path.join(session.dir, `segment00000.${session.segmentExt}`);
+  if (!fs.existsSync(realFirstSegment)) return;
+  try {
+    const fullPlaylist = buildFullHlsPlaylist({
+      totalSegments: session.totalSegments,
+      durationSeconds: session.durationSeconds,
+      segmentExt: session.segmentExt,
+      segmentType: session.segmentType,
+      placeholder: null,
+    });
+    fs.writeFileSync(session.playlistPath, fullPlaylist);
+    session.placeholderStripped = true;
+    logger.info({ sessionKey: session.sessionKey }, 'ytstream: real first segment ready; stripped instant-start placeholder from playlist for future requests');
+  } catch (err) {
+    logger.warn({ err, sessionKey: session.sessionKey }, 'ytstream: failed to strip instant-start placeholder from playlist');
+  }
+}
+
+/**
  * `ytstream.instantStart` (opt-in, calculatedLength HLS sessions only — see
  * buildFullHlsPlaylist's `placeholder` param and createHlsSessionInternal).
  *
@@ -856,8 +938,47 @@ function buildFullHlsPlaylist({ totalSegments, durationSeconds, segmentExt, segm
 // own clip (a branded loading bumper, etc.) at the exact path a signature
 // resolves to and it's used as-is forever after - ensurePlaceholderSegment/
 // ensureProbeClip only ever generate when nothing already exists there.
-const YTSTREAM_CLIPS_DIR = path.join(path.dirname(configModule.configPath), 'ytstream-clips');
+//
+// Lives under configModule.directoryPath (the youtube-output/library
+// volume), NOT the config volume - same dot-prefixed-staging-dir precedent
+// server/routes/nzb.js's own .nzb_staging already uses. These files (the
+// untracked-buffer cache especially - a full permanent copy of a video) can
+// get large, and belong on the bulk media volume sized for that, not
+// wherever the (often much smaller) config/app volume happens to live.
+// Deliberately NOT HLS_BASE_TEMP_DIR's local /tmp, though - unlike these
+// clip caches, the live per-session HLS segment directories are written to
+// continuously for the life of every stream, and there's an already-
+// diagnosed regression (see mode=hls-tap's tapTempPath doc comment) from
+// routing that continuous write traffic through NAS-backed storage instead
+// of fast local disk - segment production dropped from far-faster-than-
+// realtime to barely realtime. That risk doesn't apply here: these are
+// write-once files (a placeholder generated once per signature, a buffer
+// finalized once per video), not continuously-appended-to ones.
+// Its own top-level dir, NOT tempPathManager's '.youtarr_tmp' subfolder of
+// this same volume - .youtarr_tmp gets wiped wholesale by
+// cleanTempDirectory() on server startup and before every download job (see
+// HLS_BASE_TEMP_DIR's own comment above), which was silently deleting this
+// cache's persistent contents (the whole point of HLS_UNTRACKED_BUFFER_CACHE_DIR
+// below, and of ensurePlaceholderSegment/ensureProbeClip's caches) every time
+// a download job ran in the background.
+const YTSTREAM_CACHE_DIR = path.join(configModule.directoryPath, '.youtarr_ytstream_cache');
+const YTSTREAM_CLIPS_DIR = path.join(YTSTREAM_CACHE_DIR, 'ytstream-clips');
 const HLS_PLACEHOLDER_CACHE_DIR = path.join(YTSTREAM_CLIPS_DIR, 'hls-instant-start');
+// mode=hls-buffer against a video with no `Video` row (an NZB
+// `mediaMode:'strm'` grab Youtarr never catalogued, or one it later
+// disowned via `importStrategy:'untracked'` - see the bufferEnabled block
+// in createHlsSessionInternal) still gets buffer-fetched, since the fetch
+// itself has nothing to do with Youtarr's own library - but the finished
+// file lands HERE, keyed only by youtubeId, instead of a library location:
+// no Video/Job row, not visible in the library or Download History, purely
+// a same-video-again speed-up. Persistent (not os.tmpdir()) so a later play
+// of the same untracked video, even after a container restart, can still
+// find and reuse it instead of re-fetching from the network.
+const HLS_UNTRACKED_BUFFER_CACHE_DIR = path.join(YTSTREAM_CLIPS_DIR, 'hls-buffer-untracked-cache');
+
+function getUntrackedBufferCachePath(youtubeId) {
+  return path.join(HLS_UNTRACKED_BUFFER_CACHE_DIR, `${youtubeId}.ts`);
+}
 const HLS_PLACEHOLDER_DURATION_SECONDS = 3; // must stay < HLS_SEGMENT_DURATION_SECONDS (the playlist's #EXT-X-TARGETDURATION)
 const HLS_PLACEHOLDER_FPS = 30;
 // Used only when a video's real resolution can't be resolved yet (see
@@ -961,32 +1082,82 @@ function runFfmpegOnce(args, { timeoutMs = 30000 } = {}) {
   });
 }
 
+// drawtext's `fontfile=` bypasses fontconfig lookup entirely (no fontconfig
+// cache/config needed) - just needs this exact file physically present, see
+// the Dockerfile's `fonts-dejavu-core` package. Checked with fs.existsSync
+// before ever building a drawtext filter, so a build/environment missing the
+// package just silently loses the text overlay (still gets the thumbnail
+// image) instead of failing placeholder generation outright.
+const PLACEHOLDER_FONT_PATH = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf';
+
+/**
+ * Resolves the on-disk path to a video's already-cached UI thumbnail
+ * (written by strmMaterializer._writeThumbnail/videoDownloadPostProcessFiles
+ * for every video regardless of STRM state - this is Youtarr's own
+ * library-grid image, not a live fetch), for use as ensurePlaceholderSegment's
+ * background. Returns null (never throws) if it hasn't been cached yet -
+ * callers fall back to the generic test-pattern placeholder in that case,
+ * same as any other placeholder-generation failure.
+ */
+function resolveLocalThumbnailPath(youtubeId) {
+  try {
+    const thumbPath = path.join(configModule.getImagePath(), `videothumb-${youtubeId}.jpg`);
+    return fs.existsSync(thumbPath) ? thumbPath : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Generates (or reuses an already-cached) tiny "loading" HLS segment
  * matching a `transcode=h264` session's actual encoder settings (same
  * buildVideoEncoderArgs(hardwareMode) the real pass uses), so it splices
- * cleanly into the real encode's output. A moving lavfi test pattern +
- * silence — not a "Loading..." text card — deliberately avoids depending
- * on fontconfig/freetype being compiled into this ffmpeg build.
+ * cleanly into the real encode's output. When `thumbnailPath` resolves (see
+ * resolveLocalThumbnailPath), the segment is this video's own YouTube
+ * thumbnail with a "Loading..." text card drawn over it (letterboxed to fit
+ * `width`x`height` without distortion, since a cached thumbnail's own aspect
+ * ratio doesn't necessarily match the target); otherwise falls back to the
+ * original moving lavfi test pattern + silence.
  *
  * Never throws — any failure (ffmpeg missing a filter/encoder, hardware
  * device unavailable, timeout, ...) logs a warning and returns null, and
  * callers fall back to today's normal wait-for-the-real-segment behavior.
+ * @param {string|null} [thumbnailPath] - a local image to use as the
+ *   placeholder's background instead of the generic test pattern. Makes the
+ *   generated segment specific to one video, so it's cached per-video (see
+ *   cacheKey below) rather than shared across every video the way the
+ *   generic pattern is.
+ * @param {string} [youtubeId] - required when thumbnailPath is given, purely
+ *   to keep this video's cached placeholder from colliding with another's.
  * @param {number} width - target resolution (see resolveVideoTargetResolution)
  * @param {number} height
  * @returns {Promise<{segmentPath: string, initPath: string|null}|null>}
  */
-async function ensurePlaceholderSegment({ segmentType, segmentExt, hardwareMode, tuning, width, height }) {
+async function ensurePlaceholderSegment({ youtubeId, thumbnailPath, segmentType, segmentExt, hardwareMode, tuning, width, height }) {
   const signature = getPlaceholderSignature({ segmentType, hardwareMode, tuning, width, height });
-  const dir = path.join(HLS_PLACEHOLDER_CACHE_DIR, signature);
+  // A thumbnail-backed placeholder is per-video content, not the shared
+  // generic pattern - keyed by youtubeId plus the thumbnail file's own
+  // size+mtime, so a later-replaced thumbnail (e.g. a metadata refresh
+  // finding a better maxresdefault) invalidates the cache instead of
+  // serving a stale image forever.
+  let cacheKey = signature;
+  if (thumbnailPath) {
+    try {
+      const stat = fs.statSync(thumbnailPath);
+      cacheKey = `${youtubeId}-${stat.size}-${Math.floor(stat.mtimeMs)}-${signature}`;
+    } catch {
+      thumbnailPath = null; // vanished between resolve and here - fall back to generic
+    }
+  }
+  const dir = path.join(HLS_PLACEHOLDER_CACHE_DIR, cacheKey);
   const segmentPath = path.join(dir, `placeholder.${segmentExt}`);
   const initPath = segmentType === 'fmp4' ? path.join(dir, 'placeholder-init.mp4') : null;
 
   const isReady = () => fs.existsSync(segmentPath) && (!initPath || fs.existsSync(initPath));
   if (isReady()) return { segmentPath, initPath };
 
-  if (placeholderGenerationPromises.has(signature)) {
-    await placeholderGenerationPromises.get(signature).catch(() => {});
+  if (placeholderGenerationPromises.has(cacheKey)) {
+    await placeholderGenerationPromises.get(cacheKey).catch(() => {});
     return isReady() ? { segmentPath, initPath } : null;
   }
 
@@ -997,13 +1168,50 @@ async function ensurePlaceholderSegment({ segmentType, segmentExt, hardwareMode,
     if (encoder.preInputArgs && encoder.preInputArgs.length) {
       args.push(...encoder.preInputArgs);
     }
-    args.push(
-      '-f', 'lavfi', '-i', `testsrc2=size=${width}x${height}:rate=${HLS_PLACEHOLDER_FPS}:duration=${HLS_PLACEHOLDER_DURATION_SECONDS}`,
-      '-f', 'lavfi', '-i', 'anullsrc=r=48000:cl=stereo',
-      '-t', String(HLS_PLACEHOLDER_DURATION_SECONDS),
-    );
+    const videoFilters = [];
+    if (thumbnailPath) {
+      args.push('-loop', '1', '-framerate', String(HLS_PLACEHOLDER_FPS), '-i', thumbnailPath);
+      args.push('-f', 'lavfi', '-i', 'anullsrc=r=48000:cl=stereo');
+      args.push('-t', String(HLS_PLACEHOLDER_DURATION_SECONDS));
+      // A static "loading" card doesn't need HLS_PLACEHOLDER_DURATION_SECONDS
+      // * HLS_PLACEHOLDER_FPS near-identical encoded frames of the same
+      // unchanging image - one frame, held for the full duration via a
+      // 1-frame-per-duration output framerate, is both cheaper to generate
+      // and removes any timing ambiguity outright: a single sample's
+      // presentation duration is exact by construction, unlike summing many
+      // individual frame durations (confirmed live: unlike testsrc2 below,
+      // which self-describes an exact `duration=` on the lavfi source
+      // itself, the OLD multi-frame looped-image version had no such
+      // intrinsic length - `-t` alone cutting off an infinite loop left the
+      // encoded segment's actual duration not landing precisely on 3.000s,
+      // and the scrubber got stuck at 0 for the whole video once this
+      // thumbnail-based placeholder replaced the old testsrc2 one).
+      args.push('-r', `1/${HLS_PLACEHOLDER_DURATION_SECONDS}`);
+      args.push('-frames:v', '1');
+      // scale-to-fit + letterbox, not a bare scale - a locally-cached
+      // thumbnail's aspect ratio (e.g. hqdefault.jpg's fixed 480x360) won't
+      // generally match the real video's target aspect, and a plain scale
+      // would visibly stretch/distort the image.
+      videoFilters.push(`scale=${width}:${height}:force_original_aspect_ratio=decrease`);
+      videoFilters.push(`pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black`);
+      if (fs.existsSync(PLACEHOLDER_FONT_PATH)) {
+        const fontSize = Math.max(16, Math.round(height / 18));
+        videoFilters.push(
+          `drawtext=fontfile='${PLACEHOLDER_FONT_PATH}':text='Loading...':fontsize=${fontSize}:fontcolor=white:box=1:boxcolor=black@0.5:boxborderw=${Math.round(fontSize / 3)}:x=(w-text_w)/2:y=(h-text_h)/2`
+        );
+      }
+    } else {
+      args.push(
+        '-f', 'lavfi', '-i', `testsrc2=size=${width}x${height}:rate=${HLS_PLACEHOLDER_FPS}:duration=${HLS_PLACEHOLDER_DURATION_SECONDS}`,
+        '-f', 'lavfi', '-i', 'anullsrc=r=48000:cl=stereo',
+        '-t', String(HLS_PLACEHOLDER_DURATION_SECONDS),
+      );
+    }
     if (encoder.videoFilters && encoder.videoFilters.length) {
-      args.push('-vf', encoder.videoFilters.join(','));
+      videoFilters.push(...encoder.videoFilters);
+    }
+    if (videoFilters.length) {
+      args.push('-vf', videoFilters.join(','));
     }
     if (encoder.pixFmt) args.push('-pix_fmt', encoder.pixFmt);
     args.push(...encoder.encoderArgs);
@@ -1023,7 +1231,7 @@ async function ensurePlaceholderSegment({ segmentType, segmentExt, hardwareMode,
     const scratchPlaylist = path.join(dir, 'scratch.m3u8');
     args.push('-hls_segment_filename', path.join(dir, `placeholder-raw%d.${segmentExt}`), scratchPlaylist);
 
-    logger.info({ signature, args }, 'ytstream: generating HLS instant-start placeholder segment');
+    logger.info({ cacheKey, thumbnailPath: thumbnailPath || null, args }, 'ytstream: generating HLS instant-start placeholder segment');
     await runFfmpegOnce(args);
 
     fs.renameSync(path.join(dir, `placeholder-raw0.${segmentExt}`), segmentPath);
@@ -1033,15 +1241,15 @@ async function ensurePlaceholderSegment({ segmentType, segmentExt, hardwareMode,
     try { fs.rmSync(scratchPlaylist, { force: true }); } catch { /* best-effort cleanup */ }
   })();
 
-  placeholderGenerationPromises.set(signature, generate);
+  placeholderGenerationPromises.set(cacheKey, generate);
   try {
     await generate;
     return isReady() ? { segmentPath, initPath } : null;
   } catch (err) {
-    logger.warn({ err, signature }, 'ytstream: failed to generate HLS instant-start placeholder; falling back to normal session startup');
+    logger.warn({ err, cacheKey }, 'ytstream: failed to generate HLS instant-start placeholder; falling back to normal session startup');
     return null;
   } finally {
-    placeholderGenerationPromises.delete(signature);
+    placeholderGenerationPromises.delete(cacheKey);
   }
 }
 
@@ -1159,6 +1367,57 @@ const PROBE_CLIP_CACHE_DIR = path.join(YTSTREAM_CLIPS_DIR, 'probe-shortcut');
 const PROBE_CLIP_DURATION_SECONDS = 2;
 const probeClipGenerationPromises = new Map();
 
+// Jellyfin's own prober (MediaBrowser.MediaEncoding.Probing.ProbeResultNormalizer)
+// sets a video's RunTimeTicks straight from ffprobe's `format.duration`,
+// unconditionally overwriting whatever runtime it already knew - so a probe
+// clip that's really only PROBE_CLIP_DURATION_SECONDS long gets recorded as
+// the video's actual length. FFmpeg's matroska muxer
+// (libavformat/matroskaenc.c, mkv_write_info -> put_ebml_float) always
+// writes that container-level duration as one fixed, findable binary field:
+// EBML ID 0x4489 (Segment Info "Duration"), a 1-byte size marker of 0x88
+// (meaning "8 bytes follow"), then an 8-byte big-endian IEEE754 double,
+// scaled to milliseconds (TimecodeScale defaults to 1,000,000ns = 1ms/unit,
+// which nothing here overrides). ffprobe/Jellyfin trust that header value
+// outright and never validate it against how much real media actually
+// follows - so patching just those 8 bytes to the real video's known
+// duration (see tryServeProbeClip's resolveDurationSeconds param) before
+// serving is enough to make the probe response accurate, without encoding a
+// single extra frame.
+// Scanning for the marker rather than hardcoding a byte offset keeps this
+// resilient to ffmpeg version/build differences in header layout; if the
+// marker isn't found (an unexpected muxer change), this silently skips
+// patching and serves the clip as generated - same best-effort philosophy
+// as the rest of this feature.
+const MATROSKA_DURATION_MARKER = Buffer.from([0x44, 0x89, 0x88]);
+const probeClipDurationOffsetCache = new Map(); // signature -> byte offset | null
+
+function findMatroskaDurationValueOffset(buffer) {
+  const markerOffset = buffer.indexOf(MATROSKA_DURATION_MARKER);
+  if (markerOffset === -1) return -1;
+  const valueOffset = markerOffset + MATROSKA_DURATION_MARKER.length;
+  return valueOffset + 8 <= buffer.length ? valueOffset : -1;
+}
+
+async function getProbeClipDurationOffset(signature, filePath) {
+  if (probeClipDurationOffsetCache.has(signature)) return probeClipDurationOffsetCache.get(signature);
+  let offset = null;
+  try {
+    const fh = await fs.promises.open(filePath, 'r');
+    try {
+      const head = Buffer.alloc(65536);
+      const { bytesRead } = await fh.read(head, 0, head.length, 0);
+      const found = findMatroskaDurationValueOffset(head.subarray(0, bytesRead));
+      if (found !== -1) offset = found;
+    } finally {
+      await fh.close();
+    }
+  } catch (err) {
+    logger.warn({ err, signature }, 'ytstream: failed to scan probe-shortcut clip for its Matroska Duration field');
+  }
+  probeClipDurationOffsetCache.set(signature, offset);
+  return offset;
+}
+
 /**
  * Generates (or reuses an already-cached) tiny standalone Matroska clip
  * matching a `transcode=h264` session's actual encoder settings. Matroska
@@ -1169,17 +1428,17 @@ const probeClipGenerationPromises = new Map();
  * output codec — never throws; returns null on any failure.
  * @param {number} width - target resolution (see resolveVideoTargetResolution)
  * @param {number} height
- * @returns {Promise<{filePath: string}|null>}
+ * @returns {Promise<{filePath: string, signature: string}|null>}
  */
 async function ensureProbeClip({ hardwareMode, tuning, width, height }) {
   const signature = `${normalizeHardwareMode(hardwareMode)}-${normalizeTuning(tuning)}-${width}x${height}`;
   const dir = path.join(PROBE_CLIP_CACHE_DIR, signature);
   const filePath = path.join(dir, 'probe.mkv');
-  if (fs.existsSync(filePath)) return { filePath };
+  if (fs.existsSync(filePath)) return { filePath, signature };
 
   if (probeClipGenerationPromises.has(signature)) {
     await probeClipGenerationPromises.get(signature).catch(() => {});
-    return fs.existsSync(filePath) ? { filePath } : null;
+    return fs.existsSync(filePath) ? { filePath, signature } : null;
   }
 
   const generate = (async () => {
@@ -1209,7 +1468,7 @@ async function ensureProbeClip({ hardwareMode, tuning, width, height }) {
   probeClipGenerationPromises.set(signature, generate);
   try {
     await generate;
-    return fs.existsSync(filePath) ? { filePath } : null;
+    return fs.existsSync(filePath) ? { filePath, signature } : null;
   } catch (err) {
     logger.warn({ err, signature }, 'ytstream: failed to generate probe-shortcut clip');
     return null;
@@ -1221,28 +1480,62 @@ async function ensureProbeClip({ hardwareMode, tuning, width, height }) {
 /**
  * @returns {Promise<boolean>} true if a response was sent (caller must
  *   return immediately without falling through to normal handling).
+ * @param {(youtubeId: string) => Promise<number>} resolveDurationSeconds -
+ *   DB-first, yt-dlp-fallback-then-cached (see getVideoDurationSeconds) -
+ *   a genuine network call only ever happens once per not-yet-tracked
+ *   video; every probe after that (and this one, for anything already in
+ *   the DB or already resolved once) hits durationCache instead.
  */
-async function tryServeProbeClip(req, res, { hardwareMode, tuning, width, height }) {
+async function tryServeProbeClip(req, res, { hardwareMode, tuning, width, height, youtubeId, resolveDurationSeconds }) {
   try {
     const clip = await ensureProbeClip({ hardwareMode, tuning, width, height });
     if (!clip) return false;
-    const stat = await fs.promises.stat(clip.filePath);
+
+    // Best-effort duration patch - see MATROSKA_DURATION_MARKER's doc
+    // comment above. Falls back to serving the clip unmodified (today's
+    // behavior) whenever the real duration can't be resolved, or the
+    // Duration field can't be located.
+    let body = null;
+    let knownDurationSeconds = null;
+    try {
+      knownDurationSeconds = await resolveDurationSeconds(youtubeId);
+    } catch (err) {
+      logger.warn({ err, youtubeId }, 'ytstream: could not resolve real duration for probe-shortcut clip; serving it unmodified');
+    }
+    if (knownDurationSeconds) {
+      const offset = await getProbeClipDurationOffset(clip.signature, clip.filePath);
+      if (offset !== null) {
+        try {
+          const buffer = await fs.promises.readFile(clip.filePath);
+          buffer.writeDoubleBE(knownDurationSeconds * 1000, offset);
+          body = buffer;
+        } catch (err) {
+          logger.warn({ err, youtubeId }, 'ytstream: failed to patch probe-shortcut clip duration; serving it unmodified');
+        }
+      }
+    }
+
+    const size = body ? body.length : (await fs.promises.stat(clip.filePath)).size;
     logger.info(
-      { ua: req.headers['user-agent'], size: stat.size, url: req.originalUrl },
+      { ua: req.headers['user-agent'], size, url: req.originalUrl, patchedDurationSeconds: body ? knownDurationSeconds : null },
       'ytstream: serving cached probe-shortcut clip to a detected metadata-probe request'
     );
     res.set({
       'Content-Type': 'video/x-matroska',
-      'Content-Length': String(stat.size),
+      'Content-Length': String(size),
       'Cache-Control': 'no-store',
       'Accept-Ranges': 'bytes',
     });
-    await new Promise((resolve, reject) => {
-      const stream = fs.createReadStream(clip.filePath);
-      stream.on('error', reject);
-      stream.on('close', resolve);
-      stream.pipe(res);
-    });
+    if (body) {
+      res.end(body);
+    } else {
+      await new Promise((resolve, reject) => {
+        const stream = fs.createReadStream(clip.filePath);
+        stream.on('error', reject);
+        stream.on('close', resolve);
+        stream.pipe(res);
+      });
+    }
     return true;
   } catch (err) {
     logger.warn({ err }, 'ytstream: failed to serve probe-shortcut clip; falling back to normal request handling');
@@ -1326,6 +1619,39 @@ async function tryServeCachedVideoFile(req, res, filePath) {
   return true;
 }
 
+/**
+ * ytstream.probeShortcut: if a real, complete local copy of this video
+ * already exists - either a genuine download (Video.filePath) or the
+ * untracked hls-buffer cache (getUntrackedBufferCachePath) - there's no
+ * reason to hand a probe request the synthetic clip (plus its duration
+ * patch, plus a possible one-time yt-dlp lookup): the real file already has
+ * correct duration, codecs and everything else ffprobe could want, and
+ * serving it is still just a local disk read, same cost as the synthetic
+ * clip. Checked ahead of tryServeProbeClip so the fake clip's whole
+ * machinery only ever runs for a video with no real file to fall back on
+ * yet. Unlike the config-gated `ytstream.serveCachedFile` feature below
+ * (which controls whether REAL playback bypasses transcoding entirely), this
+ * always applies regardless of that setting - answering a metadata probe
+ * accurately carries none of serveCachedFile's own tradeoffs.
+ * @returns {Promise<string|null>} the real file's path, or null if no
+ *   complete local copy exists yet.
+ */
+async function findExistingCachedVideoFilePath(youtubeId, models) {
+  const untrackedPath = getUntrackedBufferCachePath(youtubeId);
+  if (fs.existsSync(untrackedPath)) return untrackedPath;
+  if (models && models.Video) {
+    try {
+      const video = await models.Video.findOne({ where: { youtubeId }, attributes: ['is_strm', 'filePath'] });
+      if (video && video.is_strm === false && video.filePath && fs.existsSync(video.filePath)) {
+        return video.filePath;
+      }
+    } catch (err) {
+      logger.warn({ err, youtubeId }, 'ytstream: findExistingCachedVideoFilePath DB lookup failed; treating as no cached file');
+    }
+  }
+  return null;
+}
+
 function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
   logger.info('Initializing YouTube direct/ffmpeg stream routes');
   ytstreamModels = models;
@@ -1399,40 +1725,52 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
    */
   async function getVideoDurationSeconds(youtubeId, config) {
     if (durationCache.has(youtubeId)) return durationCache.get(youtubeId);
+    if (durationLookupPromises.has(youtubeId)) {
+      return durationLookupPromises.get(youtubeId);
+    }
 
-    if (models && models.Video) {
-      try {
-        const existing = await models.Video.findOne({
-          where: { youtubeId },
-          attributes: ['duration'],
-        });
-        const dbSeconds = existing ? Number(existing.duration) : NaN;
-        if (Number.isFinite(dbSeconds) && dbSeconds > 0) {
-          logger.info({ youtubeId, seconds: dbSeconds }, 'ytstream: resolved duration for calculatedLength from the database');
-          durationCache.set(youtubeId, dbSeconds);
-          return dbSeconds;
+    const lookup = (async () => {
+      if (models && models.Video) {
+        try {
+          const existing = await models.Video.findOne({
+            where: { youtubeId },
+            attributes: ['duration'],
+          });
+          const dbSeconds = existing ? Number(existing.duration) : NaN;
+          if (Number.isFinite(dbSeconds) && dbSeconds > 0) {
+            logger.info({ youtubeId, seconds: dbSeconds }, 'ytstream: resolved duration for calculatedLength from the database');
+            durationCache.set(youtubeId, dbSeconds);
+            return dbSeconds;
+          }
+        } catch (err) {
+          logger.warn({ err, youtubeId }, 'ytstream: DB duration lookup failed for calculatedLength; falling back to yt-dlp');
         }
-      } catch (err) {
-        logger.warn({ err, youtubeId }, 'ytstream: DB duration lookup failed for calculatedLength; falling back to yt-dlp');
       }
-    }
 
-    const args = [
-      ...buildBaseArgs(config),
-      '--skip-download',
-      '--print', '%(duration)s',
-      '--no-playlist',
-      '--no-warnings',
-      `https://youtube.com/watch?v=${youtubeId}`,
-    ];
-    logger.info({ youtubeId }, 'ytstream: resolving duration for calculatedLength Content-Length estimate via yt-dlp');
-    const stdout = await ytDlpRunner.run(args, { timeoutMs: 30000 });
-    const seconds = Number.parseFloat(String(stdout).trim());
-    if (!Number.isFinite(seconds) || seconds <= 0) {
-      throw new Error(`Could not determine video duration for calculatedLength: ${String(stdout).slice(0, 200)}`);
+      const args = [
+        ...buildBaseArgs(config),
+        '--skip-download',
+        '--print', '%(duration)s',
+        '--no-playlist',
+        '--no-warnings',
+        `https://youtube.com/watch?v=${youtubeId}`,
+      ];
+      logger.info({ youtubeId }, 'ytstream: resolving duration for calculatedLength Content-Length estimate via yt-dlp');
+      const stdout = await ytDlpRunner.run(args, { timeoutMs: 30000 });
+      const seconds = Number.parseFloat(String(stdout).trim());
+      if (!Number.isFinite(seconds) || seconds <= 0) {
+        throw new Error(`Could not determine video duration for calculatedLength: ${String(stdout).slice(0, 200)}`);
+      }
+      durationCache.set(youtubeId, seconds);
+      return seconds;
+    })();
+
+    durationLookupPromises.set(youtubeId, lookup);
+    try {
+      return await lookup;
+    } finally {
+      durationLookupPromises.delete(youtubeId);
     }
-    durationCache.set(youtubeId, seconds);
-    return seconds;
   }
 
   /**
@@ -2727,13 +3065,24 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
         cleanupBufferDir();
         return;
       }
-      finalizeTapOutput({ youtubeId, tempPath: session.bufferTempPath, finalPath: session.bufferFinalPath, sourceLabel: 'hls-buffer' })
+      finalizeTapOutput({
+        youtubeId,
+        tempPath: session.bufferTempPath,
+        finalPath: session.bufferFinalPath,
+        sourceLabel: 'hls-buffer',
+        skipVideoUpsert: session.bufferUntracked === true,
+      })
         .then((finalPath) => {
           if (finalPath) {
             session.usingCachedSource = true;
             session.cachedFilePath = finalPath;
             session.bufferFetchDone = true;
-            logger.info({ sessionKey: session.sessionKey, youtubeId, finalPath }, 'ytstream: hls-buffer fetch finalized as permanent download');
+            logger.info(
+              { sessionKey: session.sessionKey, youtubeId, finalPath, untracked: session.bufferUntracked === true },
+              session.bufferUntracked
+                ? 'ytstream: hls-buffer fetch finalized into the untracked-video cache'
+                : 'ytstream: hls-buffer fetch finalized as permanent download'
+            );
           } else {
             session.bufferFetchFailed = true;
           }
@@ -2820,6 +3169,19 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
     session.lastRestartIndex = segmentIndex;
     session.lastRestartAt = now;
     logger.info({ sessionKey: session.key, segmentIndex }, 'ytstream: seek past encoded HLS segments; restarting encode pass at boundary');
+    // Bumped HERE, not left for the eventual spawnHlsEncodePass call below
+    // to do on its own (which it does too, for the NEW pass - an extra bump
+    // is harmless, isCurrentPass only ever compares equality against
+    // whatever the counter currently is). The gap between killing the old
+    // pass and spawning the new one can be up to BUFFER_CATCHUP_TIMEOUT_MS
+    // (45s) below when mode=hls-buffer's waitForBufferedThrough is in play -
+    // without bumping early, the just-killed process's own close handler
+    // still sees itself as "the current pass" for that whole window, so
+    // when it dies from its broken input pipe rather than the SIGTERM
+    // signal itself (a real race - confirmed live as `code:1, signal:null`,
+    // "Invalid data found when processing input") it logs a scary but
+    // entirely expected/intentional teardown as a real ERROR.
+    session.passGeneration = (session.passGeneration || 0) + 1;
     killChildProcess(session.ytVideo, 'hls-fakelength-restart');
     killChildProcess(session.ytAudio, 'hls-fakelength-restart');
     killChildProcess(session.ff, 'hls-fakelength-restart');
@@ -2838,10 +3200,34 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
       // to the normal network-sourced restart below (source stays
       // undefined) if the wait times out - the fetch itself keeps running
       // in the background regardless of whether this pass used it.
+      //
+      // Only worth waiting AT ALL if the live encode has actually produced
+      // real content before now (segment00000 exists) - i.e. the buffer
+      // plausibly has a head start on wherever a viewer organically is by
+      // now. A seek that arrives before segment00000 even exists (confirmed
+      // live: a resume-from-position seek landing ~3s after session start,
+      // before any real segment had ever been produced) has no such
+      // relationship to the buffer's progress - waiting for it is a pure
+      // gamble on how far the buffer happens to have gotten. Observed live:
+      // an 11.9s buffer-wait was immediately followed by a further 10.8s to
+      // actually seek+encode that segment from the now-finalized local
+      // file (-ss deep into a large MPEG-TS file isn't free), 25.4s total -
+      // past HLS.js's ~20s default fragment-load timeout, so the video
+      // never played at all. Network-direct-seek starts AT the target time
+      // via yt-dlp instead of scanning a local file for it, so it doesn't
+      // carry that second cost.
       const targetSeconds = segmentIndex * HLS_SEGMENT_DURATION_SECONDS;
-      const ready = await waitForBufferedThrough(session, targetSeconds);
-      if (ready === 'buffer') {
-        source = { type: 'local', filePath: session.usingCachedSource ? session.cachedFilePath : session.bufferTempPath };
+      const everProducedRealSegment = fs.existsSync(path.join(session.dir, `segment00000.${session.segmentExt}`));
+      if (everProducedRealSegment) {
+        const ready = await waitForBufferedThrough(session, targetSeconds);
+        if (ready === 'buffer') {
+          source = { type: 'local', filePath: session.usingCachedSource ? session.cachedFilePath : session.bufferTempPath };
+        }
+      } else {
+        logger.info(
+          { sessionKey: session.key, youtubeId: session.youtubeId, targetSeconds },
+          'ytstream: seek-restart before any real segment ever existed (likely a resume-from-position on cold start) - skipping the buffer-wait, going straight to a network-sourced seek instead'
+        );
       }
     }
 
@@ -3073,6 +3459,12 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
       container,
       config,
       calculatedLength: !!calculatedLength,
+      // ytstream.instantStart - see maybeStripPlaceholderFromPlaylist. Set
+      // true only once the placeholder is actually staged into `dir` below;
+      // placeholderStripped flips true the first time a playlist re-fetch
+      // (after the real segment0 exists) rewrites it out.
+      hasPlaceholder: false,
+      placeholderStripped: false,
       passGeneration: 0,
       ytVideo: null,
       ytAudio: null,
@@ -3158,6 +3550,17 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
           // sitting in the library folder forever.
           session.tapTempPath = path.join(dir, `tap${ext}`);
           session.tapFinalPath = path.join(targetDir, `${fileStem}${ext}`);
+        } else {
+          // Silent no-op otherwise - this is the ONE log line that explains
+          // it. Without it, a session that quietly never sets
+          // session.tapEnabled looks identical in the Streams/History UI to
+          // a plain mode=hls session (see trackStream's mode field), with
+          // nothing on disk or in this log to say why the requested tap
+          // never happened.
+          logger.info(
+            { sessionKey, youtubeId, videoFound: !!video, isStrm: video ? video.is_strm : null, hasFilePath: video ? !!video.filePath : null },
+            'ytstream: hls-tap requested but this video is not currently STRM (or has no filePath) - nothing to tap, session behaves as plain mode=hls'
+          );
         }
       } catch (err) {
         logger.warn({ err, sessionKey, youtubeId }, 'ytstream: hls-tap could not resolve STRM target; tap disabled for this session');
@@ -3198,6 +3601,56 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
           // free head start before the initial pass's waitForBufferedThrough
           // wait even begins below.
           startHlsBufferFetch(session);
+        } else {
+          // This video isn't something Youtarr's own library currently owns
+          // (no Video row - an NZB `mediaMode:'strm'` grab Youtarr never
+          // catalogued, or one it later disowned via
+          // `importStrategy:'untracked'`; could also be a video already
+          // downloaded some other way, though that case would normally have
+          // a Video row too). There's no library destination to finalize
+          // into either way, but the buffer-fetch mechanism itself doesn't
+          // actually need one - it just needs somewhere to put the finished
+          // file. Falls back to Youtarr's own untracked-buffer cache,
+          // keyed by youtubeId alone: not a library entry, no Video/Job
+          // row, never shows up in Download History (see
+          // finalizeTapOutput's skipVideoUpsert) - purely a same-video-again
+          // speed-up plus this play's own decoupled-fetch benefit.
+          const untrackedCachePath = getUntrackedBufferCachePath(youtubeId);
+          const alreadyCached = fs.existsSync(untrackedCachePath);
+          session.bufferEnabled = true;
+          if (alreadyCached) {
+            // A previous play of this same untracked video already finished
+            // buffering it. Safe to use from the very first pass too -
+            // unlike a fresh fetch (see the initial-pass call site's own
+            // comment on why THAT deliberately stays network-sourced), this
+            // file is already complete, nothing to wait for.
+            session.usingCachedSource = true;
+            session.cachedFilePath = untrackedCachePath;
+            session.bufferFetchDone = true;
+          } else {
+            fs.mkdirSync(HLS_UNTRACKED_BUFFER_CACHE_DIR, { recursive: true });
+            const bufferDir = path.join(HLS_BASE_TEMP_DIR, `buffer-${youtubeId}-${crypto.randomBytes(4).toString('hex')}`);
+            fs.mkdirSync(bufferDir, { recursive: true });
+            session.bufferDir = bufferDir;
+            session.bufferTempPath = path.join(bufferDir, 'buffer.ts');
+            session.bufferFinalPath = untrackedCachePath;
+            session.bufferUntracked = true;
+            startHlsBufferFetch(session);
+          }
+          logger.info(
+            {
+              sessionKey,
+              youtubeId,
+              videoFound: !!video,
+              isStrm: video ? video.is_strm : null,
+              hasFilePath: video ? !!video.filePath : null,
+              untrackedCachePath,
+              alreadyCached,
+            },
+            alreadyCached
+              ? 'ytstream: hls-buffer requested for an untracked video - reusing its own cached copy from a previous play, no network fetch needed'
+              : 'ytstream: hls-buffer requested for an untracked video - buffering into Youtarr\'s own untracked cache (keyed by youtube id) instead of the library, since there\'s no Video row to attach a permanent download to'
+          );
         }
       } catch (err) {
         logger.warn({ err, sessionKey, youtubeId }, 'ytstream: hls-buffer could not resolve STRM target; buffer disabled for this session');
@@ -3211,35 +3664,61 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
       // segments actually exist. Ignores `seekSeconds` (the cold-start "?t="
       // offset): segment 0 must always correspond to video time 0
       // for the pre-declared absolute segment indices to stay correct.
-      const durationSeconds = await getVideoDurationSeconds(youtubeId, config);
+      //
+      // Duration and the instant-start placeholder are resolved
+      // CONCURRENTLY, not one after the other - they're independent
+      // (nothing about the placeholder needs the real duration, and vice
+      // versa). This used to be a straight-line `await` chain, which meant
+      // a cache-miss duration lookup (getVideoDurationSeconds falling back
+      // to a live yt-dlp call, observed taking 6-7s in production logs for
+      // a video whose duration wasn't in the DB yet) fully blocked
+      // placeholder generation from even starting - defeating instant-start's
+      // whole purpose (serve *something* immediately) for exactly the
+      // videos where it mattered most. Promise.all turns that sum into a
+      // max(), so a slow duration lookup no longer holds back the
+      // placeholder (or vice versa).
+      const ytCfgForSession = config.ytstream || {};
+      const wantsPlaceholder = ytCfgForSession.instantStart === true && transcode === 'h264';
+
+      const [durationSeconds, generated] = await Promise.all([
+        getVideoDurationSeconds(youtubeId, config),
+        wantsPlaceholder
+          ? (async () => {
+              const sourceResolution = await resolveVideoTargetResolution(youtubeId, models);
+              const { width, height } = capResolutionToHeight(sourceResolution.width, sourceResolution.height, resolveQualityHeight(quality));
+              const thumbnailPath = resolveLocalThumbnailPath(youtubeId);
+              return ensurePlaceholderSegment({ youtubeId, thumbnailPath, segmentType, segmentExt, hardwareMode: hw, tuning: tier, width, height });
+            })()
+          : Promise.resolve(null),
+      ]);
       session.durationSeconds = durationSeconds;
       session.totalSegments = Math.max(1, Math.ceil(durationSeconds / HLS_SEGMENT_DURATION_SECONDS));
+      // Diagnostic (temporary) - the resolved value was never actually
+      // logged anywhere before, so "scrubber shows 0" reports had nothing
+      // to confirm/rule out against. instantStart is irrelevant to this -
+      // wantsPlaceholder only affects the second Promise.all branch above.
+      logger.info({ sessionKey, youtubeId, durationSeconds, totalSegments: session.totalSegments, instantStart: wantsPlaceholder }, 'ytstream: calculatedLength duration resolved for this session');
 
       // ytstream.instantStart - see ensurePlaceholderSegment's doc comment.
       // Staged into session.dir under its own filename (never a real
       // segment index), so nothing else in the HLS pipeline needs to know
       // it exists - only the playlist's leading entries reference it.
       let placeholder = null;
-      const ytCfgForSession = config.ytstream || {};
-      if (ytCfgForSession.instantStart === true && transcode === 'h264') {
-        const sourceResolution = await resolveVideoTargetResolution(youtubeId, models);
-        const { width, height } = capResolutionToHeight(sourceResolution.width, sourceResolution.height, resolveQualityHeight(quality));
-        const generated = await ensurePlaceholderSegment({ segmentType, segmentExt, hardwareMode: hw, tuning: tier, width, height });
-        if (generated) {
-          try {
-            fs.copyFileSync(generated.segmentPath, path.join(dir, `placeholder.${segmentExt}`));
-            if (generated.initPath) {
-              fs.copyFileSync(generated.initPath, path.join(dir, 'placeholder-init.mp4'));
-            }
-            placeholder = {
-              filename: `placeholder.${segmentExt}`,
-              initFilename: generated.initPath ? 'placeholder-init.mp4' : null,
-              durationSeconds: HLS_PLACEHOLDER_DURATION_SECONDS,
-            };
-            logger.info({ sessionKey }, 'ytstream: HLS session starting with instant-start placeholder segment');
-          } catch (err) {
-            logger.warn({ err, sessionKey }, 'ytstream: failed to stage instant-start placeholder into session dir; falling back to normal startup');
+      if (generated) {
+        try {
+          fs.copyFileSync(generated.segmentPath, path.join(dir, `placeholder.${segmentExt}`));
+          if (generated.initPath) {
+            fs.copyFileSync(generated.initPath, path.join(dir, 'placeholder-init.mp4'));
           }
+          placeholder = {
+            filename: `placeholder.${segmentExt}`,
+            initFilename: generated.initPath ? 'placeholder-init.mp4' : null,
+            durationSeconds: HLS_PLACEHOLDER_DURATION_SECONDS,
+          };
+          session.hasPlaceholder = true;
+          logger.info({ sessionKey }, 'ytstream: HLS session starting with instant-start placeholder segment');
+        } catch (err) {
+          logger.warn({ err, sessionKey }, 'ytstream: failed to stage instant-start placeholder into session dir; falling back to normal startup');
         }
       }
 
@@ -3283,12 +3762,12 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
     // Jellyfin resume-from-middle seek.
     warmHlsInfoJsonCache(session, playerClientOverride);
     // mode=hls-buffer: the cold-start/initial pass deliberately does NOT
-    // wait for the buffer fetch (see startHlsBufferFetch above) - it always
-    // starts network-sourced, exactly like plain mode=hls. An earlier
-    // version awaited waitForBufferedThrough here, which blocked this whole
-    // function (and therefore the HTTP response carrying the playlist -
-    // including the ytstream.instantStart placeholder segment written into
-    // playlistPath above) on the buffer catching up: up to
+    // wait for a fresh buffer fetch to catch up (see startHlsBufferFetch
+    // above) - it starts network-sourced, exactly like plain mode=hls. An
+    // earlier version awaited waitForBufferedThrough here, which blocked
+    // this whole function (and therefore the HTTP response carrying the
+    // playlist - including the ytstream.instantStart placeholder segment
+    // written into playlistPath above) on the buffer catching up: up to
     // BUFFER_SAFETY_MARGIN_SECONDS + real cold-start wait, which defeated
     // instant-start's entire purpose (serve *something* immediately while
     // the real pipeline is still spinning up) - the client got no response
@@ -3299,7 +3778,22 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
     // already route through waitForBufferedThrough, and that happens after
     // the response has already gone out and playback has already started -
     // a brief wait there doesn't block anything the way it would have here.
-    spawnHlsEncodePass(session, { startSegmentIndex: 0, seekSeconds, isInitialPass: true, playerClientOverride });
+    //
+    // The one exception: session.usingCachedSource can already be true
+    // RIGHT HERE, before any pass has even run - the untracked-buffer-cache
+    // hit above (a previous play of this same untracked video already
+    // finished buffering it). That's a complete local file already sitting
+    // on disk, nothing to wait for, so there's no reason to prefer the
+    // network for the initial pass in that one case - unlike a fresh
+    // buffer-fetch (which only starts producing bytes once THIS pass has
+    // already begun), reading it immediately is strictly better.
+    spawnHlsEncodePass(session, {
+      startSegmentIndex: 0,
+      seekSeconds,
+      isInitialPass: true,
+      playerClientOverride,
+      source: session.usingCachedSource ? { type: 'local', filePath: session.cachedFilePath } : undefined,
+    });
 
     return session;
   }
@@ -4285,7 +4779,7 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
           });
           steps.push({
             step: 'execution',
-            detail: 'the cold-start/first pass never waits on the buffer - it starts network-sourced immediately, identically to plain mode=hls (so instant-start\'s placeholder segment, if enabled, behaves exactly the same as it does for mode=hls too)',
+            detail: 'the cold-start/first pass never waits on a FRESH buffer fetch to catch up - it starts network-sourced immediately, identically to plain mode=hls (so instant-start\'s placeholder segment, if enabled, behaves exactly the same as it does for mode=hls too). The one exception: if this exact video was already fully buffered by a previous play (see the untracked-video case below), that complete local file is used from the very first pass instead, since there\'s nothing left to wait for',
             probed: false,
           });
           steps.push({
@@ -4295,7 +4789,12 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
           });
           steps.push({
             step: 'execution',
-            detail: 'once the buffer fetch finishes cleanly, its file is moved into the video\'s library folder, the Video row is flipped off STRM (is_strm=false), and every subsequent pass (this session and any other) reads from that finished file - same as hotSwapToCache/mode=hls-tap\'s finalized output',
+            detail: 'if this video has a Video row in Youtarr\'s own library and is currently STRM: once the buffer fetch finishes cleanly, its file is moved into the video\'s library folder, the Video row is flipped off STRM (is_strm=false), and every subsequent pass (this session and any other) reads from that finished file - same as hotSwapToCache/mode=hls-tap\'s finalized output',
+            probed: false,
+          });
+          steps.push({
+            step: 'execution',
+            detail: 'if this video has NO Video row (an NZB mediaMode:\'strm\' grab Youtarr never catalogued, or one it later disowned via importStrategy:\'untracked\'): the buffer-fetch still runs (there\'s nothing library-specific about the fetch itself), but the finished file lands in Youtarr\'s own untracked-buffer cache instead, keyed by youtube id alone - no Video/Job row, not a library entry, never shows up in Download History. A later play of this same untracked video reuses that cached file directly (no network fetch, used from the very first pass) instead of buffering again',
             probed: false,
           });
         }
@@ -4356,12 +4855,31 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
     // ytstream.probeShortcut - see tryServeProbeClip/isLikelyMetadataProbeRequest's
     // doc comment. Must run before EVERYTHING else in this handler (the
     // cache-on-play trigger below included) - the entire point is that a
-    // detected metadata probe never causes any real yt-dlp/ffmpeg work or
-    // background download against YouTube.
+    // detected metadata probe never causes any real ffmpeg/HLS session work
+    // or background download against YouTube. The only exception, and only
+    // when no real cached file exists yet either (see
+    // findExistingCachedVideoFilePath below): one bare `yt-dlp --print
+    // duration` call (see tryServeProbeClip's resolveDurationSeconds param /
+    // getVideoDurationSeconds) the first time an untracked video is probed -
+    // a few seconds, not the 15-45s+ a real encode-session cold start costs,
+    // and never repeated for that video again since getVideoDurationSeconds
+    // caches the result.
     {
       const probeCfg = (configModule.getConfig().ytstream) || {};
       const probeQueryOverride = (name) => (probeCfg.forceServerSettings === true ? undefined : req.query[name]);
       if (evaluateProbeShortcut(req, configModule.getConfig()).wouldFire) {
+        const existingCachedFilePath = await findExistingCachedVideoFilePath(youtubeId, models);
+        if (existingCachedFilePath) {
+          logger.info(
+            { youtubeId, filePath: existingCachedFilePath },
+            'ytstream: probe-shortcut - a real cached copy of this video already exists; serving it directly instead of the synthetic clip'
+          );
+          const servedReal = await tryServeCachedVideoFile(req, res, existingCachedFilePath);
+          if (servedReal) return;
+          // Fell through (e.g. the file vanished between the check and the
+          // stat) - fall back to the synthetic clip below rather than fail
+          // the probe outright.
+        }
         const sourceResolution = await resolveVideoTargetResolution(youtubeId, models);
         const probeQuality = probeQueryOverride('quality') || probeCfg.quality || configModule.getConfig().preferredResolution || '720';
         const { width, height } = capResolutionToHeight(sourceResolution.width, sourceResolution.height, resolveQualityHeight(probeQuality));
@@ -4370,6 +4888,8 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
           tuning: normalizeTuning(probeQueryOverride('tuning') || probeCfg.tuning || 'fast'),
           width,
           height,
+          youtubeId,
+          resolveDurationSeconds: (id) => getVideoDurationSeconds(id, configModule.getConfig()),
         });
         if (served) return;
         // Generation failed - fall through to normal handling below.
@@ -4400,10 +4920,25 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
       const hasActiveSessionForVideo = [...hlsSessions.values()].some((s) => s.youtubeId === youtubeId && !s.destroying);
       if (!hasActiveSessionForVideo) {
         try {
+          // Timed (temporary diagnostic) - this is the ONLY awaited call
+          // between 'ytstream: incoming request' and resolvePlaybackPlan's
+          // own first probe, so a multi-second gap observed live between
+          // those two log lines has to be spent either here or in Node's
+          // own event-loop scheduling. youtubeId is a unique/indexed
+          // column, so this should normally be a fast lookup regardless of
+          // library size - if this logs a large elapsedMs, that points at
+          // DB connection-pool contention or a genuinely slow query, not
+          // anything downstream (quality probe/duration lookup/placeholder
+          // generation) that's already been optimized this session.
+          const serveCachedFileLookupStarted = Date.now();
           const cachedVideo = await models.Video.findOne({
             where: { youtubeId },
             attributes: ['is_strm', 'filePath'],
           });
+          const serveCachedFileLookupMs = Date.now() - serveCachedFileLookupStarted;
+          if (serveCachedFileLookupMs > 250) {
+            logger.warn({ youtubeId, serveCachedFileLookupMs }, 'ytstream: serveCachedFile\'s Video lookup was unexpectedly slow');
+          }
           if (cachedVideo && cachedVideo.is_strm === false && cachedVideo.filePath && fs.existsSync(cachedVideo.filePath)) {
             logger.info({ youtubeId, filePath: cachedVideo.filePath }, 'ytstream: serving already-downloaded local file directly (serveCachedFile)');
             const served = await tryServeCachedVideoFile(req, res, cachedVideo.filePath);
@@ -4439,6 +4974,80 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
     require('../modules/strmCacheOnPlay').maybeEnqueueCacheDownload(youtubeId, { skip: tapWillAttempt || bufferWillAttempt }).catch((err) =>
       logger.warn({ err, youtubeId }, 'ytstream: cache-on-play trigger failed')
     );
+
+    // Cheap/nominal mirrors of resolvePlaybackPlan's own transcode/
+    // calculatedLength resolution (same forceServerSettings-aware
+    // precedence, just inlined instead of using its closure-scoped
+    // queryOverride helper) - used by the two warm-ups below.
+    const cheapTranscode = VALID_TRANSCODE.includes(cheapForced ? undefined : req.query.transcode)
+      ? req.query.transcode
+      : (cheapCfg.transcode || 'copy');
+    const cheapCalculatedLengthRaw = (cheapForced ? undefined : (req.query.calculatedLength ?? req.query.fakeLength)) ?? cheapCfg.calculatedLength;
+    const cheapCalculatedLength = cheapCalculatedLengthRaw === true || /^(1|true|yes)$/i.test(String(cheapCalculatedLengthRaw ?? ''));
+    const cheapIsHlsFamily = cheapMode === 'hls' || cheapMode === 'hls-tap' || cheapMode === 'hls-buffer';
+
+    // Duration warm-up: kicked off here too, for the SAME reason as the
+    // placeholder warm-up below - createHlsSessionInternal's own
+    // getVideoDurationSeconds call only runs after resolvePlaybackPlan (and
+    // its quality/codec probes) has already fully finished, so without this
+    // the two were fully serial (probe, THEN duration lookup) rather than
+    // overlapping. Observed live: a ~7s quality probe followed by a further
+    // ~5s duration lookup (this video's duration wasn't cached in the DB
+    // yet) - back to back, ~12s before anything reached the client at all,
+    // even with the placeholder fix below in place. Broader gate than the
+    // placeholder's (no instantStart/transcode requirement) since duration
+    // is needed for every calculatedLength session, not just instant-start
+    // ones. Dedup'd against the real call via durationLookupPromises, so
+    // this never spawns a second yt-dlp process for the same video.
+    if (cheapCalculatedLength && cheapIsHlsFamily) {
+      getVideoDurationSeconds(youtubeId, configModule.getConfig()).catch((err) =>
+        logger.warn({ err, youtubeId }, 'ytstream: early calculatedLength duration warm-up failed')
+      );
+    }
+
+    // ytstream.instantStart placeholder warm-up: fire-and-forget, started
+    // this early (concurrently with resolvePlaybackPlan's own yt-dlp probes
+    // below - resolveEffectiveQualityHeight/resolveVideoCodec, either of
+    // which can take several seconds on a cache miss) rather than waiting
+    // for the real plan to resolve first. Uses the REQUESTED/configured
+    // quality directly - not the probe's auto-capped value - because
+    // resolveVideoTargetResolution already reflects this video's real known
+    // resolution independent of that probe, so capResolutionToHeight
+    // produces the same effective placeholder height either way in the
+    // overwhelming common case (the probe only ever lowers a request that's
+    // higher than the source truly has, and resolveVideoTargetResolution's
+    // cached value already reflects that same ceiling). ensurePlaceholderSegment's
+    // own cache/dedup (keyed by youtubeId + these resolved dimensions) means
+    // this is never wasted: createHlsSessionInternal's own placeholder call
+    // later either finds this already done or joins the same in-flight
+    // generation - and on the rare disagreement, that later call just
+    // generates its own instead, no worse than not warming up at all.
+    if (
+      cheapCfg.instantStart === true &&
+      cheapCalculatedLength &&
+      cheapTranscode === 'h264' &&
+      cheapIsHlsFamily
+    ) {
+      const cheapHardwareMode = normalizeHardwareMode((cheapForced ? undefined : req.query.hardware) || cheapCfg.hardwareMode || 'none');
+      const cheapTuning = normalizeTuning((cheapForced ? undefined : req.query.tuning) || cheapCfg.tuning || 'fast');
+      const cheapQuality = String((cheapForced ? undefined : req.query.quality) || cheapCfg.quality || configModule.getConfig().preferredResolution || '720');
+      const { segmentType: cheapSegmentType, segmentExt: cheapSegmentExt } = getHlsContainerInfo(cheapCfg.container || 'mp4');
+      (async () => {
+        const sourceResolution = await resolveVideoTargetResolution(youtubeId, models);
+        const { width, height } = capResolutionToHeight(sourceResolution.width, sourceResolution.height, resolveQualityHeight(cheapQuality));
+        const thumbnailPath = resolveLocalThumbnailPath(youtubeId);
+        await ensurePlaceholderSegment({
+          youtubeId,
+          thumbnailPath,
+          segmentType: cheapSegmentType,
+          segmentExt: cheapSegmentExt,
+          hardwareMode: cheapHardwareMode,
+          tuning: cheapTuning,
+          width,
+          height,
+        });
+      })().catch((err) => logger.warn({ err, youtubeId }, 'ytstream: early instant-start placeholder warm-up failed'));
+    }
 
     const config = configModule.getConfig();
     const ytCfg = config.ytstream || {};
@@ -4720,6 +5329,7 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
           if (clientGoneWhileWaiting || res.writableEnded) {
             return;
           }
+          maybeStripPlaceholderFromPlaylist(session);
           const rawPlaylist = await fs.promises.readFile(session.playlistPath, 'utf8');
           const playlist = rewriteHlsPlaylistUrls(rawPlaylist, session.baseUrl);
           res.set({ 'Content-Type': 'application/vnd.apple.mpegurl', 'Cache-Control': 'no-store' });
@@ -4891,6 +5501,15 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
     session.lastAccess = Date.now();
 
     const filePath = path.join(session.dir, filename);
+
+    // See maybeStripPlaceholderFromPlaylist's doc comment - a direct fetch
+    // of playlist.m3u8 (as opposed to the entry route's own read, which has
+    // the same call) is exactly the kind of re-fetch that can otherwise
+    // hand back a stale, placeholder-still-included playlist well after the
+    // real content caught up.
+    if (filename === 'playlist.m3u8') {
+      maybeStripPlaceholderFromPlaylist(session);
+    }
 
     // ytstream.hotSwapToCache: check (throttled) whether STRM cache-on-play
     // has finished downloading this video since the session started, and if

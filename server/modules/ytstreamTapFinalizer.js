@@ -21,9 +21,17 @@ const { STRM_CACHE_LABEL_PREFIX } = require('./strmCacheOnPlay');
  *   move-into-library + upsertVideoForJob logic - mode=hls-tap (the
  *   default, unchanged for backward compat) vs mode=hls-buffer's
  *   independent buffer-fetch finalizer (server/modules/ytstreamBufferFetch.js).
+ * @param {boolean} [skipVideoUpsert] - true for mode=hls-buffer against a
+ *   video with no `Video` row (see ytstream.js's bufferEnabled block - an
+ *   NZB `mediaMode:'strm'` grab Youtarr never catalogued, or one it later
+ *   disowned via `importStrategy:'untracked'`). `finalPath` in that case is
+ *   Youtarr's own untracked-buffer cache dir (keyed by youtubeId), not a
+ *   library location - just moves the file there, no Video/Job bookkeeping,
+ *   since there's no row to attach it to and this is deliberately NOT meant
+ *   to become a tracked library entry or show up in Download History.
  * @returns {Promise<string|null>} the final file path on success, else null
  */
-async function finalizeTapOutput({ youtubeId, tempPath, finalPath, sourceLabel = 'hls-tap' }) {
+async function finalizeTapOutput({ youtubeId, tempPath, finalPath, sourceLabel = 'hls-tap', skipVideoUpsert = false }) {
   try {
     if (!tempPath || !fs.existsSync(tempPath)) return null;
     const tempStat = fs.statSync(tempPath);
@@ -46,6 +54,11 @@ async function finalizeTapOutput({ youtubeId, tempPath, finalPath, sourceLabel =
       if (err.code !== 'EXDEV') throw err;
       fs.copyFileSync(tempPath, finalPath);
       fs.unlinkSync(tempPath);
+    }
+
+    if (skipVideoUpsert) {
+      logger.info({ youtubeId, finalPath, sourceLabel }, 'ytstream: finalized - live stream tap/buffer saved to the untracked-video cache (no Video row, not a library entry)');
+      return finalPath;
     }
 
     const fileSize = fs.statSync(finalPath).size;

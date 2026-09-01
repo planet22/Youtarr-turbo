@@ -69,6 +69,12 @@ WORKDIR /app
 # DEB822 format (/etc/apt/sources.list.d/debian.sources) or the legacy
 # single-file /etc/apt/sources.list depending on which Debian release
 # the node:20-slim tag currently tracks, so both are handled here.
+#
+# fonts-dejavu-core: provides /usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf,
+# used by ensurePlaceholderSegment's drawtext filter (the "Loading..." text
+# drawn over a video's own thumbnail for ytstream.instantStart). Referenced
+# by exact fontfile= path, not through fontconfig, so no fontconfig cache
+# setup is needed - just this file being present.
 RUN if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
         sed -i '/^Components:/ s/$/ contrib non-free non-free-firmware/' /etc/apt/sources.list.d/debian.sources; \
     elif [ -f /etc/apt/sources.list ]; then \
@@ -86,6 +92,7 @@ RUN if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
     libva2 \
     libva-drm2 \
     vainfo \
+    fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/*
 
 # Download the latest yt-dlp release

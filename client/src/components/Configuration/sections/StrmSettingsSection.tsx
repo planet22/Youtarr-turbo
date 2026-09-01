@@ -223,7 +223,7 @@ export const StrmSettingsSection: React.FC<Props> = ({
           </Grid>
         )}
 
-        {ytstreamSelected && ytstreamMode === 'hls' && (
+        {ytstreamSelected && (ytstreamMode === 'hls' || ytstreamMode === 'hls-tap' || ytstreamMode === 'hls-buffer') && (
           <Grid item xs={12} md={4}>
             <Box className="flex items-center gap-1">
               <FormControlLabel
@@ -237,7 +237,7 @@ export const StrmSettingsSection: React.FC<Props> = ({
                 label="Instant start"
               />
               <InfoTooltip
-                text="Enhanced HLS + Calculated length + Transcode=H.264 only. Normally the very first response blocks until the real encode produces its first segment (10-25s is typical for a cold start). This serves a small pre-generated 'loading' clip as segment 0 instead, so playback starts within milliseconds while the real encode catches up in the background - the placeholder is generated once (matching your codec/hardware settings) and reused after that. No effect for Transcode=Copy, since no single placeholder could match every video's own passthrough codec."
+                text="Enhanced HLS (or Tap-to-Download / Buffered Download) + Calculated length + Transcode=H.264 only. Normally the very first response blocks until the real encode produces its first segment (10-25s is typical for a cold start). This serves a short placeholder clip as segment 0 instead - the video's own thumbnail with a 'Loading...' overlay when it's already cached locally, otherwise a generic moving test pattern - so playback starts within milliseconds while the real encode catches up in the background. Generated once per video/codec/hardware combination and reused after that. No effect for Transcode=Copy, since no single placeholder could match every video's own passthrough codec."
                 onMobileClick={onMobileTooltipClick}
               />
             </Box>

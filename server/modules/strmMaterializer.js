@@ -321,18 +321,23 @@ class StrmMaterializer {
     // from that initial scan rather than re-checking later) keeps showing a
     // blank placeholder even after a later full library scan fixes the
     // image everywhere else (detail page, season grid).
+    // NZB grabs (see server/routes/nzb.js): Sonarr/Radarr generate their own
+    // artwork/nfo/metadata on import, so skip Youtarr's nfo/season.nfo/
+    // tvshow.nfo/channel-poster, the media-adjacent thumbnail jpg, AND the
+    // .strmtool.json media-info cache - just the .strm itself. Unlike the
+    // others, writeMediaInfoCache below must NOT be able to re-enable this
+    // for an NZB grab regardless of how it's set - Sonarr/Radarr own this
+    // video's metadata entirely once imported, and StrmTool has no role to
+    // play for an item Youtarr doesn't itself track in Jellyfin. The UI-list
+    // thumbnail cache is still written (see _writeThumbnail) since that's
+    // for Youtarr's own library view.
+    const skipMediaSidecarFiles = options.skipMediaSidecarFiles === true;
+
     let mediaInfoCachePath = null;
-    if (strmCfg.target !== 'youtube' && strmCfg.writeMediaInfoCache !== false) {
+    if (!skipMediaSidecarFiles && strmCfg.target !== 'youtube' && strmCfg.writeMediaInfoCache !== false) {
       const ytstreamParams = strmGenerator.resolveYtstreamParams(cfg, options.strmOpts || {});
       mediaInfoCachePath = strmMediaInfoCache.writeMediaInfoCacheFile(paths.mediaBasePath, meta, ytstreamParams);
     }
-
-    // NZB grabs (see server/routes/nzb.js): Sonarr/Radarr generate their own
-    // artwork/nfo on import, so skip Youtarr's nfo/season.nfo/tvshow.nfo/
-    // channel-poster and the media-adjacent thumbnail jpg - just the .strm
-    // itself. The UI-list thumbnail cache is still written (see
-    // _writeThumbnail) since that's for Youtarr's own library view.
-    const skipMediaSidecarFiles = options.skipMediaSidecarFiles === true;
 
     let nfoPath = null;
     if (!skipMediaSidecarFiles && strmCfg.writeNfo !== false && (cfg.writeVideoNfoFiles !== false)) {

@@ -4,9 +4,27 @@ import WebSocketContext, { Message } from '../contexts/WebSocketContext';
 
 const REFETCH_DEBOUNCE_MS = 1000;
 
+/**
+ * Live per-segment on-disk status, only ever populated for hls/hls-tap/
+ * hls-buffer (the only modes with real numbered segment files) - see
+ * computeSegmentStatus/SEGMENT_STATUS_MODES in server/routes/ytstream.js.
+ * Rides the same 1.5s streamProgress broadcast every other live stat here
+ * does, so this updates in real time with no separate polling.
+ */
+export interface StreamSegmentStatus {
+  totalSegments: number;
+  /** Read this, never hardcode 4 - server-side segment length is free to change. */
+  segmentDurationSeconds: number;
+  /** encoded[i] === true means segment i's file exists on disk right now - ready to serve instantly. */
+  encoded: boolean[];
+  /** How far the independent buffer fetch (if any) has reached, as a segment index - a fast local seek target even where `encoded` is still false. */
+  bufferedThroughIndex: number;
+  bufferComplete: boolean;
+}
+
 export interface StreamSnapshot {
   streamId: string;
-  mode: 'ffmpeg' | 'hls' | 'hls-tap' | 'hls-buffer' | 'direct' | 'direct-pipe' | 'direct-redirect';
+  mode: 'ffmpeg' | 'hls' | 'hls-tap' | 'hls-buffer' | 'raw-buffer' | 'direct' | 'direct-pipe' | 'direct-redirect';
   youtubeId: string;
   title: string | null;
   quality: string;
@@ -21,6 +39,7 @@ export interface StreamSnapshot {
   bytesTransferred: number;
   bytesPerSecond: number;
   lastActivityAt: number;
+  segments: StreamSegmentStatus | null;
 }
 
 interface StreamsResponse {

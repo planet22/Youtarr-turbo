@@ -56,6 +56,7 @@ const MODE_LABELS: Record<string, string> = {
   hls: 'HLS',
   'hls-tap': 'HLS + Download',
   'hls-buffer': 'HLS + Buffered Download',
+  'raw-buffer': 'Raw + Buffered',
   ffmpeg: 'FFmpeg',
   direct: 'Direct',
   'direct-pipe': 'Direct (piped)',

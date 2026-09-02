@@ -19,6 +19,7 @@ import { formatFileSize } from '../../../utils/formatters';
 import { StreamSnapshot } from '../../../hooks/useActiveStreams';
 import { YOUTUBE_URL_BASE } from '../../shared/VideoModal/constants';
 import { formatBytesPerSecond, formatElapsed, parseClientLabel, isLikelyProbeRequest, formatModeLabel } from '../utils';
+import { SegmentActivityStrip, SegmentActivityDialog } from './SegmentActivityGrid';
 
 export interface StreamsTableProps {
   streams: StreamSnapshot[];
@@ -40,7 +41,17 @@ function formatDetail(stream: StreamSnapshot): string {
   return parts.filter(Boolean).join(' · ');
 }
 
-function StreamRow({ stream, token, onStopped }: { stream: StreamSnapshot; token: string | null; onStopped: (id: string) => void }) {
+function StreamRow({
+  stream,
+  token,
+  onStopped,
+  onOpenSegments,
+}: {
+  stream: StreamSnapshot;
+  token: string | null;
+  onStopped: (id: string) => void;
+  onOpenSegments: (streamId: string) => void;
+}) {
   // Plain wall-clock elapsed since the session started. A lastActivityAt-based
   // freeze (tried and reverted) sounds appealing for "pause the clock when
   // paused," but a healthy player pre-buffers several segments ahead and then
@@ -134,6 +145,13 @@ function StreamRow({ stream, token, onStopped }: { stream: StreamSnapshot; token
       <TableCell style={{ whiteSpace: 'nowrap' }}>{formatBytesPerSecond(stream.bytesPerSecond)}</TableCell>
       <TableCell style={{ whiteSpace: 'nowrap' }}>{formatFileSize(stream.bytesTransferred) || '0MB'}</TableCell>
       <TableCell>
+        {stream.segments ? (
+          <SegmentActivityStrip segments={stream.segments} onClick={() => onOpenSegments(stream.streamId)} />
+        ) : (
+          <Typography variant="caption" style={{ color: 'var(--muted-foreground)' }}>—</Typography>
+        )}
+      </TableCell>
+      <TableCell>
         <Chip size="small" label={stream.state} color={STATE_CHIP_COLOR[stream.state]} variant="filled" />
       </TableCell>
       <TableCell>
@@ -150,6 +168,14 @@ function StreamRow({ stream, token, onStopped }: { stream: StreamSnapshot; token
 }
 
 function StreamsTable({ streams, token, onStopped }: StreamsTableProps) {
+  // Stores the id, not a snapshot of the stream object - `streams` refreshes
+  // every 1.5s (streamProgress), so re-deriving `selectedStream` from the
+  // current `streams` prop below on every render is what makes the open
+  // dialog's segment grid keep updating live instead of freezing at
+  // whatever it looked like the moment it was opened.
+  const [selectedStreamId, setSelectedStreamId] = useState<string | null>(null);
+  const selectedStream = selectedStreamId ? streams.find((s) => s.streamId === selectedStreamId) || null : null;
+
   return (
     <Paper style={{ overflow: 'hidden' }}>
       <TableContainer>
@@ -163,17 +189,30 @@ function StreamsTable({ streams, token, onStopped }: StreamsTableProps) {
               <TableCell component="th" style={{ width: 90 }}>Duration</TableCell>
               <TableCell component="th" style={{ width: 100 }}>Throughput</TableCell>
               <TableCell component="th" style={{ width: 100 }}>Total</TableCell>
+              <TableCell component="th" style={{ width: 100 }}>Segments</TableCell>
               <TableCell component="th" style={{ width: 100 }}>State</TableCell>
               <TableCell component="th" style={{ width: 60 }}>Stop</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
             {streams.map((stream) => (
-              <StreamRow key={stream.streamId} stream={stream} token={token} onStopped={onStopped} />
+              <StreamRow
+                key={stream.streamId}
+                stream={stream}
+                token={token}
+                onStopped={onStopped}
+                onOpenSegments={setSelectedStreamId}
+              />
             ))}
           </TableBody>
         </Table>
       </TableContainer>
+      <SegmentActivityDialog
+        open={selectedStream !== null}
+        onClose={() => setSelectedStreamId(null)}
+        title={selectedStream?.title || selectedStream?.youtubeId || ''}
+        segments={selectedStream?.segments ?? null}
+      />
     </Paper>
   );
 }

@@ -173,7 +173,7 @@ export const CONFIG_FIELDS = {
   // what a full download would use unless explicitly overridden here.
   ytstream: {
     default: {
-      defaultMode: 'direct' as 'direct' | 'direct-pipe' | 'direct-redirect' | 'ffmpeg' | 'hls' | 'hls-tap' | 'hls-buffer',
+      defaultMode: 'direct' as 'direct' | 'direct-pipe' | 'direct-redirect' | 'ffmpeg' | 'hls' | 'hls-tap' | 'hls-buffer' | 'raw-buffer',
       // mkv is ffmpeg-mode only (see YtstreamSettingsSection's Container select)
       container: 'mp4' as 'mp4' | 'ts' | 'mkv',
       // Empty string = auto (derive from videoCodec); copy = remux; h264 = re-encode

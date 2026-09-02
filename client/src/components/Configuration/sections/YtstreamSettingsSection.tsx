@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import {
   FormControl,
   InputLabel,
@@ -65,7 +65,8 @@ const MODE_TOOLTIPS: Record<string, string> = {
   ffmpeg: 'Re-streams through a single live ffmpeg connection fed by yt-dlp\'s DASH (video-only + audio-only) formats - real quality up to whatever height this video truly has, not capped by progressive-format availability. Requires ffmpeg installed and working on the Youtarr host - if it isn\'t, this mode fails outright (502); it does not silently fall back to Direct.',
   hls: 'Same DASH-based quality ceiling as Enhanced, but writes real segment files to local disk instead of a live pipe, only responding once the first segment exists - fixes players (Jellyfin included) that won\'t tolerate the live pipe\'s startup wait. Costs local disk space per active stream. Same ffmpeg-required, no-fallback rule as Enhanced.',
   'hls-tap': 'Same DASH-based quality ceiling and disk cost as Enhanced HLS - but the same ffmpeg process also writes a second, untouched full-quality copy (-c copy, no re-encode, no scaling) straight to disk from the same yt-dlp video/audio pipes, before any Transcode/Container filtering is applied - no second network pull, and not a copy of the scaled-down stream. That file becomes this video\'s permanent downloaded copy once the whole video has played through once, uninterrupted, without a seek. Replaces STRM cache-on-play entirely for videos played this way - that separate background download is skipped whenever this mode\'s tap is active for a play. Limitation: only the very first, un-seeked play-through of a session can produce a complete file - if the very first request already starts mid-video (e.g. a media server resuming playback), or the viewer seeks before the video ends, the partial tap is discarded, not saved, and normal STRM cache-on-play (if enabled) picks it up instead. Same ffmpeg-required, no-fallback rule as Enhanced.',
-  'hls-buffer': 'Same DASH-based quality ceiling as Enhanced HLS - but instead of tapping the live encode, a completely independent yt-dlp+ffmpeg pull starts immediately and fetches the whole video once, unthrottled by anything the live stream is doing, remuxing it into a local MPEG-TS buffer file (a hard requirement of this mechanism - see the Container tooltip). Playback itself starts exactly like Enhanced HLS - network-sourced, no extra wait, so instant-start (if enabled) behaves identically. Only a later seek (or, with Calculated length on, catching up to a gap) waits briefly for the buffer to have already reached that point before reading it directly instead of pulling from the network again - fast once buffered. Once the fetch finishes, that MPEG-TS file becomes this video\'s permanent downloaded copy (always .ts, regardless of the Container setting below - only Tap-to-Download\'s permanent file follows Container) and STRM cache-on-play is skipped for this play, same as Tap-to-Download - but without Tap\'s limitation: the fetch keeps running and still finishes even if you seek early or stop watching partway through. For a video Youtarr doesn\'t itself catalogue (e.g. an NZB grab Sonarr/Radarr owns) there\'s no library entry to attach that permanent copy to, so it lands in Youtarr\'s own untracked-buffer cache instead - not visible in the library or Download History, but still reused automatically (skips the network fetch entirely) the next time that same video plays. Same ffmpeg-required, no-fallback rule as Enhanced.',
+  'hls-buffer': 'Same DASH-based quality ceiling as Enhanced HLS - but instead of tapping the live encode, a completely independent yt-dlp+ffmpeg pull starts immediately and fetches the whole video once, unthrottled by anything the live stream is doing, remuxing it into a local MPEG-TS buffer file (a hard requirement of this mechanism - see the Container tooltip). Playback itself starts exactly like Enhanced HLS - network-sourced, no extra wait, so instant-start (if enabled) behaves identically. Only a later seek (or catching up to a gap) waits briefly for the buffer to have already reached that point before reading it directly instead of pulling from the network again - fast once buffered. Calculated length is always on for this mode (see its own tooltip) - not a real choice here. Once the fetch finishes, that MPEG-TS file becomes this video\'s permanent downloaded copy (always .ts, regardless of the Container setting below - only Tap-to-Download\'s permanent file follows Container) and STRM cache-on-play is skipped for this play, same as Tap-to-Download - but without Tap\'s limitation: the fetch keeps running and still finishes even if you seek early or stop watching partway through. For a video Youtarr doesn\'t itself catalogue (e.g. an NZB grab Sonarr/Radarr owns) there\'s no library entry to attach that permanent copy to, so it lands in Youtarr\'s own untracked-buffer cache instead - not visible in the library or Download History, but still reused automatically (skips the network fetch entirely) the next time that same video plays. Same ffmpeg-required, no-fallback rule as Enhanced.',
+  'raw-buffer': 'No HLS session, no re-encode at all: Container/Transcode/Hardware encoder/Encoding tuning below are all ignored - the video always plays and downloads as its own source codec/resolution/bitrate, muxed from yt-dlp\'s separate video+audio streams by a plain ffmpeg -c copy pass (still needs ffmpeg installed, just never as an encoder). If this video is already fully cached (from a previous play under this mode or Enhanced HLS + Buffered), it\'s served instantly straight from disk. Otherwise, a fetch identical to Enhanced HLS + Buffered\'s starts immediately, and the response streams directly off that growing local file via plain HTTP Range requests as it downloads - no live transcode, no HLS playlist/segments at all. Seeking backward or into already-downloaded territory is instant; seeking forward past what\'s downloaded so far simply waits for the sequential download to catch up rather than restarting anything, which can take a while on a slow connection for a seek deep into a long video. A second concurrent request for the same not-yet-cached video shares this one fetch rather than starting a duplicate. Same finalize-into-library (or Youtarr\'s own untracked-video cache) behavior as Enhanced HLS + Buffered. Same ffmpeg-required, no-fallback rule as Enhanced.',
 };
 
 /**
@@ -104,6 +105,26 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
   // hls-mode's segmented output. calculatedLength applies to both too, but
   // means different things — see the checkbox's tooltip below.
   const enhancedMode = mode === 'ffmpeg' || mode === 'hls' || mode === 'hls-tap' || mode === 'hls-buffer';
+  // hls/hls-tap/hls-buffer are the only modes that build and serve a real
+  // .m3u8 - without calculatedLength, the server falls back to serving
+  // ffmpeg's own growing EVENT-type playlist as-is, and since that encode
+  // isn't paced to real-time, real HLS clients reconnecting mid-playback
+  // correctly "join near the live edge" against it - looks exactly like a
+  // random forward jump with the displayed position stuck behind. The
+  // server now forces calculatedLength on for these three regardless of
+  // this setting (see resolvePlaybackPlan's isHlsFamily block in
+  // ytstream.js) - greyed out here so the control isn't misleadingly
+  // togglable for a value that no longer does anything in this mode. ffmpeg
+  // mode has no playlist at all (one continuous live pipe), so it keeps
+  // calculatedLength as a genuine optional trade-off.
+  const calculatedLengthRequired = mode === 'hls' || mode === 'hls-tap' || mode === 'hls-buffer';
+
+  useEffect(() => {
+    if (calculatedLengthRequired && ytstream.calculatedLength !== true) {
+      setYtstream({ calculatedLength: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [calculatedLengthRequired, ytstream.calculatedLength]);
   const forceH264 = ytstream.transcode === 'h264';
   const currentHardwareMode = ytstream.hardwareMode || 'none';
   // Maps the "Stream quality" dropdown's value onto the resolution keys the
@@ -183,7 +204,7 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
               value={mode}
               label="Playback mode"
               onChange={(e: SelectChangeEvent<string>) =>
-                setYtstream({ defaultMode: e.target.value as 'direct' | 'direct-pipe' | 'direct-redirect' | 'ffmpeg' | 'hls' | 'hls-tap' | 'hls-buffer' })
+                setYtstream({ defaultMode: e.target.value as 'direct' | 'direct-pipe' | 'direct-redirect' | 'ffmpeg' | 'hls' | 'hls-tap' | 'hls-buffer' | 'raw-buffer' })
               }
               className="flex-1 min-w-0"
               disabled={disabled}
@@ -195,6 +216,7 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
               <MenuItem value="hls">Enhanced HLS</MenuItem>
               <MenuItem value="hls-tap">Enhanced HLS + Tap</MenuItem>
               <MenuItem value="hls-buffer">Enhanced HLS + Buffered</MenuItem>
+              <MenuItem value="raw-buffer">Raw + Buffered</MenuItem>
             </Select>
             <InfoTooltip
               text={MODE_TOOLTIPS[mode] || MODE_TOOLTIPS.direct}
@@ -219,7 +241,7 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
             >
               <MenuItem value="mp4">MP4</MenuItem>
               <MenuItem value="ts">MPEG-TS</MenuItem>
-              {mode !== 'hls' && mode !== 'hls-tap' && mode !== 'hls-buffer' && (
+              {mode !== 'hls' && mode !== 'hls-tap' && mode !== 'hls-buffer' && mode !== 'raw-buffer' && (
                 <MenuItem value="mkv">Matroska</MenuItem>
               )}
             </Select>
@@ -228,7 +250,9 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
                 'Matroska (mkv) is Enhanced (ffmpeg) mode only, not offered for Enhanced HLS - HLS segments must be fMP4 or MPEG-TS. Useful for Transcode=Copy when the source track isn\'t H.264: unlike MP4, Matroska\'s muxer accepts essentially any video/audio codec pair without container-specific signaling concerns.'
                 + (mode === 'hls-buffer'
                   ? ' Note for Enhanced HLS + Buffered Download: this only picks the live segment format. The permanent downloaded file this mode produces is always saved as MPEG-TS regardless of this setting (a hard requirement of the buffer-fetch mechanism, unlike Tap-to-Download, which does follow this setting) - see the Playback mode tooltip.'
-                  : '')
+                  : mode === 'raw-buffer'
+                    ? ' Ignored entirely for Raw + Buffered - this mode has no live segment format to pick, and both the growing download and its permanent file are always MPEG-TS, same hard requirement as Enhanced HLS + Buffered.'
+                    : '')
               }
               onMobileClick={onMobileTooltipClick}
             />
@@ -292,6 +316,23 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
         </FormControl>
       </Grid>
 
+      {/* Plain-English recap of the fields this mode ignores - the same
+          information the InfoTooltips above already carry (and that a real
+          /simulate dry run would report step-by-step), just surfaced without
+          needing to hover a tooltip or run a dry run against a specific
+          video. Only shown for the two modes where the answer is genuinely
+          surprising (nothing below actually applies) - every other mode's
+          fields do exactly what their own labels say. */}
+      {(mode === 'raw-buffer' || mode === 'hls-buffer') && (
+        <Grid item xs={12}>
+          <Typography variant="body2" color="textSecondary">
+            {mode === 'raw-buffer'
+              ? 'Summary: no re-encode, ever - Container/Transcode/Hardware encoder/Encoding tuning below are ignored (grayed out). Video plays and downloads as its own source codec/resolution/bitrate, muxed (not encoded) into MPEG-TS as it downloads and served over plain HTTP Range - no HLS playlist/segments.'
+              : 'Summary: Container/Transcode/Hardware encoder/Encoding tuning below shape the live HLS stream only. The separate permanent download this mode produces is always MPEG-TS regardless of those settings.'}
+          </Typography>
+        </Grid>
+      )}
+
       {/* Row 2 - how the encode pipeline behaves: transcode method, hardware,
           tuning, and calculated-length's seek/duration behavior. */}
       <Grid item xs={12} sm={6} md={3}>
@@ -312,7 +353,7 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
               <MenuItem value="h264">Force re-encode (H.264/AAC)</MenuItem>
             </Select>
             <InfoTooltip
-              text="Copy remuxes without re-encoding (fast). H.264 re-encodes for maximum client compatibility and is required to use hardware acceleration below."
+              text="Auto isn't its own behavior - it just follows your download Video codec setting above: if that's set to H.264 or H.265 (a compatibility choice), Auto forces live streams to re-encode to H.264 too, same as picking H.264 here directly. Any other Video codec setting (default/VP9/AV1, a quality choice) makes Auto behave like Copy instead. Copy always remuxes without re-encoding, regardless of that setting - fast, no CPU/GPU cost, but the client receives whatever codec YouTube actually served for that video, which varies and isn't guaranteed compatible. H.264 always re-encodes for guaranteed compatibility and is required to use hardware acceleration below, at the cost of real encode time."
               onMobileClick={onMobileTooltipClick}
             />
           </Box>
@@ -385,23 +426,26 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
       </Grid>
 
       <Grid item xs={12} sm={6} md={3}>
-        <FormControl fullWidth style={forced ? forcedFieldStyle : undefined}>
+        <FormControl fullWidth style={forced || calculatedLengthRequired ? forcedFieldStyle : undefined}>
           <InputLabel>Calculated length</InputLabel>
           <Box className="flex items-center gap-1">
             <Select
-              value={ytstream.calculatedLength ? 'on' : 'off'}
+              value={ytstream.calculatedLength || calculatedLengthRequired ? 'on' : 'off'}
               label="Calculated length"
               onChange={(e: SelectChangeEvent<string>) =>
                 setYtstream({ calculatedLength: e.target.value === 'on' })
               }
               className="flex-1 min-w-0"
-              disabled={disabled || !enhancedMode}
+              disabled={disabled || !enhancedMode || calculatedLengthRequired}
             >
               <MenuItem value="off">Off</MenuItem>
               <MenuItem value="on">On</MenuItem>
             </Select>
+            {calculatedLengthRequired && (
+              <Chip label="Required" size="small" color="warning" />
+            )}
             <InfoTooltip
-              text="Enhanced modes only. In Enhanced (ffmpeg): reports an estimated file size/duration and answers seek (Range) requests by restarting the live pipe at the matching estimated timestamp — the estimate is approximate, seeking has the same multi-second restart latency as a cold start, and playback near the very end can show a few seconds of silence if the real encode finished early. In Enhanced HLS: builds the real, exact-duration playlist upfront (no estimate) so the player sees a full seekable timeline immediately; seeking past what's been encoded so far restarts the encode at that segment instead of the whole stream, which is faster and only ever approximate for the segment currently being (re)encoded. Off, HLS still plays fine but the timeline only grows as segments are produced, so some players won't show a scrub bar until near the end."
+              text="Enhanced modes only. In Enhanced (ffmpeg): reports an estimated file size/duration and answers seek (Range) requests by restarting the live pipe at the matching estimated timestamp — the estimate is approximate, seeking has the same multi-second restart latency as a cold start, and playback near the very end can show a few seconds of silence if the real encode finished early. Optional there - a real trade-off, not a correctness requirement. In Enhanced HLS / HLS + Tap-to-Download / HLS + Buffered: always on, not a real choice (greyed out) - these modes serve a real .m3u8 playlist, and without this, players get ffmpeg's own raw, still-growing playlist instead of the real pre-built exact-duration one. Since that encode isn't paced to real-time, real HLS clients (Jellyfin included) reconnecting mid-playback correctly treat that growing playlist as live and jump to its live edge - the video visibly jumps forward while the displayed position doesn't move. On (forced, for the three HLS modes): builds the real, exact-duration playlist upfront so the player sees a full seekable timeline immediately from the start; seeking past what's been encoded so far restarts the encode at that segment instead of the whole stream."
               onMobileClick={onMobileTooltipClick}
             />
           </Box>
@@ -466,6 +510,7 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
           </Box>
         </Grid>
       )}
+
 
       {enhancedMode && forceH264 && (ytstream.hardwareMode || 'none') !== 'none' && (
         <Grid item xs={12}>

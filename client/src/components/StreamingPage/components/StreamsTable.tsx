@@ -30,6 +30,7 @@ export interface StreamsTableProps {
 const STATE_CHIP_COLOR: Record<StreamSnapshot['state'], 'default' | 'success' | 'warning' | 'error'> = {
   starting: 'warning',
   active: 'success',
+  cached: 'default',
   failed: 'error',
 };
 

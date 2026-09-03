@@ -56,20 +56,23 @@ class StrmGenerator {
 
     const url = `${base}${this._buildYtstreamPath(id, cfg, opts)}`;
 
-    // ytstream.probeShortcut: appends the Kodi/Jellyfin .strm pipe-syntax
-    // custom User-Agent (`url|User-Agent=value`). Exploits a documented
-    // Jellyfin bug (jellyfin/jellyfin#10175): ffprobe ignores this
-    // override and sends libavformat's bare default "Lavf/x.y.z" UA, while
-    // real ffmpeg playback/transcode honors it - so /api/ytstream can tell
-    // a metadata probe apart from real playback by User-Agent alone. See
-    // ytstream.js's ensureProbeClip/isLikelyMetadataProbeRequest for what
-    // it does with that distinction.
-    const cfgYtstream = cfg.ytstream || {};
-    if (cfgYtstream.probeShortcut === true) {
-      return `${url}|User-Agent=${encodeURIComponent(PROBE_SHORTCUT_USER_AGENT)}\n`;
-    }
-
-    return `${url}\n`;
+    // Every .strm file carries the Kodi/Jellyfin pipe-syntax custom
+    // User-Agent (`url|User-Agent=value`), unconditionally - not gated on
+    // ytstream.probeShortcut or the playback mode. This marker is what lets
+    // /api/ytstream tell a metadata probe apart from real playback at all
+    // (exploiting a documented Jellyfin bug, jellyfin/jellyfin#10175:
+    // ffprobe ignores this override and sends libavformat's bare default
+    // "Lavf/x.y.z" UA, while real ffmpeg playback/transcode honors it - see
+    // ytstream.js's isLikelyMetadataProbeRequest). Several independent
+    // consumers rely on that detection - raw-buffer's wait-for-exact-length
+    // logic, probeShortcut's own fake-clip shortcut - and none of them
+    // should silently lose their only signal because an unrelated setting
+    // happened to be off. The `ytstream.probeShortcut` config value's job
+    // is narrower and purely request-time: once a probe IS detected via
+    // this marker, it decides whether to short-circuit with a cached fake
+    // clip or fall through to real handling (see evaluateProbeShortcut in
+    // ytstream.js) - it has no say over whether the marker itself exists.
+    return `${url}|User-Agent=${encodeURIComponent(PROBE_SHORTCUT_USER_AGENT)}\n`;
   }
 
   /**

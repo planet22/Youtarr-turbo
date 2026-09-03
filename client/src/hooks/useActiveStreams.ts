@@ -34,7 +34,7 @@ export interface StreamSnapshot {
   clientIp: string;
   userAgent: string | null;
   viewerCount?: number;
-  state: 'starting' | 'active' | 'failed';
+  state: 'starting' | 'active' | 'cached' | 'failed';
   startedAt: number;
   bytesTransferred: number;
   bytesPerSecond: number;

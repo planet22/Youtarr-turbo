@@ -490,6 +490,7 @@ function PlaylistPage({ token }: PlaylistPageProps) {
         defaultResolution={playlist.video_quality || config.preferredResolution || '1080'}
         defaultAudioFormat={playlist.audio_format}
         defaultAudioFormatSource="playlist"
+        defaultMediaMode={playlist.media_mode || config.mediaMode || 'download'}
       />
 
       <Dialog

@@ -171,6 +171,20 @@ class StrmMaterializer {
       throw new Error('Failed to fetch video metadata');
     }
 
+    // materializeMany's per-video progress broadcast has no title to show
+    // until metadata resolves - this is the earliest point in the whole
+    // materialize (metadata fetch, then NFO/thumbnail/STRM writes + DB
+    // upsert) that the CURRENT video's name is actually known, so fire the
+    // callback here rather than waiting for the whole function to finish
+    // (which would show the previous video's name for this one's duration).
+    if (typeof options.onMetadata === 'function') {
+      try {
+        options.onMetadata(meta);
+      } catch (err) {
+        logger.debug({ err }, 'STRM materialize: onMetadata callback failed');
+      }
+    }
+
     // Rating normalization (same fields NFO expects when present)
     try {
       if (meta.content_rating || meta.age_limit != null) {
@@ -497,12 +511,22 @@ class StrmMaterializer {
         current += 1;
         emitProgress('materializing_strm', null);
         try {
-          const r = await this.materializeOne(url, options);
+          const r = await this.materializeOne(url, {
+            ...options,
+            // Fires as soon as materializeOne's metadata fetch resolves -
+            // the earliest point THIS video's title is known - rather than
+            // only after the whole materialize (NFO/thumbnail/STRM writes +
+            // DB upsert) finishes, which would show it for the wrong video
+            // (the previous, already-completed one) the whole time this one
+            // is actually being worked on.
+            onMetadata: (meta) => {
+              const title = (meta.fulltitle || meta.title) || '';
+              const channel = (meta.uploader || meta.channel) || '';
+              const displayTitle = title.length > 60 ? `${title.slice(0, 57)}...` : title;
+              emitProgress('materializing_strm', { channel, title, displayTitle });
+            },
+          });
           completed += 1;
-          const title = (r.meta && (r.meta.fulltitle || r.meta.title)) || '';
-          const channel = (r.meta && (r.meta.uploader || r.meta.channel)) || '';
-          const displayTitle = title.length > 60 ? `${title.slice(0, 57)}...` : title;
-          emitProgress('materializing_strm', { channel, title, displayTitle });
           results.push({ ok: true, ...r });
         } catch (err) {
           logger.error({ err, url }, 'STRM materialize failed');

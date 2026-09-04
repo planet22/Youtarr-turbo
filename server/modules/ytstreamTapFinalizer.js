@@ -5,10 +5,9 @@ const videoPersistence = require('./videoPersistence');
 const { STRM_CACHE_LABEL_PREFIX } = require('./strmCacheOnPlay');
 
 /**
- * server/routes/ytstream.js mode=hls-tap: called from spawnHlsEncodePass's
- * tap-specific `close` listener only when the tapped ffmpeg output finished
- * cleanly (exit code 0, not killed, session not tearing down, still the
- * current pass). Moves the finished temp file into the STRM video's real
+ * server/routes/ytstream.js mode=hls-buffer: called once the
+ * independent buffer-fetch pipeline (startHlsBufferFetch) finishes
+ * cleanly. Moves the finished temp file into the STRM video's real
  * library location and updates the Video row - same DB bookkeeping a real
  * strmCacheOnPlay download job would have done, minus the parts already
  * covered by strmMaterializer at channel-sync time (NFO/thumbnail/poster/
@@ -16,11 +15,8 @@ const { STRM_CACHE_LABEL_PREFIX } = require('./strmCacheOnPlay');
  * which writes all of that BEFORE the .strm file itself, specifically so
  * nothing ever needs to backfill it later).
  *
- * @param {string} [sourceLabel] - distinguishes the synthetic jobType tag
- *   (see jobInstance below) between callers that share this same
- *   move-into-library + upsertVideoForJob logic - mode=hls-tap (the
- *   default, unchanged for backward compat) vs mode=hls-buffer's
- *   independent buffer-fetch finalizer (server/modules/ytstreamBufferFetch.js).
+ * @param {string} [sourceLabel] - the synthetic jobType tag (see jobInstance
+ *   below); defaults to 'hls-buffer', its sole caller.
  * @param {boolean} [skipVideoUpsert] - true for mode=hls-buffer against a
  *   video with no `Video` row (see ytstream.js's bufferEnabled block - an
  *   NZB `mediaMode:'strm'` grab Youtarr never catalogued, or one it later
@@ -31,7 +27,7 @@ const { STRM_CACHE_LABEL_PREFIX } = require('./strmCacheOnPlay');
  *   to become a tracked library entry or show up in Download History.
  * @returns {Promise<string|null>} the final file path on success, else null
  */
-async function finalizeTapOutput({ youtubeId, tempPath, finalPath, sourceLabel = 'hls-tap', skipVideoUpsert = false }) {
+async function finalizeTapOutput({ youtubeId, tempPath, finalPath, sourceLabel = 'hls-buffer', skipVideoUpsert = false }) {
   try {
     if (!tempPath || !fs.existsSync(tempPath)) return null;
     const tempStat = fs.statSync(tempPath);
@@ -87,12 +83,12 @@ async function finalizeTapOutput({ youtubeId, tempPath, finalPath, sourceLabel =
 }
 
 /**
- * Deletes an incomplete/abandoned tap or buffer output - never left on disk,
- * never treated as done.
+ * Deletes an incomplete/abandoned buffer output - never left on disk, never
+ * treated as done.
  * @param {string} [sourceLabel] - see finalizeTapOutput's doc comment; used
  *   only for this log line's accuracy, no functional effect.
  */
-function discardTapOutput({ youtubeId, tempPath, sourceLabel = 'hls-tap' }) {
+function discardTapOutput({ youtubeId, tempPath, sourceLabel = 'hls-buffer' }) {
   if (!tempPath) return;
   fs.unlink(tempPath, (err) => {
     if (err && err.code !== 'ENOENT') {

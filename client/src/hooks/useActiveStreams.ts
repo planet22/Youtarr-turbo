@@ -5,8 +5,8 @@ import WebSocketContext, { Message } from '../contexts/WebSocketContext';
 const REFETCH_DEBOUNCE_MS = 1000;
 
 /**
- * Live per-segment on-disk status, only ever populated for hls/hls-tap/
- * hls-buffer (the only modes with real numbered segment files) - see
+ * Live per-segment on-disk status, only ever populated for hls/hls-buffer
+ * (the only modes with real numbered segment files) - see
  * computeSegmentStatus/SEGMENT_STATUS_MODES in server/routes/ytstream.js.
  * Rides the same 1.5s streamProgress broadcast every other live stat here
  * does, so this updates in real time with no separate polling.
@@ -28,7 +28,7 @@ export interface StreamSegmentStatus {
 
 export interface StreamSnapshot {
   streamId: string;
-  mode: 'ffmpeg' | 'hls' | 'hls-tap' | 'hls-buffer' | 'raw-buffer' | 'direct' | 'direct-pipe' | 'direct-redirect';
+  mode: 'ffmpeg' | 'hls' | 'hls-buffer' | 'direct' | 'direct-pipe' | 'direct-redirect';
   youtubeId: string;
   title: string | null;
   quality: string;

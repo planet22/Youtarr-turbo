@@ -9,6 +9,7 @@ const strmGenerator = require('./strmGenerator');
 const strmMediaInfoCache = require('./strmMediaInfoCache');
 const nfoGenerator = require('./nfoGenerator');
 const videoPersistence = require('./videoPersistence');
+const youtubeMetadataCache = require('./youtubeMetadataCache');
 const ratingMapper = require('./ratingMapper');
 const downloadSettingsResolver = require('./download/downloadSettingsResolver');
 const seriesEpisodeResolver = require('./seriesEpisodeResolver');
@@ -170,6 +171,13 @@ class StrmMaterializer {
     if (!meta || !meta.id) {
       throw new Error('Failed to fetch video metadata');
     }
+
+    // Proactively warms server/routes/ytstream.js's fps/segment-duration
+    // cache from this already-fetched blob (covers untracked/never-catalogued
+    // STRM grabs too, not just tracked library videos - see
+    // youtubeMetadataCache.js's own doc comment). Fire-and-forget; never
+    // affects this function's own use of `meta` below.
+    youtubeMetadataCache.cacheRawInfoJson(meta.id, meta.duration, meta);
 
     // materializeMany's per-video progress broadcast has no title to show
     // until metadata resolves - this is the earliest point in the whole

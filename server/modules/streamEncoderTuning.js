@@ -151,6 +151,13 @@ const TUNING_TIERS = {
   },
 };
 
+// The interval `-force_key_frames "expr:gte(t,n_forced*N)"` forces a
+// keyframe at, in real seconds - must match ytstream.js's own
+// HLS_SEGMENT_DURATION_SECONDS (kept as a second hardcoded literal here
+// rather than a shared import, same "deliberately duplicated" precedent
+// this module already follows elsewhere - see the module doc comment).
+const FORCE_KEYFRAMES_INTERVAL_SECONDS = 4;
+
 function tuningParams(hardwareMode, tuning) {
   const byMode = TUNING_TIERS[hardwareMode] || TUNING_TIERS.none;
   return byMode[tuning] || byMode.fast;
@@ -202,9 +209,20 @@ const AV1_SOFTWARE_PRESET = { fast: '10', balanced: '8', quality: '6' };
  *   hardwareEncoderModule.js's own precedent); only the software encoder
  *   name/CRF/preset actually change per codec (see SOFTWARE_CRF_OFFSET/
  *   AV1_SOFTWARE_PRESET above).
+ * @param {boolean} [useForceKeyframes] - false (default) keeps the original
+ *   fixed-120-FRAME GOP (`-g 120 -keyint_min 120`), which only actually
+ *   produces exactly-4-real-second HLS segments at exactly 30fps source
+ *   content - any other framerate silently drifts. true switches to a
+ *   fixed-TIME forced keyframe (`-force_key_frames`) instead, which lands
+ *   at exactly FORCE_KEYFRAMES_INTERVAL_SECONDS regardless of source fps -
+ *   but some hardware encoders are known to sometimes ignore or mishandle a
+ *   forced-keyframe expression, so this is only ever true for a hardware
+ *   mode a user has explicitly tested and confirmed on their own host (see
+ *   streamTuningBenchmark.testSegmentTiming and
+ *   config.ytstream.forceKeyframesByHardwareMode) - never a blanket default.
  * @returns {{preInputArgs: string[], videoFilters: string[], pixFmt: string|null, encoderArgs: string[]}}
  */
-function buildVideoEncoderArgs(hardwareMode, targetHeight, tuning, vaapiQuality, videoCodec = 'h264') {
+function buildVideoEncoderArgs(hardwareMode, targetHeight, tuning, vaapiQuality, videoCodec = 'h264', useForceKeyframes = false) {
   const mode = normalizeHardwareMode(hardwareMode);
   const tier = normalizeTuning(tuning);
   const codec = normalizeVideoCodec(videoCodec);
@@ -213,8 +231,15 @@ function buildVideoEncoderArgs(hardwareMode, targetHeight, tuning, vaapiQuality,
   const { maxrate, bufsize } = resolveEncoderBitrateCaps(heightCap);
   const encoderName = (ENCODER_NAME[codec] && ENCODER_NAME[codec][mode]) || ENCODER_NAME[codec].software;
 
-  // Common GOP / threshold settings from the plugin
-  const common = ['-g', '120', '-keyint_min', '120', '-sc_threshold', '0'];
+  // Common GOP / threshold settings from the plugin - see useForceKeyframes'
+  // own doc comment above for why there are two variants. The large -g/
+  // -keyint_min in the force-keyframes variant are a defensive fallback
+  // only (force_key_frames should always fire first, at exactly the
+  // FORCE_KEYFRAMES_INTERVAL_SECONDS mark); they just prevent a runaway GOP
+  // if it somehow doesn't.
+  const common = useForceKeyframes
+    ? ['-force_key_frames', `expr:gte(t,n_forced*${FORCE_KEYFRAMES_INTERVAL_SECONDS})`, '-g', '99999', '-keyint_min', '99999', '-sc_threshold', '0']
+    : ['-g', '120', '-keyint_min', '120', '-sc_threshold', '0'];
 
   if (mode === 'vaapi') {
     // VAAPI replaces the software scale filter with nv12+hwupload
@@ -312,6 +337,7 @@ module.exports = {
   VALID_TUNING,
   VALID_VIDEO_CODECS,
   TUNING_LABELS,
+  FORCE_KEYFRAMES_INTERVAL_SECONDS,
   VAAPI_QUALITY_MIN,
   VAAPI_QUALITY_MAX,
   normalizeHardwareMode,

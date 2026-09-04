@@ -16,6 +16,8 @@
 
 const { spawn } = require('child_process');
 const fs = require('fs');
+const os = require('os');
+const path = require('path');
 const configModule = require('./configModule');
 const streamEncoderTuning = require('./streamEncoderTuning');
 const hardwareDecodeModule = require('./hardwareDecodeModule');
@@ -167,6 +169,88 @@ async function benchmarkOne(hardwareMode, tuning, height, durationSeconds = BENC
     realtimeFactor,
     realtime: realtimeFactor >= REALTIME_SAFETY_MARGIN,
   };
+}
+
+// Deliberately non-30fps - the whole point of this test is catching the
+// "segments only land at exactly N seconds for a 30fps source" bug (see
+// ytstream.js's HLS_SEGMENT_DURATION_SECONDS comment and
+// streamEncoderTuning.buildVideoEncoderArgs' useForceKeyframes param).
+const SEGMENT_TIMING_TEST_FPS = 25;
+const SEGMENT_TIMING_TEST_DURATION_SECONDS = 30;
+// A real segment is "close enough" to the FORCE_KEYFRAMES_INTERVAL_SECONDS
+// target if every one measured is within this many seconds of it - loose
+// enough to tolerate ffmpeg's own muxer/rounding overhead, tight enough to
+// still catch genuine drift (the original bug: a 25fps source landing at
+// 4.8s instead of 4.0s is nowhere close to this).
+const SEGMENT_TIMING_TOLERANCE_SECONDS = 0.15;
+
+/**
+ * Empirically verifies whether time-based forced keyframes
+ * (streamEncoderTuning.buildVideoEncoderArgs' useForceKeyframes=true)
+ * actually produce accurate HLS segments for `hardwareMode` on THIS host -
+ * some hardware encoders are known to sometimes ignore or mishandle a
+ * forced-keyframe expression. Unlike benchmarkOne (a speed check that
+ * discards its output to `-f null`), this runs a real short HLS encode of a
+ * deliberately non-30fps synthetic source and reads the real per-segment
+ * durations straight out of the produced .m3u8's #EXTINF lines - a
+ * correctness check, not a performance one. All output is written under
+ * the OS temp directory and deleted before returning, regardless of outcome.
+ * @param {string} hardwareMode
+ * @param {number|string|null} [vaapiQuality] - see benchmarkOne; passed
+ *   through so this measures exactly what a real vaapi stream would use.
+ * @returns {Promise<{ok: boolean, measuredSeconds?: number[], averageSeconds?: number, maxDeviationSeconds?: number, error?: string}>}
+ */
+async function testSegmentTiming(hardwareMode, vaapiQuality = null) {
+  const encoder = streamEncoderTuning.buildVideoEncoderArgs(hardwareMode, null, 'fast', vaapiQuality, 'h264', true);
+  const dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'ytarr-segtiming-'));
+  const playlistPath = path.join(dir, 'out.m3u8');
+  const segmentPattern = path.join(dir, 'seg%05d.ts');
+  try {
+    const args = ['-y', '-loglevel', 'error'];
+    if (encoder.preInputArgs && encoder.preInputArgs.length) args.push(...encoder.preInputArgs);
+    args.push(
+      '-f', 'lavfi', '-i', `testsrc2=size=640x480:rate=${SEGMENT_TIMING_TEST_FPS}:duration=${SEGMENT_TIMING_TEST_DURATION_SECONDS}`,
+      '-f', 'lavfi', '-i', `sine=frequency=1000:duration=${SEGMENT_TIMING_TEST_DURATION_SECONDS}`,
+    );
+    if (encoder.videoFilters && encoder.videoFilters.length) args.push('-vf', encoder.videoFilters.join(','));
+    if (encoder.pixFmt) args.push('-pix_fmt', encoder.pixFmt);
+    args.push(...encoder.encoderArgs);
+    args.push(
+      '-c:a', 'aac', '-b:a', '128k',
+      '-f', 'hls', '-hls_time', String(streamEncoderTuning.FORCE_KEYFRAMES_INTERVAL_SECONDS), '-hls_list_size', '0',
+      '-hls_segment_filename', segmentPattern,
+      playlistPath
+    );
+
+    const result = await runTimedFfmpegEncode(args);
+    if (!result.ok) return { ok: false, error: result.error };
+
+    const playlist = await fs.promises.readFile(playlistPath, 'utf8');
+    const measuredSeconds = [...playlist.matchAll(/^#EXTINF:([\d.]+),/gm)].map((m) => Number(m[1]));
+    if (!measuredSeconds.length) {
+      return { ok: false, error: 'ffmpeg exited successfully but produced no segments to measure' };
+    }
+    // The LAST segment of ANY VOD HLS stream is normally shorter than the
+    // target - it's just whatever's left over after the last full interval
+    // (e.g. a 30s source at a 4s target naturally ends with a 2.000s tail
+    // segment: 7*4 + 2 = 30) - completely expected, true of a real stream's
+    // final segment too, and NOT evidence that force_key_frames misbehaved.
+    // Judging accuracy only makes sense on segments that had a full target
+    // interval to land on, so the last one is excluded from the pass/fail
+    // math below (still reported in the raw measuredSeconds list, for
+    // transparency).
+    const judgedSeconds = measuredSeconds.length > 1 ? measuredSeconds.slice(0, -1) : measuredSeconds;
+    const averageSeconds = judgedSeconds.reduce((a, b) => a + b, 0) / judgedSeconds.length;
+    const maxDeviationSeconds = Math.max(...judgedSeconds.map((s) => Math.abs(s - streamEncoderTuning.FORCE_KEYFRAMES_INTERVAL_SECONDS)));
+    return {
+      ok: maxDeviationSeconds <= SEGMENT_TIMING_TOLERANCE_SECONDS,
+      measuredSeconds,
+      averageSeconds,
+      maxDeviationSeconds,
+    };
+  } finally {
+    fs.promises.rm(dir, { recursive: true, force: true }).catch(() => { /* best-effort cleanup */ });
+  }
 }
 
 // Only one benchmark run at a time - concurrent ffmpeg encodes (especially
@@ -386,8 +470,10 @@ module.exports = {
   BENCHMARK_DURATION_SECONDS,
   WARMUP_DURATION_SECONDS,
   REALTIME_SAFETY_MARGIN,
+  SEGMENT_TIMING_TOLERANCE_SECONDS,
   benchmarkOne,
   runBenchmark,
   isBenchmarkRunning,
   formatBenchmarkSummaryLine,
+  testSegmentTiming,
 };

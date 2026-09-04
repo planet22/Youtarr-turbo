@@ -4,6 +4,7 @@ const path = require('path');
 const configModule = require('../configModule');
 const logger = require('../../logger');
 const { probeVideoDimensions } = require('../resolutionTier');
+const youtubeMetadataCache = require('../youtubeMetadataCache');
 
 class VideoMetadataProcessor {
   static normalizeChannelName(value) {
@@ -158,6 +159,13 @@ class VideoMetadataProcessor {
       if (fs.existsSync(dataPath)) {
         logger.debug({ dataPath, videoId: id }, 'Found info.json file');
         const data = JSON.parse(fs.readFileSync(dataPath, 'utf-8'));
+
+        // Proactively warms server/routes/ytstream.js's fps/segment-duration
+        // cache from this already-fetched blob - a real download's own
+        // yt-dlp extraction already has fps in hand here, so a later stream
+        // of this same video never needs its own live yt-dlp call for it.
+        // Fire-and-forget; never affects this function's own use of `data`.
+        youtubeMetadataCache.cacheRawInfoJson(data.id, data.duration, data);
 
         const preferredChannelName =
           this.normalizeChannelName(data.uploader) ||

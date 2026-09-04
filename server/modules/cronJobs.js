@@ -75,6 +75,20 @@ function initialize(deps = {}) {
     } catch (error) {
       logger.error({ err: error }, 'Error during STRM cache-on-play expiry sweep');
     }
+
+    // Same threshold, same slot - mode=hls-buffer's untracked cache (no
+    // Video row to attach the above sweep's cached_at/is_strm lifecycle to)
+    // gets its own age-based cleanup here instead - see
+    // ytstream.js's sweepExpiredUntrackedBufferCache doc comment.
+    try {
+      const ytstreamRoutes = require('../routes/ytstream');
+      const bufferResult = await ytstreamRoutes.sweepExpiredUntrackedBufferCache();
+      if (bufferResult.deleted > 0) {
+        logger.info(bufferResult, 'Untracked hls-buffer cache expiry sweep completed');
+      }
+    } catch (error) {
+      logger.error({ err: error }, 'Error during untracked hls-buffer cache expiry sweep');
+    }
   });
 
   // ============================================================================

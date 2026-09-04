@@ -13,7 +13,7 @@ interface UseUntrackedCacheReturn {
 
 /**
  * Youtarr's own untracked-buffer cache (HLS_UNTRACKED_BUFFER_CACHE_DIR,
- * server-side) - mode=hls-buffer/raw-buffer's finished download for a video
+ * server-side) - mode=hls-buffer's finished download for a video
  * with no library Video row (an untracked NZB grab, or one disowned via
  * importStrategy:'untracked'). Never shows up in the library or Download
  * History, so this is the only place its disk usage is visible or

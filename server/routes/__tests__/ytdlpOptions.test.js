@@ -8,14 +8,24 @@ jest.mock('../../modules/download/ytdlpValidator', () => ({
 jest.mock('../../modules/streamTuningBenchmark', () => ({
   runBenchmark: jest.fn(),
   isBenchmarkRunning: jest.fn().mockReturnValue(false),
+  testSegmentTiming: jest.fn(),
 }));
 jest.mock('../../modules/hardwareCapabilityTester', () => ({
   testAllCapabilities: jest.fn(),
+}));
+// Never let this route file's real configModule singleton load - its
+// constructor eagerly calls fs.watch() on the real config.json path (see
+// configModule.js's watchConfig), which this suite has no reason to
+// exercise and which is unreliable over some filesystems.
+jest.mock('../../modules/configModule', () => ({
+  getConfig: jest.fn().mockReturnValue({ ytstream: {} }),
+  updateConfig: jest.fn(),
 }));
 
 const ytdlpValidator = require('../../modules/download/ytdlpValidator');
 const streamTuningBenchmark = require('../../modules/streamTuningBenchmark');
 const hardwareCapabilityTester = require('../../modules/hardwareCapabilityTester');
+const configModule = require('../../modules/configModule');
 const createYtdlpOptionsRoutes = require('../ytdlpOptions');
 
 function makeApp({ verifyToken } = {}) {
@@ -231,6 +241,79 @@ describe('POST /api/ytdlp/test-tuning-benchmark', () => {
     const res = await supertest(app).post('/api/ytdlp/test-tuning-benchmark').send({ hardwareMode: 'none' });
     expect(res.status).toBe(500);
     expect(res.body).toEqual({ ok: false, error: 'ffmpeg not found' });
+  });
+});
+
+describe('POST /api/ytdlp/test-segment-timing', () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  test('returns 401 when verifyToken rejects', async () => {
+    const app = makeApp({
+      verifyToken: (_req, res) => res.status(401).json({ error: 'unauthorized' }),
+    });
+    const res = await supertest(app).post('/api/ytdlp/test-segment-timing').send({ hardwareMode: 'none' });
+    expect(res.status).toBe(401);
+    expect(streamTuningBenchmark.testSegmentTiming).not.toHaveBeenCalled();
+  });
+
+  test('returns 400 when hardwareMode is missing or invalid', async () => {
+    const app = makeApp();
+    const missing = await supertest(app).post('/api/ytdlp/test-segment-timing').send({});
+    expect(missing.status).toBe(400);
+    expect(missing.body.error).toMatch(/hardwareMode/);
+    expect(streamTuningBenchmark.testSegmentTiming).not.toHaveBeenCalled();
+  });
+
+  test('returns 409 when a benchmark is already running', async () => {
+    streamTuningBenchmark.isBenchmarkRunning.mockReturnValueOnce(true);
+    const app = makeApp();
+    const res = await supertest(app).post('/api/ytdlp/test-segment-timing').send({ hardwareMode: 'none' });
+    expect(res.status).toBe(409);
+    expect(streamTuningBenchmark.testSegmentTiming).not.toHaveBeenCalled();
+  });
+
+  test('on a passing result, persists forceKeyframesByHardwareMode[hardwareMode]=true and returns enabled:true', async () => {
+    streamTuningBenchmark.testSegmentTiming.mockResolvedValueOnce({
+      ok: true, measuredSeconds: [4.01, 3.99, 4.0], averageSeconds: 4.0, maxDeviationSeconds: 0.01,
+    });
+    configModule.getConfig.mockReturnValueOnce({ someOtherField: 1, ytstream: { existingField: true, forceKeyframesByHardwareMode: { qsv: false } } });
+
+    const app = makeApp();
+    const res = await supertest(app).post('/api/ytdlp/test-segment-timing').send({ hardwareMode: 'vaapi' });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({
+      ok: true, hardwareMode: 'vaapi', enabled: true,
+      measuredSeconds: [4.01, 3.99, 4.0], averageSeconds: 4.0, maxDeviationSeconds: 0.01, error: undefined,
+    });
+    expect(configModule.updateConfig).toHaveBeenCalledWith({
+      someOtherField: 1,
+      ytstream: { existingField: true, forceKeyframesByHardwareMode: { qsv: false, vaapi: true } },
+    });
+  });
+
+  test('on a failing result, persists forceKeyframesByHardwareMode[hardwareMode]=false and returns enabled:false with the error', async () => {
+    streamTuningBenchmark.testSegmentTiming.mockResolvedValueOnce({
+      ok: false, measuredSeconds: [4.8, 4.79], averageSeconds: 4.8, maxDeviationSeconds: 0.8,
+    });
+
+    const app = makeApp();
+    const res = await supertest(app).post('/api/ytdlp/test-segment-timing').send({ hardwareMode: 'none' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.enabled).toBe(false);
+    expect(configModule.updateConfig).toHaveBeenCalledWith(
+      expect.objectContaining({ ytstream: expect.objectContaining({ forceKeyframesByHardwareMode: { none: false } }) })
+    );
+  });
+
+  test('returns 500 with an error message when the test throws', async () => {
+    streamTuningBenchmark.testSegmentTiming.mockRejectedValueOnce(new Error('ffmpeg not found'));
+    const app = makeApp();
+    const res = await supertest(app).post('/api/ytdlp/test-segment-timing').send({ hardwareMode: 'none' });
+    expect(res.status).toBe(500);
+    expect(res.body).toEqual({ ok: false, error: 'ffmpeg not found' });
+    expect(configModule.updateConfig).not.toHaveBeenCalled();
   });
 });
 

@@ -4,6 +4,7 @@ const streamEncoderTuning = require('../streamEncoderTuning');
 const {
   buildVideoEncoderArgs, normalizeHardwareMode, normalizeTuning, normalizeVideoCodec,
   resolveEncoderBitrateCaps, VALID_HARDWARE, VALID_TUNING, VALID_VIDEO_CODECS,
+  FORCE_KEYFRAMES_INTERVAL_SECONDS,
 } = streamEncoderTuning;
 
 describe('normalizeHardwareMode', () => {
@@ -90,6 +91,38 @@ describe('buildVideoEncoderArgs — software (none)', () => {
   test('null height ("best") skips scaling entirely', () => {
     const uncapped = buildVideoEncoderArgs('none', null, 'fast');
     expect(uncapped.videoFilters[0]).toBe('format=yuv420p');
+  });
+});
+
+describe('buildVideoEncoderArgs — useForceKeyframes', () => {
+  test('omitted/false keeps the original fixed-frame-count GOP (backward compatibility)', () => {
+    const withoutArg = buildVideoEncoderArgs('none', 1080, 'fast', null, 'h264');
+    const explicitFalse = buildVideoEncoderArgs('none', 1080, 'fast', null, 'h264', false);
+    expect(withoutArg.encoderArgs).toEqual(explicitFalse.encoderArgs);
+    expect(explicitFalse.encoderArgs).toEqual(
+      expect.arrayContaining(['-g', '120', '-keyint_min', '120', '-sc_threshold', '0'])
+    );
+    expect(explicitFalse.encoderArgs).not.toContain('-force_key_frames');
+  });
+
+  test('true switches to a time-based forced keyframe at FORCE_KEYFRAMES_INTERVAL_SECONDS, with a loose -g/-keyint_min safety cap', () => {
+    const result = buildVideoEncoderArgs('none', 1080, 'fast', null, 'h264', true);
+    expect(result.encoderArgs).toEqual(
+      expect.arrayContaining([
+        '-force_key_frames', `expr:gte(t,n_forced*${FORCE_KEYFRAMES_INTERVAL_SECONDS})`,
+        '-g', '99999', '-keyint_min', '99999', '-sc_threshold', '0',
+      ])
+    );
+  });
+
+  test('applies identically to a hardware encoder (vaapi)', () => {
+    const result = buildVideoEncoderArgs('vaapi', 1080, 'fast', null, 'h264', true);
+    expect(result.encoderArgs).toEqual(
+      expect.arrayContaining([
+        '-force_key_frames', `expr:gte(t,n_forced*${FORCE_KEYFRAMES_INTERVAL_SECONDS})`,
+        '-g', '99999', '-keyint_min', '99999',
+      ])
+    );
   });
 });
 

@@ -34,6 +34,22 @@ function cellColor(index: number, segments: StreamSegmentStatus): string {
   return segmentColor(index, segments);
 }
 
+/**
+ * Expanded view's cell label needs to actually contrast with cellColor's
+ * background - a single hardcoded white read fine on the dark greens/cyan
+ * but was unreadable on --warning (a bright yellow/amber in every theme).
+ * Uses each semantic color's own paired `-foreground` token (defined
+ * per-theme, light or dark as needed) rather than guessing a fixed color,
+ * same pattern the rest of the app uses for background/foreground pairs.
+ */
+function cellTextColor(index: number, segments: StreamSegmentStatus): string {
+  if (index === segments.currentSegmentIndex) return '#fff'; // DELIVERING_COLOR is a fixed dark green
+  if (index === segments.backfillSegmentIndex) return '#000'; // BACKFILLING_COLOR (cyan) is light
+  if (segments.encoded[index]) return 'var(--success-foreground)';
+  if (index < segments.bufferedThroughIndex) return 'var(--warning-foreground)';
+  return 'var(--foreground)';
+}
+
 // Always reads segments.segmentDurationSeconds (never a hardcoded 4) so this
 // stays correct if the server-side segment length ever changes.
 function formatSegmentTime(index: number, segments: StreamSegmentStatus): string {
@@ -62,16 +78,24 @@ const STRIP_GAP = 1;
 // Target shape ("a line", not a square) used only to pick how cols/rows are
 // split - the previous fixed STRIP_WIDTH/STRIP_HEIGHT footprint.
 const STRIP_TARGET_ASPECT = 90 / 16;
+// Hard cap on columns so the strip's pixel WIDTH never grows past this
+// regardless of video length - a long enough video (e.g. ~700 segments)
+// pushed the sqrt-based column count past 60, overflowing the table's
+// Segments column and forcing the whole table to scroll horizontally. Past
+// this cap, extra segments grow the strip taller (rows), not wider - a
+// table row can grow tall without breaking layout the way a too-wide cell does.
+const STRIP_MAX_COLS = 30;
 
 /**
  * Picks a row/column split for `total` real 2x2px dots that stays close to
  * STRIP_TARGET_ASPECT's "a line, not a square" shape by packing along both
- * axes instead of squeezing everything into one row (which would run the
- * strip's width out arbitrarily far for a long video).
+ * axes instead of squeezing everything into one row, while never exceeding
+ * STRIP_MAX_COLS - see its comment for why width, not height, is the hard limit.
  */
 function computeStripGrid(total: number): { cols: number; rows: number } {
   if (total <= 0) return { cols: 1, rows: 1 };
-  const cols = Math.max(1, Math.min(total, Math.round(Math.sqrt(total * STRIP_TARGET_ASPECT))));
+  const idealCols = Math.round(Math.sqrt(total * STRIP_TARGET_ASPECT));
+  const cols = Math.max(1, Math.min(total, idealCols, STRIP_MAX_COLS));
   const rows = Math.max(1, Math.ceil(total / cols));
   return { cols, rows };
 }
@@ -198,8 +222,7 @@ export const SegmentActivityDialog: React.FC<SegmentActivityDialogProps> = ({ op
                   justifyContent: expandedView ? 'center' : undefined,
                   fontSize: 9,
                   lineHeight: 1,
-                  color: '#fff',
-                  textShadow: expandedView ? '0 0 2px #000' : undefined,
+                  color: cellTextColor(i, segments),
                   userSelect: expandedView ? 'none' : undefined,
                 }}
               >

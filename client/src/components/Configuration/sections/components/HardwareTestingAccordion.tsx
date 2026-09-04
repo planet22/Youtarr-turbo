@@ -5,6 +5,7 @@ import { HardwareCapabilityMatrix } from '../../hooks/useHardwareCapabilities';
 
 interface HardwareTestingAccordionProps {
   matrix: HardwareCapabilityMatrix | null;
+  decodeMatrix?: HardwareCapabilityMatrix | null;
   testing: boolean;
   error: string | null;
   onRunTest: () => void;
@@ -26,6 +27,7 @@ interface HardwareTestingAccordionProps {
  */
 export const HardwareTestingAccordion: React.FC<HardwareTestingAccordionProps> = ({
   matrix,
+  decodeMatrix,
   testing,
   error,
   onRunTest,
@@ -43,6 +45,7 @@ export const HardwareTestingAccordion: React.FC<HardwareTestingAccordionProps> =
           <Grid item xs={12}>
             <HardwareCapabilitiesTable
               matrix={matrix}
+              decodeMatrix={decodeMatrix}
               testing={testing}
               error={error}
               onRunTest={onRunTest}

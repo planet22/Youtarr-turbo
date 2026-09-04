@@ -1,7 +1,10 @@
 /* eslint-env jest */
 const streamEncoderTuning = require('../streamEncoderTuning');
 
-const { buildVideoEncoderArgs, normalizeHardwareMode, normalizeTuning, resolveEncoderBitrateCaps, VALID_HARDWARE, VALID_TUNING } = streamEncoderTuning;
+const {
+  buildVideoEncoderArgs, normalizeHardwareMode, normalizeTuning, normalizeVideoCodec,
+  resolveEncoderBitrateCaps, VALID_HARDWARE, VALID_TUNING, VALID_VIDEO_CODECS,
+} = streamEncoderTuning;
 
 describe('normalizeHardwareMode', () => {
   test.each(VALID_HARDWARE)('accepts %s as-is', (mode) => {
@@ -155,6 +158,74 @@ describe('buildVideoEncoderArgs — vaapi', () => {
   test('ignores vaapiQuality for every other hardwareMode', () => {
     expect(buildVideoEncoderArgs('none', 1080, 'fast', 3).encoderArgs).not.toContain('-quality');
     expect(buildVideoEncoderArgs('nvenc', 1080, 'fast', 3).encoderArgs).not.toContain('-quality');
+  });
+});
+
+describe('normalizeVideoCodec', () => {
+  test.each(VALID_VIDEO_CODECS)('accepts %s as-is', (codec) => {
+    expect(normalizeVideoCodec(codec)).toBe(codec);
+  });
+
+  test('falls back to h264 for unknown/missing values', () => {
+    expect(normalizeVideoCodec('bogus')).toBe('h264');
+    expect(normalizeVideoCodec(undefined)).toBe('h264');
+  });
+});
+
+describe('buildVideoEncoderArgs — videoCodec (encode target)', () => {
+  test('defaults to h264 when omitted, unchanged from before this axis existed', () => {
+    const withDefault = buildVideoEncoderArgs('none', 1080, 'fast');
+    const explicitH264 = buildVideoEncoderArgs('none', 1080, 'fast', null, 'h264');
+    expect(withDefault).toEqual(explicitH264);
+  });
+
+  test('software hevc uses libx265 with a higher (offset) CRF than h264 at the same tier', () => {
+    const h264 = buildVideoEncoderArgs('none', 1080, 'fast', null, 'h264');
+    const hevc = buildVideoEncoderArgs('none', 1080, 'fast', null, 'hevc');
+    expect(hevc.encoderArgs).toEqual(expect.arrayContaining(['-c:v', 'libx265']));
+    // Same preset string as h264's own fast tier - only CRF/encoder name differ.
+    expect(hevc.encoderArgs[hevc.encoderArgs.indexOf('-preset') + 1]).toBe(h264.encoderArgs[h264.encoderArgs.indexOf('-preset') + 1]);
+    const h264Crf = Number(h264.encoderArgs[h264.encoderArgs.indexOf('-crf') + 1]);
+    const hevcCrf = Number(hevc.encoderArgs[hevc.encoderArgs.indexOf('-crf') + 1]);
+    expect(hevcCrf).toBe(h264Crf + 3);
+  });
+
+  test('software av1 uses libsvtav1 with a numeric preset (not the x264/x265 string enum) and an offset CRF', () => {
+    const h264 = buildVideoEncoderArgs('none', 1080, 'fast', null, 'h264');
+    const av1 = buildVideoEncoderArgs('none', 1080, 'fast', null, 'av1');
+    expect(av1.encoderArgs).toEqual(expect.arrayContaining(['-c:v', 'libsvtav1']));
+    const av1Preset = av1.encoderArgs[av1.encoderArgs.indexOf('-preset') + 1];
+    expect(av1Preset).toMatch(/^\d+$/);
+    expect(av1Preset).not.toBe(h264.encoderArgs[h264.encoderArgs.indexOf('-preset') + 1]);
+    const h264Crf = Number(h264.encoderArgs[h264.encoderArgs.indexOf('-crf') + 1]);
+    const av1Crf = Number(av1.encoderArgs[av1.encoderArgs.indexOf('-crf') + 1]);
+    expect(av1Crf).toBe(h264Crf + 7);
+  });
+
+  test('av1 software preset still trends slower/better for a higher tuning tier, same direction as h264/hevc', () => {
+    const fastArgs = buildVideoEncoderArgs('none', 1080, 'fast', null, 'av1').encoderArgs;
+    const qualityArgs = buildVideoEncoderArgs('none', 1080, 'quality', null, 'av1').encoderArgs;
+    const fastPreset = Number(fastArgs[fastArgs.indexOf('-preset') + 1]);
+    const qualityPreset = Number(qualityArgs[qualityArgs.indexOf('-preset') + 1]);
+    expect(qualityPreset).toBeLessThan(fastPreset);
+  });
+
+  test('every hardware backend just swaps the -c:v encoder name per codec, keeping its numeric quality knob unchanged', () => {
+    const vaapiH264 = buildVideoEncoderArgs('vaapi', 1080, 'fast', null, 'h264');
+    const vaapiHevc = buildVideoEncoderArgs('vaapi', 1080, 'fast', null, 'hevc');
+    const vaapiAv1 = buildVideoEncoderArgs('vaapi', 1080, 'fast', null, 'av1');
+    expect(vaapiH264.encoderArgs).toEqual(expect.arrayContaining(['-c:v', 'h264_vaapi', '-qp', '21', '-quality', '7']));
+    expect(vaapiHevc.encoderArgs).toEqual(expect.arrayContaining(['-c:v', 'hevc_vaapi', '-qp', '21', '-quality', '7']));
+    expect(vaapiAv1.encoderArgs).toEqual(expect.arrayContaining(['-c:v', 'av1_vaapi', '-qp', '21', '-quality', '7']));
+
+    const nvencHevc = buildVideoEncoderArgs('nvenc', 1080, 'fast', null, 'hevc');
+    expect(nvencHevc.encoderArgs).toEqual(expect.arrayContaining(['-c:v', 'hevc_nvenc', '-preset', 'p5', '-cq', '21']));
+
+    const qsvAv1 = buildVideoEncoderArgs('qsv', 1080, 'fast', null, 'av1');
+    expect(qsvAv1.encoderArgs).toEqual(expect.arrayContaining(['-c:v', 'av1_qsv', '-global_quality', '21']));
+
+    const amfHevc = buildVideoEncoderArgs('amf', 1080, 'fast', null, 'hevc');
+    expect(amfHevc.encoderArgs).toEqual(expect.arrayContaining(['-c:v', 'hevc_amf', '-quality', 'speed', '-qvbr_quality_level', '21']));
   });
 });
 

@@ -46,12 +46,19 @@ async function ensureSeekableMp4(filePath) {
   const stat = await fs.promises.stat(filePath);
   const cachePath = path.join(REMUX_CACHE_DIR, cacheKeyFor(filePath, stat));
 
-  if (fs.existsSync(cachePath)) return cachePath;
-  if (inFlight.has(cachePath)) return inFlight.get(cachePath);
+  if (fs.existsSync(cachePath)) {
+    logger.debug({ filePath, cachePath }, 'ytstream: .ts -> .mp4 remux already cached, skipping ffmpeg');
+    return cachePath;
+  }
+  if (inFlight.has(cachePath)) {
+    logger.debug({ filePath, cachePath }, 'ytstream: .ts -> .mp4 remux already in flight, joining it instead of starting a second one');
+    return inFlight.get(cachePath);
+  }
 
   const work = (async () => {
     await fs.promises.mkdir(REMUX_CACHE_DIR, { recursive: true });
     const tempPath = `${cachePath}.tmp-${process.pid}`;
+    logger.debug({ filePath, cachePath, tempPath }, 'ytstream: starting .ts -> .mp4 remux');
     try {
       await new Promise((resolve, reject) => {
         const ff = spawn('ffmpeg', [
@@ -60,6 +67,7 @@ async function ensureSeekableMp4(filePath) {
           '-map', '0:v:0', '-map', '0:a:0?', '-sn', '-dn',
           '-c', 'copy',
           '-movflags', '+faststart',
+          '-f', 'mp4',
           tempPath,
         ]);
         let stderr = '';

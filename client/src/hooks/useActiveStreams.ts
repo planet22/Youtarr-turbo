@@ -22,6 +22,8 @@ export interface StreamSegmentStatus {
   bufferComplete: boolean;
   /** Index of the segment most recently fetched by the player - null until it has requested its first one. */
   currentSegmentIndex: number | null;
+  /** Only non-null while a background backfill pass is running (ytstream.backfillMissingSegments) - the next segment it's about to (re)produce from the local cached source. Unrelated to currentSegmentIndex above - backfill never affects what's actually being delivered. */
+  backfillSegmentIndex: number | null;
 }
 
 export interface StreamSnapshot {

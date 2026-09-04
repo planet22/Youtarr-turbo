@@ -77,7 +77,7 @@ function loadYoutubeCookieHeader(cookiePath) {
   }
 }
 
-const VALID_MODES = ['direct', 'direct-pipe', 'direct-redirect', 'ffmpeg', 'hls', 'hls-tap', 'hls-buffer', 'raw-buffer'];
+const VALID_MODES = ['direct', 'direct-pipe', 'direct-redirect', 'ffmpeg', 'hls', 'hls-buffer', 'raw-buffer'];
 // mkv is ffmpeg-mode only; HLS segments must be fmp4/mpegts, so
 // getHlsContainerInfo falls through to its fmp4 default for 'mkv' too.
 const VALID_CONTAINERS = ['mp4', 'ts', 'mkv'];
@@ -161,6 +161,18 @@ function destroyHlsSession(session, reason) {
   // Checked by createHlsSessionInternal's process-exit handlers so a
   // deliberate teardown isn't logged as an unexpected crash.
   session.destroying = true;
+  // This session may have been the one thing blocking trySafeDeleteFinalizedTs
+  // (see maybeFinalizeTsToMp4) from reclaiming its cachedFilePath's .ts - now
+  // that it's gone (removed from hlsSessions just above), retry: a no-op
+  // unless finalizeToMp4 already produced a .mp4 for this exact file AND no
+  // OTHER live session still references it.
+  if (session.cachedFilePath && path.extname(session.cachedFilePath).toLowerCase() === '.ts'
+    && (configModule.getConfig().ytstream || {}).finalizeToMp4 === true) {
+    const mp4Path = require('../modules/tsRemuxCache').findExistingSeekableMp4(session.cachedFilePath);
+    if (mp4Path) {
+      trySafeDeleteFinalizedTs(session.cachedFilePath, { youtubeId: session.youtubeId, sourceLabel: 'session-teardown' });
+    }
+  }
   killChildProcess(session.ytVideo, `hls-ytdlp-video:${reason}`);
   killChildProcess(session.ytAudio, `hls-ytdlp-audio:${reason}`);
   killChildProcess(session.ff, `hls-ffmpeg:${reason}`);
@@ -254,13 +266,13 @@ async function persistStreamHistoryEnd(entry, reason, errorMessage) {
   }
 }
 
-// Only hls/hls-tap/hls-buffer produce discrete numbered segment files on
-// disk at all (mode=ffmpeg is one continuous live pipe, direct* modes never
-// touch ffmpeg, raw-buffer has a growing .ts remux but no segment/playlist
+// Only hls/hls-buffer produce discrete numbered segment files on disk at
+// all (mode=ffmpeg is one continuous live pipe, direct* modes never touch
+// ffmpeg, raw-buffer has a growing .ts remux but no segment/playlist
 // concept) - snapshotStream below only computes/attaches this for those
-// three, so streamProgress's periodic broadcast never does the readdir for
+// two, so streamProgress's periodic broadcast never does the readdir for
 // a mode where it's meaningless.
-const SEGMENT_STATUS_MODES = new Set(['hls', 'hls-tap', 'hls-buffer']);
+const SEGMENT_STATUS_MODES = new Set(['hls', 'hls-buffer']);
 
 /**
  * Per-segment on-disk status for the Streaming page's live segment-activity
@@ -320,6 +332,13 @@ function computeSegmentStatus(session) {
     // Streaming page's segment grid uses this to highlight which segment is
     // currently being delivered, not just which ones are encoded on disk.
     currentSegmentIndex: typeof session.lastServedSegmentIndex === 'number' ? session.lastServedSegmentIndex : null,
+    // Only meaningful while session.backfillInProgress is true (see
+    // maybeBackfillMissingSegments) - the next segment the backfill pass is
+    // about to (re)produce, i.e. one past whatever it's already written.
+    // Distinct from currentSegmentIndex above: backfill runs against a
+    // local source in the background and never affects what's actually
+    // being delivered to the viewer.
+    backfillSegmentIndex: session.backfillInProgress ? highestEncodedIndex + 1 : null,
   };
 }
 
@@ -836,13 +855,12 @@ function getHlsContainerInfo(container) {
 }
 
 /** Identifies an HLS session across requests for the same effective params. */
-function buildHlsSessionKey({ youtubeId, quality, qualityStrictness, transcode, hardwareMode, tuning, container, playerClient, calculatedLength, tap, buffer }) {
+function buildHlsSessionKey({ youtubeId, quality, qualityStrictness, transcode, hardwareMode, tuning, container, playerClient, calculatedLength, buffer }) {
   const raw = JSON.stringify({
     youtubeId, quality, transcode, hardwareMode, tuning, container,
     qualityStrictness: qualityStrictness || 'fallback',
     playerClient: playerClient || '',
     calculatedLength: !!calculatedLength,
-    tap: !!tap,
     buffer: !!buffer,
   });
   return crypto.createHash('sha1').update(raw).digest('hex').slice(0, 20);
@@ -1780,6 +1798,45 @@ async function tryServeCachedVideoFile(req, res, filePath) {
 }
 
 /**
+ * Deletes a permanently-finalized .ts file now that a seekable .mp4 remux
+ * of it exists - but ONLY once no live (non-destroying) HLS session still
+ * has this exact path as its cachedFilePath, since such a session could
+ * still open a brand-new read of it later (a seek-restart, or another
+ * backfill pass triggered by maybeBackfillMissingSegments) - deleting out
+ * from under a FUTURE re-open would break it. This is deliberately not a
+ * concern for reads already in progress right now: POSIX unlink-while-open
+ * semantics mean an already-open read (a viewer's in-flight download,
+ * mid-transfer) keeps working fine off its existing file handle even after
+ * the directory entry is removed - only a NEW open of the now-missing path
+ * would fail, which is exactly what the cachedFilePath check above guards
+ * against. Best-effort and non-fatal either way - freeing this disk space
+ * is a nice-to-have, never worth risking a live session over.
+ * @param {string} finalPath - the .ts file's real on-disk path
+ * @param {object} context - extra fields for the log lines only (e.g. youtubeId, sourceLabel)
+ */
+function trySafeDeleteFinalizedTs(finalPath, context) {
+  const stillReferencedBy = [...hlsSessions.values()].find(
+    (s) => !s.destroying && s.cachedFilePath === finalPath
+  );
+  if (stillReferencedBy) {
+    logger.debug(
+      { ...context, finalPath, blockedBySessionKey: stillReferencedBy.key },
+      'ytstream: keeping finalized .ts for now - still referenced by an active HLS session'
+    );
+    return;
+  }
+  fs.unlink(finalPath, (err) => {
+    if (err) {
+      if (err.code !== 'ENOENT') {
+        logger.warn({ err, ...context, finalPath }, 'ytstream: failed to delete finalized .ts after successful .mp4 remux');
+      }
+      return;
+    }
+    logger.info({ ...context, finalPath }, 'ytstream: deleted finalized .ts - its .mp4 remux exists and no active session references it');
+  });
+}
+
+/**
  * ytstream.finalizeToMp4: called after finalizeTapOutput (hls-tap/hls-buffer/
  * raw-buffer) successfully lands a session's permanent output file. Fires a
  * background (never awaited by any caller) tsRemuxCache.ensureSeekableMp4
@@ -1787,16 +1844,21 @@ async function tryServeCachedVideoFile(req, res, filePath) {
  * real playback/probe of it already finds the .mp4 via
  * tryServeCachedVideoFile's own findExistingSeekableMp4 check instead of
  * paying the remux cost live. No-op (and no ffmpeg run at all) unless the
- * config option is on and the file is actually .ts.
+ * config option is on and the file is actually .ts. Once the remux
+ * succeeds, also tries to reclaim the now-redundant .ts (see
+ * trySafeDeleteFinalizedTs) - safe to skip if something's still using it;
+ * destroyHlsSession retries this once that session ends.
  */
 function maybeFinalizeTsToMp4(youtubeId, finalPath, sourceLabel) {
   try {
     if ((configModule.getConfig().ytstream || {}).finalizeToMp4 !== true) return;
     if (!finalPath || path.extname(finalPath).toLowerCase() !== '.ts') return;
+    logger.debug({ youtubeId, finalPath, sourceLabel }, 'ytstream: starting background .ts -> .mp4 finalize');
     require('../modules/tsRemuxCache').ensureSeekableMp4(finalPath)
       .then((mp4Path) => {
         if (mp4Path) {
           logger.info({ youtubeId, finalPath, mp4Path, sourceLabel }, 'ytstream: finalized .ts remuxed to .mp4 for direct playback');
+          trySafeDeleteFinalizedTs(finalPath, { youtubeId, sourceLabel });
         }
       })
       .catch((err) => logger.warn({ err, youtubeId, finalPath, sourceLabel }, 'ytstream: post-finalize .ts -> .mp4 remux failed'));
@@ -2893,6 +2955,17 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
     session.ytAudio = ytAudio;
     session.ff = ff;
 
+    logger.info(
+      {
+        sessionKey, youtubeId, passGeneration: myGeneration,
+        isBackfillPass: isBackfillPass === true, isInitialPass: isInitialPass === true,
+        startSegmentIndex, effectiveSeek,
+        hardwareMode: hw, tuning: tier,
+        sourceType: isLocalSource ? 'local' : isDirectSource ? 'direct-url' : (useSectionedPipe ? 'sectioned-pipe' : 'network'),
+      },
+      `ytstream: starting ${isBackfillPass ? 'backfill' : 'HLS'} encode pass at segment ${startSegmentIndex}`
+    );
+
     let ytVideoErr = '';
     let ytAudioErr = '';
     let ffErr = '';
@@ -3098,6 +3171,13 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
       );
       if (!isCurrentPass()) return;
       if (code !== 0 && code !== null && !isKilledByUs(signal)) {
+        // Mirrors the clean-finish branch's own reset below - without it, a
+        // backfill pass that crashes (rather than reaching a clean EOF)
+        // leaves this stuck true forever: the UI shows "backfilling segment
+        // N" frozen at whatever it last reached, and maybeBackfillMissingSegments's
+        // own backfillInProgress guard permanently blocks every future retry,
+        // even ones triggered by a later, unrelated pass finishing cleanly.
+        session.backfillInProgress = false;
         logger.error({ sessionKey, code, signal, ffErr: ffErr.slice(-800) }, 'ytstream: HLS ffmpeg exited non-zero');
         if (maybeFallbackFromInfoJson('ffmpeg-exit', ffErr || `ffmpeg exited with code ${code}`)) return;
         if (maybeFallbackToPipe('ffmpeg-exit', ffErr || `ffmpeg exited with code ${code}`)) return;
@@ -3123,7 +3203,10 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
         // pass that could fill them.
         session.encodeEnded = true;
         session.backfillInProgress = false;
-        logger.debug({ sessionKey, totalSegments: session.totalSegments }, 'ytstream: HLS encode pass finished cleanly');
+        logger.info(
+          { sessionKey, totalSegments: session.totalSegments, passGeneration: myGeneration, wasBackfillPass: isBackfillPass === true },
+          `ytstream: ${isBackfillPass ? 'backfill' : 'HLS'} encode pass finished cleanly`
+        );
         maybeBackfillMissingSegments(session);
       }
     });
@@ -3156,14 +3239,30 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
    */
   function maybeBackfillMissingSegments(session) {
     try {
-      if ((configModule.getConfig().ytstream || {}).backfillMissingSegments !== true) return;
-      if (session.destroying || session.backfillInProgress) return;
-      if (!(session.usingCachedSource && session.cachedFilePath)) return;
+      const sessionKey = session.key;
+      if ((configModule.getConfig().ytstream || {}).backfillMissingSegments !== true) {
+        logger.debug({ sessionKey }, 'ytstream: backfillMissingSegments - skipped, setting is off');
+        return;
+      }
+      if (session.destroying || session.backfillInProgress) {
+        logger.debug({ sessionKey, destroying: session.destroying === true, backfillInProgress: session.backfillInProgress === true }, 'ytstream: backfillMissingSegments - skipped, session destroying or a backfill already in progress');
+        return;
+      }
+      if (!(session.usingCachedSource && session.cachedFilePath)) {
+        logger.debug({ sessionKey, usingCachedSource: session.usingCachedSource === true }, 'ytstream: backfillMissingSegments - skipped, no local cached source available yet for this session');
+        return;
+      }
 
       const status = computeSegmentStatus(session);
-      if (!status) return;
+      if (!status) {
+        logger.debug({ sessionKey }, 'ytstream: backfillMissingSegments - skipped, could not compute segment status (session directory unreadable?)');
+        return;
+      }
       const gapIndex = status.encoded.indexOf(false);
-      if (gapIndex === -1) return; // nothing missing below the true final segment count
+      if (gapIndex === -1) {
+        logger.debug({ sessionKey, totalSegments: status.totalSegments }, 'ytstream: backfillMissingSegments - no gaps found, every segment already encoded');
+        return;
+      }
 
       logger.info(
         { sessionKey: session.key, youtubeId: session.youtubeId, gapIndex, totalSegments: status.totalSegments },
@@ -6513,10 +6612,14 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
         // entirely - this is the only place left that can flag it, by
         // comparing consecutive REQUESTS within one session regardless of
         // whether a restart happened. See [[ytstream_raw_buffer_and_segment_bug]].
+        // Debug, not warn - jumping straight to an already-encoded segment
+        // (an instant local seek, e.g. into buffered/cached content) is the
+        // whole point of instant-start/hot-swap/backfill working correctly,
+        // not a problem to flag.
         if (segmentIndex !== null) {
           const lastIndex = session.lastServedSegmentIndex;
           if (typeof lastIndex === 'number' && segmentIndex !== lastIndex + 1) {
-            logger.warn(
+            logger.debug(
               {
                 sessionKey,
                 youtubeId: session.youtubeId,
@@ -6574,3 +6677,4 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
 }
 
 module.exports = createYtStreamRoutes;
+                      

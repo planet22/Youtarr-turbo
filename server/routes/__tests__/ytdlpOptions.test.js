@@ -9,9 +9,13 @@ jest.mock('../../modules/streamTuningBenchmark', () => ({
   runBenchmark: jest.fn(),
   isBenchmarkRunning: jest.fn().mockReturnValue(false),
 }));
+jest.mock('../../modules/hardwareCapabilityTester', () => ({
+  testAllCapabilities: jest.fn(),
+}));
 
 const ytdlpValidator = require('../../modules/download/ytdlpValidator');
 const streamTuningBenchmark = require('../../modules/streamTuningBenchmark');
+const hardwareCapabilityTester = require('../../modules/hardwareCapabilityTester');
 const createYtdlpOptionsRoutes = require('../ytdlpOptions');
 
 function makeApp({ verifyToken } = {}) {
@@ -96,6 +100,38 @@ describe('POST /api/ytdlp/validate-args', () => {
   });
 });
 
+describe('POST /api/ytdlp/test-hardware-capabilities', () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  test('returns 401 when verifyToken rejects', async () => {
+    const app = makeApp({
+      verifyToken: (_req, res) => res.status(401).json({ error: 'unauthorized' }),
+    });
+    const res = await supertest(app).post('/api/ytdlp/test-hardware-capabilities').send({});
+    expect(res.status).toBe(401);
+    expect(hardwareCapabilityTester.testAllCapabilities).not.toHaveBeenCalled();
+  });
+
+  test('returns 200 with both the encode matrix and the decode matrix', async () => {
+    const matrix = { none: { h264: { ok: true } } };
+    const decodeMatrix = { none: { h264: { ok: true } }, vaapi: { vp9: { ok: false, error: 'no device' } } };
+    hardwareCapabilityTester.testAllCapabilities.mockResolvedValueOnce({ matrix, decodeMatrix });
+
+    const app = makeApp();
+    const res = await supertest(app).post('/api/ytdlp/test-hardware-capabilities').send({});
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ ok: true, matrix, decodeMatrix });
+  });
+
+  test('returns 500 with an error message when the test throws', async () => {
+    hardwareCapabilityTester.testAllCapabilities.mockRejectedValueOnce(new Error('ffmpeg not found'));
+    const app = makeApp();
+    const res = await supertest(app).post('/api/ytdlp/test-hardware-capabilities').send({});
+    expect(res.status).toBe(500);
+    expect(res.body).toEqual({ ok: false, error: 'ffmpeg not found' });
+  });
+});
+
 describe('POST /api/ytdlp/test-tuning-benchmark', () => {
   beforeEach(() => jest.clearAllMocks());
 
@@ -130,13 +166,63 @@ describe('POST /api/ytdlp/test-tuning-benchmark', () => {
   test('returns 200 with the matrix and recommendation map, scoped to the requested hardwareMode', async () => {
     const matrix = { 1080: { fast: { ok: true, realtime: true } } };
     const recommended = { 1080: 'fast' };
-    streamTuningBenchmark.runBenchmark.mockResolvedValueOnce({ matrix, recommended });
+    streamTuningBenchmark.runBenchmark.mockResolvedValueOnce({
+      matrix, recommended, decodeMode: 'none', sourceCodec: null, videoCodec: 'h264', decodeSourceHeight: 2160,
+    });
 
     const app = makeApp();
     const res = await supertest(app).post('/api/ytdlp/test-tuning-benchmark').send({ hardwareMode: 'qsv' });
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ ok: true, hardwareMode: 'qsv', matrix, recommended });
-    expect(streamTuningBenchmark.runBenchmark).toHaveBeenCalledWith('qsv', [480, 720, 1080, 1440, 2160], { vaapiQuality: null });
+    expect(res.body).toEqual({
+      ok: true, hardwareMode: 'qsv', matrix, recommended, vaapiQuality: null,
+      decodeMode: 'none', sourceCodec: null, videoCodec: 'h264', decodeSourceHeight: 2160,
+    });
+    expect(streamTuningBenchmark.runBenchmark).toHaveBeenCalledWith('qsv', [480, 720, 1080, 1440, 2160], {
+      vaapiQuality: null, decodeMode: 'none', sourceCodec: 'h264', videoCodec: 'h264', decodeSourceHeight: null,
+    });
+  });
+
+  test('returns 400 when decodeMode is present but invalid', async () => {
+    const app = makeApp();
+    const res = await supertest(app).post('/api/ytdlp/test-tuning-benchmark').send({ hardwareMode: 'none', decodeMode: 'amf' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/decodeMode/);
+    expect(streamTuningBenchmark.runBenchmark).not.toHaveBeenCalled();
+  });
+
+  test('returns 400 when videoCodec is present but invalid', async () => {
+    const app = makeApp();
+    const res = await supertest(app).post('/api/ytdlp/test-tuning-benchmark').send({ hardwareMode: 'none', videoCodec: 'vp9' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/videoCodec/);
+    expect(streamTuningBenchmark.runBenchmark).not.toHaveBeenCalled();
+  });
+
+  test('returns 400 when decodeSourceHeight is present but not one of the tested resolutions', async () => {
+    const app = makeApp();
+    const res = await supertest(app).post('/api/ytdlp/test-tuning-benchmark').send({ hardwareMode: 'none', decodeSourceHeight: 900 });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/decodeSourceHeight/);
+    expect(streamTuningBenchmark.runBenchmark).not.toHaveBeenCalled();
+  });
+
+  test('passes decodeMode/sourceCodec/videoCodec/decodeSourceHeight through to runBenchmark, echoing them back in the response', async () => {
+    const matrix = { 1080: { fast: { ok: true, realtime: true } } };
+    const recommended = { 1080: 'fast' };
+    streamTuningBenchmark.runBenchmark.mockResolvedValueOnce({
+      matrix, recommended, decodeMode: 'vaapi', sourceCodec: 'vp9', videoCodec: 'hevc', decodeSourceHeight: 1080,
+    });
+
+    const app = makeApp();
+    const res = await supertest(app)
+      .post('/api/ytdlp/test-tuning-benchmark')
+      .send({ hardwareMode: 'none', decodeMode: 'vaapi', sourceCodec: 'vp9', videoCodec: 'hevc', decodeSourceHeight: 1080 });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual(expect.objectContaining({ decodeMode: 'vaapi', sourceCodec: 'vp9', videoCodec: 'hevc', decodeSourceHeight: 1080 }));
+    expect(streamTuningBenchmark.runBenchmark).toHaveBeenCalledWith('none', [480, 720, 1080, 1440, 2160], {
+      vaapiQuality: null, decodeMode: 'vaapi', sourceCodec: 'vp9', videoCodec: 'hevc', decodeSourceHeight: 1080,
+    });
   });
 
   test('returns 500 with an error message when the benchmark throws', async () => {

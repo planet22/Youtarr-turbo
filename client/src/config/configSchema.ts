@@ -191,6 +191,16 @@ export const CONFIG_FIELDS = {
       qualityStrictness: 'fallback' as 'fixed' | 'fallback' | 'best',
       // Hardware encoder for transcode=h264 (plugin ManagedTranscodeHardwareModes)
       hardwareMode: 'none' as 'none' | 'qsv' | 'nvenc' | 'vaapi' | 'amf',
+      // Hardware DECODE backend (server/modules/hardwareDecodeModule.js) -
+      // fully independent of hardwareMode (encode) above; every combination
+      // (including mismatched ones, e.g. software encode + hardware decode)
+      // is valid and measured exactly as configured by the tuning benchmark.
+      // No 'amf' option here - AMD GPU decode acceleration in ffmpeg is a
+      // Windows/D3D11 API; on this app's actual Linux runtime, AMD decode
+      // goes through VAAPI instead, so a separate "amf" option would just be
+      // a confusing alias for 'vaapi'. 'none' (default, unchanged behavior)
+      // decodes the source in software, same as before this setting existed.
+      hardwareDecodeMode: 'none' as 'none' | 'qsv' | 'nvenc' | 'vaapi',
       // Encode tuning tier for transcode=h264 (server/modules/streamEncoderTuning.js).
       // 'fast' matches this app's long-standing defaults (safest for real-time
       // HLS/live-pipe streaming); 'balanced'/'quality' trade encode speed for

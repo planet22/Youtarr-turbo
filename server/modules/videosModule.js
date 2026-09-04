@@ -626,10 +626,22 @@ class VideosModule {
           // which stops failed rows from being re-probed every night (the
           // file may sit on a network share); a later re-download re-stamps
           // at download time regardless.
+          //
+          // .strm is in VIDEO_EXTENSIONS (scanForVideoFiles treats it as this
+          // video's "file" for STRM-library entries), but its contents are
+          // just a URL pointer, never real media bytes - ffprobing one is
+          // guaranteed to fail every time ("Invalid data found when
+          // processing input"), so skip straight to the same "0x0"
+          // undeterminable marker other unprobeable files get, instead of
+          // wasting a subprocess spawn on a call that can never succeed.
           const probeResults = new Map();
           await Promise.all(slice.map((video) => {
             const fileInfo = fileMap.get(video.youtubeId);
             if (!fileInfo || !fileInfo.videoFilePath || video.video_resolution != null) {
+              return null;
+            }
+            if (path.extname(fileInfo.videoFilePath).toLowerCase() === '.strm') {
+              probeResults.set(video.youtubeId, '0x0');
               return null;
             }
             return probeLimit(async () => {

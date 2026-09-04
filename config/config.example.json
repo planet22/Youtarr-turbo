@@ -114,6 +114,7 @@
         "quality": null,
         "qualityStrictness": "fallback",
         "hardwareMode": "none",
+        "hardwareDecodeMode": "none",
         "tuning": "fast",
         "vaapiQuality": null,
         "playerClient": "",

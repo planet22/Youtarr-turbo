@@ -53,6 +53,7 @@ export const DEFAULT_YTSTREAM: YtstreamConfig = {
   quality: null,
   qualityStrictness: 'fallback',
   hardwareMode: 'none',
+  hardwareDecodeMode: 'none',
   tuning: 'fast',
   vaapiQuality: null,
   playerClient: '',
@@ -98,13 +99,17 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
   token,
 }) => {
   const ytstream = config.ytstream || DEFAULT_YTSTREAM;
-  const { testing: testingHardware, matrix: hardwareMatrix, error: hardwareTestError, runTest: runHardwareTest } = useHardwareCapabilities(token);
+  const { testing: testingHardware, matrix: hardwareMatrix, decodeMatrix: hardwareDecodeMatrix, error: hardwareTestError, runTest: runHardwareTest } = useHardwareCapabilities(token);
   const {
     testing: testingTuning,
     progress: tuningProgress,
     matrix: tuningMatrix,
     recommended: tuningRecommended,
     resultHardwareMode: tuningResultHardwareMode,
+    resultDecodeMode: tuningResultDecodeMode,
+    resultSourceCodec: tuningResultSourceCodec,
+    resultVideoCodec: tuningResultVideoCodec,
+    resultDecodeSourceHeight: tuningResultDecodeSourceHeight,
     history: tuningHistory,
     error: tuningTestError,
     runBenchmark: runTuningBenchmark,
@@ -360,8 +365,10 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
         </FormControl>
       </Grid>
 
-      {/* Row 2 - how the encode pipeline behaves: transcode method, hardware,
-          tuning, and calculated-length's seek/duration behavior. */}
+      {/* Row 2 - transcode method and calculated-length's seek/duration
+          behavior. Hardware encoder/decode and Encoding tuning live down in
+          Performance Optimizations below, alongside VAAPI compression
+          level - one place for every hardware-related dial. */}
       {modeCompat.transcode?.status !== 'ignored' && (
         <Grid item xs={12} sm={6} md={3}>
           <FormControl fullWidth style={forced ? forcedFieldStyle : undefined}>
@@ -382,81 +389,6 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
               </Select>
               <InfoTooltip
                 text="Auto follows your download Video codec setting above (H.264/H.265 forces re-encode, otherwise behaves like Copy). Copy never re-encodes - fast, but whatever codec YouTube served isn't guaranteed compatible. H.264 always re-encodes for compatibility and is required for hardware acceleration below."
-                onMobileClick={onMobileTooltipClick}
-              />
-            </Box>
-          </FormControl>
-        </Grid>
-      )}
-
-      {modeCompat.hardwareMode?.status !== 'ignored' && (
-        <Grid item xs={12} sm={6} md={3}>
-          {/* No forcedFieldStyle: hardwareMode is never written into a
-              .strm's URL (strmGenerator.js only emits mode/quality/
-              container/transcode/calculatedLength) - Settings always
-              decides this regardless of Force these settings. */}
-          <FormControl fullWidth>
-            <InputLabel>Hardware encoder</InputLabel>
-            <Box className="flex items-center gap-1">
-              <Select
-                value={ytstream.hardwareMode || 'none'}
-                label="Hardware encoder"
-                onChange={(e: SelectChangeEvent<string>) =>
-                  setYtstream({
-                    hardwareMode: e.target.value as 'none' | 'qsv' | 'nvenc' | 'vaapi' | 'amf',
-                  })
-                }
-                className="flex-1 min-w-0"
-                disabled={disabled || modeCompat.hardwareMode?.status !== 'optional'}
-              >
-                <MenuItem value="none">None (software libx264)</MenuItem>
-                <MenuItem value="qsv">Intel Quick Sync (h264_qsv)</MenuItem>
-                <MenuItem value="nvenc">NVIDIA NVENC (h264_nvenc)</MenuItem>
-                <MenuItem value="vaapi">VAAPI (h264_vaapi)</MenuItem>
-                <MenuItem value="amf">AMD AMF (h264_amf)</MenuItem>
-              </Select>
-              <InfoTooltip
-                text="Used only when Playback mode is Enhanced and Transcode is H.264. Requires the matching ffmpeg build and GPU drivers on the Youtarr host (and device passthrough in Docker)."
-                onMobileClick={onMobileTooltipClick}
-              />
-            </Box>
-          </FormControl>
-        </Grid>
-      )}
-
-      {modeCompat.tuning?.status !== 'ignored' && (
-        <Grid item xs={12} sm={6} md={3}>
-          {/* No forcedFieldStyle: tuning is never written into a .strm's
-              URL either - same reasoning as Hardware encoder above. */}
-          <FormControl fullWidth>
-            <InputLabel>Encoding tuning</InputLabel>
-            <Box className="flex items-center gap-1">
-              <Select
-                value={ytstream.tuning || 'fast'}
-                label="Encoding tuning"
-                onChange={(e: SelectChangeEvent<string>) =>
-                  setYtstream({ tuning: e.target.value as 'fast' | 'balanced' | 'quality' })
-                }
-                className="flex-1 min-w-0"
-                disabled={disabled || modeCompat.tuning?.status !== 'optional'}
-              >
-                {[
-                  { value: 'fast', label: 'Fast (real-time safe)' },
-                  { value: 'balanced', label: 'Balanced' },
-                  { value: 'quality', label: 'Quality' },
-                ].map((opt) => (
-                  <MenuItem key={opt.value} value={opt.value}>
-                    <Box className="flex items-center gap-1 justify-between w-full">
-                      <span>{opt.label}</span>
-                      {recommendedTierForCurrentQuality === opt.value && (
-                        <Chip label="Recommended" size="small" color="success" />
-                      )}
-                    </Box>
-                  </MenuItem>
-                ))}
-              </Select>
-              <InfoTooltip
-                text="Trades encode speed for picture quality at a given resolution/hardware encoder. 'Fast' is the safest choice for real-time streaming; 'Balanced'/'Quality' can fall behind on weaker hardware at higher resolutions. Run 'Test real-time tuning' below to see which tier is actually safe on this host."
                 onMobileClick={onMobileTooltipClick}
               />
             </Box>
@@ -525,14 +457,117 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
       </Grid>
 
       {/* Calculated length lives up in the forced-settings grid above,
-          alongside Transcode/Hardware encoder/Encoding tuning - part of the
-          same "how the encode pipeline behaves" group, not a performance
-          optimization proper. Instant start / Cache on play / Hot-swap to
-          cached file / Revert-to-STRM live here (moved from
+          alongside Transcode - part of the same "how the encode pipeline
+          behaves" group, not a performance optimization proper. Hardware
+          encoder/decode, Encoding tuning, and VAAPI compression level all
+          live here together - one place for every hardware-related dial,
+          none of which are ever written into a .strm's URL (so none get
+          forcedFieldStyle - Settings always decides these regardless of
+          Force these settings). Instant start / Cache on play / Hot-swap to
+          cached file / Revert-to-STRM also live here (moved from
           StrmSettingsSection's own "File Output" section) so every
           mode-gated field's visibility changes in one place on the page
           instead of two disconnected ones - see modeCompat's own comment
           above for why. */}
+
+      {modeCompat.hardwareMode?.status !== 'ignored' && (
+        <Grid item xs={12} sm={6} md={4}>
+          <FormControl fullWidth>
+            <InputLabel>Hardware encoder</InputLabel>
+            <Box className="flex items-center gap-1">
+              <Select
+                value={ytstream.hardwareMode || 'none'}
+                label="Hardware encoder"
+                onChange={(e: SelectChangeEvent<string>) =>
+                  setYtstream({
+                    hardwareMode: e.target.value as 'none' | 'qsv' | 'nvenc' | 'vaapi' | 'amf',
+                  })
+                }
+                className="flex-1 min-w-0"
+                disabled={disabled || modeCompat.hardwareMode?.status !== 'optional'}
+              >
+                <MenuItem value="none">Software (libx264)</MenuItem>
+                <MenuItem value="qsv">Intel Quick Sync (h264_qsv)</MenuItem>
+                <MenuItem value="nvenc">NVIDIA NVENC (h264_nvenc)</MenuItem>
+                <MenuItem value="vaapi">VAAPI (h264_vaapi)</MenuItem>
+                <MenuItem value="amf">AMD AMF (h264_amf)</MenuItem>
+              </Select>
+              <InfoTooltip
+                text="Used only when Playback mode is Enhanced and Transcode is H.264. Requires the matching ffmpeg build and GPU drivers on the Youtarr host (and device passthrough in Docker)."
+                onMobileClick={onMobileTooltipClick}
+              />
+            </Box>
+          </FormControl>
+        </Grid>
+      )}
+
+      {modeCompat.hardwareMode?.status !== 'ignored' && (
+        <Grid item xs={12} sm={6} md={4}>
+          <FormControl fullWidth>
+            <InputLabel>Hardware decode</InputLabel>
+            <Box className="flex items-center gap-1">
+              <Select
+                value={ytstream.hardwareDecodeMode || 'none'}
+                label="Hardware decode"
+                onChange={(e: SelectChangeEvent<string>) =>
+                  setYtstream({
+                    hardwareDecodeMode: e.target.value as 'none' | 'qsv' | 'nvenc' | 'vaapi',
+                  })
+                }
+                className="flex-1 min-w-0"
+                disabled={disabled}
+              >
+                <MenuItem value="none">Software</MenuItem>
+                <MenuItem value="qsv">Intel Quick Sync</MenuItem>
+                <MenuItem value="nvenc">NVIDIA NVDEC</MenuItem>
+                <MenuItem value="vaapi">VAAPI</MenuItem>
+              </Select>
+              <InfoTooltip
+                text="Independent of Hardware encoder above - any combination is valid (e.g. software encode + hardware decode). Decodes the source video (often VP9/AV1 from YouTube) on the GPU instead of the CPU, before scaling/encoding proceed exactly as before. No 'AMD AMF' option here - AMD decode acceleration on this app's Linux runtime goes through VAAPI instead of a separate API. Test with 'Test real-time tuning' below (Simulate source codec) to see real decode+encode timing on this host."
+                onMobileClick={onMobileTooltipClick}
+              />
+            </Box>
+          </FormControl>
+        </Grid>
+      )}
+
+      {modeCompat.tuning?.status !== 'ignored' && (
+        <Grid item xs={12} sm={6} md={4}>
+          <FormControl fullWidth>
+            <InputLabel>Encoding tuning</InputLabel>
+            <Box className="flex items-center gap-1">
+              <Select
+                value={ytstream.tuning || 'fast'}
+                label="Encoding tuning"
+                onChange={(e: SelectChangeEvent<string>) =>
+                  setYtstream({ tuning: e.target.value as 'fast' | 'balanced' | 'quality' })
+                }
+                className="flex-1 min-w-0"
+                disabled={disabled || modeCompat.tuning?.status !== 'optional'}
+              >
+                {[
+                  { value: 'fast', label: 'Fast (real-time safe)' },
+                  { value: 'balanced', label: 'Balanced' },
+                  { value: 'quality', label: 'Quality' },
+                ].map((opt) => (
+                  <MenuItem key={opt.value} value={opt.value}>
+                    <Box className="flex items-center gap-1 justify-between w-full">
+                      <span>{opt.label}</span>
+                      {recommendedTierForCurrentQuality === opt.value && (
+                        <Chip label="Recommended" size="small" color="success" />
+                      )}
+                    </Box>
+                  </MenuItem>
+                ))}
+              </Select>
+              <InfoTooltip
+                text="Trades encode speed for picture quality at a given resolution/hardware encoder. 'Fast' is the safest choice for real-time streaming; 'Balanced'/'Quality' can fall behind on weaker hardware at higher resolutions. Run 'Test real-time tuning' below to see which tier is actually safe on this host."
+                onMobileClick={onMobileTooltipClick}
+              />
+            </Box>
+          </FormControl>
+        </Grid>
+      )}
 
       {currentHardwareMode === 'vaapi' && (
         <Grid item xs={12} sm={6} md={4}>
@@ -715,6 +750,7 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
       <Grid item xs={12}>
         <HardwareTestingAccordion
           matrix={hardwareMatrix}
+          decodeMatrix={hardwareDecodeMatrix}
           testing={testingHardware}
           error={hardwareTestError}
           onRunTest={runHardwareTest}
@@ -726,7 +762,7 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
         <Accordion style={{ border: 'var(--border-weight) solid var(--border)', borderRadius: 'var(--radius-ui)' }}>
           <AccordionSummary>
             <Typography variant="subtitle2" style={{ fontWeight: 700 }}>
-              Encoding Tuning
+              Encoding &amp; Decoding Tuning
             </Typography>
           </AccordionSummary>
           <AccordionDetails>
@@ -734,13 +770,18 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
               <Grid item xs={12}>
                 <TuningBenchmarkTable
                   hardwareMode={currentHardwareMode}
+                  decodeMode={ytstream.hardwareDecodeMode || 'none'}
                   matrix={tuningMatrix}
                   recommended={tuningRecommended}
                   resultHardwareMode={tuningResultHardwareMode}
+                  resultDecodeMode={tuningResultDecodeMode}
+                  resultSourceCodec={tuningResultSourceCodec}
+                  resultVideoCodec={tuningResultVideoCodec}
+                  resultDecodeSourceHeight={tuningResultDecodeSourceHeight}
                   progress={tuningProgress}
                   testing={testingTuning}
                   error={tuningTestError}
-                  onRunTest={() => runTuningBenchmark(currentHardwareMode, ytstream.vaapiQuality)}
+                  onRunTest={(sourceCodec, videoCodec, decodeSourceHeight) => runTuningBenchmark(currentHardwareMode, ytstream.vaapiQuality, ytstream.hardwareDecodeMode || 'none', sourceCodec, videoCodec, decodeSourceHeight)}
                   disabledReason={tuningTestDisabledReason}
                   onMobileTooltipClick={onMobileTooltipClick}
                 />

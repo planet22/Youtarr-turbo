@@ -43,7 +43,7 @@ export const YtdlpOptionsSection: React.FC<YtdlpOptionsSectionProps> = ({
 }) => {
   const [proxyError, setProxyError] = useState<string | null>(null);
   const [rateLimitError, setRateLimitError] = useState<string | null>(null);
-  const { testing: testingHardware, matrix: hardwareMatrix, error: hardwareTestError, runTest: runHardwareTest } = useHardwareCapabilities(token);
+  const { testing: testingHardware, matrix: hardwareMatrix, decodeMatrix: hardwareDecodeMatrix, error: hardwareTestError, runTest: runHardwareTest } = useHardwareCapabilities(token);
 
   const handleProxyChange = useCallback((value: string) => {
     onConfigChange({ proxy: value });
@@ -228,7 +228,7 @@ export const YtdlpOptionsSection: React.FC<YtdlpOptionsSectionProps> = ({
                 className='flex-1 min-w-0'
                 disabled={(config.downloadTranscodeVideoCodec || 'off') === 'off'}
               >
-                <MenuItem value='none'>None (software)</MenuItem>
+                <MenuItem value='none'>Software</MenuItem>
                 <MenuItem value='qsv'>Intel Quick Sync</MenuItem>
                 <MenuItem value='nvenc'>NVIDIA NVENC</MenuItem>
                 <MenuItem value='vaapi'>VAAPI</MenuItem>
@@ -272,6 +272,7 @@ export const YtdlpOptionsSection: React.FC<YtdlpOptionsSectionProps> = ({
         <Grid item xs={12}>
           <HardwareTestingAccordion
             matrix={hardwareMatrix}
+            decodeMatrix={hardwareDecodeMatrix}
             testing={testingHardware}
             error={hardwareTestError}
             onRunTest={runHardwareTest}

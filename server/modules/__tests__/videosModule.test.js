@@ -1086,6 +1086,40 @@ describe('VideosModule', () => {
       expect(options.replacements).toEqual(['/test/output/dir/Video [abc12345678].mp4', 1000, '0x0', 0, 1]);
     });
 
+    test('skips ffprobe entirely for .strm files and stamps the 0x0 sentinel directly', async () => {
+      // .strm is a URL pointer, never real media bytes - ffprobing it can
+      // never succeed, so this should never even spawn the subprocess.
+      mockFs.readdir.mockResolvedValueOnce([
+        { name: 'Video [abc12345678].strm', isDirectory: () => false, isFile: () => true }
+      ]);
+      mockFs.stat.mockResolvedValueOnce({ size: 200 });
+
+      mockVideo.count.mockResolvedValueOnce(1);
+      mockVideo.findAll.mockResolvedValueOnce([
+        {
+          id: 1,
+          youtubeId: 'abc12345678',
+          filePath: '/test/output/dir/Video [abc12345678].strm',
+          fileSize: '200',
+          audioFilePath: null,
+          audioFileSize: null,
+          removed: false,
+          video_resolution: null
+        }
+      ]);
+      mockSequelize.query.mockResolvedValue([]);
+
+      await VideosModule.backfillVideoMetadata();
+
+      expect(mockExecFile).not.toHaveBeenCalled();
+      const updateCalls = mockSequelize.query.mock.calls.filter(
+        ([sql]) => typeof sql === 'string' && sql.startsWith('UPDATE Videos SET')
+      );
+      expect(updateCalls.length).toBe(1);
+      const [, options] = updateCalls[0];
+      expect(options.replacements).toEqual(['/test/output/dir/Video [abc12345678].strm', 200, '0x0', 0, 1]);
+    });
+
     test('clears video_resolution when the video file is gone but audio remains', async () => {
       mockFs.readdir.mockResolvedValueOnce([
         { name: 'Video [abc12345678].mp3', isDirectory: () => false, isFile: () => true }

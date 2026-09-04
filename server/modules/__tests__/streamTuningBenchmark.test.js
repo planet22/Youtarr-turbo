@@ -5,19 +5,29 @@ jest.mock('child_process');
 jest.mock('../configModule', () => ({ ffmpegPath: 'ffmpeg' }));
 jest.mock('../messageEmitter', () => ({ emitMessage: jest.fn() }));
 jest.mock('../../logger');
+jest.mock('../hardwareCapabilityTester', () => ({
+  generateDecodeSample: jest.fn(),
+  // Real implementations (no ffmpeg/child_process involvement - pure string
+  // logic) so runTimedFfmpegEncode's error-path tests exercise the same
+  // stderr summarization/signal-description production code actually runs,
+  // instead of a stub.
+  summarizeStderr: jest.requireActual('../hardwareCapabilityTester').summarizeStderr,
+  describeExitSignal: jest.requireActual('../hardwareCapabilityTester').describeExitSignal,
+}));
 
 const { spawn } = require('child_process');
 const messageEmitter = require('../messageEmitter');
 const logger = require('../../logger');
+const hardwareCapabilityTester = require('../hardwareCapabilityTester');
 const streamTuningBenchmark = require('../streamTuningBenchmark');
 
-/** Builds a fake child process that resolves after `ms` with the given exit code. */
-function fakeProc({ ms = 0, code = 0, stderrText } = {}) {
+/** Builds a fake child process that resolves after `ms` with the given exit code/signal. */
+function fakeProc({ ms = 0, code = 0, signal = null, stderrText } = {}) {
   const proc = new EventEmitter();
   proc.stderr = new EventEmitter();
   setTimeout(() => {
     if (stderrText) proc.stderr.emit('data', Buffer.from(stderrText));
-    proc.emit('close', code);
+    proc.emit('close', code, signal);
   }, ms);
   return proc;
 }
@@ -55,6 +65,16 @@ describe('benchmarkOne', () => {
     expect(result.error).toContain('Device creation failed');
   });
 
+  test('a process killed by a signal (e.g. OOM-killed) says so up front, even when stderr alone looks benign', async () => {
+    spawn.mockImplementation(() => fakeProc({
+      ms: 5, code: null, signal: 'SIGKILL', stderrText: 'Svt[info]: SVT [config]: preset / tune / pred struct: 10 / PSNR / random access',
+    }));
+    const result = await streamTuningBenchmark.benchmarkOne('none', 'fast', 2160, TEST_DURATION_SECONDS);
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('killed by signal SIGKILL');
+    expect(result.error).toContain('out of memory');
+  });
+
   test('reports ok:false when spawn itself errors (e.g. ffmpeg not on PATH)', async () => {
     spawn.mockImplementation(() => {
       const proc = new EventEmitter();
@@ -75,10 +95,54 @@ describe('benchmarkOne', () => {
     await streamTuningBenchmark.benchmarkOne('none', 'quality', 1080, TEST_DURATION_SECONDS);
     expect(spawn).toHaveBeenCalledTimes(1);
   });
+
+  test('decodeMode "none" with no sourceSamplePath keeps the synthetic lavfi source (test-only path)', async () => {
+    spawn.mockImplementation((_bin, args) => {
+      expect(args).toEqual(expect.arrayContaining(['-f', 'lavfi']));
+      expect(args).not.toContain('-hwaccel');
+      return fakeProc({ ms: 1, code: 0 });
+    });
+    await streamTuningBenchmark.benchmarkOne('none', 'fast', 1080, TEST_DURATION_SECONDS);
+  });
+
+  test('decodeMode "none" with a real sourceSamplePath decodes it in software (real file input, no -hwaccel flags)', async () => {
+    spawn.mockImplementation((_bin, args) => {
+      expect(args).toEqual(expect.arrayContaining(['-i', '/tmp/sample.mp4']));
+      expect(args).not.toContain('-hwaccel');
+      expect(args).not.toContain('lavfi');
+      return fakeProc({ ms: 1, code: 0 });
+    });
+    await streamTuningBenchmark.benchmarkOne('none', 'fast', 1080, TEST_DURATION_SECONDS, null, 'none', '/tmp/sample.mp4');
+  });
+
+  test('a real decodeMode + sourceSamplePath feeds the real file as input with -hwaccel prepended, instead of the synthetic source', async () => {
+    spawn.mockImplementation((_bin, args) => {
+      expect(args).toEqual(expect.arrayContaining(['-hwaccel', 'vaapi', '-hwaccel_device', '/dev/dri/renderD128', '-i', '/tmp/sample.mp4']));
+      expect(args).not.toContain('lavfi');
+      return fakeProc({ ms: 1, code: 0 });
+    });
+    await streamTuningBenchmark.benchmarkOne('none', 'fast', 1080, TEST_DURATION_SECONDS, null, 'vaapi', '/tmp/sample.mp4');
+  });
+
+  test('a decodeMode without a sourceSamplePath falls back to the synthetic source (nothing to decode)', async () => {
+    spawn.mockImplementation((_bin, args) => {
+      expect(args).toEqual(expect.arrayContaining(['-f', 'lavfi']));
+      return fakeProc({ ms: 1, code: 0 });
+    });
+    await streamTuningBenchmark.benchmarkOne('none', 'fast', 1080, TEST_DURATION_SECONDS, null, 'vaapi', null);
+  });
 });
 
 describe('runBenchmark', () => {
-  beforeEach(() => jest.clearAllMocks());
+  beforeEach(() => {
+    jest.clearAllMocks();
+    // clearAllMocks doesn't reset a mockResolvedValue set by an earlier
+    // test in this block (that needs mockReset, not mockClear) - default
+    // back to "no real sample" every test so only the tests that
+    // deliberately opt in (via their own mockResolvedValue) exercise the
+    // real-decode-input branch of benchmarkOne.
+    hardwareCapabilityTester.generateDecodeSample.mockResolvedValue(undefined);
+  });
 
   test('scopes the matrix/recommended to just the given hardwareMode (height-keyed only)', async () => {
     spawn.mockImplementation(() => fakeProc({ ms: 1, code: 0 }));
@@ -92,6 +156,78 @@ describe('runBenchmark', () => {
     // All three tiers resolve equally fast here, so the best (highest-
     // quality) real-time-safe tier wins.
     expect(recommended[1080]).toBe('quality');
+  });
+
+  test('a decodeMode generates one real sample and reuses it (with -hwaccel) for every combo, including the warmup', async () => {
+    hardwareCapabilityTester.generateDecodeSample.mockResolvedValue('/tmp/decode-sample.mp4');
+    spawn.mockImplementation((_bin, args) => {
+      expect(args).toEqual(expect.arrayContaining(['-hwaccel', 'qsv', '-i', '/tmp/decode-sample.mp4']));
+      return fakeProc({ ms: 1, code: 0 });
+    });
+
+    await streamTuningBenchmark.runBenchmark('none', [1080], {
+      durationSeconds: TEST_DURATION_SECONDS, decodeMode: 'qsv', sourceCodec: 'vp9',
+    });
+
+    expect(hardwareCapabilityTester.generateDecodeSample).toHaveBeenCalledTimes(1);
+    expect(hardwareCapabilityTester.generateDecodeSample).toHaveBeenCalledWith('vp9', expect.objectContaining({ height: 1080 }));
+    // 1 warmup + 3 tiers = 4 encodes, every one reusing the same sample.
+    expect(spawn).toHaveBeenCalledTimes(4);
+  });
+
+  test('decodeMode "none" (default) still generates and uses a real sample - software decode is a real, measured cost', async () => {
+    hardwareCapabilityTester.generateDecodeSample.mockResolvedValue('/tmp/decode-sample.mp4');
+    spawn.mockImplementation((_bin, args) => {
+      expect(args).toEqual(expect.arrayContaining(['-i', '/tmp/decode-sample.mp4']));
+      expect(args).not.toContain('-hwaccel');
+      return fakeProc({ ms: 1, code: 0 });
+    });
+    const { sourceCodec } = await streamTuningBenchmark.runBenchmark('none', [1080], { durationSeconds: TEST_DURATION_SECONDS });
+    expect(hardwareCapabilityTester.generateDecodeSample).toHaveBeenCalledTimes(1);
+    expect(sourceCodec).toBe('h264');
+  });
+
+  test('decodeSourceHeight defaults to the max of the requested heights when omitted', async () => {
+    hardwareCapabilityTester.generateDecodeSample.mockResolvedValue('/tmp/decode-sample.mp4');
+    spawn.mockImplementation(() => fakeProc({ ms: 1, code: 0 }));
+    const { decodeSourceHeight } = await streamTuningBenchmark.runBenchmark('none', [720, 1080, 2160], { durationSeconds: TEST_DURATION_SECONDS });
+    expect(hardwareCapabilityTester.generateDecodeSample).toHaveBeenCalledWith('h264', expect.objectContaining({ height: 2160 }));
+    expect(decodeSourceHeight).toBe(2160);
+  });
+
+  test('an explicit decodeSourceHeight overrides the max-of-heights default, generating the sample at that height instead', async () => {
+    hardwareCapabilityTester.generateDecodeSample.mockResolvedValue('/tmp/decode-sample.mp4');
+    spawn.mockImplementation(() => fakeProc({ ms: 1, code: 0 }));
+    const { decodeSourceHeight } = await streamTuningBenchmark.runBenchmark('none', [480, 720, 1080], {
+      durationSeconds: TEST_DURATION_SECONDS, decodeSourceHeight: 720,
+    });
+    expect(hardwareCapabilityTester.generateDecodeSample).toHaveBeenCalledWith('h264', expect.objectContaining({ height: 720 }));
+    expect(decodeSourceHeight).toBe(720);
+  });
+
+  test('a resolution above decodeSourceHeight is skipped entirely (never actually re-tested against a smaller source under its label)', async () => {
+    hardwareCapabilityTester.generateDecodeSample.mockResolvedValue('/tmp/decode-sample.mp4');
+    const spawnedHeights = [];
+    spawn.mockImplementation((_bin, args) => {
+      // Only real (non-skipped) rows should ever reach ffmpeg at all.
+      const scaleFilter = args[args.indexOf('-vf') + 1] || '';
+      spawnedHeights.push(scaleFilter);
+      return fakeProc({ ms: 1, code: 0 });
+    });
+
+    const { matrix, recommended } = await streamTuningBenchmark.runBenchmark('none', [720, 1440], {
+      durationSeconds: TEST_DURATION_SECONDS, decodeSourceHeight: 720,
+    });
+
+    // 720p is at the cap (still tested); 1440p is above it (skipped).
+    expect(matrix[720].fast.ok).toBe(true);
+    expect(matrix[1440].fast).toEqual(expect.objectContaining({ ok: false, skipped: true }));
+    expect(matrix[1440].balanced).toEqual(expect.objectContaining({ ok: false, skipped: true }));
+    expect(matrix[1440].quality).toEqual(expect.objectContaining({ ok: false, skipped: true }));
+    expect(recommended[1440]).toBeNull();
+    // 1 warmup + 3 tiers for the one unskipped height (720) = 4 spawns; the
+    // skipped height's 3 tiers never touch ffmpeg at all.
+    expect(spawn).toHaveBeenCalledTimes(4);
   });
 
   test('only ever spawns ffmpeg for the requested hardwareMode, never the others', async () => {
@@ -164,7 +300,7 @@ describe('runBenchmark', () => {
       running: true, hardwareMode: 'qsv', completed: 0, total: 6, current: { tuning: 'fast', height: 720 }
     }));
     expect(progressCalls[progressCalls.length - 1][4]).toEqual({
-      running: false, hardwareMode: 'qsv', completed: 6, total: 6
+      running: false, hardwareMode: 'qsv', decodeMode: 'none', videoCodec: 'h264', completed: 6, total: 6
     });
   });
 
@@ -214,8 +350,8 @@ describe('runBenchmark', () => {
     await streamTuningBenchmark.runBenchmark('nvenc', [1080], { durationSeconds: TEST_DURATION_SECONDS });
 
     expect(logger.info).toHaveBeenCalledWith(
-      expect.objectContaining({ hardwareMode: 'nvenc', matrix: expect.any(Object), recommended: expect.any(Object) }),
-      expect.stringContaining('Tuning benchmark for nvenc:')
+      expect.objectContaining({ hardwareMode: 'nvenc', decodeMode: 'none', videoCodec: 'h264', matrix: expect.any(Object), recommended: expect.any(Object) }),
+      expect.stringContaining('Tuning benchmark for nvenc encoding h264 (decode=none, source 1080p):')
     );
   });
 

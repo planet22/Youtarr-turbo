@@ -15,8 +15,11 @@
  */
 
 const { spawn } = require('child_process');
+const fs = require('fs');
 const configModule = require('./configModule');
 const streamEncoderTuning = require('./streamEncoderTuning');
+const hardwareDecodeModule = require('./hardwareDecodeModule');
+const hardwareCapabilityTester = require('./hardwareCapabilityTester');
 const messageEmitter = require('./messageEmitter');
 const logger = require('../logger');
 
@@ -64,12 +67,13 @@ function runTimedFfmpegEncode(args) {
 
     proc.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
 
-    proc.on('close', (code) => {
+    proc.on('close', (code, signal) => {
       const wallSeconds = (Date.now() - startedAt) / 1000;
       if (code === 0) {
         finish({ ok: true, wallSeconds });
       } else {
-        finish({ ok: false, error: stderr.trim().slice(-800) || `ffmpeg exited with status ${code}` });
+        const summarized = hardwareCapabilityTester.summarizeStderr(stderr);
+        finish({ ok: false, error: `${hardwareCapabilityTester.describeExitSignal(signal)}${summarized || `ffmpeg exited with status ${code}`}` });
       }
     });
 
@@ -93,21 +97,59 @@ function runTimedFfmpegEncode(args) {
  *   hardwareMode) - the whole point is measuring the exact args a real
  *   stream would use, so this should always be whatever the caller has
  *   actually configured, not a synthetic default.
+ * @param {string} [decodeMode] - 'none' (default, software decode) | 'qsv' |
+ *   'nvenc' | 'vaapi' (see hardwareDecodeModule.js - a separate axis from
+ *   hardwareMode/encode). Whenever `sourceSamplePath` is given (regardless of
+ *   decodeMode, 'none' included), the real compressed sample is fed as input
+ *   instead of the synthetic lavfi source, with decodeMode's -hwaccel flags
+ *   prepended if any ('none' contributes none, so ffmpeg decodes it in
+ *   software - a real, measured cost, not a skipped one) - so the timed run
+ *   genuinely includes decode+scale+encode cost together for every decode
+ *   backend, software included. Decode is deliberately left to output
+ *   default (system-memory) frames (no -hwaccel_output_format) - the
+ *   existing encoder filter chain's own hwupload step already expects that,
+ *   so hardware decode acceleration is "invisible" downstream: only the
+ *   decode step itself moves to the GPU, no shared zero-copy device context
+ *   needed between decode and encode.
+ * @param {string|null} [sourceSamplePath] - from
+ *   hardwareCapabilityTester.generateDecodeSample; when omitted/null, falls
+ *   back to the synthetic lavfi source (test-only - production callers
+ *   always generate one, see runBenchmark).
+ * @param {string} [videoCodec] - 'h264' (default - the only one real
+ *   ytstream playback ever targets) | 'hevc' | 'av1'. See
+ *   streamEncoderTuning.buildVideoEncoderArgs' own doc comment.
  * @returns {Promise<{ok: boolean, wallSeconds?: number, realtimeFactor?: number, realtime?: boolean, error?: string}>}
  */
-async function benchmarkOne(hardwareMode, tuning, height, durationSeconds = BENCHMARK_DURATION_SECONDS, vaapiQuality = null) {
+async function benchmarkOne(hardwareMode, tuning, height, durationSeconds = BENCHMARK_DURATION_SECONDS, vaapiQuality = null, decodeMode = 'none', sourceSamplePath = null, videoCodec = 'h264') {
   const width = Math.round((height * 16) / 9 / 2) * 2;
-  const encoder = streamEncoderTuning.buildVideoEncoderArgs(hardwareMode, height, tuning, vaapiQuality);
+  const encoder = streamEncoderTuning.buildVideoEncoderArgs(hardwareMode, height, tuning, vaapiQuality, videoCodec);
 
   const args = ['-y', '-loglevel', 'error'];
-  if (encoder.preInputArgs && encoder.preInputArgs.length) {
-    args.push(...encoder.preInputArgs);
+  // decodeMode 'none' still counts as "real decode" here - it means
+  // software decode (no -hwaccel flags added below), not "skip decode
+  // entirely". Only an actually-missing sample (test-only) falls back to
+  // the synthetic source.
+  const usingRealDecode = !!sourceSamplePath;
+
+  if (usingRealDecode) {
+    // Explicit -hwaccel flags always come first, regardless of whatever
+    // encoder.preInputArgs' own device-init args (e.g. vaapi's
+    // -vaapi_device) might already imply - unambiguous is safer than
+    // relying on backend-specific implicit behavior here.
+    const decode = hardwareDecodeModule.buildDecodeArgs(decodeMode);
+    if (decode.preInputArgs.length) args.push(...decode.preInputArgs);
+    if (encoder.preInputArgs && encoder.preInputArgs.length) args.push(...encoder.preInputArgs);
+    args.push('-i', sourceSamplePath, '-t', String(durationSeconds));
+  } else {
+    if (encoder.preInputArgs && encoder.preInputArgs.length) {
+      args.push(...encoder.preInputArgs);
+    }
+    args.push(
+      '-f', 'lavfi', '-i', `testsrc2=size=${width}x${height}:rate=30:duration=${durationSeconds}`,
+      '-f', 'lavfi', '-i', 'anullsrc=r=48000:cl=stereo',
+      '-t', String(durationSeconds),
+    );
   }
-  args.push(
-    '-f', 'lavfi', '-i', `testsrc2=size=${width}x${height}:rate=30:duration=${durationSeconds}`,
-    '-f', 'lavfi', '-i', 'anullsrc=r=48000:cl=stereo',
-    '-t', String(durationSeconds),
-  );
   if (encoder.videoFilters && encoder.videoFilters.length) {
     args.push('-vf', encoder.videoFilters.join(','));
   }
@@ -192,10 +234,35 @@ function formatBenchmarkSummaryLine(matrix, recommended, heights) {
  * @param {number|string|null} [opts.vaapiQuality] - see benchmarkOne; passed
  *   through to every combo (including the warmup) so a vaapi run measures
  *   exactly what real playback would use.
+ * @param {string} [opts.decodeMode] - see benchmarkOne; 'none' (default) or
+ *   a hardwareDecodeModule.VALID_DECODE_HARDWARE value. Independent of
+ *   `hardwareMode` (encode) - e.g. software encode + hardware decode, or the
+ *   reverse, are both valid combos and measured exactly as configured.
+ * @param {string} [opts.sourceCodec] - which source codec to simulate
+ *   decoding - always used, including when `decodeMode` is 'none' (software
+ *   decode of this codec is measured too, not skipped).
+ * @param {string} [opts.videoCodec] - see benchmarkOne; 'h264' (default) |
+ *   'hevc' | 'av1' - the ENCODE target, independent of `sourceCodec` (decode
+ *   input).
+ * @param {number|null} [opts.decodeSourceHeight] - height to generate the
+ *   decode sample at, overriding the default of `Math.max(...heights)`
+ *   (worst-case: assumes the real cached source could be as large as the
+ *   largest resolution this run tests). A real cached buffer/backfill source
+ *   is actually capped at whatever Stream quality is configured (see
+ *   ytstream.js's getDashFormatSelectors), so this lets a caller test a
+ *   smaller, more realistic source size (e.g. "what if quality is capped at
+ *   1080p") instead of always the conservative worst case.
  * @returns {Promise<{matrix: object, recommended: object}>}
  * @throws {Error} if a benchmark is already running (check isBenchmarkRunning first)
  */
-async function runBenchmark(hardwareMode, heights, { durationSeconds = BENCHMARK_DURATION_SECONDS, vaapiQuality = null } = {}) {
+async function runBenchmark(hardwareMode, heights, {
+  durationSeconds = BENCHMARK_DURATION_SECONDS,
+  vaapiQuality = null,
+  decodeMode = 'none',
+  sourceCodec = 'h264',
+  videoCodec = 'h264',
+  decodeSourceHeight = null,
+} = {}) {
   if (running) {
     throw new Error('A tuning benchmark is already running');
   }
@@ -211,24 +278,67 @@ async function runBenchmark(hardwareMode, heights, { durationSeconds = BENCHMARK
 
   const broadcastProgress = (extra) => {
     messageEmitter.emitMessage('broadcast', null, 'server', 'tuningBenchmarkProgress', {
-      running: true, hardwareMode, completed, total, ...extra,
+      running: true, hardwareMode, decodeMode, videoCodec, completed, total, ...extra,
     });
   };
 
+  let sourceSamplePath = null;
+
   try {
+    // One real compressed sample, generated once and reused across every
+    // combo in this run (including the warmup) - at the highest requested
+    // height by default (a worst-case stand-in for "the real cached source
+    // could be this large"; see decodeSourceHeight's own doc comment for why
+    // a caller might override it), since a real DASH fetch pulls one
+    // highest-available source resolution once and ffmpeg scales down per
+    // target height from there, same as real playback would. Long enough
+    // (BENCHMARK_DURATION_SECONDS) that every combo's own `-t` trim still
+    // has real decoded content to work with, including the (longer) real
+    // combos, not just the short warmup. Generated inside this try so a
+    // failure here still resets `running` via the finally below, same as
+    // any other failure mode.
+    //
+    // Generated regardless of decodeMode, including 'none' - software decode
+    // of a real source has a real, measurable cost too (that's the whole
+    // point of also offering it here, not just the hardware backends), and
+    // benchmarkOne only skips -hwaccel flags for 'none', not the real input.
+    const sampleHeight = decodeSourceHeight || Math.max(...heights);
+    {
+      const sampleWidth = Math.round((sampleHeight * 16) / 9 / 2) * 2;
+      sourceSamplePath = await hardwareCapabilityTester.generateDecodeSample(sourceCodec, {
+        width: sampleWidth, height: sampleHeight, durationSeconds,
+      });
+    }
+
     // Warm up on the first height/tier so its real measurement (taken next,
     // as the first entry in the loop below) isn't skewed by one-time
     // hardware/driver init overhead. `completed`/`total` stay untouched -
     // this doesn't count as one of the matrix's measured combos.
     broadcastProgress({ current: { tuning: streamEncoderTuning.VALID_TUNING[0], height: heights[0], warmup: true } });
-    await benchmarkOne(hardwareMode, streamEncoderTuning.VALID_TUNING[0], heights[0], WARMUP_DURATION_SECONDS, vaapiQuality);
+    await benchmarkOne(hardwareMode, streamEncoderTuning.VALID_TUNING[0], heights[0], WARMUP_DURATION_SECONDS, vaapiQuality, decodeMode, sourceSamplePath, videoCodec);
 
     for (const height of heights) {
       matrix[height] = {};
+
+      // A capped decode source can't stand in for a resolution above it -
+      // buildVideoEncoderArgs' scale filter is decrease-only, so decoding a
+      // (say) 1080p sample for a "1440p" row would silently just re-measure
+      // 1080p again under a misleading label instead of ever actually
+      // testing 1440p. Mark it skipped instead of running (and mislabeling)
+      // it.
+      if (height > sampleHeight) {
+        for (const tuning of streamEncoderTuning.VALID_TUNING) {
+          matrix[height][tuning] = { ok: false, skipped: true, error: `Skipped - decode source capped at ${sampleHeight}p, below this resolution` };
+        }
+        recommended[height] = null;
+        completed += streamEncoderTuning.VALID_TUNING.length;
+        continue;
+      }
+
       for (const tuning of streamEncoderTuning.VALID_TUNING) {
         broadcastProgress({ current: { tuning, height } });
         // eslint-disable-next-line no-await-in-loop -- deliberately sequential, see doc comment
-        matrix[height][tuning] = await benchmarkOne(hardwareMode, tuning, height, durationSeconds, vaapiQuality);
+        matrix[height][tuning] = await benchmarkOne(hardwareMode, tuning, height, durationSeconds, vaapiQuality, decodeMode, sourceSamplePath, videoCodec);
         completed++;
       }
 
@@ -257,14 +367,17 @@ async function runBenchmark(hardwareMode, heights, { durationSeconds = BENCHMARK
     }
 
     logger.info(
-      { hardwareMode, matrix, recommended },
-      `Tuning benchmark for ${hardwareMode}: ${formatBenchmarkSummaryLine(matrix, recommended, heights)}`
+      { hardwareMode, decodeMode, sourceCodec, videoCodec, decodeSourceHeight: sampleHeight, matrix, recommended },
+      `Tuning benchmark for ${hardwareMode} encoding ${videoCodec} (decode=${decodeMode}, source ${sampleHeight}p): ${formatBenchmarkSummaryLine(matrix, recommended, heights)}`
     );
-    return { matrix, recommended };
+    return { matrix, recommended, decodeMode, sourceCodec, videoCodec, decodeSourceHeight: sampleHeight };
   } finally {
     running = false;
+    if (sourceSamplePath) {
+      fs.promises.unlink(sourceSamplePath).catch(() => { /* best-effort cleanup */ });
+    }
     messageEmitter.emitMessage('broadcast', null, 'server', 'tuningBenchmarkProgress', {
-      running: false, hardwareMode, completed, total,
+      running: false, hardwareMode, decodeMode, videoCodec, completed, total,
     });
   }
 }

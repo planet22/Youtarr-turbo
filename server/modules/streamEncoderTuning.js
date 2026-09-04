@@ -22,9 +22,19 @@
  *                  see streamTuningBenchmark.js.
  */
 
+const { ENCODER_NAME } = require('./hardwareEncoderModule');
+
 const VALID_HARDWARE = ['none', 'qsv', 'nvenc', 'vaapi', 'amf'];
 const VALID_TUNING = ['fast', 'balanced', 'quality'];
 const TUNING_LABELS = { fast: 'Fast (real-time safe)', balanced: 'Balanced', quality: 'Quality' };
+// ytstream's live pipeline itself only ever transcodes to H.264 (this
+// module's whole reason for existing - see the module doc comment); the
+// other two exist here purely so "Test real-time tuning" can also answer
+// "what if ytstream someday targeted HEVC/AV1 instead" as a what-if, the
+// same way its "Simulate source codec" control answers "what if YouTube
+// served something other than VP9" - not because real playback ever picks
+// one.
+const VALID_VIDEO_CODECS = ['h264', 'hevc', 'av1'];
 
 function normalizeHardwareMode(mode) {
   const m = String(mode || 'none').toLowerCase().trim();
@@ -34,6 +44,11 @@ function normalizeHardwareMode(mode) {
 function normalizeTuning(tuning) {
   const t = String(tuning || 'fast').toLowerCase().trim();
   return VALID_TUNING.includes(t) ? t : 'fast';
+}
+
+function normalizeVideoCodec(codec) {
+  const c = String(codec || 'h264').toLowerCase().trim();
+  return VALID_VIDEO_CODECS.includes(c) ? c : 'h264';
 }
 
 // ffmpeg's VAAPI encoders (h264_vaapi) expose a driver-level "-quality"
@@ -141,10 +156,32 @@ function tuningParams(hardwareMode, tuning) {
   return byMode[tuning] || byMode.fast;
 }
 
+// Hardware backends' numeric quality knobs (qp/globalQuality/cq/
+// qvbr/compressionLevel, all baked into TUNING_TIERS above) are left exactly
+// as-is regardless of `videoCodec` - matching hardwareEncoderModule.js's own
+// precedent of using one -qp/-cq/-global_quality/-qvbr_quality_level value
+// across h264/hevc/av1 for every hardware encoder there too. Only the
+// SOFTWARE encoder differs meaningfully per codec, since libx264/libx265/
+// libsvtav1 don't share a CRF scale - these offsets (applied to each tier's
+// own h264 CRF below) match hardwareEncoderModule's SOFTWARE_CRF baseline
+// (h264 23 ~ hevc 26 ~ av1 30, i.e. "similar perceived quality to x264
+// crf 23").
+const SOFTWARE_CRF_OFFSET = { h264: 0, hevc: 3, av1: 7 };
+// libsvtav1's preset is numeric, 0 (slowest/best) .. 13 (fastest/worst) -
+// unlike libx264/libx265's shared 'veryfast'/'faster'/'medium' string enum,
+// so it can't just reuse TUNING_TIERS.none's own preset string. Trends the
+// same direction (a "higher" tier picks a slower/better preset) as the
+// x264/x265 tiers alongside it.
+const AV1_SOFTWARE_PRESET = { fast: '10', balanced: '8', quality: '6' };
+
 /**
- * Build video encoder args for transcode=h264, matching the reference
- * jellyfin-youtube-plugin's ManagedTranscodeService.AddVideoEncoderArguments,
- * now parameterized by tuning tier (see TUNING_TIERS above).
+ * Build video encoder args, matching the reference jellyfin-youtube-plugin's
+ * ManagedTranscodeService.AddVideoEncoderArguments (H.264 only there),
+ * parameterized by tuning tier (see TUNING_TIERS above) and, for this
+ * benchmark tool only, target codec - see VALID_VIDEO_CODECS' own comment:
+ * ytstream's real live pipeline always transcodes to H.264, `videoCodec`
+ * exists here purely so this tool can also answer "what if it targeted
+ * HEVC/AV1 instead" as a what-if.
  * @param {string} hardwareMode
  * @param {number|null} [targetHeight] - caps the encode at this height
  *   (matching yt-dlp's own `height<=X` source selection elsewhere - see
@@ -159,14 +196,22 @@ function tuningParams(hardwareMode, tuning) {
  *   sensible compressionLevel (see TUNING_TIERS.vaapi), so most callers can
  *   omit this and get a sane value just from the tuning tier alone. This
  *   only matters when a caller explicitly wants to override that default.
+ * @param {string} [videoCodec] - 'h264' (default, the only one real ytstream
+ *   playback ever uses) | 'hevc' | 'av1'. Every hardware backend reuses its
+ *   tuning tier's numeric quality knob unchanged across codecs (matching
+ *   hardwareEncoderModule.js's own precedent); only the software encoder
+ *   name/CRF/preset actually change per codec (see SOFTWARE_CRF_OFFSET/
+ *   AV1_SOFTWARE_PRESET above).
  * @returns {{preInputArgs: string[], videoFilters: string[], pixFmt: string|null, encoderArgs: string[]}}
  */
-function buildVideoEncoderArgs(hardwareMode, targetHeight, tuning, vaapiQuality) {
+function buildVideoEncoderArgs(hardwareMode, targetHeight, tuning, vaapiQuality, videoCodec = 'h264') {
   const mode = normalizeHardwareMode(hardwareMode);
   const tier = normalizeTuning(tuning);
+  const codec = normalizeVideoCodec(videoCodec);
   const params = tuningParams(mode, tier);
   const heightCap = Number.isFinite(targetHeight) && targetHeight > 0 ? targetHeight : null;
   const { maxrate, bufsize } = resolveEncoderBitrateCaps(heightCap);
+  const encoderName = (ENCODER_NAME[codec] && ENCODER_NAME[codec][mode]) || ENCODER_NAME[codec].software;
 
   // Common GOP / threshold settings from the plugin
   const common = ['-g', '120', '-keyint_min', '120', '-sc_threshold', '0'];
@@ -185,7 +230,7 @@ function buildVideoEncoderArgs(hardwareMode, targetHeight, tuning, vaapiQuality)
       videoFilters: [scaleFilter],
       pixFmt: null,
       encoderArgs: [
-        '-c:v', 'h264_vaapi', '-qp', String(params.qp),
+        '-c:v', encoderName, '-qp', String(params.qp),
         ...(compressionLevel != null ? ['-quality', String(compressionLevel)] : []),
         ...common,
       ],
@@ -210,7 +255,7 @@ function buildVideoEncoderArgs(hardwareMode, targetHeight, tuning, vaapiQuality)
       videoFilters: ['hwupload=extra_hw_frames=64', 'format=qsv', scaleFilter],
       pixFmt: '',
       encoderArgs: [
-        '-c:v', 'h264_qsv', ...presetArgs,
+        '-c:v', encoderName, ...presetArgs,
         '-global_quality', String(params.globalQuality),
         '-look_ahead', params.lookAhead ? '1' : '0',
         '-maxrate', maxrate, '-bufsize', bufsize,
@@ -227,7 +272,7 @@ function buildVideoEncoderArgs(hardwareMode, targetHeight, tuning, vaapiQuality)
       videoFilters: [scaleFilter],
       pixFmt: 'yuv420p',
       encoderArgs: [
-        '-c:v', 'h264_nvenc', '-preset', params.preset, '-cq', String(params.cq), '-rc', 'vbr',
+        '-c:v', encoderName, '-preset', params.preset, '-cq', String(params.cq), '-rc', 'vbr',
         '-maxrate', maxrate, '-bufsize', bufsize,
         ...common,
       ],
@@ -242,32 +287,36 @@ function buildVideoEncoderArgs(hardwareMode, targetHeight, tuning, vaapiQuality)
       videoFilters: [scaleFilter],
       pixFmt: 'yuv420p',
       encoderArgs: [
-        '-c:v', 'h264_amf', '-quality', params.quality, '-rc', 'qvbr',
+        '-c:v', encoderName, '-quality', params.quality, '-rc', 'qvbr',
         '-qvbr_quality_level', String(params.qvbr),
         ...common,
       ],
     };
   }
-  // Software (None) — libx264
+  // Software (None) - libx264/libx265/libsvtav1
   const scaleFilter = heightCap
     ? `scale=-2:'min(${heightCap},ih)':force_original_aspect_ratio=decrease,format=yuv420p`
     : 'format=yuv420p';
+  const softwarePreset = codec === 'av1' ? AV1_SOFTWARE_PRESET[tier] : params.preset;
+  const softwareCrf = params.crf + (SOFTWARE_CRF_OFFSET[codec] || 0);
   return {
     preInputArgs: [],
     videoFilters: [scaleFilter],
     pixFmt: 'yuv420p',
-    encoderArgs: ['-c:v', 'libx264', '-preset', params.preset, '-crf', String(params.crf), ...common],
+    encoderArgs: ['-c:v', encoderName, '-preset', softwarePreset, '-crf', String(softwareCrf), ...common],
   };
 }
 
 module.exports = {
   VALID_HARDWARE,
   VALID_TUNING,
+  VALID_VIDEO_CODECS,
   TUNING_LABELS,
   VAAPI_QUALITY_MIN,
   VAAPI_QUALITY_MAX,
   normalizeHardwareMode,
   normalizeTuning,
+  normalizeVideoCodec,
   normalizeVaapiQuality,
   RESOLUTION_BITRATE_KBPS,
   lookupResolutionTierKbps,

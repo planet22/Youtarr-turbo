@@ -183,6 +183,11 @@ module.exports = {
   VALID_HARDWARE,
   VALID_VIDEO_CODECS,
   VALID_AUDIO_CODECS,
+  // Exported so other encoder-arg builders needing the same codec/backend ->
+  // ffmpeg encoder name mapping (see streamEncoderTuning.js's own
+  // buildVideoEncoderArgs) share this one canonical table instead of
+  // duplicating it and risking drift.
+  ENCODER_NAME,
   normalizeHardwareMode,
   normalizeVideoCodec,
   normalizeAudioCodec,

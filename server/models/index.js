@@ -14,6 +14,7 @@ const VideoWatchStatus = require('./videowatchstatus');
 const MediaServerUser = require('./mediaserveruser');
 const WatchStatusSyncCursor = require('./watchstatussynccursor');
 const StreamHistory = require('./streamhistory');
+const YoutubeMetadataCache = require('./youtubemetadatacache');
 
 Job.hasMany(JobVideo, { foreignKey: 'job_id', as: 'jobVideos' });
 Job.hasMany(JobVideoDownload, { foreignKey: 'job_id', as: 'jobVideoDownloads' });
@@ -50,4 +51,5 @@ module.exports = {
   MediaServerUser,
   WatchStatusSyncCursor,
   StreamHistory,
+  YoutubeMetadataCache,
 };

@@ -95,6 +95,8 @@ export interface YtstreamDryRunPlan {
   seekSeconds: number | null;
   calculatedLength: boolean;
   hotSwapToCache: boolean;
+  backfillMissingSegments: boolean;
+  finalizeToMp4: boolean;
   forceServerSettings: boolean;
   ignoredQueryParams: string[];
   probeShortcut: YtstreamDryRunProbeShortcut;

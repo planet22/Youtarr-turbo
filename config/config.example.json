@@ -115,6 +115,7 @@
         "qualityStrictness": "fallback",
         "hardwareMode": "none",
         "tuning": "fast",
+        "vaapiQuality": null,
         "playerClient": "",
         "calculatedLength": false,
         "hotSwapToCache": false,
@@ -122,7 +123,10 @@
         "instantStart": false,
         "probeShortcut": false,
         "forceServerSettings": false,
-        "historyRetentionDays": 90
+        "historyRetentionDays": 90,
+        "hlsStorageLocation": "tmp",
+        "backfillMissingSegments": false,
+        "finalizeToMp4": false
     },
     "nzb": {
         "enabled": false,

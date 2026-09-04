@@ -127,6 +127,10 @@ function createYtdlpOptionsRoutes({ verifyToken, ytdlpValidationRateLimiter }) {
    *               hardwareMode:
    *                 type: string
    *                 enum: [none, qsv, nvenc, vaapi, amf]
+   *               vaapiQuality:
+   *                 type: integer
+   *                 nullable: true
+   *                 description: VAAPI-only -quality (compression_level) override, 1-7. Ignored for every other hardwareMode. Sent so the benchmark measures exactly what a real vaapi stream would use, including this setting.
    *     responses:
    *       200:
    *         description: '{ hardwareMode, matrix: { [height]: { [tuning]: { ok, wallSeconds?, realtimeFactor?, realtime?, error? } } }, recommended: { [height]: tuningTierId|null } }'
@@ -144,7 +148,7 @@ function createYtdlpOptionsRoutes({ verifyToken, ytdlpValidationRateLimiter }) {
     verifyToken,
     ytdlpValidationRateLimiter,
     async (req, res) => {
-      const { hardwareMode } = req.body || {};
+      const { hardwareMode, vaapiQuality } = req.body || {};
       if (!streamEncoderTuning.VALID_HARDWARE.includes(hardwareMode)) {
         return res.status(400).json({
           ok: false,
@@ -155,7 +159,9 @@ function createYtdlpOptionsRoutes({ verifyToken, ytdlpValidationRateLimiter }) {
         return res.status(409).json({ ok: false, error: 'A tuning benchmark is already running' });
       }
       try {
-        const { matrix, recommended } = await streamTuningBenchmark.runBenchmark(hardwareMode, TUNING_BENCHMARK_HEIGHTS);
+        const { matrix, recommended } = await streamTuningBenchmark.runBenchmark(hardwareMode, TUNING_BENCHMARK_HEIGHTS, {
+          vaapiQuality: streamEncoderTuning.normalizeVaapiQuality(vaapiQuality),
+        });
         res.json({ ok: true, hardwareMode, matrix, recommended });
       } catch (err) {
         res.status(500).json({ ok: false, error: err.message || 'Encoding tuning benchmark failed' });

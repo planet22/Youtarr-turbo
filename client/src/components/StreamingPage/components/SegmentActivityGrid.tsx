@@ -32,35 +32,62 @@ function countEncoded(segments: StreamSegmentStatus): number {
   return count;
 }
 
+const STRIP_WIDTH = 90;
+const STRIP_HEIGHT = 16;
+
+/**
+ * Picks a row/column split for `total` cells that (a) fills the strip's
+ * fixed footprint edge-to-edge via `1fr` tracks (so it never overflows or
+ * needs clipping) and (b) stays as close as possible to real 2x2px dots -
+ * the same visual unit SegmentActivityDialog's full grid uses - by packing
+ * along both axes instead of squeezing everything into one row. A one-row
+ * flex strip (the previous approach) puts all of the density on a single
+ * axis, so it hits sub-pixel, anti-aliased-into-a-blur cell widths at a
+ * small fraction of the segment count this reaches before doing the same.
+ */
+function computeStripGrid(total: number): { cols: number; rows: number } {
+  if (total <= 0) return { cols: 1, rows: 1 };
+  const aspect = STRIP_WIDTH / STRIP_HEIGHT;
+  const cols = Math.max(1, Math.min(total, Math.round(Math.sqrt(total * aspect))));
+  const rows = Math.max(1, Math.ceil(total / cols));
+  return { cols, rows };
+}
+
 interface SegmentActivityStripProps {
   segments: StreamSegmentStatus;
   onClick?: () => void;
 }
 
 /**
- * Compact inline indicator for a table row - one flex item per segment,
- * squeezed into a fixed pixel width (naturally blends into a heatmap-style
- * strip at typical segment counts rather than showing individually
- * distinguishable dots - the detailed per-segment grid lives in
- * SegmentActivityDialog instead, opened by clicking this strip).
+ * Compact inline indicator for a table row - a small two-axis dot grid
+ * (see computeStripGrid) squeezed into a fixed pixel footprint, mirroring
+ * SegmentActivityDialog's full grid at a much smaller scale rather than a
+ * single-row bar. The detailed, individually-labeled grid still lives in
+ * SegmentActivityDialog, opened by clicking this strip.
  */
 export const SegmentActivityStrip: React.FC<SegmentActivityStripProps> = ({ segments, onClick }) => {
   const encodedCount = countEncoded(segments);
   const pct = segments.totalSegments > 0 ? Math.round((encodedCount / segments.totalSegments) * 100) : 0;
   const allReady = encodedCount === segments.totalSegments;
+  const { cols, rows } = computeStripGrid(segments.totalSegments);
+  const currentSuffix = segments.currentSegmentIndex !== null ? ` · delivering segment ${segments.currentSegmentIndex}` : '';
 
   return (
-    <Tooltip title={`${encodedCount}/${segments.totalSegments} segments encoded (${pct}%)${onClick ? ' · click for detail' : ''}`}>
+    <Tooltip title={`${encodedCount}/${segments.totalSegments} segments encoded (${pct}%)${currentSuffix}${onClick ? ' · click for detail' : ''}`}>
       <Box
         onClick={onClick}
         style={{
-          display: 'flex',
-          width: 90,
-          height: 16,
+          display: 'grid',
+          gridTemplateColumns: `repeat(${cols}, 1fr)`,
+          gridTemplateRows: `repeat(${rows}, 1fr)`,
+          gap: 1,
+          width: STRIP_WIDTH,
+          height: STRIP_HEIGHT,
           cursor: onClick ? 'pointer' : 'default',
           border: `1px solid ${allReady ? 'var(--success)' : 'var(--border)'}`,
           borderRadius: 3,
-          overflow: 'hidden',
+          padding: 1,
+          boxSizing: 'border-box',
           flexShrink: 0,
         }}
       >
@@ -68,9 +95,8 @@ export const SegmentActivityStrip: React.FC<SegmentActivityStripProps> = ({ segm
           <div
             key={i}
             style={{
-              flex: '1 1 0',
-              minWidth: 0,
               backgroundColor: segmentColor(i, segments),
+              outline: i === segments.currentSegmentIndex ? '1px solid var(--info)' : undefined,
             }}
           />
         ))}
@@ -106,6 +132,11 @@ export const SegmentActivityDialog: React.FC<SegmentActivityDialogProps> = ({ op
       <DialogContent>
         <Typography variant="body2" style={{ marginBottom: 12 }}>
           {encodedCount}/{segments.totalSegments} segments encoded ({pct}%)
+          {segments.currentSegmentIndex !== null && (
+            <span style={{ color: 'var(--info)', marginLeft: 8, fontWeight: 600 }}>
+              Delivering segment {segments.currentSegmentIndex} ({formatSegmentTime(segments.currentSegmentIndex, segments)})
+            </span>
+          )}
           {allReady && (
             <span style={{ color: 'var(--success)', marginLeft: 8, fontWeight: 600 }}>All ready</span>
           )}
@@ -120,23 +151,28 @@ export const SegmentActivityDialog: React.FC<SegmentActivityDialogProps> = ({ op
             overflowY: 'auto',
           }}
         >
-          {segments.encoded.map((isEncoded, i) => (
-            <div
-              key={i}
-              title={`Segment ${i} · ${formatSegmentTime(i, segments)}${
-                isEncoded ? ' · encoded, ready instantly' : i < segments.bufferedThroughIndex ? ' · buffered, fast seek' : ' · not yet available'
-              }`}
-              style={{
-                width: '100%',
-                aspectRatio: '1 / 1',
-                borderRadius: 2,
-                backgroundColor: segmentColor(i, segments),
-              }}
-            />
-          ))}
+          {segments.encoded.map((isEncoded, i) => {
+            const isCurrent = i === segments.currentSegmentIndex;
+            return (
+              <div
+                key={i}
+                title={`Segment ${i} · ${formatSegmentTime(i, segments)}${
+                  isEncoded ? ' · encoded, ready instantly' : i < segments.bufferedThroughIndex ? ' · buffered, fast seek' : ' · not yet available'
+                }${isCurrent ? ' · currently delivering' : ''}`}
+                style={{
+                  width: '100%',
+                  aspectRatio: '1 / 1',
+                  borderRadius: 2,
+                  backgroundColor: segmentColor(i, segments),
+                  outline: isCurrent ? '2px solid var(--info)' : undefined,
+                  outlineOffset: isCurrent ? -1 : undefined,
+                }}
+              />
+            );
+          })}
         </Box>
 
-        <Box style={{ display: 'flex', gap: 16, marginTop: 12 }}>
+        <Box style={{ display: 'flex', gap: 16, marginTop: 12, flexWrap: 'wrap' }}>
           <Box style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
             <div style={{ width: 10, height: 10, borderRadius: 2, backgroundColor: 'var(--success)' }} />
             <Typography variant="caption" style={{ color: 'var(--muted-foreground)' }}>Encoded</Typography>
@@ -148,6 +184,10 @@ export const SegmentActivityDialog: React.FC<SegmentActivityDialogProps> = ({ op
           <Box style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
             <div style={{ width: 10, height: 10, borderRadius: 2, backgroundColor: 'var(--border)' }} />
             <Typography variant="caption" style={{ color: 'var(--muted-foreground)' }}>Not yet</Typography>
+          </Box>
+          <Box style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <div style={{ width: 10, height: 10, borderRadius: 2, outline: '2px solid var(--info)', outlineOffset: -1 }} />
+            <Typography variant="caption" style={{ color: 'var(--muted-foreground)' }}>Currently delivering</Typography>
           </Box>
         </Box>
       </DialogContent>

@@ -136,7 +136,7 @@ describe('POST /api/ytdlp/test-tuning-benchmark', () => {
     const res = await supertest(app).post('/api/ytdlp/test-tuning-benchmark').send({ hardwareMode: 'qsv' });
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ ok: true, hardwareMode: 'qsv', matrix, recommended });
-    expect(streamTuningBenchmark.runBenchmark).toHaveBeenCalledWith('qsv', [480, 720, 1080, 1440, 2160]);
+    expect(streamTuningBenchmark.runBenchmark).toHaveBeenCalledWith('qsv', [480, 720, 1080, 1440, 2160], { vaapiQuality: null });
   });
 
   test('returns 500 with an error message when the benchmark throws', async () => {

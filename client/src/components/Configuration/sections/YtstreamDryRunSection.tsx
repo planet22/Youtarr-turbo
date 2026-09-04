@@ -19,6 +19,11 @@ function extractYoutubeId(input: string): string | null {
   return null;
 }
 
+// Never a real YouTube id (real ones are exactly 11 chars) - used only for
+// the no-video preview below, always with probe:false, so it's never
+// actually looked up.
+const NO_VIDEO_PLACEHOLDER_ID = 'no-video-dry-run';
+
 /**
  * Read-only dry-run for the /api/ytstream/:youtubeId playback route (see
  * GET /api/ytstream/:youtubeId/simulate, resolvePlaybackPlan in
@@ -60,10 +65,34 @@ export const YtstreamDryRunSection: React.FC<Props> = ({ config, token }) => {
   }
 
   const handleRun = async () => {
-    const youtubeId = extractYoutubeId(videoInput);
-    if (!youtubeId) {
-      setState({ loading: false, result: null, error: 'Enter a valid YouTube video id or URL' });
-      return;
+    const trimmed = videoInput.trim();
+    let youtubeId: string | null;
+    let probe: boolean;
+
+    if (!trimmed) {
+      // No video to check - only meaningful when Force these settings is on
+      // above, since that's the one case where a real request's outcome
+      // doesn't depend on any per-video/.strm-URL value at all. With it
+      // off, a real request's actual mode/quality/etc. can come from that
+      // specific .strm's own URL, which this preview has no way to know
+      // without one.
+      if (!ytstream?.forceServerSettings) {
+        setState({
+          loading: false,
+          result: null,
+          error: 'Enter a valid YouTube video id or URL, or turn on "Force these settings" above to preview without one',
+        });
+        return;
+      }
+      youtubeId = NO_VIDEO_PLACEHOLDER_ID;
+      probe = false; // nothing real to probe
+    } else {
+      youtubeId = extractYoutubeId(trimmed);
+      if (!youtubeId) {
+        setState({ loading: false, result: null, error: 'Enter a valid YouTube video id or URL' });
+        return;
+      }
+      probe = true;
     }
 
     setState({ loading: true, result: null, error: null });
@@ -77,7 +106,7 @@ export const YtstreamDryRunSection: React.FC<Props> = ({ config, token }) => {
         hardwareMode: ytstream?.hardwareMode || undefined,
         tuning: ytstream?.tuning || undefined,
         calculatedLength: ytstream?.calculatedLength,
-      });
+      }, { probe });
       setState({ loading: false, result, error: null });
     } catch (err: unknown) {
       setState({
@@ -101,6 +130,11 @@ export const YtstreamDryRunSection: React.FC<Props> = ({ config, token }) => {
             value={videoInput}
             onChange={(e) => setVideoInput(e.target.value)}
             placeholder="dQw4w9WgXcQ or https://youtube.com/watch?v=..."
+            helperText={
+              ytstream?.forceServerSettings
+                ? 'Leave blank to preview your forced settings alone - no specific video, no yt-dlp probing.'
+                : 'Enter a video id/URL to preview it, or turn on "Force these settings" above to preview without one.'
+            }
           />
         </Grid>
         <Grid item xs={12} md={4}>
@@ -108,7 +142,7 @@ export const YtstreamDryRunSection: React.FC<Props> = ({ config, token }) => {
             <Button
               variant="contained"
               onClick={handleRun}
-              disabled={state.loading || !videoInput.trim()}
+              disabled={state.loading || (!videoInput.trim() && !ytstream?.forceServerSettings)}
             >
               {state.loading ? 'Running…' : 'Run Dry Run'}
             </Button>

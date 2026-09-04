@@ -82,9 +82,13 @@ export const TuningBenchmarkTable: React.FC<TuningBenchmarkTableProps> = ({
 
   let progressLabel = 'Test Real-Time Tuning';
   if (testing) {
-    progressLabel = progress && progress.total > 0
-      ? `Testing ${progress.current?.tuning ?? '...'} @ ${progress.current?.height ?? '?'}p (${progress.completed}/${progress.total})...`
-      : 'Starting benchmark...';
+    if (progress?.current?.warmup) {
+      progressLabel = 'Warming up encoder...';
+    } else {
+      progressLabel = progress && progress.total > 0
+        ? `Testing ${progress.current?.tuning ?? '...'} @ ${progress.current?.height ?? '?'}p (${progress.completed}/${progress.total})...`
+        : 'Starting benchmark...';
+    }
   }
 
   return (
@@ -94,7 +98,7 @@ export const TuningBenchmarkTable: React.FC<TuningBenchmarkTableProps> = ({
           {progressLabel}
         </Button>
         <InfoTooltip
-          text={`Runs a real, timed ffmpeg encode (a few seconds of synthetic input, no video file needed) for the currently selected Hardware encoder (${hwLabel}), across all 3 tuning tiers x 5 resolutions, using the exact args live playback uses, and reports whether each ran fast enough — with safety margin — to keep up with real-time HLS/live streaming. Scoped to this one encoder, so it's typically well under a minute.`}
+          text={`Runs a real timed encode for the selected encoder (${hwLabel}) across every tuning tier x resolution, using the exact args live playback uses, and reports whether each keeps up with real-time streaming. Scoped to this encoder - usually well under a minute.`}
           onMobileClick={onMobileTooltipClick}
         />
       </Box>

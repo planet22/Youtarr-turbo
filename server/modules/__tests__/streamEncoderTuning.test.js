@@ -127,14 +127,34 @@ describe('buildVideoEncoderArgs — nvenc', () => {
 });
 
 describe('buildVideoEncoderArgs — vaapi', () => {
-  test('fast tier matches original default qp 21 and never sets maxrate/bufsize', () => {
+  test('fast tier matches original default qp 21, defaults -quality to its own compressionLevel (7), and never sets maxrate/bufsize', () => {
     const result = buildVideoEncoderArgs('vaapi', 1080, 'fast');
-    expect(result.encoderArgs).toEqual(['-c:v', 'h264_vaapi', '-qp', '21', '-g', '120', '-keyint_min', '120', '-sc_threshold', '0']);
+    expect(result.encoderArgs).toEqual(['-c:v', 'h264_vaapi', '-qp', '21', '-quality', '7', '-g', '120', '-keyint_min', '120', '-sc_threshold', '0']);
   });
 
-  test('quality tier uses a lower (higher-quality) qp', () => {
+  test('quality tier uses a lower (higher-quality) qp and compressionLevel (1)', () => {
     const result = buildVideoEncoderArgs('vaapi', 1080, 'quality');
-    expect(result.encoderArgs).toContain('15');
+    expect(result.encoderArgs).toEqual(expect.arrayContaining(['-qp', '15', '-quality', '1']));
+  });
+
+  test('balanced tier defaults to compressionLevel 4', () => {
+    const result = buildVideoEncoderArgs('vaapi', 1080, 'balanced');
+    expect(result.encoderArgs).toEqual(expect.arrayContaining(['-quality', '4']));
+  });
+
+  test('an explicit vaapiQuality override wins over the tuning tier default', () => {
+    const result = buildVideoEncoderArgs('vaapi', 1080, 'fast', 3);
+    expect(result.encoderArgs).toEqual(expect.arrayContaining(['-quality', '3']));
+  });
+
+  test('clamps an explicit vaapiQuality override to the 1-7 range', () => {
+    expect(buildVideoEncoderArgs('vaapi', 1080, 'fast', 0).encoderArgs).toEqual(expect.arrayContaining(['-quality', '1']));
+    expect(buildVideoEncoderArgs('vaapi', 1080, 'fast', 99).encoderArgs).toEqual(expect.arrayContaining(['-quality', '7']));
+  });
+
+  test('ignores vaapiQuality for every other hardwareMode', () => {
+    expect(buildVideoEncoderArgs('none', 1080, 'fast', 3).encoderArgs).not.toContain('-quality');
+    expect(buildVideoEncoderArgs('nvenc', 1080, 'fast', 3).encoderArgs).not.toContain('-quality');
   });
 });
 

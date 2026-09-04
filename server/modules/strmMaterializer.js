@@ -502,6 +502,14 @@ class StrmMaterializer {
     const cancellation = { jobId, cancelled: false };
     this._activeCancellation = cancellation;
 
+    // Carries the last-known title across the gap between "start the next
+    // video" and "its metadata resolves" - each STRM item is fast (a
+    // metadata-only fetch, no real download), so nulling the title out at
+    // the start of every item and repopulating it a moment later reads as a
+    // constant flash rather than a real download's title, which stays put
+    // for the whole (much longer) time that video is downloading.
+    let lastVideoInfo = null;
+
     try {
       for (const url of urls) {
         if (cancellation.cancelled) {
@@ -509,7 +517,7 @@ class StrmMaterializer {
           break;
         }
         current += 1;
-        emitProgress('materializing_strm', null);
+        emitProgress('materializing_strm', lastVideoInfo);
         try {
           const r = await this.materializeOne(url, {
             ...options,
@@ -523,7 +531,8 @@ class StrmMaterializer {
               const title = (meta.fulltitle || meta.title) || '';
               const channel = (meta.uploader || meta.channel) || '';
               const displayTitle = title.length > 60 ? `${title.slice(0, 57)}...` : title;
-              emitProgress('materializing_strm', { channel, title, displayTitle });
+              lastVideoInfo = { channel, title, displayTitle };
+              emitProgress('materializing_strm', lastVideoInfo);
             },
           });
           completed += 1;
@@ -531,6 +540,7 @@ class StrmMaterializer {
         } catch (err) {
           logger.error({ err, url }, 'STRM materialize failed');
           results.push({ ok: false, url, error: err.message });
+          lastVideoInfo = null;
           emitProgress('materializing_strm', null);
         }
       }

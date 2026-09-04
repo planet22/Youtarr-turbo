@@ -20,6 +20,8 @@ const STEP_LABELS: Record<string, string> = {
   'container/transcode/hardwareMode/tuning': 'Container / Transcode / Hardware / Tuning',
   calculatedLength: 'Calculated length',
   hotSwapToCache: 'Hot-swap to cache',
+  backfillMissingSegments: 'Backfill missing segments',
+  finalizeToMp4: 'Finalize .ts to .mp4',
   transcode: 'Transcode',
   execution: 'What happens',
 };

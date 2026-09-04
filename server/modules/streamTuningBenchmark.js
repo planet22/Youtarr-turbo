@@ -27,6 +27,14 @@ const logger = require('../logger');
 // finishes in a reasonable time.
 const BENCHMARK_DURATION_SECONDS = 4;
 
+// The very first ffmpeg invocation of a run pays one-time costs (VAAPI/QSV/
+// NVENC device creation, driver JIT, etc.) that every later invocation
+// skips - timed inside the benchmark, that overhead makes the first
+// measured combo look artificially slow. So before the real matrix starts,
+// throw away one short encode at the first height/tier purely to prime the
+// hardware; its result is discarded and never enters `matrix`.
+const WARMUP_DURATION_SECONDS = 1;
+
 // A real live stream needs to encode faster than real time with headroom
 // to spare (network jitter, other host load, audio muxing) - not just
 // barely keep up. 1.3x means "encodes 4s of video in <=3.08s wall clock".
@@ -80,11 +88,16 @@ function runTimedFfmpegEncode(args) {
  *   test-only hook so unit tests can use a tiny synthetic duration instead
  *   of waiting out multi-second real encodes to exercise the realtime/
  *   not-realtime boundary. Production callers always omit this.
+ * @param {number|string|null} [vaapiQuality] - passed straight through to
+ *   buildVideoEncoderArgs (vaapi-only; ignored for every other
+ *   hardwareMode) - the whole point is measuring the exact args a real
+ *   stream would use, so this should always be whatever the caller has
+ *   actually configured, not a synthetic default.
  * @returns {Promise<{ok: boolean, wallSeconds?: number, realtimeFactor?: number, realtime?: boolean, error?: string}>}
  */
-async function benchmarkOne(hardwareMode, tuning, height, durationSeconds = BENCHMARK_DURATION_SECONDS) {
+async function benchmarkOne(hardwareMode, tuning, height, durationSeconds = BENCHMARK_DURATION_SECONDS, vaapiQuality = null) {
   const width = Math.round((height * 16) / 9 / 2) * 2;
-  const encoder = streamEncoderTuning.buildVideoEncoderArgs(hardwareMode, height, tuning);
+  const encoder = streamEncoderTuning.buildVideoEncoderArgs(hardwareMode, height, tuning, vaapiQuality);
 
   const args = ['-y', '-loglevel', 'error'];
   if (encoder.preInputArgs && encoder.preInputArgs.length) {
@@ -167,14 +180,22 @@ function formatBenchmarkSummaryLine(matrix, recommended, heights) {
  * Annotates each height with which tuning tier is `recommended` — the
  * highest-quality tier that still measured real-time-safe, falling back to
  * whichever tier had the best realtimeFactor if none qualified.
+ *
+ * Runs one discarded warmup encode (see WARMUP_DURATION_SECONDS) at
+ * heights[0]/VALID_TUNING[0] before the real matrix starts, so process-spawn
+ * and hardware/driver init overhead lands there instead of skewing the
+ * first real measurement.
  * @param {string} hardwareMode
  * @param {number[]} heights
  * @param {object} [opts]
  * @param {number} [opts.durationSeconds] - see benchmarkOne; test-only.
+ * @param {number|string|null} [opts.vaapiQuality] - see benchmarkOne; passed
+ *   through to every combo (including the warmup) so a vaapi run measures
+ *   exactly what real playback would use.
  * @returns {Promise<{matrix: object, recommended: object}>}
  * @throws {Error} if a benchmark is already running (check isBenchmarkRunning first)
  */
-async function runBenchmark(hardwareMode, heights, { durationSeconds = BENCHMARK_DURATION_SECONDS } = {}) {
+async function runBenchmark(hardwareMode, heights, { durationSeconds = BENCHMARK_DURATION_SECONDS, vaapiQuality = null } = {}) {
   if (running) {
     throw new Error('A tuning benchmark is already running');
   }
@@ -195,12 +216,19 @@ async function runBenchmark(hardwareMode, heights, { durationSeconds = BENCHMARK
   };
 
   try {
+    // Warm up on the first height/tier so its real measurement (taken next,
+    // as the first entry in the loop below) isn't skewed by one-time
+    // hardware/driver init overhead. `completed`/`total` stay untouched -
+    // this doesn't count as one of the matrix's measured combos.
+    broadcastProgress({ current: { tuning: streamEncoderTuning.VALID_TUNING[0], height: heights[0], warmup: true } });
+    await benchmarkOne(hardwareMode, streamEncoderTuning.VALID_TUNING[0], heights[0], WARMUP_DURATION_SECONDS, vaapiQuality);
+
     for (const height of heights) {
       matrix[height] = {};
       for (const tuning of streamEncoderTuning.VALID_TUNING) {
         broadcastProgress({ current: { tuning, height } });
         // eslint-disable-next-line no-await-in-loop -- deliberately sequential, see doc comment
-        matrix[height][tuning] = await benchmarkOne(hardwareMode, tuning, height, durationSeconds);
+        matrix[height][tuning] = await benchmarkOne(hardwareMode, tuning, height, durationSeconds, vaapiQuality);
         completed++;
       }
 
@@ -243,6 +271,7 @@ async function runBenchmark(hardwareMode, heights, { durationSeconds = BENCHMARK
 
 module.exports = {
   BENCHMARK_DURATION_SECONDS,
+  WARMUP_DURATION_SECONDS,
   REALTIME_SAFETY_MARGIN,
   benchmarkOne,
   runBenchmark,

@@ -20,6 +20,8 @@ export interface StreamSegmentStatus {
   /** How far the independent buffer fetch (if any) has reached, as a segment index - a fast local seek target even where `encoded` is still false. */
   bufferedThroughIndex: number;
   bufferComplete: boolean;
+  /** Index of the segment most recently fetched by the player - null until it has requested its first one. */
+  currentSegmentIndex: number | null;
 }
 
 export interface StreamSnapshot {

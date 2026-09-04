@@ -197,6 +197,21 @@ export const CONFIG_FIELDS = {
       // picture quality. See the "Test real-time tuning" benchmark in Settings
       // → Streaming for which tier is actually safe on this host, per resolution.
       tuning: 'fast' as 'fast' | 'balanced' | 'quality',
+      // hardwareMode=vaapi only, manual override. ffmpeg's h264_vaapi
+      // encoder exposes a separate driver-level "-quality"
+      // (compression_level, 1-7) knob that - unlike the tuning tiers' -qp
+      // above - actually trades real encode speed for picture quality on
+      // drivers that support it (notably Intel's iHD driver); -qp alone
+      // barely affects a fixed-function hardware encoder's throughput,
+      // which is why fast/balanced/quality otherwise measure almost
+      // identically for VAAPI. null (default) doesn't mean "off" - each
+      // tuning tier already bakes in its own sensible compressionLevel
+      // (server/modules/streamEncoderTuning.js's TUNING_TIERS.vaapi:
+      // fast=7, balanced=4, quality=1), so this field only matters when
+      // manually overriding that per-tier default. Safe on drivers that
+      // don't support this attribute (e.g. AMD's Mesa radeonsi), which
+      // just ignore it with a warning.
+      vaapiQuality: null as number | null,
       // Empty string = auto ('default,-tv' — avoids the yt-dlp "tv" client,
       // which is the most common cause of YouTube's "The page needs to be
       // reloaded." extraction error). Advanced override, e.g. "android" or
@@ -257,6 +272,40 @@ export const CONFIG_FIELDS = {
       // Nightly cron prune (server/modules/cronJobs.js, 3:15 AM) deletes
       // stream_history rows older than this. <= 0 or unset falls back to 90.
       historyRetentionDays: 90 as number,
+      // Where a live HLS session's segment files (mode=hls/hls-tap/hls-buffer)
+      // are written. 'tmp' (default, unchanged behavior) uses the OS temp
+      // dir - fastest, but on some setups that's a small/volatile partition.
+      // 'cache' writes under Youtarr's own persistent .youtarr_ytstream_cache
+      // folder instead (same volume as the untracked-buffer cache below),
+      // for hosts where the OS temp dir is undersized or where segments
+      // surviving a restart is more useful than raw temp-dir speed. Segments
+      // are still deleted on the same idle-timeout schedule either way -
+      // this only changes WHERE they live, not how long they're kept.
+      hlsStorageLocation: 'tmp' as 'tmp' | 'cache',
+      // mode=hls/hls-tap/hls-buffer only, and only takes effect once a local
+      // source is available for this session (STRM cache-on-play hot-swap,
+      // or hls-buffer's own independent fetch) - a forward seek during
+      // playback restarts the live encode at the seek target, permanently
+      // skipping whatever segments lay between where the old pass had
+      // reached and the new target. When on, once the live encode pass
+      // reaches the real end of the video, a separate background ffmpeg
+      // pass (reading the now-available local source, never the network)
+      // fills in any such gap so every segment ends up encoded - purely for
+      // faster/instant seeking later in the same session, never blocking or
+      // slowing down actual playback.
+      backfillMissingSegments: false as boolean,
+      // mode=hls-tap/hls-buffer/raw-buffer only, and only when their
+      // finished output is a .ts container (hls-buffer/raw-buffer always
+      // are; hls-tap only when Container is set to MPEG-TS above). Browsers'
+      // <video> element can't play raw .ts directly, and some external
+      // players (e.g. Jellyfin) fall back to a server-side transcode rather
+      // than direct-playing it. When on, once that .ts is fully finalized
+      // (backfillMissingSegments completing first, if also enabled), a
+      // background ffmpeg pass remuxes it (-c copy, no re-encode) into a
+      // sibling .mp4 - playback/serving then prefers that .mp4 automatically
+      // whenever it exists (server/modules/tsRemuxCache.js), without ever
+      // touching the original .ts.
+      finalizeToMp4: false as boolean,
     },
     trackChanges: true,
   },

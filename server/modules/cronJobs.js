@@ -132,6 +132,36 @@ function initialize(deps = {}) {
   });
 
   // ============================================================================
+  // UNTRACKED YOUTUBE METADATA CACHE PRUNE - 3:20 AM Daily
+  // ============================================================================
+  // youtube_metadata_cache (server/models/youtubemetadatacache.js) holds
+  // cheap-but-not-free lookups (currently just duration) for videos with no
+  // Video library row - untracked NZB grabs and played-but-never-downloaded
+  // videos. Each row is a handful of bytes, so retention is deliberately on
+  // its own, much longer clock than every other prune here (stream_history's
+  // 90 days, cache-on-play's configurable hours) - a year of near-zero
+  // storage cost buys a lot fewer repeat yt-dlp calls, and it's only
+  // expired by how recently it was actually used, not when it was first
+  // fetched.
+  const YOUTUBE_METADATA_CACHE_RETENTION_DAYS = 365;
+  schedule.schedule('20 3 * * *', async () => {
+    if (!db.YoutubeMetadataCache) return;
+    try {
+      const retentionDays = YOUTUBE_METADATA_CACHE_RETENTION_DAYS;
+      const result = await db.YoutubeMetadataCache.destroy({
+        where: {
+          last_accessed_at: {
+            [db.Sequelize.Op.lt]: new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000),
+          },
+        },
+      });
+      if (result > 0) logger.info({ removed: result, retentionDays }, 'Pruned stale entries from the untracked-video YouTube metadata cache');
+    } catch (error) {
+      logger.error({ err: error }, 'Error pruning youtube_metadata_cache');
+    }
+  });
+
+  // ============================================================================
   // VIDEO METADATA BACKFILL - 3:30 AM Daily
   // ============================================================================
   schedule.schedule('30 3 * * *', async () => {

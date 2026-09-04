@@ -24,7 +24,6 @@ import { Job, FailedVideo } from '../../types/Job';
 import { VideoData } from '../../types/VideoData';
 import { useSwipeable } from 'react-swipeable';
 import { useConfig } from '../../hooks/useConfig';
-import PageControls from '../shared/PageControls';
 import VideoModal from '../shared/VideoModal';
 import { VideoModalData } from '../shared/VideoModal/types';
 import VideoThumbnail from './VideoThumbnail';
@@ -32,6 +31,7 @@ import MissingVideoChip from './MissingVideoChip';
 import FailedVideoChip from './FailedVideoChip';
 import FailedDownloadsDetail from './FailedDownloadsDetail';
 import ChannelFilter from '../shared/VideoList/filters/ChannelFilter';
+import { useListPageSize, VideoListPaginationBar } from '../shared/VideoList';
 
 interface DownloadHistoryProps {
   jobs: Job[];
@@ -162,8 +162,10 @@ const DownloadHistory: React.FC<DownloadHistoryProps> = ({
   const [imageErrors, setImageErrors] = useState<Record<string, boolean>>({});
   const buttonRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const [currentPage, setCurrentPage] = useState(1);
-  const [itemsPerPage] = useState(12);
-  const [visibleCount, setVisibleCount] = useState(12);
+  // Same shared page-size control/values (and localStorage persistence) as
+  // the Videos/Library page.
+  const [itemsPerPage, setItemsPerPage] = useListPageSize('youtarr.downloadHistory.pageSize');
+  const [visibleCount, setVisibleCount] = useState<number>(itemsPerPage);
   const loadMoreRef = useRef<HTMLDivElement | null>(null);
   const { config } = useConfig(token);
   const useInfiniteScroll = config.channelVideosHotLoad ?? false;
@@ -285,11 +287,17 @@ const DownloadHistory: React.FC<DownloadHistoryProps> = ({
                   entityLabel="Source"
                 />
               </Toolbar>
-              {!useInfiniteScroll && (
-                <Box className="flex justify-center mb-2">
-                  <PageControls page={currentPage} totalPages={totalPages} onPageChange={setCurrentPage} compact />
-                </Box>
-              )}
+              <VideoListPaginationBar
+                placement="top"
+                hasContent={jobsToDisplay.length > 0}
+                useInfiniteScroll={useInfiniteScroll}
+                page={currentPage}
+                totalPages={totalPages}
+                onPageChange={setCurrentPage}
+                pageSize={itemsPerPage}
+                onPageSizeChange={setItemsPerPage}
+                isMobile
+              />
 
               <Box {...handlers}>
                 <Box className="flex flex-col gap-2.5">
@@ -480,11 +488,17 @@ const DownloadHistory: React.FC<DownloadHistoryProps> = ({
                 </Box>
               </Box>
 
-              {!useInfiniteScroll && (
-                <Box className="flex justify-center mt-4">
-                  <PageControls page={currentPage} totalPages={totalPages} onPageChange={setCurrentPage} />
-                </Box>
-              )}
+              <VideoListPaginationBar
+                placement="bottom"
+                hasContent={jobsToDisplay.length > 0}
+                useInfiniteScroll={useInfiniteScroll}
+                page={currentPage}
+                totalPages={totalPages}
+                onPageChange={setCurrentPage}
+                pageSize={itemsPerPage}
+                onPageSizeChange={setItemsPerPage}
+                isMobile
+              />
 
               {useInfiniteScroll && hasMoreHotLoadItems && (
                 <div ref={loadMoreRef} style={{ height: 24, width: '100%', marginTop: 8 }} />
@@ -514,6 +528,18 @@ const DownloadHistory: React.FC<DownloadHistoryProps> = ({
               entityLabel="Source"
             />
           </Toolbar>
+
+          <VideoListPaginationBar
+            placement="top"
+            hasContent={jobsToDisplay.length > 0}
+            useInfiniteScroll={useInfiniteScroll}
+            page={currentPage}
+            totalPages={totalPages}
+            onPageChange={setCurrentPage}
+            pageSize={itemsPerPage}
+            onPageSizeChange={setItemsPerPage}
+            isMobile={false}
+          />
 
           <TableContainer>
             <div {...handlers}>
@@ -704,11 +730,17 @@ const DownloadHistory: React.FC<DownloadHistoryProps> = ({
             </div>
           </TableContainer>
 
-          {!useInfiniteScroll && (
-            <Box className="flex justify-center mt-4">
-              <PageControls page={currentPage} totalPages={totalPages} onPageChange={setCurrentPage} />
-            </Box>
-          )}
+          <VideoListPaginationBar
+            placement="bottom"
+            hasContent={jobsToDisplay.length > 0}
+            useInfiniteScroll={useInfiniteScroll}
+            page={currentPage}
+            totalPages={totalPages}
+            onPageChange={setCurrentPage}
+            pageSize={itemsPerPage}
+            onPageSizeChange={setItemsPerPage}
+            isMobile={false}
+          />
 
           {useInfiniteScroll && hasMoreHotLoadItems && (
             <div ref={loadMoreRef} style={{ height: 24, width: '100%', marginTop: 8 }} />

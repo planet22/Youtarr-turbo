@@ -106,8 +106,8 @@ describe('runBenchmark', () => {
 
     await streamTuningBenchmark.runBenchmark('none', [720, 1080], { durationSeconds: TEST_DURATION_SECONDS });
 
-    // 3 tiers x 2 heights = 6 encodes total, all for 'none'.
-    expect(spawn).toHaveBeenCalledTimes(6);
+    // 1 discarded warmup encode + 3 tiers x 2 heights = 7 encodes total, all for 'none'.
+    expect(spawn).toHaveBeenCalledTimes(7);
   });
 
   test('recommends the highest tier that measured real-time-safe', async () => {
@@ -155,9 +155,12 @@ describe('runBenchmark', () => {
     await streamTuningBenchmark.runBenchmark('qsv', [720, 1080], { durationSeconds: TEST_DURATION_SECONDS });
 
     const progressCalls = messageEmitter.emitMessage.mock.calls.filter((c) => c[3] === 'tuningBenchmarkProgress');
-    // 6 "starting combo N" broadcasts (3 tiers x 2 heights) + 1 final completion broadcast.
-    expect(progressCalls).toHaveLength(7);
+    // 1 warmup broadcast + 6 "starting combo N" broadcasts (3 tiers x 2 heights) + 1 final completion broadcast.
+    expect(progressCalls).toHaveLength(8);
     expect(progressCalls[0][4]).toEqual(expect.objectContaining({
+      running: true, hardwareMode: 'qsv', completed: 0, total: 6, current: { tuning: 'fast', height: 720, warmup: true }
+    }));
+    expect(progressCalls[1][4]).toEqual(expect.objectContaining({
       running: true, hardwareMode: 'qsv', completed: 0, total: 6, current: { tuning: 'fast', height: 720 }
     }));
     expect(progressCalls[progressCalls.length - 1][4]).toEqual({

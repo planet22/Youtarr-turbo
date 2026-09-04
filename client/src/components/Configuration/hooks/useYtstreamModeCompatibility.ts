@@ -27,14 +27,15 @@ export type YtstreamModeCompatibility = Record<string, ModeFieldStatus>;
 export function useYtstreamModeCompatibility(
   mode: string,
   transcode: string,
-  token: string | null
+  token: string | null,
+  container?: string
 ): YtstreamModeCompatibility {
   const [compat, setCompat] = useState<YtstreamModeCompatibility>({});
 
   useEffect(() => {
     if (!token) return undefined;
     let cancelled = false;
-    const params = new URLSearchParams({ mode, transcode: transcode || '' });
+    const params = new URLSearchParams({ mode, transcode: transcode || '', container: container || '' });
     fetch(`/api/ytstream/mode-compatibility?${params.toString()}`, {
       headers: { 'x-access-token': token },
     })
@@ -48,7 +49,7 @@ export function useYtstreamModeCompatibility(
     return () => {
       cancelled = true;
     };
-  }, [mode, transcode, token]);
+  }, [mode, transcode, token, container]);
 
   return compat;
 }

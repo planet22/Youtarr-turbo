@@ -20,10 +20,12 @@ export interface YtstreamDryRunOverrides {
  * Calls the read-only GET /api/ytstream/:youtubeId/simulate route (see
  * resolvePlaybackPlan in server/routes/ytstream.js) - never resolves a real
  * playback URL or spawns yt-dlp/ffmpeg, just reports what a real request
- * would do. Always passes probe=true: the point of this UI is showing the
- * real answer for this specific video, not the instant/unprobed structural
- * check (that fast path is still available to anyone hitting the endpoint
- * directly).
+ * would do. Defaults to probe=true: the point of this UI is normally
+ * showing the real answer for a specific video, not the instant/unprobed
+ * structural check (that fast path is still available to anyone hitting
+ * the endpoint directly). Pass `{ probe: false }` for the no-video preview
+ * (YtstreamDryRunSection's blank-URL path, forceServerSettings only) -
+ * there's no real video to probe there, only a placeholder id.
  *
  * The overrides are sent as query params even though forceServerSettings
  * (when on) makes the server ignore them - that's deliberate. With it on,
@@ -33,8 +35,12 @@ export interface YtstreamDryRunOverrides {
  * useAutoRemovalDryRun already does for its own settings.
  */
 export const useYtstreamDryRun = ({ token }: UseYtstreamDryRunParams) => {
-  const runDryRun = useCallback(async (youtubeId: string, overrides: YtstreamDryRunOverrides): Promise<YtstreamDryRunResult> => {
-    const params = new URLSearchParams({ probe: 'true' });
+  const runDryRun = useCallback(async (
+    youtubeId: string,
+    overrides: YtstreamDryRunOverrides,
+    opts: { probe?: boolean } = {}
+  ): Promise<YtstreamDryRunResult> => {
+    const params = new URLSearchParams({ probe: String(opts.probe !== false) });
     if (overrides.mode) params.set('mode', overrides.mode);
     if (overrides.quality) params.set('quality', overrides.quality);
     if (overrides.qualityStrictness) params.set('qualityStrictness', overrides.qualityStrictness);

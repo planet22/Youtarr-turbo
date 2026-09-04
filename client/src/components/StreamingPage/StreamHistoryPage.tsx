@@ -3,15 +3,13 @@ import { Box, Typography, Button } from '../ui';
 import { Trash2 as DeleteIcon } from '../../lib/icons';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
 import { useStreamHistory } from '../../hooks/useStreamHistory';
-import PageControls from '../shared/PageControls';
+import { useListPageSize, VideoListPaginationBar, type PageSize } from '../shared/VideoList';
 import StreamHistoryTable from './components/StreamHistoryTable';
 import DeleteStreamHistoryDialog from './components/DeleteStreamHistoryDialog';
 
 interface StreamHistoryPageProps {
   token: string | null;
 }
-
-const PAGE_SIZE = 25;
 
 /**
  * Settings → Streaming → History (nav sub-item, see AppShell.tsx's
@@ -23,8 +21,16 @@ const PAGE_SIZE = 25;
 function StreamHistoryPage({ token }: StreamHistoryPageProps) {
   const isMobile = useMediaQuery('(max-width: 767px)');
   const [page, setPage] = useState(1);
-  const { rows, total, loading, refetch, deleteEntries } = useStreamHistory(token, page, PAGE_SIZE);
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  // Same shared page-size control/values (and localStorage persistence) as
+  // the Videos/Library page - GET /api/ytstream/history's `limit` is capped
+  // server-side at 128 to match ALLOWED_PAGE_SIZES' top value.
+  const [pageSize, setPageSize] = useListPageSize('youtarr.streamHistoryPage.pageSize');
+  const handlePageSizeChange = (newSize: PageSize) => {
+    setPageSize(newSize);
+    setPage(1);
+  };
+  const { rows, total, loading, refetch, deleteEntries } = useStreamHistory(token, page, pageSize);
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -32,7 +38,7 @@ function StreamHistoryPage({ token }: StreamHistoryPageProps) {
   // Selection is page-scoped, like the rest of this simple, non-VideoList page.
   useEffect(() => {
     setSelectedIds([]);
-  }, [page]);
+  }, [page, pageSize]);
 
   const handleToggleSelect = (streamId: string) => {
     setSelectedIds((prev) =>
@@ -88,7 +94,17 @@ function StreamHistoryPage({ token }: StreamHistoryPageProps) {
             onToggleSelect={handleToggleSelect}
             onSelectAll={handleSelectAll}
           />
-          <PageControls page={page} totalPages={totalPages} onPageChange={setPage} compact={isMobile} />
+          <VideoListPaginationBar
+            placement="bottom"
+            hasContent={rows.length > 0}
+            useInfiniteScroll={false}
+            page={page}
+            totalPages={totalPages}
+            onPageChange={setPage}
+            pageSize={pageSize}
+            onPageSizeChange={handlePageSizeChange}
+            isMobile={isMobile}
+          />
         </>
       )}
 

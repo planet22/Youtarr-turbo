@@ -20,7 +20,7 @@ import { ConfigState } from '../types';
 import { validateProxyUrl } from '../utils/configValidation';
 import { useYtdlpArgsValidation } from '../hooks/useYtdlpArgsValidation';
 import { useHardwareCapabilities } from '../hooks/useHardwareCapabilities';
-import { HardwareCapabilitiesTable } from './components/HardwareCapabilitiesTable';
+import { HardwareTestingAccordion } from './components/HardwareTestingAccordion';
 import {
   MAX_CUSTOM_ARGS_LENGTH,
   getBlockedFlagInArgs,
@@ -270,7 +270,7 @@ export const YtdlpOptionsSection: React.FC<YtdlpOptionsSectionProps> = ({
         </Grid>
 
         <Grid item xs={12}>
-          <HardwareCapabilitiesTable
+          <HardwareTestingAccordion
             matrix={hardwareMatrix}
             testing={testingHardware}
             error={hardwareTestError}

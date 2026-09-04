@@ -63,7 +63,7 @@ export const HardwareCapabilitiesTable: React.FC<HardwareCapabilitiesTableProps>
           {testing ? 'Testing (this can take a minute)...' : 'Test Hardware Capabilities'}
         </Button>
         <InfoTooltip
-          text='Runs a real 1-second test encode (no video file needed) through every hardware backend and codec combination on the Youtarr host, so you can see what actually works here before picking a transcode setting - not every GPU generation supports every codec, and software HEVC/AV1 need this ffmpeg build to have libx265/libsvtav1 compiled in.'
+          text='Runs a real 1-second test encode through every hardware backend x codec combo on this host, so you can see what actually works before picking a transcode setting.'
           onMobileClick={onMobileTooltipClick}
         />
       </Box>

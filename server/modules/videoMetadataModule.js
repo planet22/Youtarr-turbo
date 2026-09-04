@@ -8,6 +8,7 @@ const youtubeApi = require('./youtubeApi');
 const ChannelVideo = require('../models/channelvideo');
 const channelVideoReanchor = require('./channelVideoReanchor');
 const { parseTierFromFormatNote, extractAvailableResolutionTiers } = require('./resolutionTier');
+const tsRemuxCache = require('./tsRemuxCache');
 
 const NULL_METADATA = {
   description: null,
@@ -436,12 +437,32 @@ class VideoMetadataModule {
       return { error: 'file_missing', message: 'File not found on disk' };
     }
 
-    const contentType = STREAM_MIME_TYPES[ext] || DEFAULT_STREAM_MIME_TYPE;
+    // .ts (MPEG-TS) isn't in STREAM_MIME_TYPES at all - it falls through to
+    // 'application/octet-stream', which the in-app <video> player refuses
+    // to play outright (no browser has a native MPEG-TS demuxer for a plain
+    // progressive source). Real .ts library files come from the NZB/Sonarr
+    // grab pipeline and finalized raw-buffer/hls-buffer downloads - swap in
+    // a one-time seekable .mp4 remux (see tsRemuxCache) instead of the raw
+    // file whenever one exists or can be produced.
+    let servedFilePath = filePath;
+    let servedFileSize = stat.size;
+    if (ext === '.ts' && type === 'video') {
+      const remuxPath = await tsRemuxCache.ensureSeekableMp4(filePath).catch((err) => {
+        logger.warn({ err, filePath }, 'videoMetadataModule: .ts remux lookup failed; falling back to the raw file');
+        return null;
+      });
+      if (remuxPath) {
+        servedFilePath = remuxPath;
+        servedFileSize = (await fs.stat(remuxPath)).size;
+      }
+    }
+
+    const contentType = servedFilePath === filePath ? (STREAM_MIME_TYPES[ext] || DEFAULT_STREAM_MIME_TYPE) : 'video/mp4';
 
     return {
-      filePath,
+      filePath: servedFilePath,
       contentType,
-      fileSize: stat.size,
+      fileSize: servedFileSize,
       isStrm: false,
     };
   }

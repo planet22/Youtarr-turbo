@@ -31,7 +31,7 @@ import { useHardwareCapabilities } from '../hooks/useHardwareCapabilities';
 import { useTuningBenchmark } from '../hooks/useTuningBenchmark';
 import { useYtstreamModeCompatibility } from '../hooks/useYtstreamModeCompatibility';
 import { useUntrackedCache } from '../hooks/useUntrackedCache';
-import { HardwareCapabilitiesTable } from './components/HardwareCapabilitiesTable';
+import { HardwareTestingAccordion } from './components/HardwareTestingAccordion';
 import { TuningBenchmarkTable } from './components/TuningBenchmarkTable';
 import { TuningHistoryTable } from './components/TuningHistoryTable';
 
@@ -54,6 +54,7 @@ export const DEFAULT_YTSTREAM: YtstreamConfig = {
   qualityStrictness: 'fallback',
   hardwareMode: 'none',
   tuning: 'fast',
+  vaapiQuality: null,
   playerClient: '',
   calculatedLength: false,
   hotSwapToCache: false,
@@ -62,6 +63,9 @@ export const DEFAULT_YTSTREAM: YtstreamConfig = {
   probeShortcut: false,
   forceServerSettings: false,
   historyRetentionDays: 90,
+  hlsStorageLocation: 'tmp',
+  backfillMissingSegments: false,
+  finalizeToMp4: false,
 };
 
 // Each mode's real limitation, stated plainly - see resolvePlaybackPlan's
@@ -69,14 +73,14 @@ export const DEFAULT_YTSTREAM: YtstreamConfig = {
 // dry-run form. No mode falls back to a different mode's behavior; each
 // either works as described or fails outright (502).
 const MODE_TOOLTIPS: Record<string, string> = {
-  direct: 'Resolves a playback URL via yt-dlp, then proxies it directly - no ffmpeg, no re-encode. Progressive-only: YouTube currently serves exactly one muxed video+audio format for virtually any video (~360p), so Stream quality rarely changes anything here. If the resolved URL is rejected (a session-bound "vprv" 403), this mode just fails - no automatic retry beyond the same-request extraction-error retry. Use Direct (yt-dlp piped) if you want resilience against that specific failure instead.',
-  'direct-pipe': 'Same progressive-only ceiling as Direct (effectively ~360p), but fetches through yt-dlp\'s own process instead of proxying a separately-resolved URL - survives the session-bound-URL 403 plain Direct can\'t recover from. Trade-off: no Range/seek support, since this is a live sequential pipe, not a byte-range fetch - a seek restarts playback from 0. Still zero ffmpeg, zero re-encode.',
-  'direct-redirect': 'Resolves a playback URL via yt-dlp, then sends the player a 302 straight to it - Youtarr never touches the video bytes at all, the lightest mode on Youtarr\'s own bandwidth/CPU. Real trade-offs: no cookies/Referer/User-Agent travel with the redirect, so age-restricted or members-only videos (which need those) fail outright for a player that can\'t supply them; a session-bound "vprv" URL is if anything more likely to 403 here than under Direct, since the fetch now comes from the player\'s own network entirely; and whatever happens after the redirect is invisible to Youtarr - a failure here never reaches this server\'s logs.',
-  ffmpeg: 'Re-streams through a single live ffmpeg connection fed by yt-dlp\'s DASH (video-only + audio-only) formats - real quality up to whatever height this video truly has, not capped by progressive-format availability. Requires ffmpeg installed and working on the Youtarr host - if it isn\'t, this mode fails outright (502); it does not silently fall back to Direct.',
-  hls: 'Same DASH-based quality ceiling as Enhanced, but writes real segment files to local disk instead of a live pipe, only responding once the first segment exists - fixes players (Jellyfin included) that won\'t tolerate the live pipe\'s startup wait. Costs local disk space per active stream. Same ffmpeg-required, no-fallback rule as Enhanced.',
-  'hls-tap': 'Same DASH-based quality ceiling and disk cost as Enhanced HLS - but the same ffmpeg process also writes a second, untouched full-quality copy (-c copy, no re-encode, no scaling) straight to disk from the same yt-dlp video/audio pipes, before any Transcode/Container filtering is applied - no second network pull, and not a copy of the scaled-down stream. That file becomes this video\'s permanent downloaded copy once the whole video has played through once, uninterrupted, without a seek. Replaces STRM cache-on-play entirely for videos played this way - that separate background download is skipped whenever this mode\'s tap is active for a play. Limitation: only the very first, un-seeked play-through of a session can produce a complete file - if the very first request already starts mid-video (e.g. a media server resuming playback), or the viewer seeks before the video ends, the partial tap is discarded, not saved, and normal STRM cache-on-play (if enabled) picks it up instead. Same ffmpeg-required, no-fallback rule as Enhanced.',
-  'hls-buffer': 'Same DASH-based quality ceiling as Enhanced HLS - but instead of tapping the live encode, a completely independent yt-dlp+ffmpeg pull starts immediately and fetches the whole video once, unthrottled by anything the live stream is doing, remuxing it into a local MPEG-TS buffer file (a hard requirement of this mechanism - see the Container tooltip). Playback itself starts exactly like Enhanced HLS - network-sourced, no extra wait, so instant-start (if enabled) behaves identically. Only a later seek (or catching up to a gap) waits briefly for the buffer to have already reached that point before reading it directly instead of pulling from the network again - fast once buffered. Calculated length is always on for this mode (see its own tooltip) - not a real choice here. Once the fetch finishes, that MPEG-TS file becomes this video\'s permanent downloaded copy (always .ts, regardless of the Container setting below - only Tap-to-Download\'s permanent file follows Container) and STRM cache-on-play is skipped for this play, same as Tap-to-Download - but without Tap\'s limitation: the fetch keeps running and still finishes even if you seek early or stop watching partway through. For a video Youtarr doesn\'t itself catalogue (e.g. an NZB grab Sonarr/Radarr owns) there\'s no library entry to attach that permanent copy to, so it lands in Youtarr\'s own untracked-buffer cache instead - not visible in the library or Download History, but still reused automatically (skips the network fetch entirely) the next time that same video plays. Same ffmpeg-required, no-fallback rule as Enhanced.',
-  'raw-buffer': 'No HLS session, no re-encode at all: Container/Transcode/Hardware encoder/Encoding tuning below are all ignored - the video always plays and downloads as its own source codec/resolution/bitrate, muxed from yt-dlp\'s separate video+audio streams by a plain ffmpeg -c copy pass (still needs ffmpeg installed, just never as an encoder). If this video is already fully cached (from a previous play under this mode or Enhanced HLS + Buffered), it\'s served instantly straight from disk. Otherwise, a fetch identical to Enhanced HLS + Buffered\'s starts immediately, and the response streams directly off that growing local file via plain HTTP Range requests as it downloads - no live transcode, no HLS playlist/segments at all. Seeking backward or into already-downloaded territory is instant; seeking forward past what\'s downloaded so far simply waits for the sequential download to catch up rather than restarting anything, which can take a while on a slow connection for a seek deep into a long video. A second concurrent request for the same not-yet-cached video shares this one fetch rather than starting a duplicate. Same finalize-into-library (or Youtarr\'s own untracked-video cache) behavior as Enhanced HLS + Buffered. Same ffmpeg-required, no-fallback rule as Enhanced.',
+  direct: 'Resolves a playback URL via yt-dlp and proxies it directly - no ffmpeg, no re-encode. Progressive-only (~360p regardless of Stream quality). A rejected URL just fails, with no automatic retry beyond the same-request extraction-error retry.',
+  'direct-pipe': 'Same ~360p progressive-only ceiling as Direct, but fetched through yt-dlp\'s own process, so it survives the session-bound-URL failure Direct can\'t. No Range/seek support - a seek restarts playback from 0.',
+  'direct-redirect': 'Resolves a playback URL and sends the player a 302 straight to it - Youtarr never touches the bytes, the lightest mode on its own resources. No cookies/Referer travel with the redirect (age-restricted/members-only videos fail), and whatever happens after is invisible to Youtarr\'s logs.',
+  ffmpeg: 'Re-streams through a live ffmpeg pipe fed by yt-dlp\'s DASH formats - real quality beyond progressive\'s ceiling. Requires a working ffmpeg on the host; fails outright (502) if it isn\'t available, no fallback to Direct.',
+  hls: 'Same DASH-based quality as Enhanced, but writes real HLS segment files to disk instead of a live pipe - fixes players (Jellyfin included) that won\'t tolerate the live pipe\'s startup wait. Costs local disk space per active stream. Backfill missing segments (below) can apply once Hot-swap to cached file gives it a local source.',
+  'hls-tap': 'Same as Enhanced HLS, but the same ffmpeg process also saves a second, untouched full-quality copy to disk as this video\'s permanent download - replaces STRM cache-on-play. Only a complete, un-seeked first play-through produces a saved file; a seek or mid-video start discards it. With Container=MPEG-TS, Finalize .ts to .mp4 (below) can convert it afterward.',
+  'hls-buffer': 'Same as Enhanced HLS, but an independent fetch starts immediately and pulls the whole video once, unthrottled, into a local MPEG-TS buffer file that becomes the permanent download - keeps running even if you seek early or stop watching. Calculated length is always on for this mode. Backfill and Finalize .ts to .mp4 (below) can both apply once buffered.',
+  'raw-buffer': 'No re-encode at all - Container/Transcode/Hardware encoder/Encoding tuning are ignored. Muxes the source\'s own codec/resolution via a background fetch (same as Enhanced HLS + Buffered\'s), served over plain HTTP Range as it downloads; already-cached videos play instantly from disk. Finalize .ts to .mp4 can apply once finished; no live segments here, so Backfill never applies.',
 };
 
 /**
@@ -145,7 +149,7 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
   // "looks enabled" flash. 'ignored' fields render nothing at all (not just
   // disabled) - a setting with zero effect for this mode shouldn't be shown;
   // 'forced' fields stay visible, disabled, and reflect the pinned value.
-  const modeCompat = useYtstreamModeCompatibility(mode, ytstream.transcode || '', token);
+  const modeCompat = useYtstreamModeCompatibility(mode, ytstream.transcode || '', token, ytstream.container || '');
   // enhancedMode is still used below for the tuning-benchmark's own
   // disabled-reason messaging (a UI affordance unrelated to any one
   // field's forced/ignored status) and by Encoding tuning's Recommended
@@ -222,7 +226,7 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
             label="Force these settings (ignore URL / .strm overrides)"
           />
           <InfoTooltip
-            text="Playback requests can carry their own mode/quality/container/transcode/hardware/calculated-length — either a caller's own URL, or values baked into a .strm file's URL back when it was written. When on, the highlighted settings below are always used as-is instead, even if they've changed since older .strm files were written."
+            text="When on, ignores any mode/quality/etc. a request's URL or an older .strm file carries - the highlighted settings below are always used as-is."
             onMobileClick={onMobileTooltipClick}
           />
         </Box>
@@ -282,9 +286,9 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
               </Select>
               <InfoTooltip
                 text={
-                  'Matroska (mkv) is Enhanced (ffmpeg) mode only, not offered for Enhanced HLS - HLS segments must be fMP4 or MPEG-TS. Useful for Transcode=Copy when the source track isn\'t H.264: unlike MP4, Matroska\'s muxer accepts essentially any video/audio codec pair without container-specific signaling concerns.'
+                  'Matroska (mkv, Enhanced-only) accepts any video/audio codec pair - useful for Copy when the source isn\'t H.264.'
                   + (mode === 'hls-buffer'
-                    ? ' Note for Enhanced HLS + Buffered Download: this only picks the live segment format. The permanent downloaded file this mode produces is always saved as MPEG-TS regardless of this setting (a hard requirement of the buffer-fetch mechanism, unlike Tap-to-Download, which does follow this setting) - see the Playback mode tooltip.'
+                    ? ' For Enhanced HLS + Buffered: this only picks the live segment format - the permanent download is always MPEG-TS regardless.'
                     : '')
                 }
                 onMobileClick={onMobileTooltipClick}
@@ -318,7 +322,7 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
               <MenuItem value="best">Best available</MenuItem>
             </Select>
             <InfoTooltip
-              text="Maps to yt-dlp format selectors used by the Jellyfin YouTube plugin: 720 = progressive MP4, 1080 = balanced, best = maximum quality. Enhanced mode uses separate AVC+AAC inputs capped at this height; Direct/Direct (piped) can only ever reach whatever progressive (muxed) format YouTube actually serves for a video, which today is effectively just ~360p regardless of this setting - see Quality strictness for how a mismatch is handled."
+              text="Maps to yt-dlp format selectors. Enhanced mode is capped at this height; Direct/Direct (piped) can only ever reach ~360p regardless - see Quality strictness for how a mismatch is handled."
               onMobileClick={onMobileTooltipClick}
             />
           </Box>
@@ -326,7 +330,13 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
       </Grid>
 
       <Grid item xs={12} sm={6} md={3}>
-        <FormControl fullWidth style={forced ? forcedFieldStyle : undefined}>
+        {/* No forcedFieldStyle here (unlike Playback mode/Container/Stream
+            quality/Transcode above): strmGenerator.js never writes
+            qualityStrictness into a .strm's URL at all, so Settings is
+            always the only source for this regardless of Force these
+            settings - there's no URL value for that toggle to actually
+            override. */}
+        <FormControl fullWidth>
           <InputLabel>Quality strictness</InputLabel>
           <Box className="flex items-center gap-1">
             <Select
@@ -343,29 +353,12 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
               <MenuItem value="best">Best available</MenuItem>
             </Select>
             <InfoTooltip
-              text="Controls how Stream quality's configured height is turned into a request. Fall back to lower resolution (default, unchanged behavior) chains from the exact height down to whatever's actually available. Fixed matches only that exact height and fails cleanly (no silent substitution) if this video doesn't have it - honest but likely to fail often in Direct/Direct (piped) mode, since YouTube serves almost no heights progressively other than ~360p. Best available ignores Stream quality entirely and always takes the mode's real ceiling (the best progressive format for Direct/Direct (piped), the video's true best DASH height for Enhanced/Enhanced HLS)."
+              text="Controls how Stream quality's height becomes a request. Fall back (default) chains down to whatever's available. Fixed matches only that exact height and fails cleanly if this video doesn't have it. Best available ignores Stream quality and always takes the mode's real ceiling."
               onMobileClick={onMobileTooltipClick}
             />
           </Box>
         </FormControl>
       </Grid>
-
-      {/* Plain-English recap of the fields this mode ignores - the same
-          information the InfoTooltips above already carry (and that a real
-          /simulate dry run would report step-by-step), just surfaced without
-          needing to hover a tooltip or run a dry run against a specific
-          video. Only shown for the two modes where the answer is genuinely
-          surprising (nothing below actually applies) - every other mode's
-          fields do exactly what their own labels say. */}
-      {(mode === 'raw-buffer' || mode === 'hls-buffer') && (
-        <Grid item xs={12}>
-          <Typography variant="body2" color="textSecondary">
-            {mode === 'raw-buffer'
-              ? 'Summary: no re-encode, ever - Container/Transcode/Hardware encoder/Encoding tuning aren\'t shown below since they have no effect on this mode. Video plays and downloads as its own source codec/resolution/bitrate, muxed (not encoded) into MPEG-TS as it downloads and served over plain HTTP Range - no HLS playlist/segments.'
-              : 'Summary: Container/Transcode/Hardware encoder/Encoding tuning below shape the live HLS stream only. The separate permanent download this mode produces is always MPEG-TS regardless of those settings.'}
-          </Typography>
-        </Grid>
-      )}
 
       {/* Row 2 - how the encode pipeline behaves: transcode method, hardware,
           tuning, and calculated-length's seek/duration behavior. */}
@@ -388,7 +381,7 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
                 <MenuItem value="h264">Force re-encode (H.264/AAC)</MenuItem>
               </Select>
               <InfoTooltip
-                text="Auto isn't its own behavior - it just follows your download Video codec setting above: if that's set to H.264 or H.265 (a compatibility choice), Auto forces live streams to re-encode to H.264 too, same as picking H.264 here directly. Any other Video codec setting (default/VP9/AV1, a quality choice) makes Auto behave like Copy instead. Copy always remuxes without re-encoding, regardless of that setting - fast, no CPU/GPU cost, but the client receives whatever codec YouTube actually served for that video, which varies and isn't guaranteed compatible. H.264 always re-encodes for guaranteed compatibility and is required to use hardware acceleration below, at the cost of real encode time."
+                text="Auto follows your download Video codec setting above (H.264/H.265 forces re-encode, otherwise behaves like Copy). Copy never re-encodes - fast, but whatever codec YouTube served isn't guaranteed compatible. H.264 always re-encodes for compatibility and is required for hardware acceleration below."
                 onMobileClick={onMobileTooltipClick}
               />
             </Box>
@@ -398,7 +391,11 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
 
       {modeCompat.hardwareMode?.status !== 'ignored' && (
         <Grid item xs={12} sm={6} md={3}>
-          <FormControl fullWidth style={forced ? forcedFieldStyle : undefined}>
+          {/* No forcedFieldStyle: hardwareMode is never written into a
+              .strm's URL (strmGenerator.js only emits mode/quality/
+              container/transcode/calculatedLength) - Settings always
+              decides this regardless of Force these settings. */}
+          <FormControl fullWidth>
             <InputLabel>Hardware encoder</InputLabel>
             <Box className="flex items-center gap-1">
               <Select
@@ -419,7 +416,7 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
                 <MenuItem value="amf">AMD AMF (h264_amf)</MenuItem>
               </Select>
               <InfoTooltip
-                text="Used only when Playback mode is Enhanced and Transcode is H.264. Same options as the Jellyfin YouTube plugin managed transcode path. Requires the matching ffmpeg build and GPU drivers on the Youtarr host (and device passthrough in Docker)."
+                text="Used only when Playback mode is Enhanced and Transcode is H.264. Requires the matching ffmpeg build and GPU drivers on the Youtarr host (and device passthrough in Docker)."
                 onMobileClick={onMobileTooltipClick}
               />
             </Box>
@@ -429,7 +426,9 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
 
       {modeCompat.tuning?.status !== 'ignored' && (
         <Grid item xs={12} sm={6} md={3}>
-          <FormControl fullWidth style={forced ? forcedFieldStyle : undefined}>
+          {/* No forcedFieldStyle: tuning is never written into a .strm's
+              URL either - same reasoning as Hardware encoder above. */}
+          <FormControl fullWidth>
             <InputLabel>Encoding tuning</InputLabel>
             <Box className="flex items-center gap-1">
               <Select
@@ -457,7 +456,7 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
                 ))}
               </Select>
               <InfoTooltip
-                text="Trades encode speed for picture quality at a given resolution/hardware encoder. 'Fast' is this app's long-standing default and the safest choice for real-time HLS/live-pipe streaming; 'Balanced'/'Quality' push CRF/QP lower and presets slower, which can fall behind real time on weaker hardware at higher resolutions. Run the 'Test real-time tuning' benchmark below to see which tier is actually safe on this host, per resolution — the recommended tier (based on the current Hardware encoder and Stream quality) is marked above once benchmarked."
+                text="Trades encode speed for picture quality at a given resolution/hardware encoder. 'Fast' is the safest choice for real-time streaming; 'Balanced'/'Quality' can fall behind on weaker hardware at higher resolutions. Run 'Test real-time tuning' below to see which tier is actually safe on this host."
                 onMobileClick={onMobileTooltipClick}
               />
             </Box>
@@ -487,7 +486,7 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
               )}
               <InfoTooltip
                 text={
-                  'Reports an estimated size/duration upfront and can answer seeks faster (but only approximately) by restarting at the estimated timestamp, instead of the response only ever growing until the real end is known.'
+                  'Reports an estimated size/duration upfront and can answer seeks faster (approximately) by restarting at the estimated timestamp, instead of the response only ever growing until the real end is known.'
                   + (modeCompat.calculatedLength?.reason ? ` For the current Playback mode (${mode}): ${modeCompat.calculatedLength.reason}` : '')
                 }
                 onMobileClick={onMobileTooltipClick}
@@ -511,7 +510,7 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
           />
           <InfoTooltip
             text={
-              'Passed as yt-dlp --extractor-args youtube:player_client=VALUE. The default excludes the "tv" client, which is the most common source of YouTube\'s "The page needs to be reloaded." error. Try "android" or "web,android" if problems persist after updating yt-dlp.'
+              'Passed as yt-dlp --extractor-args youtube:player_client=VALUE. The default excludes the "tv" client, the most common cause of YouTube\'s reload error. Try "android" or "web,android" if problems persist.'
             }
             onMobileClick={onMobileTooltipClick}
           />
@@ -535,6 +534,38 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
           instead of two disconnected ones - see modeCompat's own comment
           above for why. */}
 
+      {currentHardwareMode === 'vaapi' && (
+        <Grid item xs={12} sm={6} md={4}>
+          {/* No forcedFieldStyle: vaapiQuality is never written into a
+              .strm's URL - same reasoning as Hardware encoder above. */}
+          <FormControl fullWidth>
+            <InputLabel>VAAPI compression level</InputLabel>
+            <Box className="flex items-center gap-1">
+              <Select
+                value={ytstream.vaapiQuality != null ? String(ytstream.vaapiQuality) : ''}
+                label="VAAPI compression level"
+                onChange={(e: SelectChangeEvent<string>) =>
+                  setYtstream({ vaapiQuality: e.target.value === '' ? null : Number(e.target.value) })
+                }
+                className="flex-1 min-w-0"
+                disabled={disabled}
+              >
+                <MenuItem value="">Auto (follows Encoding tuning: 7/4/1)</MenuItem>
+                {[1, 2, 3, 4, 5, 6, 7].map((level) => (
+                  <MenuItem key={level} value={String(level)}>
+                    {level} {level === 1 ? '(best quality, slowest)' : level === 7 ? '(fastest, lowest quality)' : ''}
+                  </MenuItem>
+                ))}
+              </Select>
+              <InfoTooltip
+                text="ffmpeg's own -quality (compression_level) knob for h264_vaapi, separate from Encoding tuning's -qp - on supporting drivers (notably Intel's iHD), this actually trades encode speed for quality. Each Encoding tuning tier already sets a sensible value on its own (Fast=7, Balanced=4, Quality=1); only change this to manually override that. Ignored on drivers that don't support it (e.g. AMD's Mesa radeonsi). The tuning benchmark above uses this same value."
+                onMobileClick={onMobileTooltipClick}
+              />
+            </Box>
+          </FormControl>
+        </Grid>
+      )}
+
       {modeCompat.instantStart?.status !== 'ignored' && (
         <Grid item xs={12} md={4}>
           <Box className="flex items-center gap-1">
@@ -550,7 +581,7 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
             />
             <InfoTooltip
               text={
-                'Normally the very first response blocks until the real encode produces its first segment (10-25s is typical for a cold start). When applicable, this serves a short placeholder clip as segment 0 instead - the video\'s own thumbnail with a \'Loading...\' overlay when it\'s already cached locally, otherwise a generic moving test pattern - so playback starts within milliseconds while the real encode catches up in the background. Generated once per video/codec/hardware combination and reused after that.'
+                'Normally the first response blocks until the real encode produces its first segment (10-25s is typical). When applicable, this serves a placeholder clip as segment 0 instead - the video\'s own thumbnail with a \'Loading...\' overlay if cached, otherwise a generic pattern - so playback starts instantly while the real encode catches up.'
                 + (modeCompat.instantStart?.reason ? ` For the current Playback mode (${mode}): ${modeCompat.instantStart.reason}` : '')
               }
               onMobileClick={onMobileTooltipClick}
@@ -574,7 +605,7 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
             />
             <InfoTooltip
               text={
-                'When a STRM item is played, enqueue a real background download of it (same pipeline as a manual download) so later plays use a cached file instead of live proxying. Uses disk space; off by default. Pairs with the Automatic Video Removal settings, which can revert a cached video back to STRM instead of deleting it outright.'
+                'When a STRM item is played, enqueue a real background download so later plays use a cached file instead of live proxying. Pairs with Automatic Video Removal, which can revert a cached video back to STRM instead of deleting it.'
                 + (modeCompat.cacheOnPlay?.reason ? ` For the current Playback mode (${mode}): ${modeCompat.cacheOnPlay.reason}` : '')
               }
               onMobileClick={onMobileTooltipClick}
@@ -598,7 +629,7 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
             />
             <InfoTooltip
               text={
-                'If the STRM \'Cache on play\' background download finishes while this video is still playing, the session can switch to producing the remaining segments from the local cached file instead of the live network pull - same picture, no restart, just faster and more reliable for the rest of the video. Has no effect unless Cache on play is also enabled.'
+                'If the Cache on play download finishes while this video is still playing, the session switches to producing the rest from the local file instead of the network - same picture, no restart, just faster. Has no effect unless Cache on play is also enabled.'
                 + (modeCompat.hotSwapToCache?.reason ? ` For the current Playback mode (${mode}): ${modeCompat.hotSwapToCache.reason}` : '')
               }
               onMobileClick={onMobileTooltipClick}
@@ -631,7 +662,7 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
               inputProps={{ min: 1 }}
             />
             <InfoTooltip
-              text="How long a cache-on-play download stays a real file before Youtarr automatically reverts it back to STRM (freeing the disk space), reusing the same revert-to-STRM logic Automatic Video Removal already uses. Only ever applies to videos cache-on-play itself downloaded - a genuine/forced download (mediaMode=download, or a channel switched to download mode) is never touched by this, regardless of age."
+              text="How long a cache-on-play download stays a real file before Youtarr auto-reverts it back to STRM. Never touches a genuine/forced download, regardless of age."
               onMobileClick={onMobileTooltipClick}
             />
           </Box>
@@ -640,7 +671,11 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
 
       {modeCompat.probeShortcut?.status !== 'ignored' && (
         <Grid item xs={12} md={4}>
-          <Box className="flex items-center gap-1" style={forced ? forcedFieldStyle : undefined}>
+          {/* No forcedFieldStyle: probeShortcut is read straight from config
+              with no query-string override path at all (see
+              evaluateProbeShortcut) and is never written into a .strm's
+              URL - Settings has always been the only source for this. */}
+          <Box className="flex items-center gap-1">
             <FormControlLabel
               control={
                 <Switch
@@ -653,7 +688,7 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
             />
             <InfoTooltip
               text={
-                'A media server\'s metadata probe (Jellyfin\'s ffprobe, or similar) hitting a .strm\'s URL can trigger real work against YouTube just to read codec info. Every .strm this app writes always carries a custom User-Agent marker that real playback honors but a bare probe request doesn\'t (a known Jellyfin quirk), letting the server tell the two apart regardless of this setting. This toggle only controls what happens once a probe IS detected: on, it serves a tiny cached clip instead of doing real work; off, the probe is treated like any other request.'
+                'A media server\'s metadata probe (Jellyfin\'s ffprobe, etc.) hitting a .strm can trigger real work against YouTube just to read codec info. Every .strm this app writes carries a marker that lets the server detect a probe regardless of this setting; the toggle only controls what happens once one IS detected - on serves a tiny cached clip instead, off treats it like any other request.'
                 + (modeCompat.probeShortcut?.reason ? ` For the current Playback mode (${mode}): ${modeCompat.probeShortcut.reason}` : '')
                 + ' Existing .strm files need to be rewritten (re-download, or a channel resync) to pick up the marker.'
               }
@@ -678,24 +713,24 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
       )}
 
       <Grid item xs={12}>
+        <HardwareTestingAccordion
+          matrix={hardwareMatrix}
+          testing={testingHardware}
+          error={hardwareTestError}
+          onRunTest={runHardwareTest}
+          onMobileTooltipClick={onMobileTooltipClick}
+        />
+      </Grid>
+
+      <Grid item xs={12}>
         <Accordion style={{ border: 'var(--border-weight) solid var(--border)', borderRadius: 'var(--radius-ui)' }}>
           <AccordionSummary>
             <Typography variant="subtitle2" style={{ fontWeight: 700 }}>
-              Hardware Testing &amp; Tuning
+              Encoding Tuning
             </Typography>
           </AccordionSummary>
           <AccordionDetails>
             <Grid container spacing={2}>
-              <Grid item xs={12}>
-                <HardwareCapabilitiesTable
-                  matrix={hardwareMatrix}
-                  testing={testingHardware}
-                  error={hardwareTestError}
-                  onRunTest={runHardwareTest}
-                  onMobileTooltipClick={onMobileTooltipClick}
-                />
-              </Grid>
-
               <Grid item xs={12}>
                 <TuningBenchmarkTable
                   hardwareMode={currentHardwareMode}
@@ -705,7 +740,7 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
                   progress={tuningProgress}
                   testing={testingTuning}
                   error={tuningTestError}
-                  onRunTest={() => runTuningBenchmark(currentHardwareMode)}
+                  onRunTest={() => runTuningBenchmark(currentHardwareMode, ytstream.vaapiQuality)}
                   disabledReason={tuningTestDisabledReason}
                   onMobileTooltipClick={onMobileTooltipClick}
                 />
@@ -715,6 +750,83 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
           </AccordionDetails>
         </Accordion>
       </Grid>
+
+      <Grid item xs={12}>
+        <Divider className="my-2" />
+        <Typography variant="subtitle2" color="textSecondary" className="mb-1">
+          Storage &amp; background processing
+        </Typography>
+      </Grid>
+
+      <Grid item xs={12} md={4}>
+        <Box className="flex items-center gap-1">
+          <FormControl fullWidth disabled={disabled}>
+            <InputLabel>HLS segment storage</InputLabel>
+            <Select
+              label="HLS segment storage"
+              value={ytstream.hlsStorageLocation || 'tmp'}
+              onChange={(e: SelectChangeEvent<string>) =>
+                setYtstream({ hlsStorageLocation: e.target.value as 'tmp' | 'cache' })
+              }
+            >
+              <MenuItem value="tmp">OS temp directory (default)</MenuItem>
+              <MenuItem value="cache">Youtarr's persistent cache folder</MenuItem>
+            </Select>
+          </FormControl>
+          <InfoTooltip
+            text="Where a live session's segment files are written. OS temp directory is fastest but can be small/volatile; Youtarr's persistent cache folder avoids that. Either way segments are cleaned up on the same idle schedule - this only changes where they live."
+            onMobileClick={onMobileTooltipClick}
+          />
+        </Box>
+      </Grid>
+
+      {modeCompat.backfillMissingSegments?.status !== 'ignored' && (
+        <Grid item xs={12} md={4}>
+          <Box className="flex items-center gap-1">
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={ytstream.backfillMissingSegments ?? false}
+                  onChange={(e) => setYtstream({ backfillMissingSegments: e.target.checked })}
+                  disabled={disabled || modeCompat.backfillMissingSegments?.status !== 'optional'}
+                />
+              }
+              label="Backfill missing segments"
+            />
+            <InfoTooltip
+              text={
+                'A forward seek permanently skips whatever segments lie in between. When on, once encoding reaches the real end, a background pass (local source only) fills those gaps so the rest of the session can seek anywhere instantly. Never affects live playback itself.'
+                + (modeCompat.backfillMissingSegments?.reason ? ` For the current Playback mode (${mode}): ${modeCompat.backfillMissingSegments.reason}` : '')
+              }
+              onMobileClick={onMobileTooltipClick}
+            />
+          </Box>
+        </Grid>
+      )}
+
+      {modeCompat.finalizeToMp4?.status !== 'ignored' && (
+        <Grid item xs={12} md={4}>
+          <Box className="flex items-center gap-1">
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={ytstream.finalizeToMp4 ?? false}
+                  onChange={(e) => setYtstream({ finalizeToMp4: e.target.checked })}
+                  disabled={disabled || modeCompat.finalizeToMp4?.status !== 'optional'}
+                />
+              }
+              label="Finalize .ts to .mp4"
+            />
+            <InfoTooltip
+              text={
+                'Browsers and some players (Jellyfin included) can\'t direct-play raw .ts. When on, once this mode\'s permanent .ts is fully finalized, a background pass remuxes it (no re-encode) into a sibling .mp4 - playback prefers that .mp4 automatically once it exists.'
+                + (modeCompat.finalizeToMp4?.reason ? ` For the current Playback mode (${mode}): ${modeCompat.finalizeToMp4.reason}` : '')
+              }
+              onMobileClick={onMobileTooltipClick}
+            />
+          </Box>
+        </Grid>
+      )}
 
       <Grid item xs={12}>
         <Divider className="my-2" />
@@ -740,7 +852,7 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
             inputProps={{ min: 1 }}
           />
           <InfoTooltip
-            text="How long Settings -> Streaming -> History keeps past playback sessions (server/models/streamhistory.js). A nightly job (3:15 AM) deletes anything older than this. Doesn't affect the live Streaming page, which only ever shows currently-active sessions."
+            text="How long Streaming -> History keeps past playback sessions before a nightly prune (3:15 AM). Doesn't affect the live Streaming page, which only shows currently-active sessions."
             onMobileClick={onMobileTooltipClick}
           />
         </Box>
@@ -762,7 +874,7 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
             Delete
           </Button>
           <InfoTooltip
-            text="mode=Enhanced HLS + Buffered / Raw + Buffered finalize a finished download here instead of the library whenever the video has no library entry to attach to (an untracked NZB grab Sonarr/Radarr owns, or one later disowned) - purely a same-video-again speed-up, never shown in the library or Download History, so this is the only place its disk usage is visible or reclaimable. Safe to delete any time; a later replay just re-fetches from scratch."
+            text="Buffered modes save a finished download here instead of the library whenever the video has no library entry to attach to (e.g. an untracked NZB grab) - a same-video speed-up, never shown in the library. Safe to delete anytime; a later replay just re-fetches."
             onMobileClick={onMobileTooltipClick}
           />
         </Box>

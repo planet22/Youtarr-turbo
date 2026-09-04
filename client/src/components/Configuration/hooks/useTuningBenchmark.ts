@@ -18,7 +18,10 @@ export type TuningRecommendationMap = Record<string, string | null>;
 export interface TuningBenchmarkProgress {
   completed: number;
   total: number;
-  current?: { tuning: string; height: number };
+  /** `warmup: true` marks the one discarded priming encode run before the
+   * real matrix starts (see streamTuningBenchmark.js) - not one of the
+   * measured combos, so it never advances `completed`. */
+  current?: { tuning: string; height: number; warmup?: boolean };
 }
 
 export interface TuningBenchmarkHistoryEntry {
@@ -36,7 +39,7 @@ interface ProgressPayload {
   hardwareMode: string;
   completed: number;
   total: number;
-  current?: { tuning: string; height: number };
+  current?: { tuning: string; height: number; warmup?: boolean };
 }
 
 interface UseTuningBenchmarkReturn {
@@ -50,7 +53,14 @@ interface UseTuningBenchmarkReturn {
   /** Every encoder tested so far this session, for cross-encoder comparison - see TuningBenchmarkHistory. */
   history: TuningBenchmarkHistory;
   error: string | null;
-  runBenchmark: (hardwareMode: string) => Promise<void>;
+  /**
+   * @param vaapiQuality - VAAPI-only -quality (compression_level) override,
+   * 1-7 or null. Ignored server-side for every other hardwareMode. Always
+   * pass the current (possibly unsaved) form value, same as hardwareMode -
+   * the whole point of this test is measuring exactly what real playback
+   * would use.
+   */
+  runBenchmark: (hardwareMode: string, vaapiQuality?: number | null) => Promise<void>;
 }
 
 /**
@@ -92,7 +102,7 @@ export function useTuningBenchmark(token: string | null): UseTuningBenchmarkRetu
     return () => ws.unsubscribe(callback);
   }, [ws]);
 
-  const runBenchmark = useCallback(async (hardwareMode: string) => {
+  const runBenchmark = useCallback(async (hardwareMode: string, vaapiQuality?: number | null) => {
     setTesting(true);
     setError(null);
     setProgress({ completed: 0, total: 0 });
@@ -112,7 +122,7 @@ export function useTuningBenchmark(token: string | null): UseTuningBenchmarkRetu
         error?: string;
       }>(
         '/api/ytdlp/test-tuning-benchmark',
-        { hardwareMode },
+        { hardwareMode, vaapiQuality: vaapiQuality ?? null },
         { headers: { 'x-access-token': token || '' } }
       );
       if (response.data.ok && response.data.matrix && response.data.recommended) {

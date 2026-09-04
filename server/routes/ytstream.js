@@ -280,21 +280,46 @@ function computeSegmentStatus(session) {
     return null;
   }
   const encoded = new Array(session.totalSegments).fill(false);
+  let highestEncodedIndex = -1;
   for (const filename of files) {
     const match = filename.match(/^segment(\d{5})\.\w+$/);
     if (!match) continue;
     const index = Number(match[1]);
-    if (index >= 0 && index < encoded.length) encoded[index] = true;
+    if (index >= 0 && index < encoded.length) {
+      encoded[index] = true;
+      if (index > highestEncodedIndex) highestEncodedIndex = index;
+    }
   }
+
+  // session.totalSegments is only ever an ESTIMATE (yt-dlp's reported
+  // duration, divided into fixed-length segments) - the real encode can
+  // legitimately produce fewer segments than that if the estimate rounded
+  // up or slightly overshot the actual encodable content. Once the encode
+  // pass has genuinely finished (see encodeEnded above) and nothing is
+  // still running that could add more, report the true final count instead
+  // of the original estimate - otherwise the trailing slots the estimate
+  // over-reserved would show as permanently "not yet available" even
+  // though the stream played to completion with no seek ever involved.
+  const totalSegments =
+    session.encodeEnded && highestEncodedIndex >= 0 && highestEncodedIndex + 1 < session.totalSegments
+      ? highestEncodedIndex + 1
+      : session.totalSegments;
+  const encodedForDisplay = totalSegments === encoded.length ? encoded : encoded.slice(0, totalSegments);
+
   const bufferedThroughIndex = session.bufferEnabled
-    ? Math.min(session.totalSegments, Math.max(0, Math.floor((session.bufferedSeconds || 0) / HLS_SEGMENT_DURATION_SECONDS)))
+    ? Math.min(totalSegments, Math.max(0, Math.floor((session.bufferedSeconds || 0) / HLS_SEGMENT_DURATION_SECONDS)))
     : 0;
   return {
-    totalSegments: session.totalSegments,
+    totalSegments,
     segmentDurationSeconds: HLS_SEGMENT_DURATION_SECONDS,
-    encoded,
+    encoded: encodedForDisplay,
     bufferedThroughIndex,
     bufferComplete: session.bufferFetchDone === true,
+    // Set by the segment-serving route (see session.lastServedSegmentIndex)
+    // every time the player actually fetches a .ts/.m4s segment - the
+    // Streaming page's segment grid uses this to highlight which segment is
+    // currently being delivered, not just which ones are encoded on disk.
+    currentSegmentIndex: typeof session.lastServedSegmentIndex === 'number' ? session.lastServedSegmentIndex : null,
   };
 }
 
@@ -397,6 +422,18 @@ function ensureHlsIdleReaper() {
     const now = Date.now();
     for (const session of [...hlsSessions.values()]) {
       if (now - session.lastAccess > HLS_IDLE_TIMEOUT_MS) {
+        // A backfillMissingSegments pass runs entirely after playback has
+        // gone idle by design - reaping the session (and deleting its
+        // directory 3.5s later - see destroyHlsSession) out from under that
+        // still-running ffmpeg would kill it mid-write and throw away the
+        // work. Left alone for one more sweep interval; once that pass
+        // either finishes or gets superseded, spawnHlsEncodePass/the clean-
+        // finish handler always clears this flag (see their own comments),
+        // so this can never wedge a session here permanently.
+        if (session.backfillInProgress) {
+          logger.debug({ sessionKey: session.key }, 'ytstream: idle HLS session has a backfill pass in progress; deferring reap');
+          continue;
+        }
         logger.info({ sessionKey: session.key }, 'ytstream: reaping idle HLS session');
         destroyHlsSession(session, 'idle-timeout');
       }
@@ -762,6 +799,16 @@ const RAW_BUFFER_WAIT_TIMEOUT_MS = 20 * 60 * 1000;
 // wholesale by cleanTempDirectory() on startup and before every download
 // job, which would delete segments out from under an active HLS session.
 const HLS_BASE_TEMP_DIR = path.join(os.tmpdir(), 'youtarr-ytstream-hls');
+// ytstream.hlsStorageLocation: 'cache' alternative to the OS temp dir above,
+// under the same persistent .youtarr_ytstream_cache folder the untracked-
+// buffer cache and probe/placeholder clips already live in (YTSTREAM_CACHE_DIR,
+// defined further below with the rest of that group). Read fresh on every
+// session/fetch start (not cached at module load) so a config change takes
+// effect on the next play without a server restart.
+function resolveHlsBaseDir() {
+  const location = (configModule.getConfig().ytstream || {}).hlsStorageLocation;
+  return location === 'cache' ? path.join(YTSTREAM_CACHE_DIR, 'hls-sessions') : HLS_BASE_TEMP_DIR;
+}
 
 // Active HLS sessions, keyed by buildHlsSessionKey(...).
 const hlsSessions = new Map();
@@ -1102,7 +1149,8 @@ async function ensurePlaceholderSegment({ youtubeId, thumbnailPath, segmentType,
 
   const generate = (async () => {
     fs.mkdirSync(dir, { recursive: true });
-    const encoder = buildVideoEncoderArgs(hardwareMode, height, tuning);
+    const vaapiQuality = (configModule.getConfig().ytstream || {}).vaapiQuality;
+    const encoder = buildVideoEncoderArgs(hardwareMode, height, tuning, vaapiQuality);
     const args = ['-y', '-loglevel', 'error'];
     if (encoder.preInputArgs && encoder.preInputArgs.length) {
       args.push(...encoder.preInputArgs);
@@ -1332,7 +1380,7 @@ function evaluateProbeShortcut(req, config) {
  * @param {{mode: string, transcode: string}} params
  * @returns {Record<string, {status: 'forced'|'ignored'|'optional', reason?: string}>}
  */
-function getModeFieldCompatibility({ mode, transcode }) {
+function getModeFieldCompatibility({ mode, transcode, container }) {
   const isHlsFamily = mode === 'hls' || mode === 'hls-tap' || mode === 'hls-buffer';
   const enhancedMode = mode === 'ffmpeg' || isHlsFamily;
   const forceH264 = transcode === 'h264';
@@ -1432,6 +1480,48 @@ function getModeFieldCompatibility({ mode, transcode }) {
           : 'Only applies when Transcode is set to Force re-encode (H.264/AAC) - the placeholder is generated to match a real h264 encode\'s settings.',
       };
 
+  // Only hls/hls-tap/hls-buffer produce real numbered segment files at all
+  // (see SEGMENT_STATUS_MODES) - a forward seek in any of them can strand
+  // segments between the old and new encode-pass targets, permanently
+  // un-encoded. Genuinely "optional" rather than depending on more of this
+  // session's state (a local source only shows up later, from STRM
+  // cache-on-play's hot-swap or hls-buffer's own fetch) - when no local
+  // source ever appears, this just never has anything to do, same as
+  // disabled.
+  fields.backfillMissingSegments = isHlsFamily
+    ? {
+        status: 'optional',
+        reason: 'Once the live encode reaches the end of the video, fills in any segments a forward seek skipped over - using a local source only (STRM cache-on-play\'s hot-swap, or this mode\'s own buffer fetch), never a fresh network pull. No effect if no local source ever became available this session.',
+      }
+    : {
+        status: 'ignored',
+        reason: 'Only hls/hls-tap/hls-buffer write real numbered segment files that could ever have a gap to fill.',
+      };
+
+  // Only hls-buffer/raw-buffer always finalize a .ts (their whole mechanism
+  // is a plain -c copy MPEG-TS remux); hls-tap only does when Container is
+  // set to MPEG-TS - anything else it finalizes already lands as .mp4/.mkv,
+  // nothing left to convert.
+  fields.finalizeToMp4 = (mode === 'hls-buffer' || mode === 'raw-buffer')
+    ? {
+        status: 'optional',
+        reason: `${mode === 'raw-buffer' ? 'Raw + Buffered' : 'Enhanced HLS + Buffered'} always finalizes as a .ts file - once complete, remux it (no re-encode) into a sibling .mp4 that plays natively and doesn't need Jellyfin (or any other player) to transcode it server-side.`,
+      }
+    : mode === 'hls-tap'
+      ? (container === 'ts'
+          ? {
+              status: 'optional',
+              reason: 'Tap-to-Download finalizes as a .ts file with Container set to MPEG-TS - once complete, remux it (no re-encode) into a sibling .mp4 that plays natively and doesn\'t need Jellyfin (or any other player) to transcode it server-side.',
+            }
+          : {
+              status: 'ignored',
+              reason: 'Tap-to-Download only finalizes as a .ts file when Container is set to MPEG-TS - with the current Container, its finalized file is already directly playable.',
+            })
+      : {
+          status: 'ignored',
+          reason: 'This mode never finalizes a permanent .ts file to convert.',
+        };
+
   return fields;
 }
 
@@ -1507,7 +1597,8 @@ async function ensureProbeClip({ hardwareMode, tuning, width, height }) {
 
   const generate = (async () => {
     fs.mkdirSync(dir, { recursive: true });
-    const encoder = buildVideoEncoderArgs(hardwareMode, height, tuning);
+    const vaapiQuality = (configModule.getConfig().ytstream || {}).vaapiQuality;
+    const encoder = buildVideoEncoderArgs(hardwareMode, height, tuning, vaapiQuality);
     const args = ['-y', '-loglevel', 'error'];
     if (encoder.preInputArgs && encoder.preInputArgs.length) {
       args.push(...encoder.preInputArgs);
@@ -1616,6 +1707,16 @@ async function tryServeProbeClip(req, res, { hardwareMode, tuning, width, height
  *   return immediately without falling through to normal handling).
  */
 async function tryServeCachedVideoFile(req, res, filePath) {
+  // ytstream.finalizeToMp4: prefer an already-finalized .mp4 remux over the
+  // raw .ts whenever one exists (never triggers ffmpeg here - only a peek;
+  // see tsRemuxCache.js). Avoids ever handing a real player (or Jellyfin's
+  // own probe/transcode) a container it can't direct-play, without adding
+  // any latency to this request when no remux exists yet.
+  if (path.extname(filePath).toLowerCase() === '.ts') {
+    const remuxPath = require('../modules/tsRemuxCache').findExistingSeekableMp4(filePath);
+    if (remuxPath) filePath = remuxPath;
+  }
+
   let stat;
   try {
     stat = await fs.promises.stat(filePath);
@@ -1676,6 +1777,32 @@ async function tryServeCachedVideoFile(req, res, filePath) {
     stream.pipe(res);
   });
   return true;
+}
+
+/**
+ * ytstream.finalizeToMp4: called after finalizeTapOutput (hls-tap/hls-buffer/
+ * raw-buffer) successfully lands a session's permanent output file. Fires a
+ * background (never awaited by any caller) tsRemuxCache.ensureSeekableMp4
+ * run when that output is a .ts - purely eager pre-warming, so the FIRST
+ * real playback/probe of it already finds the .mp4 via
+ * tryServeCachedVideoFile's own findExistingSeekableMp4 check instead of
+ * paying the remux cost live. No-op (and no ffmpeg run at all) unless the
+ * config option is on and the file is actually .ts.
+ */
+function maybeFinalizeTsToMp4(youtubeId, finalPath, sourceLabel) {
+  try {
+    if ((configModule.getConfig().ytstream || {}).finalizeToMp4 !== true) return;
+    if (!finalPath || path.extname(finalPath).toLowerCase() !== '.ts') return;
+    require('../modules/tsRemuxCache').ensureSeekableMp4(finalPath)
+      .then((mp4Path) => {
+        if (mp4Path) {
+          logger.info({ youtubeId, finalPath, mp4Path, sourceLabel }, 'ytstream: finalized .ts remuxed to .mp4 for direct playback');
+        }
+      })
+      .catch((err) => logger.warn({ err, youtubeId, finalPath, sourceLabel }, 'ytstream: post-finalize .ts -> .mp4 remux failed'));
+  } catch (err) {
+    logger.warn({ err, youtubeId, finalPath, sourceLabel }, 'ytstream: maybeFinalizeTsToMp4 failed');
+  }
 }
 
 /**
@@ -1771,8 +1898,14 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
   /**
    * Duration lookup for `ytstream.calculatedLength`'s synthetic Content-Length.
    * Checks the library DB first (skips a yt-dlp round trip in the common
-   * case), falling back to a dedicated `--print duration` yt-dlp call when
-   * the video isn't in the DB yet or has no recorded duration.
+   * case), then the persistent youtube_metadata_cache table (for untracked
+   * videos - no Video row to read a duration from, but played at least
+   * once before), falling back to a dedicated `--print duration` yt-dlp
+   * call only when neither has it. The in-memory durationCache Map above
+   * this still short-circuits all of that within one server process's
+   * uptime; youtube_metadata_cache exists so an untracked video's duration
+   * survives a server restart AND survives its own on-disk cache being
+   * purged, rather than costing a fresh yt-dlp call on every first replay.
    */
   async function getVideoDurationSeconds(youtubeId, config) {
     if (durationCache.has(youtubeId)) return durationCache.get(youtubeId);
@@ -1798,6 +1931,24 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
         }
       }
 
+      if (models && models.YoutubeMetadataCache) {
+        try {
+          const cached = await models.YoutubeMetadataCache.findByPk(youtubeId);
+          if (cached && Number.isFinite(Number(cached.duration_seconds)) && cached.duration_seconds > 0) {
+            logger.info({ youtubeId, seconds: cached.duration_seconds }, 'ytstream: resolved duration for calculatedLength from the persistent untracked-video metadata cache');
+            durationCache.set(youtubeId, cached.duration_seconds);
+            // Fire-and-forget - a stale last_accessed_at just means this row
+            // might get swept a bit early, never a correctness issue.
+            cached.update({ last_accessed_at: new Date() }).catch((err) => {
+              logger.warn({ err, youtubeId }, 'ytstream: failed to bump youtube_metadata_cache last_accessed_at');
+            });
+            return cached.duration_seconds;
+          }
+        } catch (err) {
+          logger.warn({ err, youtubeId }, 'ytstream: youtube_metadata_cache lookup failed for calculatedLength; falling back to yt-dlp');
+        }
+      }
+
       const args = [
         ...buildBaseArgs(config),
         '--skip-download',
@@ -1813,6 +1964,17 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
         throw new Error(`Could not determine video duration for calculatedLength: ${String(stdout).slice(0, 200)}`);
       }
       durationCache.set(youtubeId, seconds);
+      if (models && models.YoutubeMetadataCache) {
+        const now = new Date();
+        models.YoutubeMetadataCache.upsert({
+          youtube_id: youtubeId,
+          duration_seconds: Math.round(seconds),
+          fetched_at: now,
+          last_accessed_at: now,
+        }).catch((err) => {
+          logger.warn({ err, youtubeId }, 'ytstream: failed to persist duration into youtube_metadata_cache');
+        });
+      }
       return seconds;
     })();
 
@@ -2465,12 +2627,26 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
    *   pipe with decode-and-discard `-ss`. Only passed by this function's
    *   own maybeFallbackToFullPipe retry.
    */
-  function spawnHlsEncodePass(session, { startSegmentIndex, seekSeconds, isInitialPass, playerClientOverride, source, directUrls, forceFullPipe }) {
+  function spawnHlsEncodePass(session, { startSegmentIndex, seekSeconds, isInitialPass, playerClientOverride, source, directUrls, forceFullPipe, isBackfillPass }) {
     // Tracks which segment the CURRENTLY RUNNING pass is already working
     // toward (see ensureHlsSegmentAvailable) - a request for this exact
     // index isn't a real seek, so it must never trigger a same-target
     // restart. Set unconditionally so it always reflects the live pass.
     session.activePassStartIndex = startSegmentIndex;
+    // A fresh pass might still add segments - only a clean ff exit (see
+    // this function's ff.on('close') below) sets this back to true.
+    session.encodeEnded = false;
+    // Whatever superseded a running backfill pass (a genuine seek, another
+    // hot-swap) already killed it via killChildProcess - it is no longer
+    // "in progress" the instant a new pass takes over session.ff, regardless
+    // of whether the old pass's own close handler ever gets to run (its
+    // isCurrentPass() guard skips its cleanup once passGeneration moves on).
+    // Set unconditionally (true only for the pass maybeBackfillMissingSegments
+    // itself started) so a backfill pass killed by a real seek never leaves
+    // this stuck true forever, which would permanently block the idle-sweep
+    // from ever reclaiming this session's directory (see the sweep's own
+    // check on this flag).
+    session.backfillInProgress = isBackfillPass === true;
     const { youtubeId, quality, qualityStrictness, transcode, hardwareMode, tuning, config, sessionKey, segmentType, segmentExt } = session;
     const hw = normalizeHardwareMode(hardwareMode);
     const tier = normalizeTuning(tuning);
@@ -2552,7 +2728,7 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
       ytAudioArgs = [...commonYtArgs, ...sectionArgs, '-f', audioFormat, ...sourceArgs];
     }
 
-    const encoder = transcode === 'h264' ? buildVideoEncoderArgs(hw, resolveQualityHeight(quality), tier) : null;
+    const encoder = transcode === 'h264' ? buildVideoEncoderArgs(hw, resolveQualityHeight(quality), tier, (config.ytstream || {}).vaapiQuality) : null;
 
     const ffArgs = [
       // 'warning' (not 'error') for a direct-URL seek-restart: this path is
@@ -2812,6 +2988,7 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
               if (finalPath) {
                 session.usingCachedSource = true;
                 session.cachedFilePath = finalPath;
+                maybeFinalizeTsToMp4(youtubeId, finalPath, 'hls-tap');
               }
             })
             .catch((err) => logger.warn({ err, sessionKey, youtubeId }, 'ytstream: hls-tap finalize failed'));
@@ -2935,8 +3112,72 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
             if (err) logger.warn({ err, sessionKey }, 'ytstream: failed to append #EXT-X-ENDLIST after HLS ffmpeg crash');
           });
         }
+      } else if (code === 0) {
+        // Clean finish: this pass reached the real end of the source and
+        // nothing will ever produce another segment for it. The
+        // calculatedLength playlist pre-declares session.totalSegments from
+        // an ESTIMATED duration (yt-dlp metadata, which can round up or
+        // slightly overshoot the actual encodable content) - computeSegmentStatus
+        // reads this flag to stop reporting those never-coming trailing
+        // slots as "not yet available" once there's no longer a running
+        // pass that could fill them.
+        session.encodeEnded = true;
+        session.backfillInProgress = false;
+        logger.debug({ sessionKey, totalSegments: session.totalSegments }, 'ytstream: HLS encode pass finished cleanly');
+        maybeBackfillMissingSegments(session);
       }
     });
+  }
+
+  /**
+   * ytstream.backfillMissingSegments: called right after a clean encode-pass
+   * finish (session.encodeEnded=true, see spawnHlsEncodePass's own
+   * ff.on('close') above). A forward seek during playback restarts the live
+   * encode at the seek target (restartHlsEncodePassAtSegment), permanently
+   * stranding any segment between the abandoned pass's progress and the new
+   * target - once the live pass has reached the real end of the video with
+   * nothing left to produce, this finds the earliest such gap and, ONLY if a
+   * real local source is already available this session (STRM cache-on-play's
+   * hot-swap, or this mode's own tap/buffer finalize - never a fresh network
+   * pull), spawns another pass there via the exact same spawnHlsEncodePass
+   * every other restart uses - reusing its hardware-encoder/tuning/HLS
+   * segment handling and generation-based cancellation (a real seek arriving
+   * mid-backfill kills and supersedes it exactly like it would any other
+   * pass) rather than reimplementing any of that. That reused pass naturally
+   * sweeps forward from the gap to the true end in one go - cheaper to let
+   * run than to bound/stop it exactly at the gap's end, and it only
+   * re-writes (not reprocesses) whatever segments after the gap already
+   * existed.
+   *
+   * Deliberately best-effort and fully decoupled from live playback: never
+   * awaited by any caller, no effect at all unless
+   * ytstream.backfillMissingSegments is on, and if no local source ever
+   * became available this session, this simply never has anything to do.
+   */
+  function maybeBackfillMissingSegments(session) {
+    try {
+      if ((configModule.getConfig().ytstream || {}).backfillMissingSegments !== true) return;
+      if (session.destroying || session.backfillInProgress) return;
+      if (!(session.usingCachedSource && session.cachedFilePath)) return;
+
+      const status = computeSegmentStatus(session);
+      if (!status) return;
+      const gapIndex = status.encoded.indexOf(false);
+      if (gapIndex === -1) return; // nothing missing below the true final segment count
+
+      logger.info(
+        { sessionKey: session.key, youtubeId: session.youtubeId, gapIndex, totalSegments: status.totalSegments },
+        'ytstream: backfilling missing HLS segments from a local source'
+      );
+      spawnHlsEncodePass(session, {
+        startSegmentIndex: gapIndex,
+        isInitialPass: false,
+        isBackfillPass: true,
+        source: { type: 'local', filePath: session.cachedFilePath },
+      });
+    } catch (err) {
+      logger.warn({ err, sessionKey: session.key }, 'ytstream: maybeBackfillMissingSegments failed');
+    }
   }
 
   /**
@@ -3072,6 +3313,7 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
                 ? 'ytstream: hls-buffer fetch finalized into the untracked-video cache'
                 : 'ytstream: hls-buffer fetch finalized as permanent download'
             );
+            maybeFinalizeTsToMp4(youtubeId, finalPath, 'hls-buffer');
             // An already-running hls-buffer session just keeps transcoding
             // until it ends - a mid-session switch to serving this finished
             // file directly was attempted and reverted: it requires splicing
@@ -3151,7 +3393,7 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
     const { finalizeTapOutput, discardTapOutput } = require('../modules/ytstreamTapFinalizer');
     const { registerRawBufferFetch, clearRawBufferFetch } = require('../modules/ytstreamRawBufferFetch');
 
-    const bufferDir = path.join(HLS_BASE_TEMP_DIR, `raw-${youtubeId}-${crypto.randomBytes(4).toString('hex')}`);
+    const bufferDir = path.join(resolveHlsBaseDir(), `raw-${youtubeId}-${crypto.randomBytes(4).toString('hex')}`);
     fs.mkdirSync(bufferDir, { recursive: true });
     const tempPath = path.join(bufferDir, 'buffer.ts');
 
@@ -3252,6 +3494,7 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
               { youtubeId, finalPath: resolvedFinalPath, untracked, finalSize: entry.finalSize, durationSeconds: entry.durationSeconds, lengthEstimate: entry.lengthEstimate },
               'ytstream: raw-buffer fetch finalized'
             );
+            maybeFinalizeTsToMp4(youtubeId, resolvedFinalPath, 'raw-buffer');
           } else {
             entry.status = 'failed';
             entry.error = 'finalize failed';
@@ -3852,7 +4095,7 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
     // delete the new attempt's freshly-written segments. The asset route
     // resolves files via session.dir, not a recomputed sessionKey path, so
     // this is safe to vary independently.
-    const dir = path.join(HLS_BASE_TEMP_DIR, `${sessionKey}-${crypto.randomBytes(4).toString('hex')}`);
+    const dir = path.join(resolveHlsBaseDir(), `${sessionKey}-${crypto.randomBytes(4).toString('hex')}`);
     fs.mkdirSync(dir, { recursive: true });
     const playlistPath = path.join(dir, 'playlist.m3u8');
 
@@ -3986,7 +4229,7 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
           // MPEG-TS is the hard requirement for a file safely readable
           // while still being appended to (no moov-atom-style trailing
           // index the way MP4 has).
-          const bufferDir = path.join(HLS_BASE_TEMP_DIR, `buffer-${youtubeId}-${crypto.randomBytes(4).toString('hex')}`);
+          const bufferDir = path.join(resolveHlsBaseDir(), `buffer-${youtubeId}-${crypto.randomBytes(4).toString('hex')}`);
           fs.mkdirSync(bufferDir, { recursive: true });
           session.bufferDir = bufferDir;
           session.bufferTempPath = path.join(bufferDir, 'buffer.ts');
@@ -4018,7 +4261,7 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
             session.bufferFetchDone = true;
           } else {
             fs.mkdirSync(HLS_UNTRACKED_BUFFER_CACHE_DIR, { recursive: true });
-            const bufferDir = path.join(HLS_BASE_TEMP_DIR, `buffer-${youtubeId}-${crypto.randomBytes(4).toString('hex')}`);
+            const bufferDir = path.join(resolveHlsBaseDir(), `buffer-${youtubeId}-${crypto.randomBytes(4).toString('hex')}`);
             fs.mkdirSync(bufferDir, { recursive: true });
             session.bufferDir = bufferDir;
             session.bufferTempPath = path.join(bufferDir, 'buffer.ts');
@@ -4380,7 +4623,7 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
         ytAudioArgs = [...commonYtArgs, '-f', audioFormat, watchUrl];
       }
 
-      const encoder = transcode === 'h264' ? buildVideoEncoderArgs(hw, resolveQualityHeight(quality), tier) : null;
+      const encoder = transcode === 'h264' ? buildVideoEncoderArgs(hw, resolveQualityHeight(quality), tier, (config.ytstream || {}).vaapiQuality) : null;
 
       const ffArgs = [
         // 'warning' (not the usual 'error') for a direct-URL seek-restart
@@ -4782,7 +5025,8 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
   router.get('/api/ytstream/mode-compatibility', authMiddleware, (req, res) => {
     const mode = String(req.query.mode || 'direct');
     const transcode = String(req.query.transcode || '');
-    res.json(getModeFieldCompatibility({ mode, transcode }));
+    const container = String(req.query.container || '');
+    res.json(getModeFieldCompatibility({ mode, transcode, container }));
   });
 
   /**
@@ -4799,7 +5043,11 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
       return res.json({ rows: [], total: 0, page: 1, limit: 25 });
     }
     const page = Math.max(1, Number.parseInt(req.query.page, 10) || 1);
-    const limit = Math.min(100, Math.max(1, Number.parseInt(req.query.limit, 10) || 25));
+    // 128 (not 100) to match the client's shared ALLOWED_PAGE_SIZES ceiling
+    // (see client/src/components/shared/VideoList/pageSizes.ts) - otherwise
+    // picking the largest per-page option would silently return fewer rows
+    // than the page-size math on the client expects.
+    const limit = Math.min(128, Math.max(1, Number.parseInt(req.query.limit, 10) || 25));
     try {
       const { count, rows } = await models.StreamHistory.findAndCountAll({
         order: [['started_at', 'DESC']],
@@ -5089,7 +5337,7 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
     // this - both the forced-value ENFORCEMENT below and the dry-run TEXT
     // explaining it derive from the same status+reason, so they can't drift
     // apart the way three independently hand-written versions once did.
-    const modeCompat = getModeFieldCompatibility({ mode, transcode });
+    const modeCompat = getModeFieldCompatibility({ mode, transcode, container });
 
     const calculatedLengthRaw = queryOverride('calculatedLength') ?? queryOverride('fakeLength') ?? ytCfg.calculatedLength;
     const calculatedLengthCompat = modeCompat.calculatedLength;
@@ -5106,6 +5354,22 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
     const hotSwapToCacheCompat = modeCompat.hotSwapToCache;
     if (hotSwapToCache && hotSwapToCacheCompat.status === 'ignored') {
       steps.push({ step: 'hotSwapToCache', detail: `on, but ignored - ${hotSwapToCacheCompat.reason}`, probed: false });
+    }
+
+    const backfillMissingSegments = ytCfg.backfillMissingSegments === true;
+    const backfillMissingSegmentsCompat = modeCompat.backfillMissingSegments;
+    if (backfillMissingSegments && backfillMissingSegmentsCompat.status === 'ignored') {
+      steps.push({ step: 'backfillMissingSegments', detail: `on, but ignored - ${backfillMissingSegmentsCompat.reason}`, probed: false });
+    } else if (backfillMissingSegments && backfillMissingSegmentsCompat.status === 'optional') {
+      steps.push({ step: 'backfillMissingSegments', detail: `on - ${backfillMissingSegmentsCompat.reason}`, probed: false });
+    }
+
+    const finalizeToMp4 = ytCfg.finalizeToMp4 === true;
+    const finalizeToMp4Compat = modeCompat.finalizeToMp4;
+    if (finalizeToMp4 && finalizeToMp4Compat.status === 'ignored') {
+      steps.push({ step: 'finalizeToMp4', detail: `on, but ignored - ${finalizeToMp4Compat.reason}`, probed: false });
+    } else if (finalizeToMp4 && finalizeToMp4Compat.status === 'optional') {
+      steps.push({ step: 'finalizeToMp4', detail: `on - ${finalizeToMp4Compat.reason}`, probed: false });
     }
 
     if (transcode === 'copy' && (mode === 'ffmpeg' || mode === 'hls' || mode === 'hls-tap' || mode === 'hls-buffer')) {
@@ -5278,6 +5542,8 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
       seekSeconds,
       calculatedLength,
       hotSwapToCache,
+      backfillMissingSegments,
+      finalizeToMp4,
       forceServerSettings,
       ignoredQueryParams,
       probeShortcut,
@@ -5907,7 +6173,28 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
           // all. Real playback (a real player's UA, not Lavf) is
           // completely unaffected - still gets the fast progressive path
           // immediately.
-          if (entry.status === 'running' && isProbeRequest) {
+          // Also requires a genuine tail/trailer read (Range start > 0), not
+          // just the UA-based isProbeRequest flag alone: isLikelyMetadataProbeRequest
+          // is a heuristic (a bare "Lavf/x.y.z" User-Agent) that assumes real
+          // playback always carries the .strm's embedded custom-UA marker
+          // instead - true for direct play, but NOT provably true the moment
+          // this mode forces a server-side transcode (raw-buffer's .ts often
+          // isn't direct-playable), since a transcoding player's own internal
+          // ffmpeg invocation may not propagate that marker at all. If that
+          // ever misfires on a genuine playback request, this wait must NOT
+          // be the thing that catches it - a `bytes=0-`/headerless request is
+          // exactly what real playback needs immediately to start at all, and
+          // is indistinguishable from a probe's own leading request (see the
+          // comment above on the alternating bytes=0-/tail-range pattern), so
+          // waiting on it risks stalling real playback for the entire
+          // download instead of just the probe. A nonzero start offset (the
+          // trailer/duration read) is what actually benefits from an exact
+          // final size and is never something real progressive playback
+          // sends this early, so gating on it here is a safe second signal
+          // even if the UA check alone is wrong.
+          const rangeMatch = typeof req.headers.range === 'string' ? /^bytes=(\d+)-/.exec(req.headers.range) : null;
+          const looksLikeTailRead = !!rangeMatch && Number(rangeMatch[1]) > 0;
+          if (entry.status === 'running' && isProbeRequest && looksLikeTailRead) {
             const probeWaitStart = Date.now();
             const probeWaitDeadline = probeWaitStart + HLS_READY_TIMEOUT_MS;
             while (entry.status === 'running' && Date.now() < probeWaitDeadline) {

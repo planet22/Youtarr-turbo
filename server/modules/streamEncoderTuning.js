@@ -36,6 +36,25 @@ function normalizeTuning(tuning) {
   return VALID_TUNING.includes(t) ? t : 'fast';
 }
 
+// ffmpeg's VAAPI encoders (h264_vaapi) expose a driver-level "-quality"
+// (compression_level) knob separate from -qp - on Intel's iHD driver this
+// actually trades real encode speed for quality (1=slowest/best, 7=fastest/
+// worst); -qp alone barely affects a fixed-function hardware encoder's
+// throughput, which is why the fast/balanced/quality tiers above measure
+// almost identically for VAAPI without it. Left unset (null) by default -
+// on drivers that don't support this attribute (e.g. AMD's Mesa radeonsi)
+// ffmpeg logs a warning and ignores it, so this is safe to leave off unless
+// the user opts in.
+const VAAPI_QUALITY_MIN = 1;
+const VAAPI_QUALITY_MAX = 7;
+
+function normalizeVaapiQuality(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const n = Number(value);
+  if (!Number.isFinite(n)) return null;
+  return Math.min(VAAPI_QUALITY_MAX, Math.max(VAAPI_QUALITY_MIN, Math.round(n)));
+}
+
 /** Rough KB/s per resolution tier, video only (see resolveEncoderBitrateCaps). */
 const RESOLUTION_BITRATE_KBPS = {
   2160: 20000,
@@ -97,10 +116,18 @@ const TUNING_TIERS = {
     balanced: { preset: 'p6', cq: 19 },
     quality: { preset: 'p7', cq: 17 },
   },
+  // compressionLevel is h264_vaapi's own -quality (compression_level, 1-7) -
+  // a separate driver-level speed/quality knob from qp (see
+  // normalizeVaapiQuality's comment: qp alone barely affects a fixed-
+  // function hardware encoder's throughput, which is why fast/balanced/
+  // quality otherwise measure almost identically for VAAPI). Baked into the
+  // tier itself so picking a tuning tier is enough on its own - Settings'
+  // VAAPI compression level field is an optional manual override on top of
+  // this, not a second control most users ever need to touch.
   vaapi: {
-    fast: { qp: 21 },
-    balanced: { qp: 18 },
-    quality: { qp: 15 },
+    fast: { qp: 21, compressionLevel: 7 },
+    balanced: { qp: 18, compressionLevel: 4 },
+    quality: { qp: 15, compressionLevel: 1 },
   },
   amf: {
     fast: { quality: 'speed', qvbr: 21 },
@@ -126,9 +153,15 @@ function tuningParams(hardwareMode, tuning) {
  *   value) skips scaling entirely - the source's own resolution passes
  *   through untouched.
  * @param {string} [tuning] - 'fast' (default) | 'balanced' | 'quality'
+ * @param {number|string|null} [vaapiQuality] - VAAPI-only manual override
+ *   for -quality (compression_level), 1-7; ignored for every other
+ *   hardwareMode. Optional - each tuning tier already bakes in its own
+ *   sensible compressionLevel (see TUNING_TIERS.vaapi), so most callers can
+ *   omit this and get a sane value just from the tuning tier alone. This
+ *   only matters when a caller explicitly wants to override that default.
  * @returns {{preInputArgs: string[], videoFilters: string[], pixFmt: string|null, encoderArgs: string[]}}
  */
-function buildVideoEncoderArgs(hardwareMode, targetHeight, tuning) {
+function buildVideoEncoderArgs(hardwareMode, targetHeight, tuning, vaapiQuality) {
   const mode = normalizeHardwareMode(hardwareMode);
   const tier = normalizeTuning(tuning);
   const params = tuningParams(mode, tier);
@@ -143,11 +176,19 @@ function buildVideoEncoderArgs(hardwareMode, targetHeight, tuning) {
     const scaleFilter = heightCap
       ? `scale=-2:'min(${heightCap},ih)':force_original_aspect_ratio=decrease,format=nv12,hwupload`
       : 'format=nv12,hwupload';
+    // An explicit override wins; otherwise fall back to the tuning tier's
+    // own compressionLevel default (see TUNING_TIERS.vaapi) rather than
+    // omitting -quality entirely.
+    const compressionLevel = normalizeVaapiQuality(vaapiQuality) ?? params.compressionLevel;
     return {
       preInputArgs: ['-vaapi_device', '/dev/dri/renderD128'],
       videoFilters: [scaleFilter],
       pixFmt: null,
-      encoderArgs: ['-c:v', 'h264_vaapi', '-qp', String(params.qp), ...common],
+      encoderArgs: [
+        '-c:v', 'h264_vaapi', '-qp', String(params.qp),
+        ...(compressionLevel != null ? ['-quality', String(compressionLevel)] : []),
+        ...common,
+      ],
     };
   }
   if (mode === 'qsv') {
@@ -223,8 +264,11 @@ module.exports = {
   VALID_HARDWARE,
   VALID_TUNING,
   TUNING_LABELS,
+  VAAPI_QUALITY_MIN,
+  VAAPI_QUALITY_MAX,
   normalizeHardwareMode,
   normalizeTuning,
+  normalizeVaapiQuality,
   RESOLUTION_BITRATE_KBPS,
   lookupResolutionTierKbps,
   resolveEncoderBitrateCaps,

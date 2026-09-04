@@ -21,6 +21,7 @@ import {
   DialogContent,
   DialogActions,
   Alert,
+  AlertTitle,
   Button,
 } from '../../ui';
 import { Trash2 as DeleteIcon, Warning as WarningIcon } from '../../../lib/icons';
@@ -31,9 +32,12 @@ import { useHardwareCapabilities } from '../hooks/useHardwareCapabilities';
 import { useTuningBenchmark } from '../hooks/useTuningBenchmark';
 import { useYtstreamModeCompatibility } from '../hooks/useYtstreamModeCompatibility';
 import { useUntrackedCache } from '../hooks/useUntrackedCache';
+import { useMetadataCache } from '../hooks/useMetadataCache';
+import { useSegmentTimingTest } from '../hooks/useSegmentTimingTest';
 import { HardwareTestingAccordion } from './components/HardwareTestingAccordion';
 import { TuningBenchmarkTable } from './components/TuningBenchmarkTable';
 import { TuningHistoryTable } from './components/TuningHistoryTable';
+import { SegmentTimingTestButton } from './components/SegmentTimingTestButton';
 
 type YtstreamConfig = ConfigState['ytstream'];
 
@@ -67,6 +71,8 @@ export const DEFAULT_YTSTREAM: YtstreamConfig = {
   hlsStorageLocation: 'tmp',
   backfillMissingSegments: false,
   finalizeToMp4: false,
+  debugLogging: false,
+  forceKeyframesByHardwareMode: {},
 };
 
 // Each mode's real limitation, stated plainly - see resolvePlaybackPlan's
@@ -79,9 +85,7 @@ const MODE_TOOLTIPS: Record<string, string> = {
   'direct-redirect': 'Resolves a playback URL and sends the player a 302 straight to it - Youtarr never touches the bytes, the lightest mode on its own resources. No cookies/Referer travel with the redirect (age-restricted/members-only videos fail), and whatever happens after is invisible to Youtarr\'s logs.',
   ffmpeg: 'Re-streams through a live ffmpeg pipe fed by yt-dlp\'s DASH formats - real quality beyond progressive\'s ceiling. Requires a working ffmpeg on the host; fails outright (502) if it isn\'t available, no fallback to Direct.',
   hls: 'Same DASH-based quality as Enhanced, but writes real HLS segment files to disk instead of a live pipe - fixes players (Jellyfin included) that won\'t tolerate the live pipe\'s startup wait. Costs local disk space per active stream. Backfill missing segments (below) can apply once Hot-swap to cached file gives it a local source.',
-  'hls-tap': 'Same as Enhanced HLS, but the same ffmpeg process also saves a second, untouched full-quality copy to disk as this video\'s permanent download - replaces STRM cache-on-play. Only a complete, un-seeked first play-through produces a saved file; a seek or mid-video start discards it. With Container=MPEG-TS, Finalize .ts to .mp4 (below) can convert it afterward.',
   'hls-buffer': 'Same as Enhanced HLS, but an independent fetch starts immediately and pulls the whole video once, unthrottled, into a local MPEG-TS buffer file that becomes the permanent download - keeps running even if you seek early or stop watching. Calculated length is always on for this mode. Backfill and Finalize .ts to .mp4 (below) can both apply once buffered.',
-  'raw-buffer': 'No re-encode at all - Container/Transcode/Hardware encoder/Encoding tuning are ignored. Muxes the source\'s own codec/resolution via a background fetch (same as Enhanced HLS + Buffered\'s), served over plain HTTP Range as it downloads; already-cached videos play instantly from disk. Finalize .ts to .mp4 can apply once finished; no live segments here, so Backfill never applies.',
 };
 
 /**
@@ -122,6 +126,19 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
     clear: clearUntrackedCache,
   } = useUntrackedCache(token);
   const [confirmClearUntrackedCache, setConfirmClearUntrackedCache] = useState(false);
+  const {
+    count: metadataCacheCount,
+    clearing: clearingMetadataCache,
+    error: metadataCacheError,
+    clear: clearMetadataCache,
+  } = useMetadataCache(token);
+  const [confirmClearMetadataCache, setConfirmClearMetadataCache] = useState(false);
+  const {
+    testing: testingSegmentTiming,
+    result: segmentTimingResult,
+    error: segmentTimingError,
+    runTest: runSegmentTimingTest,
+  } = useSegmentTimingTest(token);
 
   const setYtstream = (patch: Partial<YtstreamConfig>) => {
     onConfigChange({ ytstream: { ...ytstream, ...patch } });
@@ -160,7 +177,7 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
   // field's forced/ignored status) and by Encoding tuning's Recommended
   // badge - not a duplicate of modeCompat, a different, narrower question
   // ("does this mode run an ffmpeg encode at all").
-  const enhancedMode = mode === 'ffmpeg' || mode === 'hls' || mode === 'hls-tap' || mode === 'hls-buffer';
+  const enhancedMode = mode === 'ffmpeg' || mode === 'hls' || mode === 'hls-buffer';
 
   useEffect(() => {
     if (modeCompat.calculatedLength?.status === 'forced' && ytstream.calculatedLength !== true) {
@@ -247,7 +264,7 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
               value={mode}
               label="Playback mode"
               onChange={(e: SelectChangeEvent<string>) =>
-                setYtstream({ defaultMode: e.target.value as 'direct' | 'direct-pipe' | 'direct-redirect' | 'ffmpeg' | 'hls' | 'hls-tap' | 'hls-buffer' | 'raw-buffer' })
+                setYtstream({ defaultMode: e.target.value as 'direct' | 'direct-pipe' | 'direct-redirect' | 'ffmpeg' | 'hls' | 'hls-buffer' })
               }
               className="flex-1 min-w-0"
               disabled={disabled}
@@ -257,9 +274,7 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
               <MenuItem value="direct-redirect">Direct (redirect)</MenuItem>
               <MenuItem value="ffmpeg">Enhanced</MenuItem>
               <MenuItem value="hls">Enhanced HLS</MenuItem>
-              <MenuItem value="hls-tap">Enhanced HLS + Tap</MenuItem>
               <MenuItem value="hls-buffer">Enhanced HLS + Buffered</MenuItem>
-              <MenuItem value="raw-buffer">Raw + Buffered</MenuItem>
             </Select>
             <InfoTooltip
               text={MODE_TOOLTIPS[mode] || MODE_TOOLTIPS.direct}
@@ -285,7 +300,7 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
               >
                 <MenuItem value="mp4">MP4</MenuItem>
                 <MenuItem value="ts">MPEG-TS</MenuItem>
-                {mode !== 'hls' && mode !== 'hls-tap' && mode !== 'hls-buffer' && mode !== 'raw-buffer' && (
+                {mode !== 'hls' && mode !== 'hls-buffer' && (
                   <MenuItem value="mkv">Matroska</MenuItem>
                 )}
               </Select>
@@ -428,6 +443,15 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
         </Grid>
       )}
 
+      <Grid item xs={12}>
+        <Alert severity='warning' style={{ marginBottom: 8 }}>
+          <AlertTitle>Power user feature</AlertTitle>
+          <Typography variant='body2'>
+            Passed directly as yt-dlp&apos;s youtube:player_client extractor-arg on every stream request. An invalid or unsupported client value can break streaming entirely - leave blank unless streams are actually failing, and revert if problems appear.
+          </Typography>
+        </Alert>
+      </Grid>
+
       <Grid item xs={12} md={4}>
         <Box className="flex items-center gap-1">
           <TextField
@@ -438,12 +462,31 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
             onChange={(e) => setYtstream({ playerClient: e.target.value })}
             placeholder="default,-tv"
             disabled={disabled}
-            helperText='Leave blank for "default,-tv" (recommended). Only change this if streams still fail after an update.'
+            helperText='Leave blank for "default,-tv" (recommended). Try "android", "ios", "web,android", or "tv_embedded" if streams fail.'
           />
           <InfoTooltip
             text={
-              'Passed as yt-dlp --extractor-args youtube:player_client=VALUE. The default excludes the "tv" client, the most common cause of YouTube\'s reload error. Try "android" or "web,android" if problems persist.'
+              'Passed as yt-dlp --extractor-args youtube:player_client=VALUE. The default excludes the "tv" client, the most common cause of YouTube\'s reload error. "android"/"ios" often resolve extraction failures other clients hit; "web,android" tries both in order; "tv_embedded" can help with age-restricted content.'
             }
+            onMobileClick={onMobileTooltipClick}
+          />
+        </Box>
+      </Grid>
+
+      <Grid item xs={12} md={4}>
+        <Box className="flex items-center gap-1">
+          <FormControlLabel
+            control={
+              <Switch
+                checked={ytstream.debugLogging ?? false}
+                onChange={(e) => setYtstream({ debugLogging: e.target.checked })}
+                disabled={disabled}
+              />
+            }
+            label="Streaming debug logging"
+          />
+          <InfoTooltip
+            text="Shows this file's own high-volume diagnostic logs (segment serves, playlist polls, buffer-fetch progress, etc.) at the normal log level, without needing global Log Level set to Debug - which would also show unrelated noise from every other module (e.g. the periodic database health check). Applies regardless of Playback mode."
             onMobileClick={onMobileTooltipClick}
           />
         </Box>
@@ -673,7 +716,7 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
         </Grid>
       )}
 
-      {modeCompat.cacheOnPlay?.status !== 'ignored' && cacheOnPlay && (
+      {((modeCompat.cacheOnPlay?.status !== 'ignored' && cacheOnPlay) || mode === 'hls-buffer') && (
         <Grid item xs={12} md={4}>
           <Box className="flex items-center gap-1">
             <TextField
@@ -693,11 +736,11 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
               }}
               disabled={disabled}
               placeholder="Never"
-              helperText="Blank = never auto-revert. A nightly sweep (2:10 AM) checks for cached videos older than this."
+              helperText="Blank = never auto-expire. A nightly sweep (2:10 AM) checks cache-on-play downloads and Enhanced HLS + Buffered's untracked-video cache files for anything older than this."
               inputProps={{ min: 1 }}
             />
             <InfoTooltip
-              text="How long a cache-on-play download stays a real file before Youtarr auto-reverts it back to STRM. Never touches a genuine/forced download, regardless of age."
+              text="How long a cache-on-play download stays a real file before Youtarr auto-reverts it back to STRM (never touches a genuine/forced download, regardless of age) - and, separately, how long Enhanced HLS + Buffered's untracked-video cache files (no library entry to revert, so these are just deleted) are kept before the same nightly sweep removes them. One setting governs both."
               onMobileClick={onMobileTooltipClick}
             />
           </Box>
@@ -786,6 +829,18 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
                   onMobileTooltipClick={onMobileTooltipClick}
                 />
                 <TuningHistoryTable history={tuningHistory} />
+              </Grid>
+              <Grid item xs={12}>
+                <Divider className="my-1" />
+                <SegmentTimingTestButton
+                  hardwareMode={currentHardwareMode}
+                  currentlyEnabled={(ytstream.forceKeyframesByHardwareMode || {})[currentHardwareMode] === true}
+                  testing={testingSegmentTiming}
+                  result={segmentTimingResult}
+                  error={segmentTimingError}
+                  onRunTest={() => runSegmentTimingTest(currentHardwareMode, ytstream.vaapiQuality)}
+                  onMobileTooltipClick={onMobileTooltipClick}
+                />
               </Grid>
             </Grid>
           </AccordionDetails>
@@ -923,6 +978,66 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
           <Typography variant="caption" color="error">{untrackedCacheError}</Typography>
         )}
       </Grid>
+
+      <Grid item xs={12} md={4}>
+        <Box className="flex items-center gap-1">
+          <Typography variant="body2">
+            Cached video metadata: {metadataCacheCount === null ? '…' : `${metadataCacheCount} video${metadataCacheCount === 1 ? '' : 's'}`}
+          </Typography>
+          <Button
+            variant="outlined"
+            color="error"
+            size="small"
+            startIcon={<DeleteIcon size={14} />}
+            disabled={!metadataCacheCount || clearingMetadataCache}
+            onClick={() => setConfirmClearMetadataCache(true)}
+          >
+            Delete
+          </Button>
+          <InfoTooltip
+            text="Per-video fps/duration/etc. learned from yt-dlp (via streaming, download, or STRM generation) so later streams of the same video skip a live yt-dlp lookup. Safe to delete anytime; each video relearns its info the next time it's streamed, downloaded, or STRM-generated."
+            onMobileClick={onMobileTooltipClick}
+          />
+        </Box>
+        {metadataCacheError && (
+          <Typography variant="caption" color="error">{metadataCacheError}</Typography>
+        )}
+      </Grid>
+
+      <Dialog open={confirmClearMetadataCache} onClose={() => setConfirmClearMetadataCache(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>
+          <WarningIcon size={20} color="var(--warning)" className="shrink-0" />
+          Delete Cached Video Metadata
+        </DialogTitle>
+        <DialogContent>
+          <div className="space-y-4">
+            <Alert severity="warning">
+              <Typography variant="body2">
+                You are about to permanently delete cached metadata for {metadataCacheCount ?? 0} video{metadataCacheCount === 1 ? '' : 's'}. Each one relearns its info (a live yt-dlp lookup) the next time it's streamed, downloaded, or STRM-generated.
+              </Typography>
+            </Alert>
+            <Typography variant="body2" color="text.secondary">
+              This action cannot be undone.
+            </Typography>
+          </div>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setConfirmClearMetadataCache(false)} variant="contained" color="primary" autoFocus>
+            Cancel
+          </Button>
+          <Button
+            onClick={() => {
+              setConfirmClearMetadataCache(false);
+              clearMetadataCache();
+            }}
+            variant="outlined"
+            color="error"
+            startIcon={<DeleteIcon size={16} />}
+          >
+            Delete
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       <Dialog open={confirmClearUntrackedCache} onClose={() => setConfirmClearUntrackedCache(false)} maxWidth="sm" fullWidth>
         <DialogTitle>

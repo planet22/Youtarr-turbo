@@ -64,8 +64,8 @@ class StrmGenerator {
     // ffprobe ignores this override and sends libavformat's bare default
     // "Lavf/x.y.z" UA, while real ffmpeg playback/transcode honors it - see
     // ytstream.js's isLikelyMetadataProbeRequest). Several independent
-    // consumers rely on that detection - raw-buffer's wait-for-exact-length
-    // logic, probeShortcut's own fake-clip shortcut - and none of them
+    // consumers rely on that detection - probeShortcut's own fake-clip
+    // shortcut among them - and none of them
     // should silently lose their only signal because an unrelated setting
     // happened to be off. The `ytstream.probeShortcut` config value's job
     // is narrower and purely request-time: once a probe IS detected via

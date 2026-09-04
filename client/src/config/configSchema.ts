@@ -173,7 +173,7 @@ export const CONFIG_FIELDS = {
   // what a full download would use unless explicitly overridden here.
   ytstream: {
     default: {
-      defaultMode: 'direct' as 'direct' | 'direct-pipe' | 'direct-redirect' | 'ffmpeg' | 'hls' | 'hls-tap' | 'hls-buffer' | 'raw-buffer',
+      defaultMode: 'direct' as 'direct' | 'direct-pipe' | 'direct-redirect' | 'ffmpeg' | 'hls' | 'hls-buffer',
       // mkv is ffmpeg-mode only (see YtstreamSettingsSection's Container select)
       container: 'mp4' as 'mp4' | 'ts' | 'mkv',
       // Empty string = auto (derive from videoCodec); copy = remux; h264 = re-encode
@@ -282,7 +282,7 @@ export const CONFIG_FIELDS = {
       // Nightly cron prune (server/modules/cronJobs.js, 3:15 AM) deletes
       // stream_history rows older than this. <= 0 or unset falls back to 90.
       historyRetentionDays: 90 as number,
-      // Where a live HLS session's segment files (mode=hls/hls-tap/hls-buffer)
+      // Where a live HLS session's segment files (mode=hls/hls-buffer)
       // are written. 'tmp' (default, unchanged behavior) uses the OS temp
       // dir - fastest, but on some setups that's a small/volatile partition.
       // 'cache' writes under Youtarr's own persistent .youtarr_ytstream_cache
@@ -292,7 +292,7 @@ export const CONFIG_FIELDS = {
       // are still deleted on the same idle-timeout schedule either way -
       // this only changes WHERE they live, not how long they're kept.
       hlsStorageLocation: 'tmp' as 'tmp' | 'cache',
-      // mode=hls/hls-tap/hls-buffer only, and only takes effect once a local
+      // mode=hls/hls-buffer only, and only takes effect once a local
       // source is available for this session (STRM cache-on-play hot-swap,
       // or hls-buffer's own independent fetch) - a forward seek during
       // playback restarts the live encode at the seek target, permanently
@@ -304,10 +304,8 @@ export const CONFIG_FIELDS = {
       // faster/instant seeking later in the same session, never blocking or
       // slowing down actual playback.
       backfillMissingSegments: false as boolean,
-      // mode=hls-tap/hls-buffer/raw-buffer only, and only when their
-      // finished output is a .ts container (hls-buffer/raw-buffer always
-      // are; hls-tap only when Container is set to MPEG-TS above). Browsers'
-      // <video> element can't play raw .ts directly, and some external
+      // mode=hls-buffer only - its finished output is always a
+      // .ts container. Browsers' <video> element can't play raw .ts directly, and some external
       // players (e.g. Jellyfin) fall back to a server-side transcode rather
       // than direct-playing it. When on, once that .ts is fully finalized
       // (backfillMissingSegments completing first, if also enabled), a
@@ -316,6 +314,26 @@ export const CONFIG_FIELDS = {
       // whenever it exists (server/modules/tsRemuxCache.js), without ever
       // touching the original .ts.
       finalizeToMp4: false as boolean,
+      // This file's own per-request/per-segment diagnostic lines (segment
+      // serves, playlist polls, buffer-fetch progress ticks, etc.) are too
+      // high-volume for logger.info by default, but gating them behind the
+      // global Log Level=debug setting also turns on every OTHER module's
+      // debug output (most visibly the ~15s database health-check line) -
+      // unrelated noise with no way to see just this file's own traffic.
+      // When on, these specific lines print regardless of the global Log
+      // Level, without touching any other module's verbosity; when off,
+      // they behave exactly as before (visible only at Log Level=debug).
+      debugLogging: false as boolean,
+      // Per-hardware-mode result of the "Test HLS segment timing" check
+      // (server/modules/streamTuningBenchmark.js's testSegmentTiming) -
+      // only ever set by that test itself, never manually. true for a mode
+      // means time-based forced keyframes (exact ~4s HLS segments,
+      // regardless of source fps) were empirically confirmed working on
+      // THIS host for that mode; false/absent keeps the original
+      // fixed-frame-count GOP (only exactly accurate at 30fps, but a known,
+      // safe default). See streamEncoderTuning.js's buildVideoEncoderArgs
+      // useForceKeyframes param.
+      forceKeyframesByHardwareMode: {} as Record<string, boolean>,
     },
     trackChanges: true,
   },

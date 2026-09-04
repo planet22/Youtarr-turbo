@@ -5,7 +5,7 @@
  * reject a .ts source outright, and even Safari only accepts .ts inside an
  * HLS playlist, never as a plain progressive source - so a library file
  * whose container is .ts (produced by the NZB/Sonarr grab pipeline's ffmpeg
- * remux, or a finalized raw-buffer/hls-buffer download) can't play in
+ * remux, or a finalized hls-buffer download) can't play in
  * Youtarr's in-app player at all, regardless of what Content-Type header is
  * sent with it.
  *

@@ -1,5 +1,6 @@
 /* eslint-env jest */
 const EventEmitter = require('events');
+const fs = require('fs');
 
 jest.mock('child_process');
 jest.mock('../configModule', () => ({ ffmpegPath: 'ffmpeg' }));
@@ -419,5 +420,53 @@ describe('formatBenchmarkSummaryLine', () => {
     const line = streamTuningBenchmark.formatBenchmarkSummaryLine(matrix, recommended, [480, 720]);
 
     expect(line).toBe('480p[fast=10.0x balanced=9.0x quality=8.0x*] 720p[fast=5.0x balanced=4.0x quality=3.0x*]');
+  });
+});
+
+describe('testSegmentTiming', () => {
+  beforeEach(() => jest.clearAllMocks());
+  afterEach(() => {
+    if (fs.promises.readFile.mockRestore) fs.promises.readFile.mockRestore();
+  });
+
+  /** A minimal but real HLS VOD playlist with the given per-segment #EXTINF durations. */
+  function fakePlaylist(extinfSeconds) {
+    const lines = ['#EXTM3U', '#EXT-X-VERSION:3', '#EXT-X-TARGETDURATION:4', '#EXT-X-PLAYLIST-TYPE:VOD'];
+    extinfSeconds.forEach((seconds, i) => {
+      lines.push(`#EXTINF:${seconds.toFixed(6)},`);
+      lines.push(`seg${String(i).padStart(5, '0')}.ts`);
+    });
+    lines.push('#EXT-X-ENDLIST');
+    return `${lines.join('\n')}\n`;
+  }
+
+  test('excludes the naturally-short last segment (the VOD tail remainder) from the pass/fail judgment', async () => {
+    spawn.mockImplementation(() => fakeProc({ ms: 5, code: 0 }));
+    jest.spyOn(fs.promises, 'readFile').mockResolvedValueOnce(fakePlaylist([4.0, 4.0, 4.0, 2.0]));
+
+    const result = await streamTuningBenchmark.testSegmentTiming('vaapi');
+
+    expect(result.ok).toBe(true);
+    expect(result.measuredSeconds).toEqual([4.0, 4.0, 4.0, 2.0]);
+    expect(result.maxDeviationSeconds).toBe(0);
+  });
+
+  test('still fails when a non-last segment drifts from the target (the original 30fps-assumption bug)', async () => {
+    spawn.mockImplementation(() => fakeProc({ ms: 5, code: 0 }));
+    jest.spyOn(fs.promises, 'readFile').mockResolvedValueOnce(fakePlaylist([4.8, 4.8, 4.8, 2.0]));
+
+    const result = await streamTuningBenchmark.testSegmentTiming('vaapi');
+
+    expect(result.ok).toBe(false);
+    expect(result.maxDeviationSeconds).toBeCloseTo(0.8);
+  });
+
+  test('reports the underlying ffmpeg error when the encode fails', async () => {
+    spawn.mockImplementation(() => fakeProc({ ms: 5, code: 1, stderrText: 'Unknown encoder h264_vaapi' }));
+
+    const result = await streamTuningBenchmark.testSegmentTiming('vaapi');
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toBeTruthy();
   });
 });

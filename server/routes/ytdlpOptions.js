@@ -5,6 +5,7 @@ const hardwareCapabilityTester = require('../modules/hardwareCapabilityTester');
 const streamTuningBenchmark = require('../modules/streamTuningBenchmark');
 const streamEncoderTuning = require('../modules/streamEncoderTuning');
 const hardwareDecodeModule = require('../modules/hardwareDecodeModule');
+const configModule = require('../modules/configModule');
 const logger = require('../logger');
 
 // Matches the numeric values in the Ytstream Settings "Stream quality" dropdown.
@@ -223,6 +224,97 @@ function createYtdlpOptionsRoutes({ verifyToken, ytdlpValidationRateLimiter }) {
       } catch (err) {
         logger.error({ err, hardwareMode, decodeMode, sourceCodec, videoCodec, decodeSourceHeight }, 'ytdlp: encoding tuning benchmark failed');
         res.status(500).json({ ok: false, error: err.message || 'Encoding tuning benchmark failed' });
+      }
+    }
+  );
+
+  /**
+   * @swagger
+   * /api/ytdlp/test-segment-timing:
+   *   post:
+   *     summary: Empirically verify time-based forced keyframes (exact HLS segment timing) for one hardware encoder on this host, and persist the resulting on/off setting for it
+   *     tags: [Configuration]
+   *     security:
+   *       - bearerAuth: []
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             required: [hardwareMode]
+   *             properties:
+   *               hardwareMode:
+   *                 type: string
+   *                 enum: [none, qsv, nvenc, vaapi, amf]
+   *               vaapiQuality:
+   *                 type: integer
+   *                 nullable: true
+   *     responses:
+   *       200:
+   *         description: '{ hardwareMode, ok, enabled, measuredSeconds?, averageSeconds?, maxDeviationSeconds?, error? } - enabled is the resulting config.ytstream.forceKeyframesByHardwareMode[hardwareMode] value, persisted by this call.'
+   *       400:
+   *         description: Missing or invalid hardwareMode.
+   *       401:
+   *         description: Missing or invalid auth token.
+   *       409:
+   *         description: A tuning benchmark (or this test) is already running.
+   *       429:
+   *         description: Rate limit exceeded.
+   */
+  router.post(
+    '/api/ytdlp/test-segment-timing',
+    verifyToken,
+    ytdlpValidationRateLimiter,
+    async (req, res) => {
+      const { hardwareMode, vaapiQuality } = req.body || {};
+      if (!streamEncoderTuning.VALID_HARDWARE.includes(hardwareMode)) {
+        return res.status(400).json({
+          ok: false,
+          error: `hardwareMode must be one of: ${streamEncoderTuning.VALID_HARDWARE.join(', ')}`,
+        });
+      }
+      if (streamTuningBenchmark.isBenchmarkRunning()) {
+        return res.status(409).json({ ok: false, error: 'A tuning benchmark is already running' });
+      }
+      const normalizedVaapiQuality = streamEncoderTuning.normalizeVaapiQuality(vaapiQuality);
+      try {
+        const result = await streamTuningBenchmark.testSegmentTiming(hardwareMode, normalizedVaapiQuality);
+
+        // The test result IS the config toggle - no separate manual switch.
+        // Only ever changes THIS hardwareMode's entry, keyed alongside
+        // whatever other modes have been tested before.
+        const currentConfig = configModule.getConfig();
+        const currentYtstream = currentConfig.ytstream || {};
+        configModule.updateConfig({
+          ...currentConfig,
+          ytstream: {
+            ...currentYtstream,
+            forceKeyframesByHardwareMode: {
+              ...(currentYtstream.forceKeyframesByHardwareMode || {}),
+              [hardwareMode]: result.ok,
+            },
+          },
+        });
+
+        // `ok` here means "the HTTP call itself succeeded" (always true in
+        // this branch) - `enabled` is the actual pass/fail verdict (also
+        // what got persisted into config.ytstream.forceKeyframesByHardwareMode
+        // above). Named explicitly rather than spreading `result` wholesale
+        // so its own `ok` field (the verdict) can never collide with/shadow
+        // this response's `ok` (the HTTP-success field).
+        res.json({
+          ok: true,
+          hardwareMode,
+          enabled: result.ok,
+          measuredSeconds: result.measuredSeconds,
+          averageSeconds: result.averageSeconds,
+          maxDeviationSeconds: result.maxDeviationSeconds,
+          error: result.error,
+        });
+      } catch (err) {
+        logger.error({ err, hardwareMode }, 'ytdlp: HLS segment timing test failed');
+        res.status(500).json({ ok: false, error: err.message || 'HLS segment timing test failed' });
       }
     }
   );

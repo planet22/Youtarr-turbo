@@ -441,7 +441,7 @@ class VideoMetadataModule {
     // 'application/octet-stream', which the in-app <video> player refuses
     // to play outright (no browser has a native MPEG-TS demuxer for a plain
     // progressive source). Real .ts library files come from the NZB/Sonarr
-    // grab pipeline and finalized raw-buffer/hls-buffer downloads - swap in
+    // grab pipeline and finalized hls-buffer downloads - swap in
     // a one-time seekable .mp4 remux (see tsRemuxCache) instead of the raw
     // file whenever one exists or can be produced.
     let servedFilePath = filePath;

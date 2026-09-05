@@ -65,6 +65,8 @@ const renderTable = (overrides: Partial<React.ComponentProps<typeof VideosTable>
     onStrmChipClick: jest.fn(),
     onImageError: jest.fn(),
     onAddChannel: jest.fn(),
+    onOpenCacheDetail: jest.fn(),
+    onClearCachedRow: jest.fn(),
   };
   render(
     <MemoryRouter>
@@ -110,7 +112,7 @@ describe('VideosTable', () => {
     const removedRowCheckbox = screen.getByRole('checkbox', { name: /Select Removed Video/ });
     expect(removedRowCheckbox).toBeEnabled();
     fireEvent.click(removedRowCheckbox);
-    expect(onToggleSelect).toHaveBeenCalledWith(2);
+    expect(onToggleSelect).toHaveBeenCalledWith('b');
   });
 
   test('clicking the Published header fires onSortChange with published', () => {
@@ -130,7 +132,7 @@ describe('VideosTable', () => {
     fireEvent.click(screen.getByText('First Video'));
     // Title cell stops propagation - row click happens via the underlying tr; click the row directly via the duration cell.
     fireEvent.click(screen.getByText('5m'));
-    expect(onToggleSelect).toHaveBeenCalledWith(1);
+    expect(onToggleSelect).toHaveBeenCalledWith('a');
   });
 
   test('unsubscribed channel name opens the add-channel affordance', () => {

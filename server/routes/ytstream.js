@@ -731,6 +731,7 @@ const durationCache = new Map();
 // see server/modules/youtubeMetadataCache.js's own doc comment for why (and
 // for what's safe vs. NOT safe to reuse out of a cached blob).
 const youtubeMetadataCache = require('../modules/youtubeMetadataCache');
+const { formatRelativeTimeAgo } = require('../modules/relativeTimeFormatter');
 
 // In-flight dedup for getVideoDurationSeconds's live yt-dlp fallback -
 // without it, the instant-start warm-up and the real calculatedLength
@@ -1082,6 +1083,58 @@ async function sweepExpiredUntrackedBufferCache() {
     logger.info({ deleted, freedBytes, thresholdHours }, 'ytstream: swept expired untracked buffer cache files');
   }
   return { deleted, freedBytes, thresholdHours };
+}
+
+/**
+ * Single-entry stat for the Library page's per-video "Cached Video" icon on
+ * an untracked row - mirrors the aggregate GET /api/ytstream/untracked-cache
+ * route's own fs.stat call, just scoped to one youtubeId.
+ * @returns {Promise<{exists: boolean, size: number|null, mtime: string|null}>}
+ */
+async function getUntrackedBufferCacheStat(youtubeId) {
+  try {
+    const stat = await fs.promises.stat(getUntrackedBufferCachePath(youtubeId));
+    if (!stat.isFile()) return { exists: false, size: null, mtime: null };
+    return { exists: true, size: stat.size, mtime: stat.mtime.toISOString() };
+  } catch (err) {
+    if (err.code === 'ENOENT') return { exists: false, size: null, mtime: null };
+    throw err;
+  }
+}
+
+/** Deletes one untracked buffer cache file; returns whether one existed to delete. */
+async function deleteUntrackedBufferCacheFile(youtubeId) {
+  try {
+    await fs.promises.unlink(getUntrackedBufferCachePath(youtubeId));
+    return true;
+  } catch (err) {
+    if (err.code === 'ENOENT') return false;
+    throw err;
+  }
+}
+
+/**
+ * Every untracked buffer cache entry, for the Library page's "Show
+ * untracked" bucket (videosModule.js's _getUntrackedCandidates) to merge
+ * against youtube_metadata_cache rows.
+ * @returns {Promise<Array<{youtubeId: string, size: number, mtime: string}>>}
+ */
+async function listUntrackedBufferCacheEntries() {
+  if (!fs.existsSync(HLS_UNTRACKED_BUFFER_CACHE_DIR)) return [];
+  const entries = await fs.promises.readdir(HLS_UNTRACKED_BUFFER_CACHE_DIR);
+  const results = [];
+  for (const entry of entries) {
+    if (!entry.endsWith('.ts')) continue;
+    try {
+      const filePath = path.join(HLS_UNTRACKED_BUFFER_CACHE_DIR, entry);
+      const stat = await fs.promises.stat(filePath);
+      if (!stat.isFile()) continue;
+      results.push({ youtubeId: entry.slice(0, -3), size: stat.size, mtime: stat.mtime.toISOString(), filePath });
+    } catch (err) {
+      logger.warn({ err, entry }, 'ytstream: failed to stat one untracked buffer cache entry while listing');
+    }
+  }
+  return results;
 }
 
 const HLS_PLACEHOLDER_DURATION_SECONDS = 3; // must stay < HLS_SEGMENT_DURATION_SECONDS (the playlist's #EXT-X-TARGETDURATION)
@@ -1493,33 +1546,33 @@ function getModeFieldCompatibility({ mode, transcode }) {
 
   fields.calculatedLength = isHlsFamily
     ? {
-        status: 'forced',
-        reason: `${mode} builds a real .m3u8 playlist - without this, a player sees ffmpeg's own raw growing playlist instead of a pre-declared exact-duration one, and can "join near the live edge" on reconnect (a real forward jump, displayed position stuck behind it), regardless of how this setting is configured.`,
-      }
+      status: 'forced',
+      reason: `${mode} builds a real .m3u8 playlist - without this, a player sees ffmpeg's own raw growing playlist instead of a pre-declared exact-duration one, and can "join near the live edge" on reconnect (a real forward jump, displayed position stuck behind it), regardless of how this setting is configured.`,
+    }
     : (mode === 'direct' || mode === 'direct-redirect')
       ? {
-          status: 'ignored',
-          reason: `${mode} mode uses the stream's own real length (whatever the upstream/player's own fetch reports), not an estimate.`,
-        }
+        status: 'ignored',
+        reason: `${mode} mode uses the stream's own real length (whatever the upstream/player's own fetch reports), not an estimate.`,
+      }
       : {
-          status: 'optional',
-          reason: 'A genuine trade-off: reports an estimated size/duration upfront and answers seeks faster (but only approximately) by restarting at the estimated timestamp.',
-        };
+        status: 'optional',
+        reason: 'A genuine trade-off: reports an estimated size/duration upfront and answers seeks faster (but only approximately) by restarting at the estimated timestamp.',
+      };
 
   fields.probeShortcut = !enhancedMode
     ? {
-        status: 'ignored',
-        reason: 'This mode never transcodes, so the cached probe-shortcut clip (always H.264) could never stand in for its real output codec/container.',
-      }
+      status: 'ignored',
+      reason: 'This mode never transcodes, so the cached probe-shortcut clip (always H.264) could never stand in for its real output codec/container.',
+    }
     : !forceH264
       ? {
-          status: 'ignored',
-          reason: 'Only applies when Transcode is set to Force re-encode (H.264/AAC) - the cached probe-shortcut clip is always H.264, so it can only stand in for a real response that would also be H.264.',
-        }
+        status: 'ignored',
+        reason: 'Only applies when Transcode is set to Force re-encode (H.264/AAC) - the cached probe-shortcut clip is always H.264, so it can only stand in for a real response that would also be H.264.',
+      }
       : {
-          status: 'optional',
-          reason: 'Skips a real yt-dlp/ffmpeg session for a detected metadata probe, serving a tiny cached clip in the right codec instead.',
-        };
+        status: 'optional',
+        reason: 'Skips a real yt-dlp/ffmpeg session for a detected metadata probe, serving a tiny cached clip in the right codec instead.',
+      };
 
   const encodeFieldsIgnoredReason = 'This mode never runs an ffmpeg encode - there\'s nothing here for Container/Transcode/Hardware encoder/Encoding tuning to apply to.';
   fields.container = !enhancedMode
@@ -1541,15 +1594,15 @@ function getModeFieldCompatibility({ mode, transcode }) {
 
   fields.hotSwapToCache = mode === 'hls'
     ? {
-        status: 'optional',
-        reason: 'Hot-swaps a live HLS session onto a finished STRM cache-on-play download once it completes, without restarting playback.',
-      }
+      status: 'optional',
+      reason: 'Hot-swaps a live HLS session onto a finished STRM cache-on-play download once it completes, without restarting playback.',
+    }
     : {
-        status: 'ignored',
-        reason: mode === 'hls-buffer'
-          ? 'This mode replaces hot-swap-to-cache entirely with its own buffer finalize mechanism - there\'s nothing session-swap-shaped for it to do here.'
-          : 'Only mode=Enhanced HLS uses this - there\'s no live HLS session in this mode to hot-swap onto a finished download.',
-      };
+      status: 'ignored',
+      reason: mode === 'hls-buffer'
+        ? 'This mode replaces hot-swap-to-cache entirely with its own buffer finalize mechanism - there\'s nothing session-swap-shaped for it to do here.'
+        : 'Only mode=Enhanced HLS uses this - there\'s no live HLS session in this mode to hot-swap onto a finished download.',
+    };
 
   // Mirrors the exact bufferWillAttempt condition the real cache-on-play
   // trigger checks (see maybeEnqueueCacheDownload's call site) - hls-buffer's
@@ -1558,25 +1611,25 @@ function getModeFieldCompatibility({ mode, transcode }) {
   // is always skipped for it.
   fields.cacheOnPlay = mode === 'hls-buffer'
     ? {
-        status: 'ignored',
-        reason: 'Enhanced HLS + Buffered\'s own fetch always finalizes into the same permanent file cache-on-play would have downloaded - the STRM background download is always skipped for this mode, regardless of this setting.',
-      }
+      status: 'ignored',
+      reason: 'Enhanced HLS + Buffered\'s own fetch always finalizes into the same permanent file cache-on-play would have downloaded - the STRM background download is always skipped for this mode, regardless of this setting.',
+    }
     : {
-        status: 'optional',
-        reason: 'Enqueues a real background download of this video on play, so later plays use the cached file instead of live-proxying it again.',
-      };
+      status: 'optional',
+      reason: 'Enqueues a real background download of this video on play, so later plays use the cached file instead of live-proxying it again.',
+    };
 
   fields.instantStart = (isHlsFamily && forceH264)
     ? {
-        status: 'optional',
-        reason: 'Serves a tiny pre-generated "loading" segment immediately while the real encode cold-starts, instead of the player waiting on the real first segment.',
-      }
+      status: 'optional',
+      reason: 'Serves a tiny pre-generated "loading" segment immediately while the real encode cold-starts, instead of the player waiting on the real first segment.',
+    }
     : {
-        status: 'ignored',
-        reason: !isHlsFamily
-          ? 'Only Enhanced HLS / + Buffered have a cold-start placeholder segment to show at all.'
-          : 'Only applies when Transcode is set to Force re-encode (H.264/AAC) - the placeholder is generated to match a real h264 encode\'s settings.',
-      };
+      status: 'ignored',
+      reason: !isHlsFamily
+        ? 'Only Enhanced HLS / + Buffered have a cold-start placeholder segment to show at all.'
+        : 'Only applies when Transcode is set to Force re-encode (H.264/AAC) - the placeholder is generated to match a real h264 encode\'s settings.',
+    };
 
   // Only hls/hls-buffer produce real numbered segment files at all
   // (see SEGMENT_STATUS_MODES) - a forward seek in any of them can strand
@@ -1588,26 +1641,26 @@ function getModeFieldCompatibility({ mode, transcode }) {
   // disabled.
   fields.backfillMissingSegments = isHlsFamily
     ? {
-        status: 'optional',
-        reason: 'Once the live encode reaches the end of the video, fills in any segments a forward seek skipped over - using a local source only (STRM cache-on-play\'s hot-swap, or this mode\'s own buffer fetch), never a fresh network pull. No effect if no local source ever became available this session.',
-      }
+      status: 'optional',
+      reason: 'Once the live encode reaches the end of the video, fills in any segments a forward seek skipped over - using a local source only (STRM cache-on-play\'s hot-swap, or this mode\'s own buffer fetch), never a fresh network pull. No effect if no local source ever became available this session.',
+    }
     : {
-        status: 'ignored',
-        reason: 'Only hls/hls-buffer write real numbered segment files that could ever have a gap to fill.',
-      };
+      status: 'ignored',
+      reason: 'Only hls/hls-buffer write real numbered segment files that could ever have a gap to fill.',
+    };
 
   // Only hls-buffer finalizes a .ts (its whole mechanism is a plain -c copy
   // MPEG-TS remux) - every other mode either never finalizes a permanent
   // file, or finalizes something already in a directly-playable container.
   fields.finalizeToMp4 = mode === 'hls-buffer'
     ? {
-        status: 'optional',
-        reason: 'Enhanced HLS + Buffered always finalizes as a .ts file - once complete, remux it (no re-encode) into a sibling .mp4 that plays natively and doesn\'t need Jellyfin (or any other player) to transcode it server-side.',
-      }
+      status: 'optional',
+      reason: 'Enhanced HLS + Buffered always finalizes as a .ts file - once complete, remux it (no re-encode) into a sibling .mp4 that plays natively and doesn\'t need Jellyfin (or any other player) to transcode it server-side.',
+    }
     : {
-        status: 'ignored',
-        reason: 'This mode never finalizes a permanent .ts file to convert.',
-      };
+      status: 'ignored',
+      reason: 'This mode never finalizes a permanent .ts file to convert.',
+    };
 
   return fields;
 }
@@ -4067,11 +4120,11 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
         getVideoDurationSeconds(youtubeId, config),
         wantsPlaceholder
           ? (async () => {
-              const sourceResolution = await resolveVideoTargetResolution(youtubeId, models);
-              const { width, height } = capResolutionToHeight(sourceResolution.width, sourceResolution.height, resolveQualityHeight(quality));
-              const thumbnailPath = resolveLocalThumbnailPath(youtubeId);
-              return ensurePlaceholderSegment({ youtubeId, thumbnailPath, segmentType, segmentExt, hardwareMode: hw, tuning: tier, width, height });
-            })()
+            const sourceResolution = await resolveVideoTargetResolution(youtubeId, models);
+            const { width, height } = capResolutionToHeight(sourceResolution.width, sourceResolution.height, resolveQualityHeight(quality));
+            const thumbnailPath = resolveLocalThumbnailPath(youtubeId);
+            return ensurePlaceholderSegment({ youtubeId, thumbnailPath, segmentType, segmentExt, hardwareMode: hw, tuning: tier, width, height });
+          })()
           : Promise.resolve(null),
       ]);
       session.durationSeconds = durationSeconds;
@@ -4397,13 +4450,13 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
       }
 
       // forceKeyframesByHardwareMode[hw] is only ever true once a user has
-    // explicitly run the "Test HLS segment timing" check for THIS hardware
-    // mode on THIS host and it passed (see streamTuningBenchmark.
-    // testSegmentTiming and its route) - never a blanket default, since some
-    // hardware encoders are known to sometimes mishandle a forced-keyframe
-    // expression.
-    const useForceKeyframes = ((config.ytstream || {}).forceKeyframesByHardwareMode || {})[hw] === true;
-    const encoder = transcode === 'h264' ? buildVideoEncoderArgs(hw, resolveQualityHeight(quality), tier, (config.ytstream || {}).vaapiQuality, 'h264', useForceKeyframes) : null;
+      // explicitly run the "Test HLS segment timing" check for THIS hardware
+      // mode on THIS host and it passed (see streamTuningBenchmark.
+      // testSegmentTiming and its route) - never a blanket default, since some
+      // hardware encoders are known to sometimes mishandle a forced-keyframe
+      // expression.
+      const useForceKeyframes = ((config.ytstream || {}).forceKeyframesByHardwareMode || {})[hw] === true;
+      const encoder = transcode === 'h264' ? buildVideoEncoderArgs(hw, resolveQualityHeight(quality), tier, (config.ytstream || {}).vaapiQuality, 'h264', useForceKeyframes) : null;
 
       const ffArgs = [
         // 'warning' (not the usual 'error') for a direct-URL seek-restart
@@ -4904,19 +4957,91 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
   // relearned - clears both the in-memory caches and the DB row; the next
   // play re-runs a live yt-dlp lookup and repopulates it, same as if this
   // video had never been cached at all.
-  router.delete('/api/ytstream/:youtubeId/metadata-cache', authMiddleware, async (req, res) => {
-    const { youtubeId } = req.params;
+  // Shared by the single- and bulk-clear routes below so both ways of
+  // triggering a clear (one row from the Library page's cache icon, many
+  // rows from its bulk-action toolbar) run identical logic.
+  async function clearMetadataCacheEntry(youtubeId) {
     durationCache.delete(youtubeId);
     youtubeMetadataCache.clearCachedEntry(youtubeId);
-    if (!models || !models.YoutubeMetadataCache) {
-      return res.json({ success: true, deleted: 0 });
-    }
+    if (!models || !models.YoutubeMetadataCache) return 0;
+    return models.YoutubeMetadataCache.destroy({ where: { youtube_id: youtubeId } });
+  }
+
+  router.delete('/api/ytstream/:youtubeId/metadata-cache', authMiddleware, async (req, res) => {
+    const { youtubeId } = req.params;
     try {
-      const deleted = await models.YoutubeMetadataCache.destroy({ where: { youtube_id: youtubeId } });
+      const deleted = await clearMetadataCacheEntry(youtubeId);
       res.json({ success: true, deleted });
     } catch (err) {
       logger.error({ err, youtubeId }, 'ytstream: failed to clear youtube_metadata_cache entry');
       res.status(500).json({ success: false, error: 'Failed to clear cached metadata' });
+    }
+  });
+
+  // Bulk counterpart of the per-video route above, for the Library page's
+  // multi-select "Clear Cached Metadata" bulk action.
+  router.delete('/api/ytstream/metadata-cache/bulk', authMiddleware, async (req, res) => {
+    const youtubeIds = Array.isArray(req.body?.youtubeIds) ? req.body.youtubeIds : [];
+    let deleted = 0;
+    const failed = [];
+    for (const youtubeId of youtubeIds) {
+      try {
+        deleted += await clearMetadataCacheEntry(youtubeId);
+      } catch (err) {
+        logger.warn({ err, youtubeId }, 'ytstream: failed to clear one youtube_metadata_cache entry in bulk request');
+        failed.push(youtubeId);
+      }
+    }
+    res.json({ success: true, deleted, failed });
+  });
+
+  // Per-video detail for the Library page's "Cached Metadata" icon dialog -
+  // slim fields by default (never the raw_info_json blob, which can be
+  // large); ?raw=true is an explicit opt-in second round trip for the
+  // dialog's "Show raw JSON" toggle only.
+  router.get('/api/ytstream/:youtubeId/metadata-cache/detail', authMiddleware, async (req, res) => {
+    const { youtubeId } = req.params;
+    if (!models || !models.YoutubeMetadataCache) {
+      return res.status(404).json({ error: 'Not cached' });
+    }
+    try {
+      const row = await models.YoutubeMetadataCache.findByPk(youtubeId);
+      if (!row) {
+        return res.status(404).json({ error: 'Not cached' });
+      }
+      let info = null;
+      if (row.raw_info_json) {
+        try {
+          info = JSON.parse(row.raw_info_json);
+        } catch (err) {
+          logger.warn({ err, youtubeId }, 'ytstream: failed to parse cached raw_info_json');
+        }
+      }
+      const retentionDays = youtubeMetadataCache.YOUTUBE_METADATA_CACHE_RETENTION_DAYS;
+      const expiresAt = row.last_accessed_at
+        ? new Date(new Date(row.last_accessed_at).getTime() + retentionDays * 24 * 60 * 60 * 1000).toISOString()
+        : null;
+      const detail = {
+        youtubeId,
+        durationSeconds: row.duration_seconds,
+        fetchedAt: row.fetched_at,
+        fetchedAgo: formatRelativeTimeAgo(row.fetched_at),
+        lastAccessedAt: row.last_accessed_at,
+        lastAccessedAgo: formatRelativeTimeAgo(row.last_accessed_at),
+        expiresAt,
+        title: info?.title ?? null,
+        uploader: info?.uploader ?? info?.channel ?? null,
+        resolution: info && info.width && info.height ? `${info.width}x${info.height}` : null,
+        fps: info?.fps ?? null,
+        uploadDate: info?.upload_date ?? null,
+      };
+      if (req.query.raw === 'true') {
+        detail.rawInfoJson = info;
+      }
+      res.json(detail);
+    } catch (err) {
+      logger.error({ err, youtubeId }, 'ytstream: failed to read metadata cache detail');
+      res.status(500).json({ error: 'Failed to read cached metadata' });
     }
   });
 
@@ -5007,6 +5132,53 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
       logger.error({ err }, 'ytstream: failed to clear untracked buffer cache');
       res.status(500).json({ success: false, error: 'Failed to clear untracked buffer cache' });
     }
+  });
+
+  // Per-video counterpart of the aggregate routes above, for the Library
+  // page's "Cached Video" icon on an untracked row.
+  router.get('/api/ytstream/:youtubeId/untracked-cache', authMiddleware, async (req, res) => {
+    try {
+      const stat = await getUntrackedBufferCacheStat(req.params.youtubeId);
+      res.json(stat);
+    } catch (err) {
+      logger.error({ err, youtubeId: req.params.youtubeId }, 'ytstream: failed to read untracked buffer cache entry');
+      res.status(500).json({ error: 'Failed to read untracked buffer cache entry' });
+    }
+  });
+
+  router.delete('/api/ytstream/:youtubeId/untracked-cache', authMiddleware, async (req, res) => {
+    try {
+      const deleted = await deleteUntrackedBufferCacheFile(req.params.youtubeId);
+      res.json({ success: true, deleted: deleted ? 1 : 0 });
+    } catch (err) {
+      logger.error({ err, youtubeId: req.params.youtubeId }, 'ytstream: failed to delete one untracked buffer cache file');
+      res.status(500).json({ success: false, error: 'Failed to delete untracked buffer cache entry' });
+    }
+  });
+
+  // Bulk counterpart, for the Library page's multi-select "Clear Cached
+  // Video" bulk action against a selection of untracked rows.
+  router.delete('/api/ytstream/untracked-cache/bulk', authMiddleware, async (req, res) => {
+    const youtubeIds = Array.isArray(req.body?.youtubeIds) ? req.body.youtubeIds : [];
+    let deletedFiles = 0;
+    let freedBytes = 0;
+    const failed = [];
+    for (const youtubeId of youtubeIds) {
+      const filePath = getUntrackedBufferCachePath(youtubeId);
+      try {
+        const stat = await fs.promises.stat(filePath);
+        if (!stat.isFile()) continue;
+        await fs.promises.unlink(filePath);
+        deletedFiles += 1;
+        freedBytes += stat.size;
+      } catch (err) {
+        if (err.code !== 'ENOENT') {
+          logger.warn({ err, youtubeId }, 'ytstream: failed to delete one untracked buffer cache file in bulk request');
+          failed.push(youtubeId);
+        }
+      }
+    }
+    res.json({ success: true, deletedFiles, freedBytes, failed });
   });
 
   /**
@@ -5341,7 +5513,7 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
     };
   }
 
-    router.get('/api/ytstream/:youtubeId', async (req, res) => {
+  router.get('/api/ytstream/:youtubeId', async (req, res) => {
     // debug (not info): fires on every single request to this route,
     // including every HLS.js/AVPlayer segment poll - see 'ytstream: serving
     // HLS asset' below for the same reasoning. Turn on ytstream.debugLogging
@@ -6223,3 +6395,14 @@ module.exports = createYtStreamRoutes;
 // cronJobs.js's nightly sweep reach the untracked-cache cleanup without a
 // second module or duplicating HLS_UNTRACKED_BUFFER_CACHE_DIR's path.
 module.exports.sweepExpiredUntrackedBufferCache = sweepExpiredUntrackedBufferCache;
+// Same reasoning - videosModule.js's unified Library query reaches these to
+// merge untracked-buffer-cache state into its "Show untracked" rows without
+// duplicating HLS_UNTRACKED_BUFFER_CACHE_DIR's path or scanning logic.
+module.exports.getUntrackedBufferCacheStat = getUntrackedBufferCacheStat;
+module.exports.deleteUntrackedBufferCacheFile = deleteUntrackedBufferCacheFile;
+module.exports.listUntrackedBufferCacheEntries = listUntrackedBufferCacheEntries;
+// videoMetadataModule.js's getVideoStreamInfo reaches this to serve an
+// untracked video's cache file through the normal /api/videos/:id/stream
+// endpoint (in-app player) when there's no Videos table row to read a
+// filePath from.
+module.exports.getUntrackedBufferCachePath = getUntrackedBufferCachePath;

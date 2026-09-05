@@ -62,6 +62,17 @@ export interface VideoExtendedMetadata {
   webpageUrl: string | null;
   relatedFiles: VideoRelatedFile[] | null;
   availableResolutions: number[] | null;
+  // Whether this response was served from the on-disk .info.json / shared
+  // youtube_metadata_cache DB cache instead of a live yt-dlp/API call - see
+  // videoMetadataModule.js's getVideoMetadata. Optional so older callers
+  // that don't check it are unaffected.
+  isCached?: boolean;
+  cachedAt?: string | null;
+  // Pre-formatted "5h 4m ago" text (server/modules/relativeTimeFormatter.js)
+  // - prefer this for display over computing relative time from cachedAt,
+  // so a wording change only has to happen in that one server-side place.
+  cachedAgo?: string | null;
+  metadataSource?: 'info-json' | 'db-cache' | 'yt-dlp' | null;
 }
 
 export interface VideoRelatedFile {

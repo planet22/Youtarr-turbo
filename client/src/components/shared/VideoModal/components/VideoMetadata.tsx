@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Box, Typography, Chip, Skeleton, Button } from '../../../ui';
+import { Box, Typography, Chip, Skeleton, Button, IconButton, Tooltip, CircularProgress } from '../../../ui';
 import useMediaQuery from '../../../../hooks/useMediaQuery';
 import {
   Eye as VisibilityIcon,
@@ -10,6 +10,8 @@ import {
   ExpandLess as ExpandLessIcon,
   FileDownload as DownloadedIcon,
   Plus as AddIcon,
+  Refresh as RefreshIcon,
+  Database as CachedMetadataIcon,
 } from '../../../../lib/icons';
 import { formatDate, formatDateTime } from '../../../../utils/formatters';
 import { VideoModalData, VideoExtendedMetadata } from '../types';
@@ -19,6 +21,8 @@ interface VideoMetadataProps {
   metadata: VideoExtendedMetadata | null;
   loading: boolean;
   onAddChannel?: () => void;
+  onRefresh?: () => void;
+  refreshing?: boolean;
 }
 
 const DESCRIPTION_PREVIEW_LENGTH = 300;
@@ -44,7 +48,7 @@ function formatDuration(seconds: number): string {
   return `${minutes}:${String(secs).padStart(2, '0')}`;
 }
 
-function VideoMetadata({ video, metadata, loading, onAddChannel }: VideoMetadataProps) {
+function VideoMetadata({ video, metadata, loading, onAddChannel, onRefresh, refreshing }: VideoMetadataProps) {
   const [descriptionExpanded, setDescriptionExpanded] = useState(false);
   const [tagsExpanded, setTagsExpanded] = useState(false);
   const isMobile = useMediaQuery('(max-width: 599px)');
@@ -125,6 +129,36 @@ function VideoMetadata({ video, metadata, loading, onAddChannel }: VideoMetadata
               </Typography>
             </Box>
           </>
+        )}
+
+        {metadata?.isCached && (
+          <Box style={{ display: 'flex', alignItems: 'center', gap: 4, marginLeft: 'auto', flexShrink: 0 }}>
+            <Tooltip title={`Served from cache${metadata.cachedAt ? ` — cached ${formatDateTime(metadata.cachedAt)}` : ''}`}>
+              <span>
+                <Chip
+                  icon={<CachedMetadataIcon size={14} />}
+                  label={metadata.cachedAgo ?? 'Cached'}
+                  size="small"
+                  color="info"
+                  variant="filled"
+                />
+              </span>
+            </Tooltip>
+            {onRefresh && (
+              <Tooltip title={refreshing ? 'Refreshing…' : 'Refresh cached metadata'}>
+                <span>
+                  <IconButton
+                    size="small"
+                    aria-label="Refresh cached metadata"
+                    onClick={onRefresh}
+                    disabled={refreshing || loading}
+                  >
+                    {refreshing ? <CircularProgress size={14} /> : <RefreshIcon size={14} />}
+                  </IconButton>
+                </span>
+              </Tooltip>
+            )}
+          </Box>
         )}
       </Box>
 

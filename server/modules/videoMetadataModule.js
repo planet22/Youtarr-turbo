@@ -9,6 +9,8 @@ const ChannelVideo = require('../models/channelvideo');
 const channelVideoReanchor = require('./channelVideoReanchor');
 const { parseTierFromFormatNote, extractAvailableResolutionTiers } = require('./resolutionTier');
 const tsRemuxCache = require('./tsRemuxCache');
+const youtubeMetadataCache = require('./youtubeMetadataCache');
+const { formatRelativeTimeAgo } = require('./relativeTimeFormatter');
 
 const NULL_METADATA = {
   description: null,
@@ -32,6 +34,18 @@ const NULL_METADATA = {
   webpageUrl: null,
   relatedFiles: null,
   availableResolutions: null,
+  // Additive - purely informational for a consumer that wants to show "this
+  // is cached data" (the video modal). isCached is false and cachedAt/
+  // cachedAgo/metadataSource are null for every live-fetched path (yt-dlp,
+  // the API fallback, and total failure), so an existing caller that
+  // ignores these fields sees no behavior change at all. cachedAgo is a
+  // pre-formatted "5h 4m ago" string (see relativeTimeFormatter.js) rather
+  // than leaving relative-time math to every consumer independently - a
+  // display-wording change only ever has to happen in that one place.
+  isCached: false,
+  cachedAt: null,
+  cachedAgo: null,
+  metadataSource: null,
 };
 
 const YTDLP_FETCH_TIMEOUT_MS = 60000;
@@ -92,34 +106,75 @@ class VideoMetadataModule {
    * @param {string} youtubeId - YouTube video ID
    * @returns {Promise<Object>} Curated metadata object (all null on failure)
    */
-  async getVideoMetadata(youtubeId) {
+  /**
+   * @param {string} youtubeId
+   * @param {{forceRefresh?: boolean}} [options] - forceRefresh skips both the
+   *   on-disk .info.json and the youtube_metadata_cache DB row and always
+   *   does a live yt-dlp fetch, overwriting both caches with the result -
+   *   the video modal's/Library page's "Refresh cached metadata" action.
+   */
+  async getVideoMetadata(youtubeId, { forceRefresh = false } = {}) {
     try {
       const infoDir = path.join(configModule.getJobsPath(), 'info');
       const infoPath = path.join(infoDir, `${youtubeId}.info.json`);
 
       let rawData = null;
+      // Which source actually answered this call, and when that source's
+      // data was captured - purely additive fields on the eventual response
+      // (see NULL_METADATA) for a consumer that wants to show "this is
+      // cached" (the video modal). null/false for every live-fetched path.
+      let metadataSource = null;
+      let cachedAt = null;
 
-      // Try reading cached .info.json from disk
-      try {
-        await fs.access(infoPath);
-        const content = await fs.readFile(infoPath, 'utf8');
-        rawData = JSON.parse(content);
-      } catch {
-        // Not cached - fetch via yt-dlp
-        logger.debug({ youtubeId }, 'No cached .info.json, fetching via yt-dlp');
+      // Try reading cached .info.json from disk, then the shared
+      // youtube_metadata_cache DB row (see youtubeMetadataCache.js) - a
+      // prior full yt-dlp extraction for this video (a stream/preview
+      // warm-up, a completed download, STRM materialization) may already
+      // be sitting there even with no .info.json file on disk at all, e.g.
+      // an untracked video that was only ever previewed. forceRefresh skips
+      // both and always re-fetches live.
+      if (!forceRefresh) {
+        try {
+          const stat = await fs.stat(infoPath);
+          const content = await fs.readFile(infoPath, 'utf8');
+          rawData = JSON.parse(content);
+          metadataSource = 'info-json';
+          cachedAt = stat.mtime.toISOString();
+        } catch {
+          const dbCached = await youtubeMetadataCache.getCachedRawInfoJson(youtubeId);
+          if (dbCached) {
+            rawData = dbCached.data;
+            metadataSource = 'db-cache';
+            cachedAt = dbCached.fetchedAt;
+            logger.debug({ youtubeId }, 'No cached .info.json; using youtube_metadata_cache DB row instead');
+          }
+        }
+      }
+
+      if (!rawData) {
+        // Not cached anywhere (or forceRefresh) - fetch via yt-dlp
+        logger.debug({ youtubeId, forceRefresh }, 'Fetching video metadata via yt-dlp');
         try {
           rawData = await ytDlpRunner.fetchMetadata(
             `https://www.youtube.com/watch?v=${youtubeId}`,
             YTDLP_FETCH_TIMEOUT_MS
           );
+          metadataSource = 'yt-dlp';
+          cachedAt = new Date().toISOString();
 
-          // Cache the result for future requests
+          // Cache the result for future requests - both the disk .info.json
+          // this method has always used, and the shared DB cache so other
+          // consumers (ytstream's fps/max-height lookups, a later untracked
+          // preview) don't need their own independent yt-dlp fetch either.
           try {
             await fs.mkdir(infoDir, { recursive: true });
             await fs.writeFile(infoPath, JSON.stringify(rawData, null, 2), 'utf8');
             logger.debug({ youtubeId }, 'Cached .info.json from yt-dlp fetch');
           } catch (cacheErr) {
             logger.warn({ err: cacheErr, youtubeId }, 'Failed to cache .info.json');
+          }
+          if (Number.isFinite(Number(rawData.duration)) && Number(rawData.duration) > 0) {
+            youtubeMetadataCache.cacheRawInfoJson(youtubeId, rawData.duration, rawData);
           }
         } catch (fetchErr) {
           logger.warn({ err: fetchErr, youtubeId }, 'Failed to fetch metadata via yt-dlp');
@@ -241,6 +296,10 @@ class VideoMetadataModule {
         webpageUrl: rawData.webpage_url ?? null,
         relatedFiles,
         availableResolutions,
+        isCached: metadataSource === 'info-json' || metadataSource === 'db-cache',
+        cachedAt,
+        cachedAgo: formatRelativeTimeAgo(cachedAt),
+        metadataSource,
       };
     } catch (err) {
       logger.error({ err, youtubeId }, 'Unexpected error in getVideoMetadata');
@@ -405,27 +464,34 @@ class VideoMetadataModule {
   async getVideoStreamInfo(youtubeId, type) {
     const video = await Video.findOne({ where: { youtubeId } });
 
-    if (!video) {
-      return { error: 'not_found', message: 'Video not found' };
-    }
+    let filePath;
+    if (video) {
+      filePath = type === 'audio' ? video.audioFilePath : video.filePath;
+      if (!filePath) {
+        return { error: 'no_file', message: `No ${type} file available for this video` };
+      }
 
-    const filePath = type === 'audio' ? video.audioFilePath : video.filePath;
-
-    if (!filePath) {
-      return { error: 'no_file', message: `No ${type} file available for this video` };
-    }
-
-    // STRM-only entries store a .strm shortcut (or is_strm=true) instead of
-    // real media. The in-app player cannot play that text file; callers should
-    // redirect to /api/ytstream/:id (see videoDetail stream route).
-    const ext = path.extname(filePath).toLowerCase();
-    const isStrm = Boolean(video.is_strm) || ext === '.strm';
-    if (isStrm && type === 'video') {
-      return {
-        isStrm: true,
-        youtubeId: video.youtubeId,
-        filePath,
-      };
+      // STRM-only entries store a .strm shortcut (or is_strm=true) instead of
+      // real media. The in-app player cannot play that text file; callers should
+      // redirect to /api/ytstream/:id (see videoDetail stream route).
+      const isStrm = Boolean(video.is_strm) || path.extname(filePath).toLowerCase() === '.strm';
+      if (isStrm && type === 'video') {
+        return {
+          isStrm: true,
+          youtubeId: video.youtubeId,
+          filePath,
+        };
+      }
+    } else {
+      // No Videos table row - this id was only ever streamed/previewed, not
+      // added to the library. Its one possible local copy is the untracked
+      // hls-buffer cache (see ytstream.js's HLS_UNTRACKED_BUFFER_CACHE_DIR),
+      // which is always a muxed video+audio .ts keyed by youtubeId alone -
+      // there's no audio-only counterpart, so only 'video' can fall back to it.
+      if (type !== 'video') {
+        return { error: 'not_found', message: 'Video not found' };
+      }
+      filePath = require('../routes/ytstream').getUntrackedBufferCachePath(youtubeId);
     }
 
     // Verify file exists on disk
@@ -434,16 +500,20 @@ class VideoMetadataModule {
       await fs.access(filePath);
       stat = await fs.stat(filePath);
     } catch {
-      return { error: 'file_missing', message: 'File not found on disk' };
+      return video
+        ? { error: 'file_missing', message: 'File not found on disk' }
+        : { error: 'not_found', message: 'Video not found' };
     }
 
     // .ts (MPEG-TS) isn't in STREAM_MIME_TYPES at all - it falls through to
     // 'application/octet-stream', which the in-app <video> player refuses
     // to play outright (no browser has a native MPEG-TS demuxer for a plain
     // progressive source). Real .ts library files come from the NZB/Sonarr
-    // grab pipeline and finalized hls-buffer downloads - swap in
-    // a one-time seekable .mp4 remux (see tsRemuxCache) instead of the raw
-    // file whenever one exists or can be produced.
+    // grab pipeline and finalized hls-buffer downloads (tracked or
+    // untracked) - swap in a one-time seekable .mp4 remux (see
+    // tsRemuxCache) instead of the raw file whenever one exists or can be
+    // produced.
+    const ext = path.extname(filePath).toLowerCase();
     let servedFilePath = filePath;
     let servedFileSize = stat.size;
     if (ext === '.ts' && type === 'video') {

@@ -5,10 +5,20 @@ import {
   Download as DownloadIcon,
   Eye as EyeIcon,
   FileVideo as StrmIcon,
+  Database as MetadataCacheIcon,
+  Storage as CachedVideoIcon,
 } from '../../../lib/icons';
 import type { FilterConfig } from './types';
 
-export type StatusChipId = 'protected' | 'missing' | 'ignored' | 'downloaded' | 'watched' | 'strm';
+export type StatusChipId =
+  | 'protected'
+  | 'missing'
+  | 'ignored'
+  | 'downloaded'
+  | 'watched'
+  | 'strm'
+  | 'metadataCache'
+  | 'cachedVideo';
 export type StatusFilterConfig = Extract<FilterConfig, { id: StatusChipId }>;
 
 // Shape kept deliberately thin: the Icon component (not an element) so each
@@ -27,6 +37,8 @@ export const STATUS_CHIP_DESCRIPTORS: Record<StatusChipId, StatusChipDescriptor>
   downloaded: { Icon: DownloadIcon, noun: 'Downloaded' },
   watched: { Icon: EyeIcon, noun: 'Watched' },
   strm: { Icon: StrmIcon, noun: 'STRM' },
+  metadataCache: { Icon: MetadataCacheIcon, noun: 'Cached Metadata' },
+  cachedVideo: { Icon: CachedVideoIcon, noun: 'Cached Video' },
 };
 
 export function isStatusChipId(id: string): id is StatusChipId {

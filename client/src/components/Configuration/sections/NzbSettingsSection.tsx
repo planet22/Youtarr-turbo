@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import axios from 'axios';
-import { Eye, EyeOff, Trash2 } from 'lucide-react';
+import { Eye, EyeOff, Trash2, ChevronDown } from 'lucide-react';
 import {
   FormControlLabel,
   Switch,
@@ -9,6 +9,9 @@ import {
   MenuItem,
   InputLabel,
   FormControl,
+  FormHelperText,
+  Menu,
+  ListItemText,
   Grid,
   Box,
   Typography,
@@ -57,6 +60,52 @@ const blankCategory = (): NzbCategory => ({
   postEncode: false,
 });
 
+// Keeps the closed-state value on one line (ellipsis instead of wrapping to a
+// second line) so every dropdown in a row stays the same height.
+const SELECT_TRUNCATE_CLASS = '[&>span]:truncate [&>span]:min-w-0';
+
+interface NewznabCategoryMultiSelectProps {
+  selectedIds: string[];
+  onToggle: (id: string, checked: boolean) => void;
+}
+
+const NewznabCategoryMultiSelect: React.FC<NewznabCategoryMultiSelectProps> = ({
+  selectedIds,
+  onToggle,
+}) => {
+  const [anchorEl, setAnchorEl] = useState<HTMLButtonElement | null>(null);
+  const open = Boolean(anchorEl);
+
+  const displayText =
+    NEWZNAB_CATEGORY_OPTIONS.filter((opt) => selectedIds.includes(opt.id))
+      .map((opt) => opt.label)
+      .join(', ') || 'None selected';
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={(e) => setAnchorEl(e.currentTarget)}
+        className="flex items-center justify-between gap-2 w-full rounded-[var(--radius-input)] border border-[var(--input-border)] hover:border-[var(--input-border-hover)] bg-input text-foreground font-sans text-left text-base px-3.5 py-2.5 min-h-[48px] transition-colors focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+      >
+        <span className="truncate min-w-0">{displayText}</span>
+        <ChevronDown className="h-4 w-4 shrink-0 opacity-60" />
+      </button>
+      <Menu open={open} anchorEl={anchorEl} onClose={() => setAnchorEl(null)}>
+        {NEWZNAB_CATEGORY_OPTIONS.map((opt) => {
+          const checked = selectedIds.includes(opt.id);
+          return (
+            <MenuItem key={opt.id} onClick={() => onToggle(opt.id, !checked)}>
+              <Checkbox size="small" checked={checked} onChange={() => {}} />
+              <ListItemText primary={opt.label} />
+            </MenuItem>
+          );
+        })}
+      </Menu>
+    </>
+  );
+};
+
 export const NzbSettingsSection: React.FC<Props> = ({
   config,
   token,
@@ -67,6 +116,7 @@ export const NzbSettingsSection: React.FC<Props> = ({
     enabled: false,
     apiKey: '',
     remoteBasePath: null,
+    searchCacheMinutes: 10,
     categories: [],
   };
 
@@ -202,6 +252,45 @@ export const NzbSettingsSection: React.FC<Props> = ({
           </Box>
         </Grid>
 
+        <Grid item xs={12} md={6}>
+          <Box className="flex items-center gap-1">
+            <TextField
+              fullWidth
+              type="number"
+              label="Search result cache (minutes)"
+              value={nzb.searchCacheMinutes ?? 10}
+              onChange={(e) => {
+                const parsed = Number.parseInt(e.target.value, 10);
+                setNzb({ searchCacheMinutes: Number.isFinite(parsed) ? Math.max(0, parsed) : 0 });
+              }}
+              inputProps={{ min: 0 }}
+              helperText="Reuses a search's results for repeat Sonarr/Radarr/Prowlarr queries instead of re-running yt-dlp. Set to 0 to disable caching."
+            />
+            <InfoTooltip
+              text="Sonarr/Radarr re-run the same search on their own schedule, which can otherwise spawn a fresh yt-dlp process (or spend YouTube API quota) for a query Youtarr just answered. Keeping this short (a few minutes) still avoids that without noticeably delaying a genuinely new upload showing up."
+              onMobileClick={onMobileTooltipClick}
+            />
+          </Box>
+        </Grid>
+
+        <Grid item xs={12} md={6}>
+          <Box className="flex items-center gap-1">
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={nzb.debugLogging ?? false}
+                  onChange={(e) => setNzb({ debugLogging: e.target.checked })}
+                />
+              }
+              label="NZB debug logging"
+            />
+            <InfoTooltip
+              text="Shows this integration's own diagnostic logs (search/caps/addfile/queue/history requests, cache hit/miss, local-filter before/after counts, remapped Sonarr/Radarr paths) at the normal log level, without needing global Log Level set to Debug - which would also show unrelated noise from every other module."
+              onMobileClick={onMobileTooltipClick}
+            />
+          </Box>
+        </Grid>
+
         <Grid item xs={12}>
           <Typography variant="subtitle2" className="mt-2 mb-1">
             Categories
@@ -229,31 +318,36 @@ export const NzbSettingsSection: React.FC<Props> = ({
                   </IconButton>
                 </span>
               </Tooltip>
-              <Grid container spacing={2} alignItems="center">
+              <Grid container spacing={2} alignItems="flex-start">
                 <Grid item xs={12} md={2}>
-                  <TextField
-                    fullWidth
-                    label="Category name"
-                    value={cat.name}
-                    onChange={(e) => updateCategory(index, { name: e.target.value })}
-                    helperText="Download client category"
-                  />
+                  <FormControl fullWidth>
+                    <InputLabel>Category name</InputLabel>
+                    <TextField
+                      fullWidth
+                      value={cat.name}
+                      onChange={(e) => updateCategory(index, { name: e.target.value })}
+                    />
+                    <FormHelperText>Download client category</FormHelperText>
+                  </FormControl>
                 </Grid>
                 <Grid item xs={12} md={2}>
-                  <TextField
-                    fullWidth
-                    label="Subfolder"
-                    value={cat.subfolder || ''}
-                    onChange={(e) => updateCategory(index, { subfolder: e.target.value || null })}
-                    helperText="e.g. Sonarr"
-                  />
+                  <FormControl fullWidth>
+                    <InputLabel>Subfolder</InputLabel>
+                    <TextField
+                      fullWidth
+                      value={cat.subfolder || ''}
+                      onChange={(e) => updateCategory(index, { subfolder: e.target.value || null })}
+                    />
+                    <FormHelperText>e.g. Sonarr</FormHelperText>
+                  </FormControl>
                 </Grid>
                 <Grid item xs={12} md={2}>
                   <FormControl fullWidth>
                     <InputLabel>Media mode</InputLabel>
                     <Select
+                      fullWidth
+                      className={SELECT_TRUNCATE_CLASS}
                       value={cat.mediaMode}
-                      label="Media mode"
                       onChange={(e: SelectChangeEvent<string>) =>
                         updateCategory(index, { mediaMode: e.target.value as NzbCategory['mediaMode'] })
                       }
@@ -262,14 +356,16 @@ export const NzbSettingsSection: React.FC<Props> = ({
                       <MenuItem value="strm">STRM only</MenuItem>
                       <MenuItem value="both">Both</MenuItem>
                     </Select>
+                    <FormHelperText>How grabs are saved</FormHelperText>
                   </FormControl>
                 </Grid>
                 <Grid item xs={12} md={3}>
                   <FormControl fullWidth>
                     <InputLabel>Search mode</InputLabel>
                     <Select
+                      fullWidth
+                      className={SELECT_TRUNCATE_CLASS}
                       value={cat.searchMode}
-                      label="Search mode"
                       onChange={(e: SelectChangeEvent<string>) =>
                         updateCategory(index, { searchMode: e.target.value as NzbCategory['searchMode'] })
                       }
@@ -277,14 +373,16 @@ export const NzbSettingsSection: React.FC<Props> = ({
                       <MenuItem value="flat">Flat (text search)</MenuItem>
                       <MenuItem value="episode">Season/episode (best-effort)</MenuItem>
                     </Select>
+                    <FormHelperText>How queries are interpreted</FormHelperText>
                   </FormControl>
                 </Grid>
                 <Grid item xs={12} md={3}>
                   <FormControl fullWidth>
                     <InputLabel>Import strategy</InputLabel>
                     <Select
+                      fullWidth
+                      className={SELECT_TRUNCATE_CLASS}
                       value={cat.importStrategy}
-                      label="Import strategy"
                       onChange={(e: SelectChangeEvent<string>) =>
                         updateCategory(index, { importStrategy: e.target.value as NzbCategory['importStrategy'] })
                       }
@@ -292,6 +390,7 @@ export const NzbSettingsSection: React.FC<Props> = ({
                       <MenuItem value="hardlink">Keep in Youtarr library (hardlink)</MenuItem>
                       <MenuItem value="untracked">Hand off to Sonarr/Radarr (untracked)</MenuItem>
                     </Select>
+                    <FormHelperText>What happens after a grab completes</FormHelperText>
                   </FormControl>
                 </Grid>
                 <Grid item xs={12}>
@@ -304,21 +403,10 @@ export const NzbSettingsSection: React.FC<Props> = ({
                       onMobileClick={onMobileTooltipClick}
                     />
                   </Box>
-                  <Box className="flex flex-wrap gap-x-1 gap-y-0">
-                    {NEWZNAB_CATEGORY_OPTIONS.map((opt) => (
-                      <FormControlLabel
-                        key={opt.id}
-                        control={
-                          <Checkbox
-                            size="small"
-                            checked={cat.newznabCategoryIds.includes(opt.id)}
-                            onChange={(e) => toggleCategoryNewznabId(index, opt.id, e.target.checked)}
-                          />
-                        }
-                        label={opt.label}
-                      />
-                    ))}
-                  </Box>
+                  <NewznabCategoryMultiSelect
+                    selectedIds={cat.newznabCategoryIds}
+                    onToggle={(id, checked) => toggleCategoryNewznabId(index, id, checked)}
+                  />
                 </Grid>
                 <Grid item xs={12} md={6}>
                   <Box className="flex items-center">

@@ -17,8 +17,14 @@ export interface SwitchProps extends Omit<React.ComponentPropsWithoutRef<typeof 
 }
 
 const Switch = React.forwardRef<React.ElementRef<typeof SwitchPrimitive.Root>, SwitchProps>(
-  ({ checked, onChange, size = 'medium', color: _color, inputProps, className, name, ...props }, ref) => {
+  ({ checked, onChange, size = 'medium', color: _color, inputProps, className, name, style, ...props }, ref) => {
     const isSmall = size === 'small';
+    // Themes may need the "on" track to differ from --primary (e.g. a theme whose
+    // primary is pure white for monochrome buttons would otherwise render an
+    // invisible white-on-white switch). Falls back to --primary when unset.
+    const checkedTrackStyle: React.CSSProperties | undefined = checked
+      ? { backgroundColor: 'hsl(var(--switch-track-checked-raw, var(--primary-raw)))' }
+      : undefined;
     return (
       <SwitchPrimitive.Root
         ref={ref}
@@ -38,6 +44,7 @@ const Switch = React.forwardRef<React.ElementRef<typeof SwitchPrimitive.Root>, S
           isSmall ? 'h-5 w-9' : 'h-6 w-11',
           className
         )}
+        style={{ ...checkedTrackStyle, ...style }}
         {...props}
       >
         <SwitchPrimitive.Thumb

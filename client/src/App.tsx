@@ -25,6 +25,7 @@ import DownloadManager from './components/DownloadManager';
 import VideosPage from './components/VideosPage';
 import StreamingPage from './components/StreamingPage';
 import StreamHistoryPage from './components/StreamingPage/StreamHistoryPage';
+import NzbPage from './components/NzbPage';
 import FindVideos from './components/FindVideos';
 import FindChannels from './components/FindChannels';
 import LocalLogin from './components/LocalLogin';
@@ -543,6 +544,7 @@ function AppContent() {
                           <Route path="/videos/find" element={<FindVideos token={token} />} />
                           <Route path="/streaming" element={<StreamingPage token={token} />} />
                           <Route path="/streaming/history" element={<StreamHistoryPage token={token} />} />
+                          <Route path="/nzb" element={<NzbPage token={token} />} />
                           <Route path="/channel/:channel_id" element={<ChannelPage token={token} />} />
                           <Route path="/playlist/:id" element={<PlaylistPage token={token} />} />
                           <Route path="/" element={<Navigate to="/subscriptions" replace />} />

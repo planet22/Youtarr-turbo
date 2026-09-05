@@ -1,8 +1,11 @@
 import React from 'react';
-import { CheckCircle as CheckCircleIcon, CloudOff as CloudOffIcon, Lock as LockIcon, NewReleases as NewReleasesIcon, Schedule as ScheduleIcon, VideoLibrary as VideoLibraryIcon, Block as BlockIcon } from '../lib/icons';
+import { CheckCircle as CheckCircleIcon, CloudOff as CloudOffIcon, Lock as LockIcon, NewReleases as NewReleasesIcon, Schedule as ScheduleIcon, VideoLibrary as VideoLibraryIcon, Block as BlockIcon, Storage as CachedIcon } from '../lib/icons';
 import { ChannelVideo } from '../types/ChannelVideo';
 
-export type VideoStatus = 'never_downloaded' | 'downloaded' | 'missing' | 'members_only' | 'ignored';
+// 'cached' is never produced by getVideoStatus below (ChannelVideo has no
+// concept of an untracked buffer-cache file) - it's only ever set directly
+// by VideosPage's videoDataToModalData for an untracked row that has one.
+export type VideoStatus = 'never_downloaded' | 'downloaded' | 'missing' | 'members_only' | 'ignored' | 'cached';
 
 export const getVideoStatus = (video: ChannelVideo): VideoStatus => {
   if (video.ignored) {
@@ -32,6 +35,8 @@ export const getStatusColor = (status: VideoStatus) => {
       return 'default';
     case 'ignored':
       return 'default';
+    case 'cached':
+      return 'info';
     default:
       return 'info';
   }
@@ -47,6 +52,8 @@ export const getStatusIcon = (status: VideoStatus) => {
       return <LockIcon size={16} data-testid="LockIcon" />;
     case 'ignored':
       return <BlockIcon size={16} data-testid="BlockIcon" />;
+    case 'cached':
+      return <CachedIcon size={16} data-testid="CachedIcon" />;
     default:
       return <NewReleasesIcon size={16} data-testid="NewReleasesIcon" />;
   }
@@ -62,6 +69,8 @@ export const getStatusLabel = (status: VideoStatus) => {
       return 'Members Only';
     case 'ignored':
       return 'Ignored';
+    case 'cached':
+      return 'Cached';
     default:
       return 'Not Downloaded';
   }
@@ -98,6 +107,11 @@ export const getStatusChipStyle = (status: VideoStatus): React.CSSProperties => 
       return {
         backgroundColor: 'transparent',
         color: 'var(--muted-foreground)',
+      };
+    case 'cached':
+      return {
+        backgroundColor: 'transparent',
+        color: 'var(--info)',
       };
     case 'members_only':
     default:

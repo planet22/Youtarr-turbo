@@ -64,9 +64,9 @@ describe('AppearanceSettingsSection', () => {
 
   test('renders one card per registered theme', () => {
     render(<AppearanceSettingsSection />);
-    // ALL_THEMES includes playful, linear, flat
+    // ALL_THEMES includes playful, linear, flat, netflix, youtube, hulu, disneyPlus, hboMax, appleTv
     const themeCards = screen.getAllByLabelText(/Select .* theme/i);
-    expect(themeCards).toHaveLength(3);
+    expect(themeCards).toHaveLength(9);
   });
 
   test('toggling Dark Mode calls setColorMode with the new mode', () => {

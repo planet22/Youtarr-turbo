@@ -79,7 +79,7 @@ function VideoModal({
   // .info.json so we let the fetch proceed.
   const skipMetadataFetch = video.status === 'members_only' && !video.isDownloaded;
   const shouldFetchMetadata = open && !skipMetadataFetch;
-  const { metadata, loading: metadataLoading } = useVideoMetadata(
+  const { metadata, loading: metadataLoading, refreshing: metadataRefreshing, refresh: refreshMetadata } = useVideoMetadata(
     shouldFetchMetadata ? video.youtubeId : '',
     token
   );
@@ -279,6 +279,8 @@ function VideoModal({
               metadata={metadata}
               loading={metadataLoading}
               onAddChannel={canAddChannel ? () => setAddChannelOpen(true) : undefined}
+              onRefresh={shouldFetchMetadata ? refreshMetadata : undefined}
+              refreshing={metadataRefreshing}
             />
             <VideoWatchStatusSection statuses={watchStatuses} />
             <VideoTechnical

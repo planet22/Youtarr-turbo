@@ -50,6 +50,7 @@ const renderCard = (overrides: Partial<React.ComponentProps<typeof VideoCard>> =
     onDeleteSingle: jest.fn(),
     onImageError: jest.fn(),
     onAddChannel: jest.fn(),
+    onOpenCacheDetail: jest.fn(),
   };
   render(
     <MemoryRouter>
@@ -93,7 +94,7 @@ describe('VideoCard', () => {
     const { onToggleSelect } = renderCard();
     const checkbox = screen.getByRole('checkbox', { name: /Select Test Video/ });
     fireEvent.click(checkbox);
-    expect(onToggleSelect).toHaveBeenCalledWith(1);
+    expect(onToggleSelect).toHaveBeenCalledWith('abc');
   });
 
   test('renders selection checkbox for audio-only downloads with no video fileSize', () => {
@@ -108,14 +109,14 @@ describe('VideoCard', () => {
     });
     const checkbox = screen.getByRole('checkbox', { name: /Select Test Video/ });
     fireEvent.click(checkbox);
-    expect(onToggleSelect).toHaveBeenCalledWith(1);
+    expect(onToggleSelect).toHaveBeenCalledWith('abc');
   });
 
   test('renders selection checkbox when video is removed', () => {
     const { onToggleSelect } = renderCard({ video: { ...baseVideo, removed: true } });
     const checkbox = screen.getByRole('checkbox', { name: /Select Test Video/ });
     fireEvent.click(checkbox);
-    expect(onToggleSelect).toHaveBeenCalledWith(1);
+    expect(onToggleSelect).toHaveBeenCalledWith('abc');
   });
 
   test('shows Available chip for present files and Missing chip for removed', () => {
@@ -133,6 +134,7 @@ describe('VideoCard', () => {
           onDeleteSingle={jest.fn()}
           onImageError={jest.fn()}
           onAddChannel={jest.fn()}
+          onOpenCacheDetail={jest.fn()}
         />
       </MemoryRouter>
     );

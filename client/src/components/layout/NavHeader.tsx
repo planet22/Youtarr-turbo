@@ -83,6 +83,7 @@ export const NavHeader: React.FC<NavHeaderProps> = ({
     borderRadius: 'var(--layout-header-menu-radius)',
     border: 'var(--layout-header-menu-border)',
     backgroundColor: 'var(--layout-header-menu-background)',
+    backdropFilter: 'var(--layout-header-menu-backdrop-filter)',
     boxShadow: 'var(--layout-header-menu-shadow)',
     padding: '4px',
   };

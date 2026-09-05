@@ -8,8 +8,10 @@ import {
   Clock as ScheduleIcon,
   AlarmCheck as AlarmOnIcon,
 } from 'lucide-react';
+import { Database as MetadataCacheIcon, Storage as CachedVideoIcon, ClearCache as ClearCacheIcon } from '../../../lib/icons';
 import { formatDuration, formatYTDate } from '../../../utils';
 import { formatAddedDateTime, formatFileSize } from '../../../utils/formatters';
+import { getDisplayPath } from '../../../utils/paths';
 import { getMediaTypeInfo } from '../../../utils/videoStatus';
 import { getEnabledChannelId } from '../../../utils/enabledChannels';
 import { VideoData, EnabledChannel } from '../../../types/VideoData';
@@ -28,12 +30,20 @@ export interface VideoCardProps {
   enabledChannels: EnabledChannel[];
   imageErrored: boolean;
   deleteDisabled: boolean;
-  onToggleSelect: (videoId: number) => void;
+  onToggleSelect: (youtubeId: string) => void;
   onOpenModal: (video: VideoData) => void;
   onToggleProtection: (videoId: number) => void;
   onDeleteSingle: (videoId: number) => void;
   onImageError: (youtubeId: string) => void;
   onAddChannel: (channelName: string, channelUrl: string) => void;
+  onOpenCacheDetail: (youtubeId: string, kind: 'metadata' | 'video') => void;
+  // Single-click "delete" for an untracked row - clears both its cached
+  // metadata and cached video after a confirm dialog. Optional since not
+  // every VideoCard call site wires up the confirm dialog (yet).
+  onClearCachedRow?: (video: VideoData) => void;
+  // Reveals the file path(s) as a small full-width line at the bottom of the
+  // card - a page-level toggle, see VideosTable's matching prop.
+  showFilePath?: boolean;
 }
 
 function VideoCard({
@@ -48,7 +58,11 @@ function VideoCard({
   onDeleteSingle,
   onImageError,
   onAddChannel,
+  onOpenCacheDetail,
+  onClearCachedRow,
+  showFilePath = false,
 }: VideoCardProps) {
+  const isTracked = video.isTracked !== false;
   const channelId = getEnabledChannelId(video.youTubeChannelName, video.channel_id, enabledChannels);
   const mediaTypeInfo = getMediaTypeInfo(video.media_type);
   const fileSizeNumber = video.fileSize
@@ -122,6 +136,26 @@ function VideoCard({
           }}
         />
 
+        {!isTracked && (
+          <Box
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              backgroundColor: 'var(--media-overlay-background, rgba(0,0,0,0.6))',
+              color: 'var(--media-overlay-foreground)',
+              padding: '4px 8px',
+              fontSize: '0.7rem',
+              fontWeight: 'bold',
+              textAlign: 'center',
+              zIndex: 2,
+            }}
+          >
+            Untracked
+          </Box>
+        )}
+
         {video.youtube_removed && (
           <Box
             style={{
@@ -172,7 +206,7 @@ function VideoCard({
           onClick={(e) => e.stopPropagation()}
           onChange={(event) => {
             event.stopPropagation();
-            onToggleSelect(video.id);
+            onToggleSelect(video.youtubeId);
           }}
           inputProps={{ 'aria-label': `Select ${video.youTubeVideoName}` }}
           style={{
@@ -186,12 +220,12 @@ function VideoCard({
           }}
         />
 
-        {!video.removed && (
+        {isTracked && video.id !== null && !video.removed && (
           <ProtectionShieldButton
             isProtected={video.protected || false}
             onClick={(e) => {
               e.stopPropagation();
-              onToggleProtection(video.id);
+              onToggleProtection(video.id as number);
             }}
             style={{ position: 'absolute', bottom: 6, left: 6, zIndex: 3 }}
           />
@@ -302,14 +336,42 @@ function VideoCard({
               showNA
               size="small"
             />
-            {video.removed ? (
+            {isTracked && (video.removed ? (
               <AvailabilityChip isAvailable={false} />
             ) : video.fileSize ? (
               <AvailabilityChip isAvailable={true} />
-            ) : null}
+            ) : null)}
             <WatchedChip watchedBy={video.watchedBy || []} />
+            {video.hasCachedMetadata && (
+              <Tooltip title="Cached metadata — click for details">
+                <IconButton
+                  size="small"
+                  aria-label="Cached metadata"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onOpenCacheDetail(video.youtubeId, 'metadata');
+                  }}
+                >
+                  <MetadataCacheIcon size={16} />
+                </IconButton>
+              </Tooltip>
+            )}
+            {video.hasCachedVideo && (
+              <Tooltip title="Cached video — click for details">
+                <IconButton
+                  size="small"
+                  aria-label="Cached video"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onOpenCacheDetail(video.youtubeId, 'video');
+                  }}
+                >
+                  <CachedVideoIcon size={16} />
+                </IconButton>
+              </Tooltip>
+            )}
           </Box>
-          {!video.removed && (
+          {isTracked && video.id !== null && !video.removed && (
             <Tooltip title="Delete video from disk">
               <span style={{ flexShrink: 0 }}>
                 <IconButton
@@ -317,7 +379,7 @@ function VideoCard({
                   size="small"
                   data-testid="DeleteIcon"
                   aria-label="Delete video from disk"
-                  onClick={() => onDeleteSingle(video.id)}
+                  onClick={() => onDeleteSingle(video.id as number)}
                   disabled={deleteDisabled}
                 >
                   <DeleteIcon />
@@ -325,7 +387,33 @@ function VideoCard({
               </span>
             </Tooltip>
           )}
+          {!isTracked && (video.hasCachedMetadata || video.hasCachedVideo) && onClearCachedRow && (
+            <Tooltip title="Clear cached metadata and video">
+              <span style={{ flexShrink: 0 }}>
+                <IconButton
+                  color="error"
+                  size="small"
+                  aria-label="Clear cached metadata and video"
+                  onClick={() => onClearCachedRow(video)}
+                >
+                  <ClearCacheIcon />
+                </IconButton>
+              </span>
+            </Tooltip>
+          )}
         </Box>
+        {showFilePath && (video.filePath || video.audioFilePath) && (
+          <Typography
+            variant="caption"
+            color="text.secondary"
+            style={{ wordBreak: 'break-all', display: 'block' }}
+          >
+            {[video.filePath, video.audioFilePath]
+              .filter((p): p is string => Boolean(p))
+              .map(getDisplayPath)
+              .join('  •  ')}
+          </Typography>
+        )}
       </Box>
     </Card>
   );

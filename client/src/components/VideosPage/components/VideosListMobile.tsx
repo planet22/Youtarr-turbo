@@ -3,6 +3,7 @@ import { Box, Typography, Chip, Checkbox, Stack } from '../../ui';
 import { AlertCircle as ErrorOutlineIcon } from 'lucide-react';
 import { formatDuration, formatYTDate } from '../../../utils';
 import { formatAddedDateTime, formatFileSize } from '../../../utils/formatters';
+import { getDisplayPath } from '../../../utils/paths';
 import { getMediaTypeInfo } from '../../../utils/videoStatus';
 import { getEnabledChannelId } from '../../../utils/enabledChannels';
 import { VideoData, EnabledChannel } from '../../../types/VideoData';
@@ -17,14 +18,17 @@ import ChannelNameDisplay from './ChannelNameDisplay';
 
 export interface VideosListMobileProps {
   videos: VideoData[];
-  selectedVideos: number[];
+  selectedVideos: string[];
   enabledChannels: EnabledChannel[];
   imageErrors: Record<string, boolean>;
-  onToggleSelect: (videoId: number) => void;
+  onToggleSelect: (youtubeId: string) => void;
   onOpenModal: (video: VideoData) => void;
   onToggleProtection: (videoId: number) => void;
   onImageError: (youtubeId: string) => void;
   onAddChannel: (channelName: string, channelUrl: string) => void;
+  // Reveals the file path(s) as a small full-width line under each row - a
+  // page-level toggle, see VideosTable's matching prop.
+  showFilePath?: boolean;
 }
 
 const COMPACT_CHIP_HEIGHT = 20;
@@ -51,11 +55,13 @@ function VideosListMobile({
   onToggleProtection,
   onImageError,
   onAddChannel,
+  showFilePath = false,
 }: VideosListMobileProps) {
   return (
     <Box>
       {videos.map((video) => {
-        const isSelected = selectedVideos.includes(video.id);
+        const isSelected = selectedVideos.includes(video.youtubeId);
+        const isTracked = video.isTracked !== false;
         const channelId = getEnabledChannelId(
           video.youTubeChannelName,
           video.channel_id,
@@ -68,25 +74,32 @@ function VideosListMobile({
             : video.fileSize
           : null;
 
+        const showPathLine = showFilePath && Boolean(video.filePath || video.audioFilePath);
+        const pathText = [video.filePath, video.audioFilePath]
+          .filter((p): p is string => Boolean(p))
+          .map(getDisplayPath)
+          .join('  •  ');
+
         return (
+          <React.Fragment key={video.youtubeId}>
           <Box
-            key={video.id}
             role="button"
             tabIndex={0}
-            onClick={() => onToggleSelect(video.id)}
+            onClick={() => onToggleSelect(video.youtubeId)}
             onKeyDown={(event) => {
               if (event.key === 'Enter' || event.key === ' ') {
                 event.preventDefault();
-                onToggleSelect(video.id);
+                onToggleSelect(video.youtubeId);
               }
             }}
             style={{
               display: 'flex',
               gap: 10,
               padding: '10px 4px',
-              borderBottom: '1px solid var(--border)',
+              borderBottom: showPathLine ? 'none' : '1px solid var(--border)',
               cursor: 'pointer',
               backgroundColor: isSelected ? 'var(--muted)' : undefined,
+              opacity: isTracked ? 1 : 0.75,
               transition: 'background-color 0.15s ease',
               alignItems: 'flex-start',
             }}
@@ -144,6 +157,25 @@ function VideosListMobile({
                   onOpenModal(video);
                 }}
               />
+              {!isTracked && (
+                <Box
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    backgroundColor: 'var(--media-overlay-background, rgba(0,0,0,0.6))',
+                    color: 'var(--media-overlay-foreground)',
+                    padding: '2px 4px',
+                    fontSize: '0.55rem',
+                    fontWeight: 'bold',
+                    textAlign: 'center',
+                    zIndex: 2,
+                  }}
+                >
+                  Untracked
+                </Box>
+              )}
               {video.youtube_removed && (
                 <Box
                   style={{
@@ -203,7 +235,7 @@ function VideosListMobile({
                 onClick={(e) => e.stopPropagation()}
                 onChange={(event) => {
                   event.stopPropagation();
-                  onToggleSelect(video.id);
+                  onToggleSelect(video.youtubeId);
                 }}
                 inputProps={{ 'aria-label': `Select ${video.youTubeVideoName}` }}
                 style={{
@@ -216,12 +248,12 @@ function VideosListMobile({
                   zIndex: 3,
                 }}
               />
-              {!video.removed && (
+              {isTracked && video.id !== null && !video.removed && (
                 <ProtectionShieldButton
                   isProtected={video.protected || false}
                   onClick={(e) => {
                     e.stopPropagation();
-                    onToggleProtection(video.id);
+                    onToggleProtection(video.id as number);
                   }}
                   style={{ position: 'absolute', bottom: 2, left: 2, zIndex: 3 }}
                 />
@@ -297,11 +329,11 @@ function VideosListMobile({
                   size="small"
                   style={compactRatingChipStyle}
                 />
-                {video.removed ? (
+                {isTracked && (video.removed ? (
                   <AvailabilityChip isAvailable={false} compact />
                 ) : video.fileSize ? (
                   <AvailabilityChip isAvailable={true} compact />
-                ) : null}
+                ) : null)}
                 <WatchedChip watchedBy={video.watchedBy || []} compact />
               </Stack>
               <Typography
@@ -316,6 +348,18 @@ function VideosListMobile({
               </Typography>
             </Box>
           </Box>
+          {showPathLine && (
+            <Box style={{ padding: '0 4px 8px 4px', borderBottom: '1px solid var(--border)' }}>
+              <Typography
+                variant="caption"
+                color="text.secondary"
+                style={{ fontSize: '0.65rem', wordBreak: 'break-all', display: 'block' }}
+              >
+                {pathText}
+              </Typography>
+            </Box>
+          )}
+          </React.Fragment>
         );
       })}
     </Box>

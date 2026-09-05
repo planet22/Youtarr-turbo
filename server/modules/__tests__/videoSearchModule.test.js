@@ -17,6 +17,14 @@ jest.mock('../youtubeApi', () => ({
   },
   YoutubeApiErrorCode: { QUOTA_EXCEEDED: 'QUOTA_EXCEEDED' },
 }));
+// No nzb.searchCacheMinutes - _fetchRaw falls back to a 10-minute default
+// TTL in that case (mirrors the Settings UI's own fallback), so this is
+// NOT "caching off": every test below still gets a fresh module instance
+// per beforeEach (jest.resetModules), so the cache never carries over
+// between tests even though it's active within a single test.
+jest.mock('../configModule', () => ({
+  getConfig: jest.fn(() => ({})),
+}));
 
 describe('videoSearchModule', () => {
   let videoSearchModule;
@@ -255,6 +263,26 @@ describe('videoSearchModule', () => {
       expect(results.map(r => r.youtubeId)).toEqual(['new', 'mid', 'old', 'nodate']);
     });
   });
+
+  describe('raw-results caching', () => {
+    test('caches results even when nzb.searchCacheMinutes is absent from config', async () => {
+      // Regression test: configModule's getConfig() mock above returns {},
+      // i.e. no nzb.searchCacheMinutes key - the exact shape of a real
+      // config.json predating this setting. _fetchRaw must still cache
+      // (10-minute default), not silently disable caching, or every repeat
+      // Sonarr/Radarr/Prowlarr query re-runs yt-dlp forever.
+      const ndjson = JSON.stringify({ id: 'cached-id', title: 'Cached' }) + '\n';
+      ytDlpRunner.run.mockResolvedValueOnce(ndjson);
+
+      const first = await videoSearchModule.searchVideos('same query', 25, {});
+      expect(first).toHaveLength(1);
+      expect(ytDlpRunner.run).toHaveBeenCalledTimes(1);
+
+      const second = await videoSearchModule.searchVideos('same query', 25, {});
+      expect(second).toHaveLength(1);
+      expect(ytDlpRunner.run).toHaveBeenCalledTimes(1);
+    });
+  });
 });
 
 describe('videoSearchModule.searchVideos - API-first path', () => {
@@ -280,7 +308,10 @@ describe('videoSearchModule.searchVideos - API-first path', () => {
     jest.doMock('../download/ytdlpCommandBuilder', () => ({
       buildSearchArgs: jest.fn(() => ['--some-arg']),
     }));
-    jest.doMock('../configModule', () => ({ getCookiesPath: jest.fn(() => null) }));
+    jest.doMock('../configModule', () => ({
+      getCookiesPath: jest.fn(() => null),
+      getConfig: jest.fn(() => ({})),
+    }));
     jest.doMock('../../models', () => ({
       Video: { findAll: jest.fn().mockResolvedValue([]) },
     }));

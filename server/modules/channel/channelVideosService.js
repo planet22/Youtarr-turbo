@@ -75,10 +75,22 @@ class ChannelVideosService {
    */
   attachChannelFilterPreview(videos, channel) {
     const channelSettingsModule = require('../channelSettingsModule');
+    const configModule = require('../configModule');
+    const downloadSettingsResolver = require('../download/downloadSettingsResolver');
     const minDuration = channel.min_duration;
     const maxDuration = channel.max_duration;
     const titleFilterRegex = channel.title_filter_regex ? channel.title_filter_regex.trim() : '';
-    const isSeriesMode = channel.library_mode === 'series';
+    // channel.library_mode is null when the channel inherits the global
+    // setting - a raw `=== 'series'` check would miss that case and always
+    // treat inherited channels as movie mode, even when the global default
+    // is series. Resolve through the same channel > global precedence the
+    // real download/materialize pipeline uses (see resolveFinalLibraryMode
+    // callers in strmMaterializer.js, downloadModule.js, channelThumbnails.js).
+    const libraryMode = downloadSettingsResolver.resolveFinalLibraryMode({
+      channelRecord: channel,
+      globalDefault: (configModule.getConfig() || {}).defaultLibraryMode,
+    });
+    const isSeriesMode = libraryMode === 'series';
     const seasonEpisodeRegex = isSeriesMode && channel.season_episode_regex
       ? channel.season_episode_regex.trim()
       : '';

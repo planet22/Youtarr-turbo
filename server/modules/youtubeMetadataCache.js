@@ -1,5 +1,9 @@
 const logger = require('../logger');
-const YoutubeMetadataCache = require('../models/youtubemetadatacache');
+// Lazy, not top-level: this module's YOUTUBE_METADATA_CACHE_RETENTION_DAYS
+// constant is imported by places (e.g. videosModule.js's Library query)
+// that don't necessarily want to eagerly initialize the Sequelize model
+// (and its ../db dependency) just to read a number.
+const getModel = () => require('../models/youtubemetadatacache');
 
 /**
  * Shared fps/raw-yt-dlp-extraction cache (youtube_metadata_cache -
@@ -31,6 +35,11 @@ const YoutubeMetadataCache = require('../models/youtubemetadatacache');
 const fpsCache = new Map();
 const maxHeightCache = new Map();
 
+// Single source of truth for how long a row survives since it was last
+// accessed - cronJobs.js's nightly prune sweep and the Library page's
+// per-video expiry countdown both read this same value.
+const YOUTUBE_METADATA_CACHE_RETENTION_DAYS = 365;
+
 /**
  * fps lookup - memory then the persistent DB row's raw_info_json blob.
  * @param {string} youtubeId
@@ -39,7 +48,7 @@ const maxHeightCache = new Map();
 async function getCachedFps(youtubeId) {
   if (fpsCache.has(youtubeId)) return fpsCache.get(youtubeId);
   try {
-    const cached = await YoutubeMetadataCache.findByPk(youtubeId);
+    const cached = await getModel().findByPk(youtubeId);
     if (!cached || !cached.raw_info_json) return null;
     const info = JSON.parse(cached.raw_info_json);
     const fps = Number(info && info.fps);
@@ -66,7 +75,7 @@ async function getCachedFps(youtubeId) {
 async function getCachedMaxHeight(youtubeId) {
   if (maxHeightCache.has(youtubeId)) return maxHeightCache.get(youtubeId);
   try {
-    const cached = await YoutubeMetadataCache.findByPk(youtubeId);
+    const cached = await getModel().findByPk(youtubeId);
     if (!cached || !cached.raw_info_json) return null;
     const info = JSON.parse(cached.raw_info_json);
     const heights = (info && info.formats ? info.formats : [])
@@ -110,7 +119,7 @@ function cacheRawInfoJson(youtubeId, durationSeconds, info) {
   const seconds = Number(durationSeconds);
   if (!Number.isFinite(seconds) || seconds <= 0) return;
   const now = new Date();
-  YoutubeMetadataCache.upsert({
+  getModel().upsert({
     youtube_id: youtubeId,
     duration_seconds: Math.round(seconds),
     raw_info_json: JSON.stringify(info),
@@ -121,6 +130,33 @@ function cacheRawInfoJson(youtubeId, durationSeconds, info) {
   });
 }
 
+/**
+ * Full parsed raw_info_json blob for a video plus when it was fetched, or
+ * null if there's no row or no blob. Read-only counterpart to
+ * cacheRawInfoJson, for a consumer (e.g. the video modal's getVideoMetadata)
+ * that wants the whole cached yt-dlp extraction rather than just
+ * fps/max-height - see this module's top-level doc comment for what's safe
+ * to read out of it and what emphatically isn't (signed CDN/format URLs).
+ * `fetchedAt` is returned alongside the data (rather than just the data) so
+ * callers can tell a consumer of THEIR OWN response when the underlying
+ * extraction actually happened, instead of it silently looking live.
+ * @param {string} youtubeId
+ * @returns {Promise<{data: object, fetchedAt: string}|null>}
+ */
+async function getCachedRawInfoJson(youtubeId) {
+  try {
+    const cached = await getModel().findByPk(youtubeId);
+    if (!cached || !cached.raw_info_json) return null;
+    return {
+      data: JSON.parse(cached.raw_info_json),
+      fetchedAt: cached.fetched_at instanceof Date ? cached.fetched_at.toISOString() : cached.fetched_at,
+    };
+  } catch (err) {
+    logger.warn({ err, youtubeId }, 'youtubeMetadataCache: raw info json lookup failed');
+    return null;
+  }
+}
+
 /** Manual re-cache trigger's in-memory half - see ytstream.js's DELETE route for the DB-row half. */
 function clearCachedEntry(youtubeId) {
   fpsCache.delete(youtubeId);
@@ -129,14 +165,23 @@ function clearCachedEntry(youtubeId) {
 
 /** Total cached rows - Settings UI's "Cached video metadata" count. */
 async function countCached() {
-  return YoutubeMetadataCache.count();
+  return getModel().count();
 }
 
 /** Bulk clear-all - Settings UI's "Clear cached video metadata" button. */
 async function clearAll() {
   fpsCache.clear();
   maxHeightCache.clear();
-  return YoutubeMetadataCache.destroy({ truncate: true });
+  return getModel().destroy({ truncate: true });
 }
 
-module.exports = { getCachedFps, getCachedMaxHeight, cacheRawInfoJson, clearCachedEntry, countCached, clearAll };
+module.exports = {
+  getCachedFps,
+  getCachedMaxHeight,
+  getCachedRawInfoJson,
+  cacheRawInfoJson,
+  clearCachedEntry,
+  countCached,
+  clearAll,
+  YOUTUBE_METADATA_CACHE_RETENTION_DAYS,
+};

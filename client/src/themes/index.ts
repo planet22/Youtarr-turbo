@@ -4,12 +4,24 @@ import { ThemeMode, ThemeDefinition, getMissingRequiredThemeTokens } from './typ
 import { playfulTheme } from './playful';
 import { linearTheme } from './linear';
 import { flatTheme } from './flat';
+import { netflixTheme } from './netflix';
+import { youtubeTheme } from './youtubeTheme';
+import { huluTheme } from './hulu';
+import { disneyPlusTheme } from './disneyPlus';
+import { hboMaxTheme } from './hboMax';
+import { appleTvTheme } from './appleTv';
 export { FALLBACK_LAYOUT_POLICY, getThemeLayoutCssVars, resolveThemeLayoutPolicy } from './layoutPolicy';
 
 export const ALL_THEMES: Record<ThemeMode, ThemeDefinition> = {
   playful: playfulTheme,
   linear: linearTheme,
   flat: flatTheme,
+  netflix: netflixTheme,
+  youtube: youtubeTheme,
+  hulu: huluTheme,
+  disneyPlus: disneyPlusTheme,
+  hboMax: hboMaxTheme,
+  appleTv: appleTvTheme,
 };
 
 Object.values(ALL_THEMES).forEach((theme) => {

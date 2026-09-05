@@ -18,6 +18,9 @@ export interface UseVideosDataParams {
   missingFilter: ChipFilterMode;
   watchedFilter: ChipFilterMode;
   strmFilter: ChipFilterMode;
+  metadataCacheFilter: ChipFilterMode;
+  cachedVideoFilter: ChipFilterMode;
+  showUntracked: boolean;
   useInfiniteScroll: boolean;
 }
 
@@ -33,12 +36,14 @@ export interface UseVideosDataResult {
   refetch: () => Promise<void>;
 }
 
-function mergeUniqueById(existing: VideoData[], incoming: VideoData[]): VideoData[] {
+// Keyed by youtubeId, not id - id is null for "Show untracked" rows, which
+// would otherwise all collide on the same missing key.
+function mergeUniqueByYoutubeId(existing: VideoData[], incoming: VideoData[]): VideoData[] {
   const merged = [...existing, ...incoming];
-  const seen = new Set<number>();
+  const seen = new Set<string>();
   return merged.filter((video) => {
-    if (seen.has(video.id)) return false;
-    seen.add(video.id);
+    if (seen.has(video.youtubeId)) return false;
+    seen.add(video.youtubeId);
     return true;
   });
 }
@@ -58,6 +63,9 @@ export function useVideosData({
   missingFilter,
   watchedFilter,
   strmFilter,
+  metadataCacheFilter,
+  cachedVideoFilter,
+  showUntracked,
   useInfiniteScroll,
 }: UseVideosDataParams): UseVideosDataResult {
   const [videos, setVideos] = useState<VideoData[]>([]);
@@ -90,6 +98,9 @@ export function useVideosData({
     if (missingFilter !== 'off') params.append('missingFilter', missingFilter);
     if (watchedFilter !== 'off') params.append('watchedFilter', watchedFilter);
     if (strmFilter !== 'off') params.append('strmFilter', strmFilter);
+    if (metadataCacheFilter !== 'off') params.append('metadataCacheFilter', metadataCacheFilter);
+    if (cachedVideoFilter !== 'off') params.append('cachedVideoFilter', cachedVideoFilter);
+    if (showUntracked) params.append('showUntracked', 'true');
 
     try {
       const response = await axios.get<PaginatedVideosResponse>(
@@ -110,7 +121,7 @@ export function useVideosData({
         if (!useInfiniteScroll || page <= 1) {
           return incomingVideos;
         }
-        return mergeUniqueById(prev, incomingVideos);
+        return mergeUniqueByYoutubeId(prev, incomingVideos);
       });
       setTotalVideos(response.data.total);
       setTotalPages(response.data.totalPages);
@@ -144,6 +155,9 @@ export function useVideosData({
     missingFilter,
     watchedFilter,
     strmFilter,
+    metadataCacheFilter,
+    cachedVideoFilter,
+    showUntracked,
     useInfiniteScroll,
   ]);
 

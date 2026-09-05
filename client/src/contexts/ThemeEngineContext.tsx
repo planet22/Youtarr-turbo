@@ -1,18 +1,23 @@
-import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { ALL_THEMES, ThemeMode, getThemeById } from '../themes';
 
 const DEFAULT_THEME_MODE: ThemeMode = 'linear';
 const DEFAULT_COLOR_MODE: 'light' | 'dark' = 'light';
+export type ColorModePreference = 'light' | 'dark' | 'system';
 
 interface ThemeEngineState {
   themeMode: ThemeMode;
   colorMode: 'light' | 'dark';
+  /** The user's chosen preference - 'system' means colorMode follows the OS setting live. */
+  colorModePreference: ColorModePreference;
   motionEnabled: boolean;
   showHeaderLogo: boolean;
   showHeaderWordmark: boolean;
   showSectionIcons: boolean;
   setThemeMode: (mode: ThemeMode) => void;
+  /** Sets an explicit light/dark preference, overriding 'system' if it was active. */
   setColorMode: (mode: 'light' | 'dark') => void;
+  setColorModePreference: (preference: ColorModePreference) => void;
   setMotionEnabled: (enabled: boolean) => void;
   setShowHeaderLogo: (enabled: boolean) => void;
   setShowHeaderWordmark: (enabled: boolean) => void;
@@ -21,6 +26,7 @@ interface ThemeEngineState {
 
 const THEME_STORAGE_KEY = 'uiThemeMode';
 const COLOR_MODE_STORAGE_KEY = 'uiColorMode';
+const COLOR_MODE_PREFERENCE_STORAGE_KEY = 'uiColorModePreference';
 const MOTION_STORAGE_KEY = 'uiMotionEnabled';
 const HEADER_LOGO_STORAGE_KEY = 'uiHeaderLogoVisible';
 const HEADER_WORDMARK_STORAGE_KEY = 'uiHeaderWordmarkVisible';
@@ -31,17 +37,24 @@ const ThemeEngineContext = createContext<ThemeEngineState | undefined>(undefined
 const FALLBACK_THEME_ENGINE: ThemeEngineState = {
   themeMode: DEFAULT_THEME_MODE,
   colorMode: DEFAULT_COLOR_MODE,
+  colorModePreference: DEFAULT_COLOR_MODE,
   motionEnabled: false,
   showHeaderLogo: true,
   showHeaderWordmark: true,
   showSectionIcons: true,
   setThemeMode: () => {},
   setColorMode: () => {},
+  setColorModePreference: () => {},
   setMotionEnabled: () => {},
   setShowHeaderLogo: () => {},
   setShowHeaderWordmark: () => {},
   setShowSectionIcons: () => {},
 };
+
+const getSystemPrefersDark = () =>
+  typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+    ? window.matchMedia('(prefers-color-scheme: dark)').matches
+    : false;
 
 const isThemeMode = (value: string | null): value is ThemeMode => {
   return value !== null && value in ALL_THEMES;
@@ -87,11 +100,38 @@ export function ThemeEngineProvider({ children }: { children: React.ReactNode })
     return stored === 'true';
   });
 
-  const [colorMode, setColorMode] = useState<'light' | 'dark'>(() => {
+  const [colorModePreference, setColorModePreferenceRaw] = useState<ColorModePreference>(() => {
     if (typeof window === 'undefined') return DEFAULT_COLOR_MODE;
-    const stored = localStorage.getItem(COLOR_MODE_STORAGE_KEY);
-    return stored === 'dark' ? 'dark' : DEFAULT_COLOR_MODE;
+    const storedPreference = localStorage.getItem(COLOR_MODE_PREFERENCE_STORAGE_KEY);
+    if (storedPreference === 'light' || storedPreference === 'dark' || storedPreference === 'system') {
+      return storedPreference;
+    }
+    // Pre-dates the light/dark/system preference - preserve the old binary behavior.
+    const legacyColorMode = localStorage.getItem(COLOR_MODE_STORAGE_KEY);
+    return legacyColorMode === 'dark' ? 'dark' : DEFAULT_COLOR_MODE;
   });
+
+  const [systemPrefersDark, setSystemPrefersDark] = useState<boolean>(getSystemPrefersDark);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
+    const mql = window.matchMedia('(prefers-color-scheme: dark)');
+    const handleChange = (event: MediaQueryListEvent) => setSystemPrefersDark(event.matches);
+    mql.addEventListener('change', handleChange);
+    return () => mql.removeEventListener('change', handleChange);
+  }, []);
+
+  const colorMode: 'light' | 'dark' =
+    colorModePreference === 'system' ? (systemPrefersDark ? 'dark' : 'light') : colorModePreference;
+
+  const setColorModePreference = useCallback((preference: ColorModePreference) => {
+    setColorModePreferenceRaw(preference);
+  }, []);
+
+  // Backward-compat setter: an explicit light/dark choice always overrides 'system'.
+  const setColorMode = useCallback((mode: 'light' | 'dark') => {
+    setColorModePreferenceRaw(mode);
+  }, []);
 
   const [showHeaderLogo, setShowHeaderLogo] = useState<boolean>(() => {
     const initialTheme = getThemeById(themeMode);
@@ -183,6 +223,11 @@ export function ThemeEngineProvider({ children }: { children: React.ReactNode })
     localStorage.setItem(THEME_STORAGE_KEY, themeMode);
     localStorage.setItem(COLOR_MODE_STORAGE_KEY, colorMode);
   }, [themeMode, colorMode]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    localStorage.setItem(COLOR_MODE_PREFERENCE_STORAGE_KEY, colorModePreference);
+  }, [colorModePreference]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -311,18 +356,30 @@ export function ThemeEngineProvider({ children }: { children: React.ReactNode })
     () => ({
       themeMode,
       colorMode,
+      colorModePreference,
       motionEnabled,
       showHeaderLogo,
       showHeaderWordmark,
       showSectionIcons,
       setThemeMode,
       setColorMode,
+      setColorModePreference,
       setMotionEnabled,
       setShowHeaderLogo,
       setShowHeaderWordmark,
       setShowSectionIcons,
     }),
-    [themeMode, colorMode, motionEnabled, showHeaderLogo, showHeaderWordmark, showSectionIcons]
+    [
+      themeMode,
+      colorMode,
+      colorModePreference,
+      motionEnabled,
+      showHeaderLogo,
+      showHeaderWordmark,
+      showSectionIcons,
+      setColorModePreference,
+      setColorMode,
+    ]
   );
 
   return <ThemeEngineContext.Provider value={value}>{children}</ThemeEngineContext.Provider>;

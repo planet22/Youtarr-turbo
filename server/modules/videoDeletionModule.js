@@ -279,6 +279,13 @@ class VideoDeletionModule {
         // video sets a fresh cached_at itself (videoPersistence.js), so
         // this never needs to be re-armed here.
         cached_at: null,
+        // The deleted real file is what got ffprobed for this - a STRM
+        // pointer has no dimensions of its own, so a stale value here would
+        // otherwise keep showing a resolution chip for a file that no
+        // longer exists. Backfill's ffprobe pass never re-populates it for
+        // .strm files (skips them entirely), so this must be cleared here,
+        // not left to self-heal later.
+        video_resolution: null,
       });
 
       logger.info({ videoId: video.id, restoredStrmPath }, '[Auto-Removal] Reverted cached video to STRM playback');
@@ -346,6 +353,23 @@ class VideoDeletionModule {
       videoId,
       error: 'This video was not originally STRM (or has no cached backup), so it can\'t be switched back.',
     };
+  }
+
+  /**
+   * Maintenance-rescan counterpart to _tryRevertToStrm: called for a row
+   * whose STRM cache-on-play materialization (cached_at set) went missing
+   * outside the app - checkVideoFiles already flipped removed=true for it
+   * on the next page load (that read-path guard is what keeps the Library
+   * page's "Cached Video" icon honest regardless of this call's outcome).
+   * This is a best-effort self-heal, not a correctness requirement: if a
+   * `.strm.cached` backup is still there it restores STRM playback,
+   * otherwise there's nothing recoverable and the row is left as-is.
+   * @param {object} video - Sequelize Video instance
+   * @returns {Promise<{success:boolean,videoId:number,message:string}|null>}
+   */
+  async reconcileRemovedCachedVideo(video) {
+    if (!video.filePath) return null;
+    return this._tryRevertToStrm(video);
   }
 
   /**

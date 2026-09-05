@@ -98,6 +98,33 @@ export function formatAddedDateTime(iso: string | null | undefined): string {
   return parts ? `${parts.date} ${parts.time}` : '';
 }
 
+// Countdown to an absolute expiry timestamp the backend already computed
+// (see videosModule.js's computeExpiresAt) - this only formats a fixed
+// point, never derives one, so client/server clock skew can't produce a
+// misleading countdown. Returns null when there's no configured TTL
+// (expiresAt is null) or the deadline has already passed.
+export function formatExpiresIn(expiresAt: string | null | undefined): string | null {
+  if (!expiresAt) {
+    return null;
+  }
+  const target = new Date(expiresAt).getTime();
+  if (Number.isNaN(target)) {
+    return null;
+  }
+  const remainingMs = target - Date.now();
+  if (remainingMs <= 0) {
+    return 'Expires soon';
+  }
+  const hours = remainingMs / (60 * 60 * 1000);
+  if (hours < 1) {
+    return `Expires in ${Math.max(1, Math.round(hours * 60))}m`;
+  }
+  if (hours < 48) {
+    return `Expires in ${Math.round(hours)}h`;
+  }
+  return `Expires in ${Math.round(hours / 24)}d`;
+}
+
 export function formatAddedDate(iso: string | null | undefined): string {
   if (!iso) {
     return '';

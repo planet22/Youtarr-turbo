@@ -60,6 +60,26 @@ export type FilterConfig =
       onChange: (value: ChipFilterMode) => void;
     }
   | {
+      id: 'metadataCache';
+      value: ChipFilterMode;
+      onChange: (value: ChipFilterMode) => void;
+    }
+  | {
+      id: 'cachedVideo';
+      value: ChipFilterMode;
+      onChange: (value: ChipFilterMode) => void;
+    }
+  | {
+      id: 'showUntracked';
+      value: boolean;
+      onChange: (value: boolean) => void;
+    }
+  | {
+      id: 'showFilePaths';
+      value: boolean;
+      onChange: (value: boolean) => void;
+    }
+  | {
       id: 'duration';
       min: number | null;
       max: number | null;

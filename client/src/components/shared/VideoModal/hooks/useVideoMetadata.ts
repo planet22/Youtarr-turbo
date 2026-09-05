@@ -6,6 +6,8 @@ interface UseVideoMetadataReturn {
   metadata: VideoExtendedMetadata | null;
   loading: boolean;
   error: string | null;
+  refreshing: boolean;
+  refresh: () => Promise<void>;
 }
 
 export const useVideoMetadata = (
@@ -16,6 +18,7 @@ export const useVideoMetadata = (
   const [metadataYoutubeId, setMetadataYoutubeId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
     if (!youtubeId || !token) {
@@ -65,9 +68,33 @@ export const useVideoMetadata = (
     };
   }, [youtubeId, token]);
 
+  const refresh = async () => {
+    if (!youtubeId || !token) return;
+    setRefreshing(true);
+    setError(null);
+    try {
+      const response = await axios.post<VideoExtendedMetadata>(
+        `/api/videos/${youtubeId}/metadata/refresh`,
+        null,
+        { headers: { 'x-access-token': token } }
+      );
+      setMetadata(response.data);
+      setMetadataYoutubeId(youtubeId);
+    } catch (err: unknown) {
+      const errorMessage =
+        (err as { response?: { data?: { error?: string } } })?.response?.data?.error ||
+        (err instanceof Error ? err.message : 'Failed to refresh video metadata');
+      setError(errorMessage);
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
   return {
     metadata: Boolean(token) && metadataYoutubeId === youtubeId ? metadata : null,
     loading,
     error,
+    refreshing,
+    refresh,
   };
 };

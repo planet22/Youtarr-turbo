@@ -71,7 +71,7 @@ describe('VideosListMobile', () => {
   test('clicking the row body toggles selection for selectable videos', () => {
     const { onToggleSelect } = renderList();
     fireEvent.click(screen.getByRole('button', { name: /Compact Row Video/ }));
-    expect(onToggleSelect).toHaveBeenCalledWith(1);
+    expect(onToggleSelect).toHaveBeenCalledWith('abc');
   });
 
   test('renders checkbox and row-click for removed videos', () => {
@@ -79,7 +79,7 @@ describe('VideosListMobile', () => {
       videos: [{ ...sampleVideo, removed: true }],
     });
     fireEvent.click(screen.getByRole('checkbox', { name: /Select Compact Row Video/ }));
-    expect(onToggleSelect).toHaveBeenCalledWith(1);
+    expect(onToggleSelect).toHaveBeenCalledWith('abc');
     fireEvent.click(screen.getByRole('button', { name: /Compact Row Video/ }));
     expect(onToggleSelect).toHaveBeenCalledTimes(2);
   });
@@ -95,7 +95,7 @@ describe('VideosListMobile', () => {
       }],
     });
     fireEvent.click(screen.getByRole('button', { name: /Compact Row Video/ }));
-    expect(onToggleSelect).toHaveBeenCalledWith(1);
+    expect(onToggleSelect).toHaveBeenCalledWith('abc');
   });
 
   test('renders the download format chips compact', () => {

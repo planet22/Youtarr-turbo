@@ -287,6 +287,35 @@ module.exports = function createConfigRoutes({ verifyToken, configModule, valida
   });
 
   /**
+   * Diagnostics for the NZB page: queries/sec, cache hit rate, recent
+   * Sonarr/Radarr/Prowlarr searches, and the raw-results cache's current
+   * entries. Only reflects origin: 'nzb' searches (see
+   * videoSearchModule.getNzbStats's doc comment) - manual "Find Videos"
+   * searches never affect this.
+   */
+  router.get('/api/nzb/stats', verifyToken, (req, res) => {
+    const videoSearchModule = require('../modules/videoSearchModule');
+    res.json(videoSearchModule.getNzbStats());
+  });
+
+  /**
+   * Deletes one or more entries from the NZB search-results cache by key
+   * (the `key` field from GET /api/nzb/stats's cachedEntries), so a stale or
+   * unwanted cached search can be forced to re-run on the next Sonarr/Radarr
+   * request instead of waiting out searchCacheMinutes.
+   */
+  router.delete('/api/nzb/cache', verifyToken, (req, res) => {
+    const keys = Array.isArray(req.body?.keys) ? req.body.keys.filter((k) => typeof k === 'string') : [];
+    if (keys.length === 0) {
+      res.status(400).json({ error: 'keys must be a non-empty array of strings' });
+      return;
+    }
+    const videoSearchModule = require('../modules/videoSearchModule');
+    const removed = videoSearchModule.deleteCacheEntries(keys);
+    res.json({ removed });
+  });
+
+  /**
    * @swagger
    * /api/config/filename-preview:
    *   post:

@@ -357,6 +357,21 @@ export const CONFIG_FIELDS = {
       // default), paths are reported unchanged - correct when both
       // containers see the same path.
       remoteBasePath: null as string | null,
+      // How long a raw search result set (keyed by the exact query+count
+      // sent to the YouTube API/yt-dlp) is reused before a repeat search
+      // re-fetches - see videoSearchModule.js's _fetchRaw. Sonarr/Radarr
+      // poll the same Newznab query repeatedly on their own schedule; this
+      // avoids spawning a redundant yt-dlp process (or burning API quota)
+      // for one it already just answered. 0 disables caching entirely.
+      searchCacheMinutes: 10,
+      // This file's own per-request diagnostic lines (search/caps/addfile/
+      // queue/history requests, cache hit/miss, local-filter before/after
+      // counts, etc.) print at logger.debug by default - too high-volume for
+      // logger.info, but gating them behind the global Log Level=debug
+      // setting also turns on every OTHER module's debug output. This flag
+      // decouples the two, same as ytstream.debugLogging above - see
+      // nzbDebug in server/routes/nzb.js.
+      debugLogging: false as boolean,
       categories: [] as Array<{
         name: string;
         subfolder: string | null;

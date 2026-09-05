@@ -3,6 +3,7 @@ const archiveModule = require('./archiveModule');
 const logger = require('../logger');
 const ChannelVideo = require('../models/channelvideo');
 const youtubeUrlParser = require('./youtubeUrlParser');
+const youtubeMetadataCache = require('./youtubeMetadataCache');
 
 class VideoValidationModule {
   constructor() {
@@ -231,8 +232,25 @@ class VideoValidationModule {
         return cachedResponse;
       }
 
-      logger.debug({ videoId }, 'Fetching metadata for video');
-      const metadata = await this.fetchVideoMetadata(canonicalUrl, { timeoutMs: 60000 });
+      // Beyond this instance's own 5-minute in-memory cache (process-local,
+      // lost on restart), the shared youtube_metadata_cache DB row (see
+      // youtubeMetadataCache.js) may already hold a full extraction for this
+      // exact video - a prior stream/preview, download, or STRM
+      // materialization - good for up to a year. Same raw yt-dlp JSON shape
+      // toValidationResponse already expects, so it's usable as-is; skips
+      // an entirely avoidable live yt-dlp process for a URL someone pastes
+      // again (e.g. re-queuing a previously-removed video).
+      const dbCached = await youtubeMetadataCache.getCachedRawInfoJson(videoId);
+      let metadata = dbCached ? dbCached.data : null;
+      if (metadata) {
+        logger.debug({ videoId }, 'Using youtube_metadata_cache DB row for URL validation, skipping live yt-dlp fetch');
+      } else {
+        logger.debug({ videoId }, 'Fetching metadata for video');
+        metadata = await this.fetchVideoMetadata(canonicalUrl, { timeoutMs: 60000 });
+        if (Number.isFinite(Number(metadata.duration)) && Number(metadata.duration) > 0) {
+          youtubeMetadataCache.cacheRawInfoJson(videoId, metadata.duration, metadata);
+        }
+      }
 
       const isDuplicateVideo = await this.isDuplicate(videoId);
 

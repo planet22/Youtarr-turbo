@@ -11,6 +11,7 @@ const m3uGenerator = require('./m3uGenerator');
 const { AUDIO_EXTENSIONS, MEDIA_EXTENSIONS } = require('./filesystem/constants');
 const { probeVideoDimensions } = require('./resolutionTier');
 const createLimiter = require('./subscriptionImport/concurrencyLimiter');
+const { formatRelativeTimeAgo } = require('./relativeTimeFormatter');
 
 // Backfill row updates are applied in parameterized batches of this size,
 // and flushed mid-chunk at the same cadence so completed work survives a
@@ -20,6 +21,29 @@ const BACKFILL_UPDATE_BATCH_SIZE = 100;
 // ffprobes are I/O-bound, so running 4 at once cuts backfill wall time
 // ~4x without piling up subprocesses next to downloads and Plex.
 const BACKFILL_PROBE_CONCURRENCY = 4;
+
+// Safety cap on the "Show untracked" bucket (videos with no Videos row at
+// all, surfaced only via youtube_metadata_cache / the untracked buffer
+// cache dir) - this is a debugging/cache-management view, not meant to
+// browse an unbounded history, so a huge cache just gets truncated to its
+// most-recently-touched entries rather than paginating the whole thing.
+const UNTRACKED_BUCKET_CAP = 2000;
+
+/**
+ * Absolute expiry timestamp for a cache row, or null if the cache type has
+ * no configured TTL - the client only ever formats a countdown from this
+ * fixed point, never computes one itself, so clock skew between the two
+ * can't produce a wrong-looking countdown.
+ * @param {string|Date|null} fromTimestamp
+ * @param {number|null|undefined} ttlHours
+ * @returns {string|null}
+ */
+function computeExpiresAt(fromTimestamp, ttlHours) {
+  if (!fromTimestamp) return null;
+  const hours = Number(ttlHours);
+  if (!Number.isFinite(hours) || hours <= 0) return null;
+  return new Date(new Date(fromTimestamp).getTime() + hours * 60 * 60 * 1000).toISOString();
+}
 
 class VideosModule {
   constructor() {
@@ -42,6 +66,9 @@ class VideosModule {
       missingFilter = 'off',
       watchedFilter = 'off',
       strmFilter = 'off',
+      metadataCacheFilter = 'off',
+      cachedVideoFilter = 'off',
+      showUntracked = false,
     } = options;
 
     try {
@@ -95,6 +122,22 @@ class VideosModule {
         whereConditions.push('Videos.is_strm = 0');
       }
 
+      if (metadataCacheFilter === 'only') {
+        whereConditions.push('ymc.youtube_id IS NOT NULL');
+      } else if (metadataCacheFilter === 'exclude') {
+        whereConditions.push('ymc.youtube_id IS NULL');
+      }
+
+      // "Cached video" here means the opportunistic STRM cache-on-play
+      // materialization (Videos.cached_at) - a genuine, permanently
+      // downloaded (non-STRM) video never has cached_at set, so this never
+      // matches those rows.
+      if (cachedVideoFilter === 'only') {
+        whereConditions.push('Videos.cached_at IS NOT NULL');
+      } else if (cachedVideoFilter === 'exclude') {
+        whereConditions.push('Videos.cached_at IS NULL');
+      }
+
       const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
 
       // Build ORDER BY
@@ -112,6 +155,7 @@ class VideosModule {
         FROM Videos
         LEFT JOIN JobVideos ON Videos.id = JobVideos.video_id
         LEFT JOIN Jobs ON Jobs.id = JobVideos.job_id
+        LEFT JOIN youtube_metadata_cache ymc ON ymc.youtube_id = Videos.youtubeId
         ${whereClause}
       `;
 
@@ -120,11 +164,41 @@ class VideosModule {
         type: Sequelize.QueryTypes.SELECT
       });
 
-      const total = countResult[0].total;
+      // mysql2 returns COUNT() as a string in raw-query mode - a bare `+`
+      // below (combining with untrackedTotal) would silently string-concat
+      // instead of add without this coercion (e.g. "86" + 0 -> "860").
+      const trackedTotal = Number(countResult[0].total);
 
-      // Get paginated videos
-      const query = `
-        SELECT
+      // "Show untracked" mixes videos with no Videos row at all (played but
+      // never downloaded, or NZB grabs disowned via importStrategy:
+      // 'untracked') - sourced from youtube_metadata_cache and the untracked
+      // hls-buffer cache dir, a fundamentally different source with no FK to
+      // Videos - into the SAME chronologically-sorted, paginated list as
+      // tracked rows. search/dateFrom/dateTo/channelFilter still don't apply
+      // to untracked candidates (would require parsing every candidate's
+      // raw_info_json up front, defeating the point of the cheap-columns-
+      // first pass in _getUntrackedCandidates).
+      //
+      // Like the STRM filter, metadataCacheFilter/cachedVideoFilter only
+      // narrow whatever's already in scope - they never flip showUntracked
+      // on by themselves. showUntracked defaults true client-side, so in
+      // practice untracked rows are already there to be narrowed; a user
+      // who explicitly turns showUntracked off is asking to not see
+      // untracked rows at all, and a cache filter shouldn't override that.
+      const untrackedCandidates = showUntracked
+        ? (await this._getUntrackedCandidates({ sortOrder })).filter((c) => {
+          if (metadataCacheFilter === 'only' && !c.hasCachedMetadata) return false;
+          if (metadataCacheFilter === 'exclude' && c.hasCachedMetadata) return false;
+          if (cachedVideoFilter === 'only' && !c.hasCachedVideo) return false;
+          if (cachedVideoFilter === 'exclude' && c.hasCachedVideo) return false;
+          return true;
+        })
+        : [];
+      const untrackedTotal = untrackedCandidates.length;
+      const total = trackedTotal + untrackedTotal;
+      const sortDir = String(sortOrder).toLowerCase() === 'asc' ? 1 : -1;
+
+      const videoColumnsSql = `
           Videos.id,
           Videos.youtubeId,
           Videos.youTubeChannelName,
@@ -146,25 +220,100 @@ class VideosModule {
           Videos.protected,
           Videos.video_resolution,
           Videos.is_strm,
+          Videos.cached_at AS cachedVideoAt,
+          ymc.fetched_at AS cachedMetadataAt,
+          ymc.last_accessed_at AS cachedMetadataLastAccessedAt,
           COALESCE(Videos.last_downloaded_at, Jobs.timeCreated, STR_TO_DATE(Videos.originalDate, '%Y%m%d')) AS timeCreated
+      `;
+      const videoJoinsSql = `
         FROM Videos
         LEFT JOIN JobVideos ON Videos.id = JobVideos.video_id
         LEFT JOIN Jobs ON Jobs.id = JobVideos.job_id
-        ${whereClause}
-        ${orderByClause}
-        LIMIT :limit OFFSET :offset
+        LEFT JOIN youtube_metadata_cache ymc ON ymc.youtube_id = Videos.youtubeId
       `;
 
-      replacements.limit = limit;
-      replacements.offset = offset;
+      // pageSlice/pageUntrackedCandidates are only populated on the
+      // showUntracked path (see below) - the common path skips all of this
+      // and keeps its original single LIMIT/OFFSET query, zero risk to the
+      // unfiltered/untracked-off case.
+      let videos;
+      let pageSlice = null;
+      let pageUntrackedCandidates = [];
 
-      const videos = await sequelize.query(query, {
-        replacements,
-        type: Sequelize.QueryTypes.SELECT,
-        model: Video,
-        mapToModel: true,
-        raw: true
-      });
+      if (showUntracked) {
+        // Two data sources can't share one SQL ORDER BY/LIMIT, so: cheaply
+        // fetch every matching tracked id's sort key alone (two columns,
+        // not full rows), merge-sort that against the already-sorted
+        // untracked candidates, slice the requested page from the UNIFIED
+        // order, then fetch full row data only for the tracked ids that
+        // actually landed on this page. GROUP BY Videos.id here is safe
+        // under ONLY_FULL_GROUP_BY (grouping by a table's primary key makes
+        // every other column from THAT table single-valued per group) since
+        // only an aggregate of the sort expression is selected alongside it.
+        const sortKeyExpr = sortBy === 'published'
+          ? 'STR_TO_DATE(Videos.originalDate, \'%Y%m%d\')'
+          : 'COALESCE(Videos.last_downloaded_at, Jobs.timeCreated, STR_TO_DATE(Videos.originalDate, \'%Y%m%d\'))';
+        const trackedIdRows = await sequelize.query(
+          `SELECT Videos.id AS id, MAX(${sortKeyExpr}) AS sortKey ${videoJoinsSql} ${whereClause} GROUP BY Videos.id`,
+          { replacements, type: Sequelize.QueryTypes.SELECT }
+        );
+
+        // Nulls (a row with no resolvable date at all) sort as "oldest"
+        // regardless of direction, rather than crashing the comparator or
+        // clumping unpredictably at whichever end Array.sort happens to
+        // leave them.
+        const combined = [
+          ...trackedIdRows.map((r) => ({
+            kind: 'tracked',
+            id: r.id,
+            sortKey: r.sortKey ? new Date(r.sortKey).getTime() : null,
+          })),
+          ...untrackedCandidates.map((c) => ({
+            kind: 'untracked',
+            id: c.youtubeId,
+            sortKey: new Date(c.cachedMetadataAt || c.cachedVideoAt).getTime(),
+            candidate: c,
+          })),
+        ];
+        combined.sort((a, b) => sortDir * ((a.sortKey ?? -Infinity) - (b.sortKey ?? -Infinity)));
+
+        pageSlice = combined.slice(offset, offset + limit);
+        const pageTrackedIds = pageSlice.filter((x) => x.kind === 'tracked').map((x) => x.id);
+        pageUntrackedCandidates = pageSlice.filter((x) => x.kind === 'untracked').map((x) => x.candidate);
+
+        // No GROUP BY here (unlike the ids-only query above) - selecting
+        // ymc.* alongside a GROUP BY Videos.id can trip ONLY_FULL_GROUP_BY
+        // depending on sql_mode, since ymc isn't the grouped table. A
+        // pre-existing, unrelated JobVideos/Jobs fan-out (a video
+        // associated with multiple Jobs) can still duplicate rows here per
+        // id, same as the common path below always could - deduped in JS
+        // instead, right after the query.
+        const rawTrackedRows = pageTrackedIds.length
+          ? await sequelize.query(
+            `SELECT ${videoColumnsSql} ${videoJoinsSql} WHERE Videos.id IN (:pageTrackedIds)`,
+            {
+              replacements: { pageTrackedIds },
+              type: Sequelize.QueryTypes.SELECT,
+              model: Video,
+              mapToModel: true,
+              raw: true
+            }
+          )
+          : [];
+        const dedupedById = new Map(rawTrackedRows.map((v) => [v.id, v]));
+        videos = Array.from(dedupedById.values());
+      } else {
+        const query = `SELECT ${videoColumnsSql} ${videoJoinsSql} ${whereClause} ${orderByClause} LIMIT :limit OFFSET :offset`;
+        replacements.limit = limit;
+        replacements.offset = offset;
+        videos = await sequelize.query(query, {
+          replacements,
+          type: Sequelize.QueryTypes.SELECT,
+          model: Video,
+          mapToModel: true,
+          raw: true
+        });
+      }
 
       // Real-time file check for videos that have a known file path
       // Only check videos with an existing filePath to avoid incorrectly marking videos as removed
@@ -248,6 +397,49 @@ class VideosModule {
         video.watchedBy = watchedByVideoId.get(video.id) || [];
       }
 
+      // Cache-state fields for the Library page's "Cached Metadata"/"Cached
+      // Video" icons and Downloaded-column expiry tooltip. hasCachedVideo
+      // is gated on !removed - fileCheckModule.checkVideoFiles above has
+      // already flipped removed=true the instant a materialized cache file
+      // goes missing, so this one guard is what keeps the icon from lying
+      // about a file that's actually gone, with no separate reconciliation
+      // needed for read-path correctness.
+      const cacheOnPlayExpiryHours = configModule.getConfig().strm?.cacheOnPlayExpiryHours;
+      const metadataRetentionHours = require('./youtubeMetadataCache').YOUTUBE_METADATA_CACHE_RETENTION_DAYS * 24;
+      for (const video of videos) {
+        video.isTracked = true;
+        video.hasCachedMetadata = Boolean(video.cachedMetadataAt);
+        video.cachedMetadataExpiresAt = computeExpiresAt(video.cachedMetadataLastAccessedAt, metadataRetentionHours);
+        // Pre-formatted "5h 4m ago" text (relativeTimeFormatter.js) so the
+        // Library page's per-row caption doesn't grow its own relative-time
+        // math that could drift from the video modal's/cache dialog's.
+        video.cachedMetadataAgo = formatRelativeTimeAgo(video.cachedMetadataAt);
+        video.hasCachedVideo = Boolean(video.cachedVideoAt) && !video.removed;
+        video.cachedVideoExpiresAt = computeExpiresAt(video.cachedVideoAt, cacheOnPlayExpiryHours);
+        video.cachedVideoAgo = formatRelativeTimeAgo(video.cachedVideoAt);
+      }
+
+      // Hydrate only the untracked rows that will actually be returned on
+      // this page - title/uploader require parsing raw_info_json, which is
+      // deliberately never pulled for the whole capped candidate list.
+      const untrackedRows = pageUntrackedCandidates.length
+        ? await this._hydrateUntrackedRows(pageUntrackedCandidates, { cacheOnPlayExpiryHours, metadataRetentionHours })
+        : [];
+
+      // pageSlice (only set on the showUntracked path) carries the true
+      // chronologically-unified order across both sources - rebuild the
+      // final page in that exact order rather than concatenating tracked
+      // then untracked as two separate blocks.
+      const mergedVideos = pageSlice
+        ? (() => {
+          const trackedById = new Map(videos.map((v) => [v.id, v]));
+          const untrackedByYoutubeId = new Map(untrackedRows.map((v) => [v.youtubeId, v]));
+          return pageSlice
+            .map((entry) => (entry.kind === 'tracked' ? trackedById.get(entry.id) : untrackedByYoutubeId.get(entry.id)))
+            .filter(Boolean);
+        })()
+        : videos;
+
       // Get all unique channels for the filter dropdown
       const channels = await this.getAllUniqueChannels();
 
@@ -259,17 +451,178 @@ class VideosModule {
       });
 
       return {
-        videos,
+        videos: mergedVideos,
         total,
         page,
         totalPages: Math.ceil(total / limit),
         channels,
-        enabledChannels: enabledChannels.map(ch => ({ channel_id: ch.channel_id, uploader: ch.uploader }))
+        enabledChannels: enabledChannels.map(ch => ({ channel_id: ch.channel_id, uploader: ch.uploader })),
+        ...(showUntracked && { untrackedScopeLimited: untrackedTotal >= UNTRACKED_BUCKET_CAP })
       };
     } catch (err) {
       logger.error({ err }, 'Error in getVideosPaginated');
       throw err;
     }
+  }
+
+  /**
+   * Every candidate for the "Show untracked" bucket: videos with NO Videos
+   * row that still have a youtube_metadata_cache row and/or an untracked
+   * hls-buffer cache file. Capped and sorted (most-recent-first by default,
+   * flipped for 'asc') so the caller can slice a page out of it the same
+   * way the tracked-row SQL query does. search/dateFrom/dateTo/channelFilter
+   * are NOT applied here (see getVideosPaginated's doc comment) - only the
+   * two cache-presence tri-states matter, and those two buckets ARE this
+   * method's two data sources, so they're implicit rather than re-filtered.
+   * @returns {Promise<Array<object>>}
+   */
+  async _getUntrackedCandidates({ sortOrder = 'desc' } = {}) {
+    // Cheap columns only - never raw_info_json here, it can be large and
+    // this pass may scan up to UNTRACKED_BUCKET_CAP rows just to know
+    // what's out there. ORDER BY fetched_at DESC bounds an unbounded cache
+    // to its most-recently-cached entries before any further sorting below.
+    const metadataRows = await sequelize.query(
+      `SELECT youtube_id, duration_seconds, fetched_at, last_accessed_at
+       FROM youtube_metadata_cache
+       WHERE youtube_id NOT IN (SELECT youtubeId FROM Videos WHERE youtubeId IS NOT NULL)
+       ORDER BY fetched_at DESC
+       LIMIT :cap`,
+      { replacements: { cap: UNTRACKED_BUCKET_CAP }, type: Sequelize.QueryTypes.SELECT }
+    );
+
+    const ytstreamRoutes = require('../routes/ytstream');
+    const bufferEntries = await ytstreamRoutes.listUntrackedBufferCacheEntries();
+
+    const merged = new Map();
+    for (const row of metadataRows) {
+      merged.set(row.youtube_id, {
+        youtubeId: row.youtube_id,
+        durationSeconds: row.duration_seconds,
+        hasCachedMetadata: true,
+        cachedMetadataAt: row.fetched_at,
+        cachedMetadataLastAccessedAt: row.last_accessed_at,
+        hasCachedVideo: false,
+        cachedVideoAt: null,
+        cachedVideoFilePath: null,
+        cachedVideoFileSize: null,
+      });
+    }
+
+    // A buffer file may exist for a youtubeId this dir-listing alone can't
+    // tell is actually tracked (e.g. the video was properly downloaded
+    // after being cached) - only resolve that for entries not already known
+    // untracked via the metadata-cache pass above.
+    const unresolvedBufferIds = bufferEntries
+      .map((e) => e.youtubeId)
+      .filter((id) => !merged.has(id));
+    let trackedIdSet = new Set();
+    if (unresolvedBufferIds.length) {
+      const trackedRows = await sequelize.query(
+        'SELECT youtubeId FROM Videos WHERE youtubeId IN (:ids)',
+        { replacements: { ids: unresolvedBufferIds }, type: Sequelize.QueryTypes.SELECT }
+      );
+      trackedIdSet = new Set(trackedRows.map((r) => r.youtubeId));
+    }
+
+    for (const entry of bufferEntries) {
+      const existing = merged.get(entry.youtubeId);
+      if (existing) {
+        existing.hasCachedVideo = true;
+        existing.cachedVideoAt = entry.mtime;
+        existing.cachedVideoFilePath = entry.filePath;
+        existing.cachedVideoFileSize = entry.size;
+      } else if (!trackedIdSet.has(entry.youtubeId)) {
+        merged.set(entry.youtubeId, {
+          youtubeId: entry.youtubeId,
+          durationSeconds: null,
+          hasCachedMetadata: false,
+          cachedMetadataAt: null,
+          cachedMetadataLastAccessedAt: null,
+          hasCachedVideo: true,
+          cachedVideoAt: entry.mtime,
+          cachedVideoFilePath: entry.filePath,
+          cachedVideoFileSize: entry.size,
+        });
+      }
+    }
+
+    const candidates = Array.from(merged.values());
+    if (candidates.length > UNTRACKED_BUCKET_CAP) {
+      logger.warn(
+        { count: candidates.length, cap: UNTRACKED_BUCKET_CAP },
+        'videosModule: untracked bucket exceeded cap, truncating to most-recent entries'
+      );
+    }
+    const dir = String(sortOrder).toLowerCase() === 'asc' ? 1 : -1;
+    candidates.sort((a, b) => {
+      const aTime = new Date(a.cachedMetadataAt || a.cachedVideoAt).getTime();
+      const bTime = new Date(b.cachedMetadataAt || b.cachedVideoAt).getTime();
+      return dir * (aTime - bTime);
+    });
+    return candidates.slice(0, UNTRACKED_BUCKET_CAP);
+  }
+
+  /**
+   * Builds Library-page row objects (matching the tracked-row shape) for a
+   * slice of _getUntrackedCandidates' output - only fetches raw_info_json
+   * (for title/uploader) for the ids actually being returned this page.
+   * @returns {Promise<Array<object>>}
+   */
+  async _hydrateUntrackedRows(slice, { cacheOnPlayExpiryHours, metadataRetentionHours }) {
+    const idsNeedingInfo = slice.filter((c) => c.hasCachedMetadata).map((c) => c.youtubeId);
+    const infoById = new Map();
+    if (idsNeedingInfo.length) {
+      const rows = await sequelize.query(
+        'SELECT youtube_id, raw_info_json FROM youtube_metadata_cache WHERE youtube_id IN (:ids)',
+        { replacements: { ids: idsNeedingInfo }, type: Sequelize.QueryTypes.SELECT }
+      );
+      for (const row of rows) {
+        if (!row.raw_info_json) continue;
+        try {
+          infoById.set(row.youtube_id, JSON.parse(row.raw_info_json));
+        } catch (err) {
+          logger.warn({ err, youtubeId: row.youtube_id }, 'videosModule: failed to parse cached raw_info_json for untracked row');
+        }
+      }
+    }
+
+    return slice.map((candidate) => {
+      const info = infoById.get(candidate.youtubeId);
+      return {
+        id: null,
+        youtubeId: candidate.youtubeId,
+        youTubeChannelName: info?.uploader ?? info?.channel ?? '',
+        youTubeVideoName: info?.title ?? candidate.youtubeId,
+        duration: candidate.durationSeconds ?? info?.duration ?? null,
+        originalDate: info?.upload_date ?? null,
+        description: info?.description ?? null,
+        channel_id: null,
+        filePath: candidate.cachedVideoFilePath ?? null,
+        fileSize: candidate.cachedVideoFileSize ?? null,
+        audioFilePath: null,
+        audioFileSize: null,
+        removed: false,
+        youtube_removed: false,
+        youtube_removed_checked_at: null,
+        media_type: null,
+        normalized_rating: null,
+        rating_source: null,
+        protected: false,
+        video_resolution: null,
+        is_strm: false,
+        watchedBy: [],
+        isTracked: false,
+        timeCreated: candidate.cachedMetadataAt || candidate.cachedVideoAt,
+        hasCachedMetadata: candidate.hasCachedMetadata,
+        cachedMetadataAt: candidate.cachedMetadataAt,
+        cachedMetadataAgo: formatRelativeTimeAgo(candidate.cachedMetadataAt),
+        cachedMetadataExpiresAt: computeExpiresAt(candidate.cachedMetadataLastAccessedAt, metadataRetentionHours),
+        hasCachedVideo: candidate.hasCachedVideo,
+        cachedVideoAt: candidate.cachedVideoAt,
+        cachedVideoAgo: formatRelativeTimeAgo(candidate.cachedVideoAt),
+        cachedVideoExpiresAt: computeExpiresAt(candidate.cachedVideoAt, cacheOnPlayExpiryHours),
+      };
+    });
   }
 
   /**
@@ -748,6 +1101,46 @@ class VideosModule {
         if (offset % (VIDEO_CHUNK_SIZE * 5) === 0) {
           logProgress(`Progress: ${totalProcessed}/${totalCount} videos processed, ${totalUpdated} updated, ${totalRemoved} removed`);
         }
+      }
+
+      // Best-effort reconciliation for cache state that can go stale when a
+      // file is deleted outside the app: rows whose STRM cache-on-play
+      // materialization went missing (removed=true, cached_at still set -
+      // the loop above already caught the missing file and set removed on
+      // its own, this just tries to recover the row back to STRM playback
+      // where possible). Never lets a failure here abort the rest of the
+      // backfill result.
+      try {
+        const { Op } = require('sequelize');
+        const staleCached = await Video.findAll({
+          where: { cached_at: { [Op.ne]: null }, removed: true },
+        });
+        if (staleCached.length) {
+          const videoDeletionModule = require('./videoDeletionModule');
+          let reconciled = 0;
+          for (const video of staleCached) {
+            try {
+              const result = await videoDeletionModule.reconcileRemovedCachedVideo(video);
+              if (result && result.success) reconciled += 1;
+            } catch (err) {
+              logger.warn({ err, videoId: video.id }, 'Failed to reconcile one stale cached-video row during backfill');
+            }
+          }
+          if (reconciled) {
+            logProgress(`Reconciled ${reconciled} stale cached-video row(s) back to STRM`);
+          }
+        }
+      } catch (err) {
+        logger.warn({ err }, 'Failed to reconcile stale cached-video state during backfill');
+      }
+
+      // Redundant safety net for the untracked hls-buffer cache's own TTL
+      // sweep, in case the nightly 2:10 AM cron was disabled or missed.
+      try {
+        const ytstreamRoutes = require('../routes/ytstream');
+        await ytstreamRoutes.sweepExpiredUntrackedBufferCache();
+      } catch (err) {
+        logger.warn({ err }, 'Failed to sweep untracked buffer cache during backfill');
       }
 
       const elapsed = Math.round((Date.now() - startTime) / 1000);

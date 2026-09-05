@@ -64,6 +64,7 @@ export const NavSidebarMobileBottomNav: React.FC<NavSidebarMobileBottomNavProps>
             right: 0,
             zIndex: 1299,
             backgroundColor: 'var(--mobile-subnav-surface-background)',
+            backdropFilter: 'var(--mobile-subnav-surface-backdrop-filter, none)',
             borderTop: 'var(--mobile-subnav-surface-border-top)',
             borderRadius: 'var(--mobile-subnav-surface-radius)',
             padding: '8px 10px',
@@ -122,6 +123,7 @@ export const NavSidebarMobileBottomNav: React.FC<NavSidebarMobileBottomNavProps>
           borderRadius: 'var(--mobile-primary-nav-surface-radius)',
           borderTop: 'var(--mobile-primary-nav-surface-border-top)',
           backgroundColor: 'var(--mobile-primary-nav-surface-background)',
+          backdropFilter: 'var(--mobile-primary-nav-surface-backdrop-filter, none)',
           overflow: 'visible',
           boxShadow: 'var(--mobile-primary-nav-surface-shadow)',
         }}

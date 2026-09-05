@@ -1304,11 +1304,14 @@ describe('VideosModule', () => {
       mockVideo.findAll
         .mockResolvedValueOnce(chunk1)
         .mockResolvedValueOnce(chunk2)
-        .mockResolvedValueOnce(chunk3);
+        .mockResolvedValueOnce(chunk3)
+        // Post-pass stale cached-video reconciliation query (see
+        // reconcileRemovedCachedVideo) - no stale rows in this scenario.
+        .mockResolvedValueOnce([]);
 
       const result = await VideosModule.backfillVideoMetadata();
 
-      expect(mockVideo.findAll).toHaveBeenCalledTimes(3);
+      expect(mockVideo.findAll).toHaveBeenCalledTimes(4);
       expect(result.processed).toBe(2500);
     });
 

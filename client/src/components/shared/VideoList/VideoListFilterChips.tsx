@@ -5,6 +5,8 @@ import {
   CalendarToday as CalendarIcon,
   Close as CloseIcon,
   ListFilter as FilterIcon,
+  Unlink as UntrackedIcon,
+  Folder as FilePathIcon,
 } from '../../../lib/icons';
 import { FilterConfig } from './types';
 import {
@@ -184,6 +186,40 @@ function VideoListFilterChips({ filters }: VideoListFilterChipsProps) {
           variant="outlined"
         />
       );
+      continue;
+    }
+
+    if (filter.id === 'showUntracked' && filter.value) {
+      chips.push(
+        <Chip
+          key="showUntracked"
+          icon={<UntrackedIcon size={14} />}
+          label="Showing Untracked"
+          size="small"
+          onDelete={() => filter.onChange(false)}
+          onClick={() => filter.onChange(false)}
+          deleteIcon={<CloseIcon data-testid="CancelIcon" size={14} />}
+          color="primary"
+          variant="outlined"
+        />
+      );
+      continue;
+    }
+
+    if (filter.id === 'showFilePaths' && filter.value) {
+      chips.push(
+        <Chip
+          key="showFilePaths"
+          icon={<FilePathIcon size={14} />}
+          label="Showing File Paths"
+          size="small"
+          onDelete={() => filter.onChange(false)}
+          onClick={() => filter.onChange(false)}
+          deleteIcon={<CloseIcon data-testid="CancelIcon" size={14} />}
+          color="primary"
+          variant="outlined"
+        />
+      );
     }
   }
 
@@ -210,6 +246,8 @@ export function countActiveFilters(filters: FilterConfig[]): number {
     else if (filter.id === 'maxRating' && filter.value) count++;
     else if (isStatusFilter(filter) && filter.value !== 'off') count++;
     else if (filter.id === 'channel' && filter.value) count++;
+    else if (filter.id === 'showUntracked' && filter.value) count++;
+    else if (filter.id === 'showFilePaths' && filter.value) count++;
   }
   return count;
 }
@@ -235,6 +273,10 @@ export function clearAllFilters(filters: FilterConfig[]): void {
       filter.onChange('off');
     } else if (filter.id === 'channel') {
       filter.onChange('');
+    } else if (filter.id === 'showUntracked') {
+      filter.onChange(false);
+    } else if (filter.id === 'showFilePaths') {
+      filter.onChange(false);
     }
   }
 }

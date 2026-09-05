@@ -1,13 +1,14 @@
 import React, { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Button, Divider, Typography } from '../../ui';
-import { Close as CloseIcon } from '../../../lib/icons';
+import { Close as CloseIcon, Unlink as UntrackedIcon, Folder as FilePathIcon } from '../../../lib/icons';
 import { FilterConfig } from './types';
 import DurationFilter from './filters/DurationFilter';
 import DateRangeFilter from './filters/DateRangeFilter';
 import DateRangeStringFilter from './filters/DateRangeStringFilter';
 import MaxRatingFilter from './filters/MaxRatingFilter';
 import ToggleChipFilter from './filters/ToggleChipFilter';
+import BooleanChipFilter from './filters/BooleanChipFilter';
 import ChannelFilter from './filters/ChannelFilter';
 import { hasActiveFilters, clearAllFilters } from './VideoListFilterChips';
 import {
@@ -90,6 +91,26 @@ function renderFilter(filter: FilterConfig, compact: boolean): React.ReactNode {
       <ChannelFilter value={filter.value} options={filter.options} onChange={filter.onChange} />
     );
   }
+  if (filter.id === 'showUntracked') {
+    return (
+      <BooleanChipFilter
+        value={filter.value}
+        onChange={filter.onChange}
+        icon={<UntrackedIcon size={16} />}
+        label="Show Untracked"
+      />
+    );
+  }
+  if (filter.id === 'showFilePaths') {
+    return (
+      <BooleanChipFilter
+        value={filter.value}
+        onChange={filter.onChange}
+        icon={<FilePathIcon size={16} />}
+        label="Show File Paths"
+      />
+    );
+  }
   return null;
 }
 
@@ -105,14 +126,25 @@ function filterLabel(filter: FilterConfig): string {
       return 'Max Rating';
     case 'channel':
       return 'Channel';
+    case 'showUntracked':
+      return 'Untracked';
+    case 'showFilePaths':
+      return 'File Paths';
   }
   return '';
 }
 
+// Rendered alongside the status chips (not the row above) so they line up
+// with Cached Video/Cached Metadata etc. instead of sitting on a different
+// row - they're plain boolean toggles, not tri-state status chips, but
+// visually belong with the other row-of-videos toggles.
+const INLINE_ROW_TOGGLE_IDS = new Set(['showUntracked', 'showFilePaths']);
+
 function InlinePanel({ filters, open, customFilters }: { filters: FilterConfig[]; open: boolean; customFilters?: React.ReactNode }) {
   if (!open) return null;
-  const nonStatusFilters = filters.filter((f) => !isStatusFilter(f));
+  const nonStatusFilters = filters.filter((f) => !isStatusFilter(f) && !INLINE_ROW_TOGGLE_IDS.has(f.id));
   const statusFiltersList = filters.filter(isStatusFilter);
+  const inlineRowToggles = filters.filter((f) => INLINE_ROW_TOGGLE_IDS.has(f.id));
   return (
     <div
       data-testid="video-list-filter-panel-inline"
@@ -141,7 +173,7 @@ function InlinePanel({ filters, open, customFilters }: { filters: FilterConfig[]
             Clear All
           </Button>
         )}
-        {(statusFiltersList.length > 0 || customFilters) && (
+        {(statusFiltersList.length > 0 || inlineRowToggles.length > 0 || customFilters) && (
           <div
             key="status-group"
             data-testid="video-list-filter-status-group-inline"
@@ -158,6 +190,9 @@ function InlinePanel({ filters, open, customFilters }: { filters: FilterConfig[]
           >
             {statusFiltersList.map((sf) => (
               <React.Fragment key={sf.id}>{renderFilter(sf, false)}</React.Fragment>
+            ))}
+            {inlineRowToggles.map((f) => (
+              <React.Fragment key={f.id}>{renderFilter(f, false)}</React.Fragment>
             ))}
             {customFilters}
           </div>

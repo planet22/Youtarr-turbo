@@ -7,6 +7,10 @@ export {
   CheckCircle2 as CheckCircleOutline,
   Trash2 as Delete,
   Eraser as Purge,
+  // Distinct from Purge (Eraser, permanent DB-record removal) and Delete
+  // (Trash2, removes a real downloaded video) - "clear cache" only drops a
+  // cheap, re-derivable copy (cached metadata / an untracked buffer file).
+  Trash as ClearCache,
   Settings,
   Ban as Block,
   Info,
@@ -61,6 +65,7 @@ export {
   StarOff,
   Eye,
   EyeOff,
+  Unlink,
   Loader2,
   Check,
   ChevronRight,

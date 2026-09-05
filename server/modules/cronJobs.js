@@ -156,8 +156,9 @@ function initialize(deps = {}) {
   // 90 days, cache-on-play's configurable hours) - a year of near-zero
   // storage cost buys a lot fewer repeat yt-dlp calls, and it's only
   // expired by how recently it was actually used, not when it was first
-  // fetched.
-  const YOUTUBE_METADATA_CACHE_RETENTION_DAYS = 365;
+  // fetched. Single source of truth: server/modules/youtubeMetadataCache.js
+  // (also read by the Library page's per-video expiry countdown).
+  const { YOUTUBE_METADATA_CACHE_RETENTION_DAYS } = require('./youtubeMetadataCache');
   schedule.schedule('20 3 * * *', async () => {
     if (!db.YoutubeMetadataCache) return;
     try {

@@ -3,7 +3,7 @@ import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
 import { useSwipeable } from 'react-swipeable';
 import { Alert, Box, Grid, Snackbar, Typography } from '../ui';
-import { Trash2 as DeleteIcon, Star as RatingIcon, Download as DownloadIcon, Purge as PurgeIcon, Wifi as StrmIcon } from '../../lib/icons';
+import { Trash2 as DeleteIcon, Star as RatingIcon, Download as DownloadIcon, Purge as PurgeIcon, Wifi as StrmIcon, Database as MetadataCacheIcon, Storage as CachedVideoIcon } from '../../lib/icons';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
 import { useConfig } from '../../hooks/useConfig';
 import { useDownloadListingsRefresh } from '../../hooks/useDownloadListingsRefresh';
@@ -18,6 +18,9 @@ import StrmDownloadDialog from '../shared/StrmDownloadDialog';
 import StrmRevertDialog from '../shared/StrmRevertDialog';
 import { useStrmSwitch } from '../shared/useStrmSwitch';
 import ChangeRatingDialog from '../shared/ChangeRatingDialog';
+import ClearCachedMetadataDialog from '../shared/ClearCachedMetadataDialog';
+import ClearCachedVideoDialog from '../shared/ClearCachedVideoDialog';
+import ClearCachedRowDialog from '../shared/ClearCachedRowDialog';
 import { useVideoProtection } from '../shared/useVideoProtection';
 import VideoModal from '../shared/VideoModal';
 import { VideoModalData } from '../shared/VideoModal/types';
@@ -26,7 +29,9 @@ import { DownloadSettings } from '../DownloadManager/ManualDownload/types';
 import VideoCard from './components/VideoCard';
 import VideosTable from './components/VideosTable';
 import VideosListMobile from './components/VideosListMobile';
+import CacheDetailDialog from './components/CacheDetailDialog';
 import { useVideosData } from './hooks/useVideosData';
+import { useCacheActions } from './hooks/useCacheActions';
 import {
   INFINITE_SCROLL_FETCH_SIZE,
   VideoListContainer,
@@ -51,19 +56,30 @@ const VIEW_MODE_STORAGE_KEY = 'youtarr:videosPageViewMode';
 const YOUTUBE_CHANNEL_ID_PATTERN = /^UC[a-zA-Z0-9_-]{22}$/;
 
 interface VideoSelectionMeta {
+  id: number | null;
   youtubeId: string;
   channelId: string | null;
   removed: boolean;
   youtubeRemoved: boolean;
   isStrm: boolean;
+  isTracked: boolean;
+  hasCachedMetadata: boolean;
+  hasCachedVideo: boolean;
 }
 
 function deriveIsStrm(video: VideoData): boolean {
-  return Boolean((video as { is_strm?: boolean }).is_strm) ||
+  return Boolean(video.is_strm) ||
     (typeof video.filePath === 'string' && video.filePath.toLowerCase().endsWith('.strm'));
 }
 
 function videoDataToModalData(video: VideoData): VideoModalData {
+  const isTracked = video.isTracked !== false;
+  // An untracked row with a cached video file (a previous play's hls-buffer
+  // cache - see server/routes/ytstream.js's HLS_UNTRACKED_BUFFER_CACHE_DIR)
+  // is playable via /api/videos/:id/stream's untracked-cache fallback even
+  // though it was never actually downloaded - surface that instead of the
+  // generic "never downloaded" state so the modal offers Play, not Download.
+  const isCachedOnly = !isTracked && Boolean(video.hasCachedVideo);
   return {
     youtubeId: video.youtubeId,
     title: video.youTubeVideoName,
@@ -73,10 +89,9 @@ function videoDataToModalData(video: VideoData): VideoModalData {
     publishedAt: video.originalDate || null,
     addedAt: video.timeCreated || null,
     mediaType: video.media_type || 'video',
-    status: video.removed ? 'missing' : 'downloaded',
-    isDownloaded: !video.removed,
-    isStrm: Boolean((video as { is_strm?: boolean }).is_strm) ||
-      (typeof video.filePath === 'string' && video.filePath.toLowerCase().endsWith('.strm')),
+    status: isTracked ? (video.removed ? 'missing' : 'downloaded') : (isCachedOnly ? 'cached' : 'never_downloaded'),
+    isDownloaded: isTracked && !video.removed,
+    isStrm: deriveIsStrm(video),
     filePath: video.filePath || null,
     fileSize: video.fileSize ? Number(video.fileSize) : null,
     audioFilePath: video.audioFilePath || null,
@@ -85,7 +100,7 @@ function videoDataToModalData(video: VideoData): VideoModalData {
     isIgnored: false,
     normalizedRating: video.normalized_rating || null,
     ratingSource: video.rating_source || null,
-    databaseId: video.id,
+    databaseId: video.id ?? null,
     channelId: video.channel_id || null,
   };
 }
@@ -109,6 +124,13 @@ function VideosPage({ token }: VideosPageProps) {
   const [missingFilter, setMissingFilter] = useState<ChipFilterMode>('off');
   const [watchedFilter, setWatchedFilter] = useState<ChipFilterMode>('off');
   const [strmFilter, setStrmFilter] = useState<ChipFilterMode>('off');
+  const [metadataCacheFilter, setMetadataCacheFilter] = useState<ChipFilterMode>('off');
+  const [cachedVideoFilter, setCachedVideoFilter] = useState<ChipFilterMode>('off');
+  // Defaults on - untracked cache-only videos (played/cached but never
+  // downloaded) are part of what this page is for surfacing, not an
+  // edge case someone has to opt into seeing.
+  const [showUntracked, setShowUntracked] = useState(true);
+  const [showFilePaths, setShowFilePaths] = useState(false);
 
   const [imageErrors, setImageErrors] = useState<Record<string, boolean>>({});
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -118,8 +140,16 @@ function VideosPage({ token }: VideosPageProps) {
   // Set for a single-row chip click (bypasses the checkbox selection so the
   // row doesn't visibly become "selected" just from clicking the chip); null
   // means the open STRM dialog is acting on the current bulk selection.
-  const [pendingStrmVideoId, setPendingStrmVideoId] = useState<number | null>(null);
+  // Holds a youtubeId (not a database id) - see VideoSelectionMeta.
+  const [pendingStrmVideoId, setPendingStrmVideoId] = useState<string | null>(null);
   const [ratingDialogOpen, setRatingDialogOpen] = useState(false);
+  const [clearMetadataCacheDialogOpen, setClearMetadataCacheDialogOpen] = useState(false);
+  const [clearCachedVideoDialogOpen, setClearCachedVideoDialogOpen] = useState(false);
+  const [cacheDetailTarget, setCacheDetailTarget] = useState<{ youtubeId: string; kind: 'metadata' | 'video' } | null>(null);
+  // Single-row combined clear (the untracked row's "delete" action) -
+  // distinct from cacheDetailTarget's per-cache-type dialog.
+  const [clearCachedRowTarget, setClearCachedRowTarget] = useState<VideoData | null>(null);
+  const [clearingCachedRow, setClearingCachedRow] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [modalVideo, setModalVideo] = useState<VideoData | null>(null);
@@ -138,6 +168,8 @@ function VideosPage({ token }: VideosPageProps) {
   const { deleteVideos, loading: deleteLoading } = useVideoDeletion();
   const { purgeVideos, loading: purgeLoading } = useVideoPurge();
   const { forceDownload, revertToStrm, loading: strmSwitchLoading } = useStrmSwitch();
+  const cacheActions = useCacheActions(token);
+  const [clearingCacheDetail, setClearingCacheDetail] = useState(false);
   const configState = useConfig(token);
   const useInfiniteScroll = configState?.config?.channelVideosHotLoad ?? false;
   const {
@@ -180,19 +212,26 @@ function VideosPage({ token }: VideosPageProps) {
     missingFilter,
     watchedFilter,
     strmFilter,
+    metadataCacheFilter,
+    cachedVideoFilter,
+    showUntracked,
     useInfiniteScroll,
   });
 
-  const videoMetaRef = useRef<Map<number, VideoSelectionMeta>>(new Map());
+  const videoMetaRef = useRef<Map<string, VideoSelectionMeta>>(new Map());
 
   useEffect(() => {
     for (const video of videos) {
-      videoMetaRef.current.set(video.id, {
+      videoMetaRef.current.set(video.youtubeId, {
+        id: video.id ?? null,
         youtubeId: video.youtubeId,
         channelId: video.channel_id || null,
         removed: Boolean(video.removed),
         youtubeRemoved: Boolean(video.youtube_removed),
         isStrm: deriveIsStrm(video),
+        isTracked: video.isTracked !== false,
+        hasCachedMetadata: Boolean(video.hasCachedMetadata),
+        hasCachedVideo: Boolean(video.hasCachedVideo),
       });
     }
   }, [videos]);
@@ -239,12 +278,12 @@ function VideosPage({ token }: VideosPageProps) {
     }
   };
 
-  const handleDeleteConfirm = async (selectedIds: number[]) => {
+  const handleDeleteConfirm = async (selectedYoutubeIds: string[]) => {
     setDeleteDialogOpen(false);
-    const deletableIds = selectedIds.filter((id) => {
-      const meta = videoMetaRef.current.get(id);
-      return Boolean(meta && !meta.removed);
-    });
+    const deletableIds = selectedYoutubeIds
+      .map((youtubeId) => videoMetaRef.current.get(youtubeId))
+      .filter((meta): meta is VideoSelectionMeta => Boolean(meta && meta.id !== null && !meta.removed))
+      .map((meta) => meta.id as number);
     if (deletableIds.length === 0) return;
     const result = await deleteVideos(deletableIds, token);
     if (result.success) {
@@ -270,12 +309,12 @@ function VideosPage({ token }: VideosPageProps) {
     }
   };
 
-  const handlePurgeConfirm = async (selectedIds: number[]) => {
+  const handlePurgeConfirm = async (selectedYoutubeIds: string[]) => {
     setPurgeDialogOpen(false);
-    const purgeableIds = selectedIds.filter((id) => {
-      const meta = videoMetaRef.current.get(id);
-      return Boolean(meta && meta.removed);
-    });
+    const purgeableIds = selectedYoutubeIds
+      .map((youtubeId) => videoMetaRef.current.get(youtubeId))
+      .filter((meta): meta is VideoSelectionMeta => Boolean(meta && meta.id !== null && meta.removed))
+      .map((meta) => meta.id as number);
     if (purgeableIds.length === 0) return;
     const result = await purgeVideos(purgeableIds, token);
     if (result.success) {
@@ -301,8 +340,12 @@ function VideosPage({ token }: VideosPageProps) {
     }
   };
 
-  const handleApplyRating = async (rating: string | null, selectedIds: number[]) => {
+  const handleApplyRating = async (rating: string | null, selectedYoutubeIds: string[]) => {
     if (!token) return;
+    const selectedIds = selectedYoutubeIds
+      .map((youtubeId) => videoMetaRef.current.get(youtubeId)?.id)
+      .filter((id): id is number => id !== null && id !== undefined);
+    if (selectedIds.length === 0) return;
     try {
       await axios.post(
         '/api/videos/rating',
@@ -323,7 +366,7 @@ function VideosPage({ token }: VideosPageProps) {
     }
   };
 
-  const selectionActions = useMemo<SelectionAction<number>[]>(
+  const selectionActions = useMemo<SelectionAction<string>[]>(
     () => [
       {
         id: 'download',
@@ -342,6 +385,11 @@ function VideosPage({ token }: VideosPageProps) {
         label: 'Rating',
         icon: <RatingIcon size={14} />,
         intent: 'warning',
+        disabled: (ids) =>
+          !ids.some((id) => {
+            const meta = videoMetaRef.current.get(id);
+            return Boolean(meta && meta.isTracked);
+          }),
         onClick: () => setRatingDialogOpen(true),
       },
       {
@@ -353,7 +401,7 @@ function VideosPage({ token }: VideosPageProps) {
           deleteLoading ||
           !ids.some((id) => {
             const meta = videoMetaRef.current.get(id);
-            return Boolean(meta && !meta.removed);
+            return Boolean(meta && meta.isTracked && !meta.removed);
           }),
         onClick: () => setDeleteDialogOpen(true),
       },
@@ -368,7 +416,7 @@ function VideosPage({ token }: VideosPageProps) {
           purgeLoading ||
           !ids.some((id) => {
             const meta = videoMetaRef.current.get(id);
-            return Boolean(meta && meta.removed);
+            return Boolean(meta && meta.isTracked && meta.removed);
           }),
         onClick: () => setPurgeDialogOpen(true),
       },
@@ -397,18 +445,42 @@ function VideosPage({ token }: VideosPageProps) {
           strmSwitchLoading ||
           !ids.some((id) => {
             const meta = videoMetaRef.current.get(id);
-            return Boolean(meta && !meta.isStrm && !meta.removed);
+            return Boolean(meta && meta.isTracked && !meta.isStrm && !meta.removed);
           }),
         onClick: () => {
           setPendingStrmVideoId(null);
           setStrmRevertDialogOpen(true);
         },
       },
+      {
+        id: 'clear-metadata-cache',
+        label: 'Clear Cached Metadata',
+        icon: <MetadataCacheIcon size={14} />,
+        intent: 'warning',
+        disabled: (ids) =>
+          !ids.some((id) => {
+            const meta = videoMetaRef.current.get(id);
+            return Boolean(meta && meta.hasCachedMetadata);
+          }),
+        onClick: () => setClearMetadataCacheDialogOpen(true),
+      },
+      {
+        id: 'clear-cached-video',
+        label: 'Clear Cached Video',
+        icon: <CachedVideoIcon size={14} />,
+        intent: 'warning',
+        disabled: (ids) =>
+          !ids.some((id) => {
+            const meta = videoMetaRef.current.get(id);
+            return Boolean(meta && meta.hasCachedVideo);
+          }),
+        onClick: () => setClearCachedVideoDialogOpen(true),
+      },
     ],
     [deleteLoading, purgeLoading, strmSwitchLoading]
   );
 
-  const selection = useVideoSelection<number>({ actions: selectionActions });
+  const selection = useVideoSelection<string>({ actions: selectionActions });
 
   // Clear selection when a filter changes so bulk actions can't fire on IDs that
   // are no longer in the filtered dataset. Sort and pagination are deliberately
@@ -425,16 +497,19 @@ function VideosPage({ token }: VideosPageProps) {
     missingFilter,
     watchedFilter,
     strmFilter,
+    metadataCacheFilter,
+    cachedVideoFilter,
+    showUntracked,
     selection.clear,
   ]);
 
-  const handleToggleSelect = (videoId: number) => {
-    selection.toggle(videoId);
+  const handleToggleSelect = (youtubeId: string) => {
+    selection.toggle(youtubeId);
   };
 
   const handleSelectAll = (checked: boolean) => {
     if (checked) {
-      selection.set(videos.map((v) => v.id));
+      selection.set(videos.map((v) => v.youtubeId));
     } else {
       selection.clear();
     }
@@ -467,7 +542,7 @@ function VideosPage({ token }: VideosPageProps) {
     let skipped = 0;
     for (const id of selection.selectedIds) {
       const meta = videoMetaRef.current.get(id);
-      if (meta && !meta.removed) {
+      if (meta && meta.isTracked && !meta.removed) {
         deletable += 1;
       } else {
         skipped += 1;
@@ -482,7 +557,7 @@ function VideosPage({ token }: VideosPageProps) {
     let skipped = 0;
     for (const id of selection.selectedIds) {
       const meta = videoMetaRef.current.get(id);
-      if (meta && meta.removed) {
+      if (meta && meta.isTracked && meta.removed) {
         purgeable += 1;
       } else {
         skipped += 1;
@@ -492,9 +567,9 @@ function VideosPage({ token }: VideosPageProps) {
   };
   const purgeCounts = getPurgeCounts();
 
-  // The active STRM dialog acts on a single clicked video (pendingStrmVideoId)
-  // when set, otherwise the current bulk selection - see pendingStrmVideoId's
-  // declaration above.
+  // The active STRM dialog acts on a single clicked video (pendingStrmVideoId,
+  // a youtubeId) when set, otherwise the current bulk selection - see
+  // pendingStrmVideoId's declaration above.
   const strmTargetIds = pendingStrmVideoId !== null ? [pendingStrmVideoId] : selection.selectedIds;
 
   const getStrmDownloadCounts = () => {
@@ -528,7 +603,7 @@ function VideosPage({ token }: VideosPageProps) {
   const strmRevertCounts = getStrmRevertCounts();
 
   const handleStrmChipClick = (video: VideoData) => {
-    setPendingStrmVideoId(video.id);
+    setPendingStrmVideoId(video.youtubeId);
     if (deriveIsStrm(video)) {
       setStrmDownloadDialogOpen(true);
     } else {
@@ -539,10 +614,10 @@ function VideosPage({ token }: VideosPageProps) {
   const handleStrmDownloadConfirm = async () => {
     setStrmDownloadDialogOpen(false);
     const isSingle = pendingStrmVideoId !== null;
-    const eligibleIds = strmTargetIds.filter((id) => {
-      const meta = videoMetaRef.current.get(id);
-      return Boolean(meta && meta.isStrm);
-    });
+    const eligibleIds = strmTargetIds
+      .map((id) => videoMetaRef.current.get(id))
+      .filter((meta): meta is VideoSelectionMeta => Boolean(meta && meta.id !== null && meta.isStrm))
+      .map((meta) => meta.id as number);
     setPendingStrmVideoId(null);
     if (eligibleIds.length === 0) return;
 
@@ -573,10 +648,10 @@ function VideosPage({ token }: VideosPageProps) {
   const handleStrmRevertConfirm = async () => {
     setStrmRevertDialogOpen(false);
     const isSingle = pendingStrmVideoId !== null;
-    const eligibleIds = strmTargetIds.filter((id) => {
-      const meta = videoMetaRef.current.get(id);
-      return Boolean(meta && !meta.isStrm && !meta.removed);
-    });
+    const eligibleIds = strmTargetIds
+      .map((id) => videoMetaRef.current.get(id))
+      .filter((meta): meta is VideoSelectionMeta => Boolean(meta && meta.id !== null && !meta.isStrm && !meta.removed))
+      .map((meta) => meta.id as number);
     setPendingStrmVideoId(null);
     if (eligibleIds.length === 0) return;
 
@@ -601,6 +676,134 @@ function VideosPage({ token }: VideosPageProps) {
           `Failed to switch to STRM: ${result.failed[0]?.error || 'Unknown error'}`
         );
       }
+    }
+  };
+
+  const getClearMetadataCacheCounts = () => {
+    let eligible = 0;
+    let skipped = 0;
+    for (const id of selection.selectedIds) {
+      const meta = videoMetaRef.current.get(id);
+      if (meta && meta.hasCachedMetadata) {
+        eligible += 1;
+      } else {
+        skipped += 1;
+      }
+    }
+    return { eligible, skipped };
+  };
+  const clearMetadataCacheCounts = getClearMetadataCacheCounts();
+
+  const getClearCachedVideoCounts = () => {
+    let eligible = 0;
+    let skipped = 0;
+    for (const id of selection.selectedIds) {
+      const meta = videoMetaRef.current.get(id);
+      if (meta && meta.hasCachedVideo) {
+        eligible += 1;
+      } else {
+        skipped += 1;
+      }
+    }
+    return { eligible, skipped };
+  };
+  const clearCachedVideoCounts = getClearCachedVideoCounts();
+
+  const handleClearMetadataCacheConfirm = async () => {
+    setClearMetadataCacheDialogOpen(false);
+    const eligibleIds = selection.selectedIds.filter((id) => {
+      const meta = videoMetaRef.current.get(id);
+      return Boolean(meta && meta.hasCachedMetadata);
+    });
+    if (eligibleIds.length === 0) return;
+
+    const result = await cacheActions.bulkClearMetadataCache(eligibleIds);
+    if (result.success) {
+      setSuccessMessage(
+        `Cleared cached metadata for ${eligibleIds.length - result.failed.length} video${eligibleIds.length !== 1 ? 's' : ''}`
+      );
+      selection.clear();
+      refetch();
+    } else {
+      setErrorMessage('Failed to clear cached metadata');
+    }
+  };
+
+  // Tracked rows' cached video is the STRM cache-on-play file - clearing it
+  // means reverting to STRM (the existing useStrmSwitch endpoint), same
+  // action as "Switch to STRM" but reached from the cache icon instead.
+  // Untracked rows' cached video is a plain buffer-cache file - clearing it
+  // is a direct delete via useCacheActions, no revert semantics apply.
+  const handleClearCachedVideoConfirm = async () => {
+    setClearCachedVideoDialogOpen(false);
+    const eligibleMeta = selection.selectedIds
+      .map((id) => videoMetaRef.current.get(id))
+      .filter((meta): meta is VideoSelectionMeta => Boolean(meta && meta.hasCachedVideo));
+    if (eligibleMeta.length === 0) return;
+
+    const trackedIds = eligibleMeta.filter((m) => m.isTracked && m.id !== null).map((m) => m.id as number);
+    const untrackedYoutubeIds = eligibleMeta.filter((m) => !m.isTracked).map((m) => m.youtubeId);
+
+    const [strmResult, untrackedResult] = await Promise.all([
+      trackedIds.length ? revertToStrm(trackedIds, token) : Promise.resolve(null),
+      untrackedYoutubeIds.length ? cacheActions.bulkClearVideoCache(untrackedYoutubeIds) : Promise.resolve(null),
+    ]);
+
+    const clearedCount =
+      (strmResult ? strmResult.processed.length : 0) +
+      (untrackedResult ? untrackedYoutubeIds.length - untrackedResult.failed.length : 0);
+    const failedCount = eligibleMeta.length - clearedCount;
+
+    if (failedCount === 0) {
+      setSuccessMessage(`Cleared cached video for ${clearedCount} video${clearedCount !== 1 ? 's' : ''}`);
+    } else if (clearedCount > 0) {
+      setSuccessMessage(`Cleared cached video for ${clearedCount} video${clearedCount !== 1 ? 's' : ''}, but ${failedCount} failed`);
+    } else {
+      setErrorMessage('Failed to clear cached video');
+    }
+    selection.clear();
+    refetch();
+  };
+
+  const handleClearSingleCacheDetail = async () => {
+    if (!cacheDetailTarget) return;
+    setClearingCacheDetail(true);
+    try {
+      if (cacheDetailTarget.kind === 'metadata') {
+        await cacheActions.clearMetadataCache(cacheDetailTarget.youtubeId);
+      } else {
+        const meta = videoMetaRef.current.get(cacheDetailTarget.youtubeId);
+        if (meta && meta.isTracked && meta.id !== null) {
+          await revertToStrm([meta.id], token);
+        } else {
+          await cacheActions.clearVideoCache(cacheDetailTarget.youtubeId);
+        }
+      }
+      setCacheDetailTarget(null);
+      refetch();
+    } finally {
+      setClearingCacheDetail(false);
+    }
+  };
+
+  const handleOpenClearCachedRow = (video: VideoData) => setClearCachedRowTarget(video);
+
+  // Untracked row's "delete" action - clears whichever cache types it has
+  // (metadata and/or video) in one confirm, since there's no real library
+  // row/file for the usual single-video delete to act on.
+  const handleClearCachedRowConfirm = async () => {
+    const video = clearCachedRowTarget;
+    if (!video) return;
+    setClearingCachedRow(true);
+    try {
+      await Promise.all([
+        video.hasCachedMetadata ? cacheActions.clearMetadataCache(video.youtubeId) : Promise.resolve(),
+        video.hasCachedVideo ? cacheActions.clearVideoCache(video.youtubeId) : Promise.resolve(),
+      ]);
+      setClearCachedRowTarget(null);
+      refetch();
+    } finally {
+      setClearingCachedRow(false);
     }
   };
 
@@ -639,7 +842,9 @@ function VideosPage({ token }: VideosPageProps) {
   };
 
   const handleDeleteSingleVideo = (videoId: number) => {
-    selection.set([videoId]);
+    const video = videos.find((v) => v.id === videoId);
+    if (!video) return;
+    selection.set([video.youtubeId]);
     setDeleteDialogOpen(true);
   };
 
@@ -647,7 +852,7 @@ function VideosPage({ token }: VideosPageProps) {
     const video = videos.find((v) => v.id === videoId);
     if (!video) return;
     const currentState = video.protected || false;
-    const newState = await toggleProtection(video.id, currentState);
+    const newState = await toggleProtection(videoId, currentState);
     if (newState !== undefined) {
       setVideos((prev) =>
         prev.map((v) => (v.id === videoId ? { ...v, protected: newState } : v))
@@ -656,6 +861,9 @@ function VideosPage({ token }: VideosPageProps) {
   };
 
   const handleOpenModal = (video: VideoData) => setModalVideo(video);
+
+  const handleOpenCacheDetail = (youtubeId: string, kind: 'metadata' | 'video') =>
+    setCacheDetailTarget({ youtubeId, kind });
 
   const swipeHandlers = useSwipeable({
     onSwipedLeft: () => {
@@ -688,15 +896,21 @@ function VideosPage({ token }: VideosPageProps) {
       { id: 'missing', value: missingFilter, onChange: withPageReset(setMissingFilter) },
       { id: 'watched', value: watchedFilter, onChange: withPageReset(setWatchedFilter) },
       { id: 'strm', value: strmFilter, onChange: withPageReset(setStrmFilter) },
+      { id: 'metadataCache', value: metadataCacheFilter, onChange: withPageReset(setMetadataCacheFilter) },
+      { id: 'cachedVideo', value: cachedVideoFilter, onChange: withPageReset(setCachedVideoFilter) },
       {
         id: 'channel',
         value: channelFilter,
         options: uniqueChannels,
         onChange: withPageReset(setChannelFilter),
       },
+      { id: 'showUntracked', value: showUntracked, onChange: withPageReset(setShowUntracked) },
+      // Pure display toggle - doesn't filter the dataset, so it doesn't reset
+      // the page like the other filters above.
+      { id: 'showFilePaths', value: showFilePaths, onChange: setShowFilePaths },
     ];
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dateFrom, dateTo, maxRatingFilter, protectedFilter, missingFilter, watchedFilter, strmFilter, channelFilter, uniqueChannels]);
+  }, [dateFrom, dateTo, maxRatingFilter, protectedFilter, missingFilter, watchedFilter, strmFilter, metadataCacheFilter, cachedVideoFilter, channelFilter, uniqueChannels, showUntracked, showFilePaths]);
 
   const sortConfig: SortConfig = useMemo(
     () => ({
@@ -719,6 +933,11 @@ function VideosPage({ token }: VideosPageProps) {
       <Typography variant={isMobile ? 'h6' : 'h5'} component="h2" gutterBottom align="center">
         Library ({totalVideos} total)
       </Typography>
+      {showUntracked && (
+        <Typography variant="caption" color="text.secondary" align="center" style={{ display: 'block' }}>
+          Showing untracked cache-only videos — search and date filters don&apos;t apply to them.
+        </Typography>
+      )}
     </div>
   );
 
@@ -770,10 +989,10 @@ function VideosPage({ token }: VideosPageProps) {
       return (
         <Grid container spacing={2}>
           {videos.map((video) => (
-            <Grid item xs={12} sm={6} md={4} lg={3} key={video.id}>
+            <Grid item xs={12} sm={6} md={4} lg={3} key={video.youtubeId}>
               <VideoCard
                 video={video}
-                selected={selection.isSelected(video.id)}
+                selected={selection.isSelected(video.youtubeId)}
                 enabledChannels={enabledChannels}
                 imageErrored={Boolean(imageErrors[video.youtubeId])}
                 deleteDisabled={deleteLoading}
@@ -783,6 +1002,9 @@ function VideosPage({ token }: VideosPageProps) {
                 onDeleteSingle={handleDeleteSingleVideo}
                 onImageError={handleImageError}
                 onAddChannel={handleAddChannel}
+                onOpenCacheDetail={handleOpenCacheDetail}
+                onClearCachedRow={handleOpenClearCachedRow}
+                showFilePath={showFilePaths}
               />
             </Grid>
           ))}
@@ -801,6 +1023,7 @@ function VideosPage({ token }: VideosPageProps) {
           onToggleProtection={handleToggleProtection}
           onImageError={handleImageError}
           onAddChannel={handleAddChannel}
+          showFilePath={showFilePaths}
         />
       );
     }
@@ -822,6 +1045,9 @@ function VideosPage({ token }: VideosPageProps) {
         onStrmChipClick={handleStrmChipClick}
         onImageError={handleImageError}
         onAddChannel={handleAddChannel}
+        onOpenCacheDetail={handleOpenCacheDetail}
+        onClearCachedRow={handleOpenClearCachedRow}
+        showFilePaths={showFilePaths}
       />
     );
   };
@@ -906,6 +1132,51 @@ function VideosPage({ token }: VideosPageProps) {
         onApply={(rating) => handleApplyRating(rating, selection.selectedIds)}
         selectedCount={selection.count}
       />
+
+      <ClearCachedMetadataDialog
+        open={clearMetadataCacheDialogOpen}
+        onClose={() => setClearMetadataCacheDialogOpen(false)}
+        onConfirm={handleClearMetadataCacheConfirm}
+        videoCount={clearMetadataCacheCounts.eligible}
+        skippedCount={clearMetadataCacheCounts.skipped}
+      />
+
+      <ClearCachedVideoDialog
+        open={clearCachedVideoDialogOpen}
+        onClose={() => setClearCachedVideoDialogOpen(false)}
+        onConfirm={handleClearCachedVideoConfirm}
+        videoCount={clearCachedVideoCounts.eligible}
+        skippedCount={clearCachedVideoCounts.skipped}
+      />
+
+      {cacheDetailTarget && (() => {
+        const targetVideo = videos.find((v) => v.youtubeId === cacheDetailTarget.youtubeId);
+        if (!targetVideo) return null;
+        return (
+          <CacheDetailDialog
+            open
+            onClose={() => setCacheDetailTarget(null)}
+            video={targetVideo}
+            kind={cacheDetailTarget.kind}
+            token={token}
+            onClear={handleClearSingleCacheDetail}
+            clearing={clearingCacheDetail}
+            onRefreshed={refetch}
+          />
+        );
+      })()}
+
+      {clearCachedRowTarget && (
+        <ClearCachedRowDialog
+          open
+          onClose={() => setClearCachedRowTarget(null)}
+          onConfirm={handleClearCachedRowConfirm}
+          title={clearCachedRowTarget.youTubeVideoName}
+          hasCachedMetadata={Boolean(clearCachedRowTarget.hasCachedMetadata)}
+          hasCachedVideo={Boolean(clearCachedRowTarget.hasCachedVideo)}
+          clearing={clearingCachedRow}
+        />
+      )}
 
       <DownloadSettingsDialog
         open={downloadDialogOpen}

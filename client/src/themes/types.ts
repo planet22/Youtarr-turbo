@@ -1,6 +1,15 @@
 import React from 'react';
 
-export type ThemeMode = 'playful' | 'linear' | 'flat';
+export type ThemeMode =
+  | 'playful'
+  | 'linear'
+  | 'flat'
+  | 'netflix'
+  | 'youtube'
+  | 'hulu'
+  | 'disneyPlus'
+  | 'hboMax'
+  | 'appleTv';
 export type ThemeBreakpoint = 'mobile' | 'desktop';
 export type HeaderFrameMode = 'flush' | 'inset';
 export type NavPlacement = 'sidebar' | 'top';
@@ -34,6 +43,7 @@ export interface ThemeLayoutPolicy {
   headerMenuBorder: string;
   headerMenuBackground: string;
   headerMenuShadow: string;
+  headerMenuBackdropFilter: string;
   shellBackground: string;
   mainPadding: string;
   mainMarginTop: string;

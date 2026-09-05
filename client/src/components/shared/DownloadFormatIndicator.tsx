@@ -2,6 +2,7 @@ import React from 'react';
 import { Box, Chip, Tooltip } from '../ui';
 import { MovieOutlined as VideoFormatIcon, AudioIcon as AudioFormatIcon, Wifi as StrmIcon } from '../../lib/icons';
 import { formatFileSize } from '../../utils/formatters';
+import { getDisplayPath } from '../../utils/paths';
 import { resolutionTierLabel } from '../../utils/videoResolution';
 import { SHARED_THEMED_CHIP_SMALL_STYLE, SHARED_COMPACT_CHIP_OVERRIDES } from './chipStyles';
 
@@ -22,20 +23,6 @@ interface DownloadFormatIndicatorProps {
   // VideosTable.tsx / VideoTableView.tsx for the confirm-dialog wiring.
   onVideoChipClick?: () => void;
 }
-
-// Strip internal Docker paths from display
-const stripInternalPath = (path: string): string => {
-  const internalPrefixes = ['/usr/src/app/data/'];
-  for (const prefix of internalPrefixes) {
-    if (path.startsWith(prefix)) {
-      return path.slice(prefix.length);
-    }
-  }
-  return path;
-};
-
-const getDisplayPath = (path: string): string =>
-  stripInternalPath(path).replace(/\\/g, '/').replace(/\/+$/, '');
 
 const DownloadFormatIndicator: React.FC<DownloadFormatIndicatorProps> = ({
   filePath,

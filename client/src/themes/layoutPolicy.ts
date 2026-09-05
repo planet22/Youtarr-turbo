@@ -30,7 +30,8 @@ type CssVarName =
   | '--layout-header-menu-radius'
   | '--layout-header-menu-border'
   | '--layout-header-menu-background'
-  | '--layout-header-menu-shadow';
+  | '--layout-header-menu-shadow'
+  | '--layout-header-menu-backdrop-filter';
 
 export type ThemeLayoutCssVars = Record<CssVarName, string>;
 
@@ -60,6 +61,7 @@ const DESKTOP_FALLBACK_LAYOUT_POLICY: ThemeLayoutPolicy = {
   headerMenuBorder: '2px solid var(--border-strong)',
   headerMenuBackground: 'var(--card)',
   headerMenuShadow: 'none',
+  headerMenuBackdropFilter: 'none',
   shellBackground: 'linear-gradient(180deg, var(--card) 0%, var(--background) 55%, var(--background) 100%)',
   mainPadding: 'calc(80px + var(--shell-gap)) calc(var(--shell-gap) / 2) calc(var(--shell-gap) / 2) calc(var(--nav-width) + var(--shell-gap))',
   mainMarginTop: '0px',
@@ -134,6 +136,7 @@ export function getThemeLayoutCssVars(policy: ThemeLayoutPolicy): ThemeLayoutCss
     '--layout-header-menu-border': policy.headerMenuBorder,
     '--layout-header-menu-background': policy.headerMenuBackground,
     '--layout-header-menu-shadow': policy.headerMenuShadow,
+    '--layout-header-menu-backdrop-filter': policy.headerMenuBackdropFilter,
   };
 }
 

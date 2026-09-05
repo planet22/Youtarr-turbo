@@ -28,15 +28,35 @@ function VideoPlayer({ video, token, onDownloadClick, isMobile }: VideoPlayerPro
   const [streamError, setStreamError] = useState(false);
   const [infoTooltipOpen, setInfoTooltipOpen] = useState(false);
   const [streamAspectRatio, setStreamAspectRatio] = useState<number | null>(null);
+  // video.thumbnailUrl is always the LOCAL /images/videothumb-*.jpg path
+  // (see videoDataToModalData) - that file only exists once something has
+  // actually written it (a real download, channel sync, STRM
+  // materialization), so a video that's merely been previewed/cache-warmed
+  // (never downloaded) 404s there. Same local-then-YouTube-CDN fallback as
+  // DownloadManager/VideoThumbnail.tsx, so the popup shows a real thumbnail
+  // instead of the browser's broken-image icon.
+  const [thumbnailSrc, setThumbnailSrc] = useState(video.thumbnailUrl);
 
   useEffect(() => {
     setPlaybackStarted(false);
     setStreamError(false);
     setInfoTooltipOpen(false);
     setStreamAspectRatio(null);
-  }, [video.youtubeId]);
+    setThumbnailSrc(video.thumbnailUrl);
+  }, [video.youtubeId, video.thumbnailUrl]);
 
-  const canStream = video.isDownloaded && video.status !== 'missing';
+  const handleThumbnailError = useCallback(() => {
+    const cdnThumbnailUrl = `https://i.ytimg.com/vi/${video.youtubeId}/hqdefault.jpg`;
+    if (thumbnailSrc !== cdnThumbnailUrl) {
+      setThumbnailSrc(cdnThumbnailUrl);
+    }
+  }, [thumbnailSrc, video.youtubeId]);
+
+  // 'cached' (an untracked row whose hls-buffer cache file exists - see
+  // videoDataToModalData) is streamable the same way a real download is:
+  // /api/videos/:id/stream falls back to that cache file server-side when
+  // there's no Videos table row at all.
+  const canStream = (video.isDownloaded || video.status === 'cached') && video.status !== 'missing';
   const playbackType: 'video' | 'audio' =
     !video.filePath && video.audioFilePath ? 'audio' : 'video';
   // STRM-only library items store a .strm text file. Serve those through
@@ -146,8 +166,9 @@ function VideoPlayer({ video, token, onDownloadClick, isMobile }: VideoPlayerPro
       {!isPlayingVideo && (
         <Box
           component="img"
-          src={video.thumbnailUrl}
+          src={thumbnailSrc}
           alt={video.title}
+          onError={handleThumbnailError}
           style={{
             position: 'absolute',
             inset: 0,

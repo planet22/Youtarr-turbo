@@ -79,6 +79,44 @@ function createVideoDetailRoutes({ verifyToken, videoMetadataModule, mediaServer
 
   /**
    * @swagger
+   * /api/videos/{youtubeId}/metadata/refresh:
+   *   post:
+   *     summary: Force-refresh extended video metadata
+   *     description: Re-fetches metadata via yt-dlp regardless of any cached .info.json or youtube_metadata_cache DB row, and overwrites both with the result.
+   *     tags: [Videos]
+   *     parameters:
+   *       - in: path
+   *         name: youtubeId
+   *         required: true
+   *         schema:
+   *           type: string
+   *         description: YouTube video ID
+   *     responses:
+   *       200:
+   *         description: Freshly-fetched video metadata
+   *       400:
+   *         description: Invalid YouTube ID
+   *       500:
+   *         description: Internal server error
+   */
+  router.post('/api/videos/:youtubeId/metadata/refresh', metadataLimiter, verifyToken, async (req, res) => {
+    const { youtubeId } = req.params;
+
+    if (!youtubeId || !/^[A-Za-z0-9_-]{6,20}$/.test(youtubeId)) {
+      return res.status(400).json({ error: 'Invalid YouTube ID' });
+    }
+
+    try {
+      const metadata = await videoMetadataModule.getVideoMetadata(youtubeId, { forceRefresh: true });
+      res.json(metadata);
+    } catch (err) {
+      req.log.error({ err, youtubeId }, 'Failed to refresh video metadata');
+      res.status(500).json({ error: 'Failed to refresh video metadata' });
+    }
+  });
+
+  /**
+   * @swagger
    * /api/videos/{youtubeId}/watch-status:
    *   get:
    *     summary: Get per-media-server watch status for a video

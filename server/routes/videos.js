@@ -140,6 +140,26 @@ module.exports = function createVideoRoutes({ verifyToken, videosModule, downloa
    *           enum: [off, only, exclude]
    *           default: off
    *         description: Tri-state filter on STRM (stream shortcut) videos
+   *       - in: query
+   *         name: metadataCacheFilter
+   *         schema:
+   *           type: string
+   *           enum: [off, only, exclude]
+   *           default: off
+   *         description: Tri-state filter on whether a youtube_metadata_cache row exists for the video
+   *       - in: query
+   *         name: cachedVideoFilter
+   *         schema:
+   *           type: string
+   *           enum: [off, only, exclude]
+   *           default: off
+   *         description: Tri-state filter on the opportunistic STRM cache-on-play materialization (Videos.cached_at)
+   *       - in: query
+   *         name: showUntracked
+   *         schema:
+   *           type: boolean
+   *           default: false
+   *         description: Also include cache-only rows with no Videos row (played-but-undownloaded, or disowned NZB grabs) as a trailing block after the tracked results. search/dateFrom/dateTo/channelFilter do not apply to these rows.
    *     responses:
    *       200:
    *         description: Paginated list of videos
@@ -150,7 +170,7 @@ module.exports = function createVideoRoutes({ verifyToken, videosModule, downloa
     req.log.info('Getting videos');
 
     try {
-      const { page, limit, search, dateFrom, dateTo, sortBy, sortOrder, channelFilter, protectedFilter, missingFilter, watchedFilter, strmFilter } = req.query;
+      const { page, limit, search, dateFrom, dateTo, sortBy, sortOrder, channelFilter, protectedFilter, missingFilter, watchedFilter, strmFilter, metadataCacheFilter, cachedVideoFilter, showUntracked } = req.query;
 
       const parseFilterMode = (value) => (value === 'only' || value === 'exclude' ? value : 'off');
 
@@ -167,6 +187,9 @@ module.exports = function createVideoRoutes({ verifyToken, videosModule, downloa
         missingFilter: parseFilterMode(missingFilter),
         watchedFilter: parseFilterMode(watchedFilter),
         strmFilter: parseFilterMode(strmFilter),
+        metadataCacheFilter: parseFilterMode(metadataCacheFilter),
+        cachedVideoFilter: parseFilterMode(cachedVideoFilter),
+        showUntracked: showUntracked === 'true',
       };
 
       const result = await videosModule.getVideosPaginated(options);

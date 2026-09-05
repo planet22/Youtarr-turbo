@@ -35,6 +35,29 @@ const { formatBytes } = require('../modules/notifications/utils');
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
 const ALLOWED_SEARCH_COUNTS = [10, 25, 50, 100];
 
+/**
+ * nzb.debugLogging: this file's own per-request diagnostic lines (search/
+ * caps/addfile/queue/history requests, cache hit/miss via videoSearchModule,
+ * local-filter before/after counts, remapped Sonarr/Radarr paths, etc.) are
+ * genuinely too high-volume for logger.info by default, but gating them
+ * behind the global Log Level=debug setting also turns on every OTHER
+ * module's debug output (most visibly databaseHealthModule's ~15s health
+ * check line) - unrelated noise with no way to see just this integration's
+ * own traffic. This flag decouples the two (same pattern as ytstream.js's
+ * streamDebug): off (default), behaves exactly like logger.debug always
+ * has; on, these specific lines print at info instead, regardless of the
+ * global Log Level. Read live per call, so it takes effect immediately, no
+ * restart.
+ */
+function nzbDebug(obj, msg) {
+  // Supports both call shapes used below: nzbDebug(obj, msg) and the
+  // message-only nzbDebug(msg) - passing a stray `undefined` second arg to
+  // the plain-string calls would otherwise reach the real pino logger.
+  const args = msg === undefined ? [obj] : [obj, msg];
+  const level = configModule.getConfig().nzb?.debugLogging === true ? 'info' : 'debug';
+  logger[level](...args);
+}
+
 function nearestAllowedCount(requested) {
   const n = Number.parseInt(requested, 10);
   if (!Number.isFinite(n) || n <= 0) return 25;
@@ -300,10 +323,19 @@ async function handleHistoryDeleteRequest(jobIds) {
  * real episode/movie. When a category enables this, results are dropped
  * unless the video's own title actually contains the search terms and,
  * for a tvsearch where Sonarr supplied season and/or episode, a
- * recognizable SxxExx-style code. Episode isn't always supplied (Sonarr
- * does season-pack searches with only a season), so the code check only
- * requires whichever of season/episode is actually known - never invents a
- * requirement for the missing half.
+ * recognizable SxxExx-style code.
+ *
+ * Sonarr often searches with only a season known (no specific episode yet -
+ * "any missing episode in this season"). A YouTube upload is always a single
+ * video, never a real multi-episode archive, so a title that only mentions
+ * the season with no episode number (e.g. a "Series 4 Advert"/trailer/promo
+ * upload) is never a genuine episode - but is exactly the shape Sonarr's own
+ * release parser reads as a season pack (season number present, episode
+ * number absent), so it grabs it expecting an archive to extract, gets a
+ * single non-matching video, and the cycle repeats. So a season-only search
+ * still requires an actual SxxEyy-shaped marker - any episode number, since
+ * Sonarr itself picks which specific one it wants from the candidates
+ * returned - never just a bare season mention.
  */
 function normalizeForMatch(text) {
   return String(text || '')
@@ -335,12 +367,14 @@ function titleMatchesEpisodeCode(title, season, ep) {
     // (e.g. an air date).
     patterns.push(new RegExp(`\\bs(?:eason|eries)?\\.?\\s*0*${season}\\D{0,20}?e(?:p(?:isode)?)?\\.?\\s*0*${ep}\\b`, 'i'));
   } else if (season != null) {
-    // No trailing \b here: a real title like "Celebrity Juice S22E01" has no
-    // word boundary between the season digits and the following "E" (both
-    // are word characters), so a \b would silently fail to match every
-    // properly-coded title. A negative lookahead against another digit
-    // still keeps "S22" from matching inside "S220".
-    patterns.push(new RegExp(`\\bs(?:eason|eries)?\\.?\\s*0*${season}(?!\\d)`, 'i'));
+    // Season known, episode not yet (see this function's doc comment above)
+    // - require SOME episode number alongside the season, not just a bare
+    // season mention. Same three shapes as the season+episode branch above,
+    // but with the episode digits left as a wildcard (\d+) since we don't
+    // know which specific episode(s) Sonarr is after yet.
+    patterns.push(new RegExp(`\\bs0*${season}\\s*[.\\-]?\\s*e0*\\d+\\b`, 'i'));
+    patterns.push(new RegExp(`\\b0*${season}\\s*x\\s*0*\\d+\\b`, 'i'));
+    patterns.push(new RegExp(`\\bs(?:eason|eries)?\\.?\\s*0*${season}\\D{0,20}?e(?:p(?:isode)?)?\\.?\\s*0*\\d+\\b`, 'i'));
   } else {
     patterns.push(new RegExp(`\\be(?:p(?:isode)?)?\\.?\\s*0*${ep}\\b`, 'i'));
     // "#5"-style numbering - common on YouTube for numbered series that
@@ -366,13 +400,13 @@ module.exports = function createNzbRoutes() {
   // ---- Newznab ----
 
   router.get('/nzb/newznab', async (req, res) => {
-    logger.debug({ query: req.query }, 'nzb: newznab request');
+    nzbDebug({ query: req.query }, 'nzb: newznab request');
     const cfg = configModule.getConfig();
     const categories = cfg.nzb?.categories || [];
     const t = String(req.query.t || '').toLowerCase();
 
     if (t === 'caps') {
-      logger.debug('nzb: caps request');
+      nzbDebug('nzb: caps request');
       res.type('application/xml').send(nzbFeedModule.buildCapsXml(categories));
       return;
     }
@@ -450,7 +484,7 @@ module.exports = function createNzbRoutes() {
             const seasonStr = season !== null ? 'S' + String(season).padStart(2, '0') : '';
             const epStr = ep !== null ? 'E' + String(ep).padStart(2, '0') : '';
             newquery = `${query} ${seasonStr}${epStr}`;
-            logger.debug({ query, season, ep , newquery}, 'nzb: tvsearch with episode mode - adjusted query');
+            nzbDebug({ query, season, ep , newquery}, 'nzb: tvsearch with episode mode - adjusted query');
           }
 
           // Carry Sonarr/Radarr's real season+episode through to the grab so
@@ -464,7 +498,7 @@ module.exports = function createNzbRoutes() {
           }
         }
 
-        let results = await videoSearchModule.searchVideos(newquery, count);
+        let results = await videoSearchModule.searchVideos(newquery, count, { origin: 'nzb' });
 
         if (category.additionalLocalFilter) {
           const beforeCount = results.length;
@@ -485,7 +519,7 @@ module.exports = function createNzbRoutes() {
           );
         }
 
-        logger.debug({ results }, 'nzb: search complete');
+        nzbDebug({ results }, 'nzb: search complete');
 
         res.type('application/xml').send(nzbFeedModule.buildSearchXml(results, responseOpts));
       } catch (err) {
@@ -527,19 +561,19 @@ module.exports = function createNzbRoutes() {
   // ---- SABnzbd ----
 
   router.all('/nzb/sab/api', upload.any(), async (req, res) => {
-    logger.debug({ method: req.method, query: req.query, params: req.params, body: req.body }, 'nzb/sab/api request');
+    nzbDebug({ method: req.method, query: req.query, params: req.params, body: req.body }, 'nzb/sab/api request');
     const mode = String(req.query.mode || '').toLowerCase();
     const cfg = configModule.getConfig();
     const categories = cfg.nzb?.categories || [];
 
     if (mode === 'version') {
-      logger.debug('nzb: version request');
+      nzbDebug('nzb: version request');
       res.json({ version: '1.0.0' });
       return;
     }
 
     if (mode === 'get_config') {
-      logger.debug('nzb: get_config request');
+      nzbDebug('nzb: get_config request');
       // Field names/types match iplayarr's SabNZBDConfigCategoryResponse
       // exactly, including the mandatory '*' catch-all category Sonarr/
       // Radarr expect as the first entry.
@@ -626,7 +660,7 @@ module.exports = function createNzbRoutes() {
     }
 
     if (mode === 'queue') {
-      logger.debug('nzb: queue request');
+      nzbDebug('nzb: queue request');
       const jobs = jobModule.getRunningJobs().filter(
         (j) => j.data?.nzb && (j.status === 'Pending' || j.status === 'In Progress')
       );
@@ -646,7 +680,7 @@ module.exports = function createNzbRoutes() {
         const totalBytes = progress?.totalBytes || 0;
         const downloadedBytes = progress?.downloadedBytes || 0;
         const percent = progress?.percent ? Math.trunc(progress.percent) : 0;
-        logger.debug({ jobId: j.id, isCurrent, totalBytes, downloadedBytes, percent }, 'nzb: queue entry');
+        nzbDebug({ jobId: j.id, isCurrent, totalBytes, downloadedBytes, percent }, 'nzb: queue entry');
         return {
           status: j.status === 'In Progress' ? 'Downloading' : 'Queued',
           index,
@@ -667,7 +701,7 @@ module.exports = function createNzbRoutes() {
         };
       });
 
-      logger.debug({ slots }, 'nzb: queue response');
+      nzbDebug({ slots }, 'nzb: queue response');
 
       res.json({
         queue: {
@@ -718,13 +752,13 @@ module.exports = function createNzbRoutes() {
     }
 
     if (mode === 'history') {
-      logger.debug('nzb: history request');
+      nzbDebug('nzb: history request');
       const jobs = jobModule.getRunningJobs().filter(
         (j) => j.data?.nzb && !j.data.nzb.historyRemoved &&
           ['Complete', 'Complete with Warnings', 'Error', 'Terminated'].includes(j.status)
       );
 
-      logger.debug({ jobs: jobs.map((j) => ({ jobId: j.id, status: j.status })) }, 'nzb: history entries');
+      nzbDebug({ jobs: jobs.map((j) => ({ jobId: j.id, status: j.status })) }, 'nzb: history entries');
       
       // Field names/types match iplayarr's SabNZBDHistoryResponse/
       // SABNZBDHistoryEntryResponse exactly. storage/path is either a staged
@@ -746,14 +780,14 @@ module.exports = function createNzbRoutes() {
         if (!failed) {
           if (strategy === 'untracked') {
             filePath = videoRow?.filePath || null;
-            logger.debug({ jobId: j.id, filePath }, 'nzb: history entry - untracked strategy');
+            nzbDebug({ jobId: j.id, filePath }, 'nzb: history entry - untracked strategy');
           } else {
             filePath = stageForSonarrImport(j, j.data.nzb.categoryName || 'youtarr', videoRow);
           }
         }
-        logger.debug({ jobId: j.id, failed, filePath, bytes, strategy }, 'nzb: history entry');
+        nzbDebug({ jobId: j.id, failed, filePath, bytes, strategy }, 'nzb: history entry');
         const reportedPath = remapPathForSonarr(filePath);
-        logger.debug({ jobId: j.id, reportedPath }, 'nzb: history entry remapped path for Sonarr/Radarr');
+        nzbDebug({ jobId: j.id, reportedPath }, 'nzb: history entry remapped path for Sonarr/Radarr');
         const nowSeconds = Math.floor(Date.now() / 1000);
         return {
           action_line: '',
@@ -809,3 +843,9 @@ module.exports = function createNzbRoutes() {
 
   return router;
 };
+
+// Exposed on the factory function (still callable exactly as before) purely
+// so the local-filter regex logic can be unit tested directly, without
+// spinning up an Express app/request - see __tests__/nzb.test.js.
+module.exports.titleMatchesEpisodeCode = titleMatchesEpisodeCode;
+module.exports.applyLocalTitleFilter = applyLocalTitleFilter;

@@ -78,7 +78,7 @@ export const PlexPlaylistScopeControl: React.FC<PlexPlaylistScopeControlProps> =
           name="plexPlaylistToken"
           value={tokenValue}
           onChange={handleTokenChange}
-          helperText="Paste the X-Plex-Token for the account that should own Youtarr playlists."
+          helperText="Paste the X-Plex-Token for the account that should own Youtarr-Turbo playlists."
           inputProps={{ 'data-testid': 'plex-playlist-token-input' }}
         />
       )}
@@ -87,20 +87,19 @@ export const PlexPlaylistScopeControl: React.FC<PlexPlaylistScopeControlProps> =
         <Alert severity="warning" data-testid="plex-unclaimed-hint">
           <AlertTitle>This Plex server appears to be unclaimed</AlertTitle>
           <Typography variant="body2">
-            On an unclaimed server, Plex Web browses without a token, so playlists
-            created under your admin account will not be visible. Choose{' '}
-            <b>Unclaimed server (anonymous LAN access)</b> above so Youtarr playlists
-            appear in your Plex Web session.
+            On an unclaimed server, Plex Web browses without a token, so playlists created under
+            an admin account are not visible. Select{' '}
+            <b>Unclaimed server (anonymous LAN access)</b> for Youtarr-Turbo playlists to appear in
+            Plex Web.
           </Typography>
         </Alert>
       )}
 
       <Alert severity="info">
         <Typography variant="body2">
-          On a claimed Plex server, Youtarr playlists are created under your admin
-          account and are visible to you. To let other Plex users see a playlist,
-          share it from Plex Web (open the playlist &rarr; menu &rarr; Share). Youtarr
-          cannot grant per-user access automatically.
+          On a claimed Plex server, Youtarr-Turbo playlists are created under the admin account.
+          To share a playlist with other Plex users, use Plex Web (open the playlist &rarr;
+          menu &rarr; Share). Youtarr-Turbo does not grant per-user access automatically.
         </Typography>
       </Alert>
     </Box>

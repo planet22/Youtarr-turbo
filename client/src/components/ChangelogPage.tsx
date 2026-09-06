@@ -35,7 +35,7 @@ function ChangelogPage({ updateAvailable = false, serverVersion }: ChangelogPage
           data-testid="changelog-update-available"
         >
           <Typography variant="body2">
-            You are running an older version of Youtarr.
+            You are running an older version of Youtarr-Turbo.
             {serverVersion ? (
               <>
                 {' '}

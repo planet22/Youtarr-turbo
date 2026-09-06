@@ -102,7 +102,7 @@ export const FullChannelCard: Story = {
             YT
           </div>
         }
-        title="Youtarr Official"
+        title="Youtarr-Turbo Official"
         subheader="youtube.com/@youtarr"
         action={
           <button className="text-xs text-muted-foreground hover:text-foreground transition-colors px-2 py-1">

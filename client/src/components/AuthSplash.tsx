@@ -97,7 +97,7 @@ export const AuthSplash: React.FC<AuthSplashProps> = ({ setToken }) => {
           <div style={{ textAlign: 'center', marginBottom: 24 }}>
             <div
               style={AUTH_TITLE_STYLE}
-              aria-label="Youtarr brand"
+              aria-label="Youtarr-Turbo brand"
             >
               <div
                 style={{
@@ -112,7 +112,7 @@ export const AuthSplash: React.FC<AuthSplashProps> = ({ setToken }) => {
                 {showHeaderLogo && (
                   <img
                     src="/logo192.png"
-                    alt="Youtarr logo"
+                    alt="Youtarr-Turbo logo"
                     style={{
                       width: 52,
                       height: 52,
@@ -124,7 +124,7 @@ export const AuthSplash: React.FC<AuthSplashProps> = ({ setToken }) => {
                 {showHeaderWordmark ? (
                   <img
                     src={youtarrWordmark}
-                    alt="Youtarr"
+                    alt="Youtarr-Turbo"
                     style={{
                       height: 'calc(var(--auth-title-font-size) + 0.15rem)',
                       maxWidth: 'min(100%, 260px)',
@@ -134,7 +134,7 @@ export const AuthSplash: React.FC<AuthSplashProps> = ({ setToken }) => {
                   />
                 ) : showPlainTitle ? (
                   <Typography variant="h3" component="h1" style={AUTH_TITLE_STYLE}>
-                    Youtarr
+                    Youtarr-Turbo
                   </Typography>
                 ) : null}
               </div>
@@ -190,12 +190,12 @@ export const AuthSplash: React.FC<AuthSplashProps> = ({ setToken }) => {
                 </summary>
                 <div className="mt-2.5">
                   <Typography variant="body2" className="mb-2">
-                    If you have access to the Youtarr host, stop Youtarr, set{' '}
+                    If you have access to the Youtarr-Turbo host, stop Youtarr-Turbo, set{' '}
                     <code>AUTH_PRESET_USERNAME</code> and <code>AUTH_PRESET_PASSWORD</code> in your{' '}
-                    <code>.env</code> file, then restart Youtarr and log in with those credentials.
+                    <code>.env</code> file, then restart Youtarr-Turbo and log in with those credentials.
                   </Typography>
                   <Typography variant="body2">
-                    Advanced fallback: stop Youtarr, remove <code>username</code> and{' '}
+                    Advanced fallback: stop Youtarr-Turbo, remove <code>username</code> and{' '}
                     <code>passwordHash</code> from <code>config/config.json</code>, restart, then
                     complete setup again with the one-time setup token.
                   </Typography>
@@ -230,7 +230,7 @@ export const AuthSplash: React.FC<AuthSplashProps> = ({ setToken }) => {
             style={AUTH_FOOTER_STYLE}
             color="text.secondary"
           >
-            Youtarr v{packageJson.version}
+            Youtarr-Turbo v{packageJson.version}
           </Typography>
         </Paper>
       </div>

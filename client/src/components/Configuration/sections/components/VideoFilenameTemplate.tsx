@@ -27,9 +27,9 @@ interface VideoFilenameTemplateProps {
 
 const SEVERITY_TEXT: Record<'warn' | 'danger', string> = {
   warn:
-    "Long filename. With deep subfolders or non-ASCII channel names, the full path may approach Windows' 260-character limit, which would cause downloads to fail.",
+    "Long filename. Deep subfolders or non-ASCII channel names may push the full path past Windows' 260-character limit, causing downloads to fail.",
   danger:
-    "Filename is very long. Downloads are likely to fail on Windows and SMB-mounted NAS shares (260-char path limit). Pure CJK or emoji content can also exceed Linux/macOS' 255-byte per-filename limit.",
+    "Filename is very long. Downloads will likely fail on Windows and SMB-mounted NAS shares (260-char path limit). Pure CJK or emoji content can also exceed Linux/macOS' 255-byte per-filename limit.",
 };
 
 export const VideoFilenameTemplate: React.FC<VideoFilenameTemplateProps> = ({
@@ -74,7 +74,7 @@ export const VideoFilenameTemplate: React.FC<VideoFilenameTemplateProps> = ({
         Video Filename Template
       </Typography>
       <Typography variant="caption" color="text.secondary">
-        How yt-dlp names downloaded video files and per-video folders. Youtarr always appends{' '}
+        Controls how yt-dlp names downloaded video files and per-video folders. Youtarr-Turbo appends{' '}
         <span className="font-mono px-1 py-0.5 rounded text-xs bg-muted">
           [VIDEO_ID].EXT
         </span>{' '}
@@ -82,7 +82,7 @@ export const VideoFilenameTemplate: React.FC<VideoFilenameTemplateProps> = ({
         <span className="font-mono px-1 py-0.5 rounded text-xs bg-muted">
           - VIDEO_ID
         </span>{' '}
-        to folder names so it can re-find your videos on disk. Only applies to new downloads.{' '}
+        to folder names to re-find videos on disk. Applies to new downloads only.{' '}
         <Link
           href="https://github.com/yt-dlp/yt-dlp#output-template"
           target="_blank"
@@ -236,7 +236,7 @@ export const VideoFilenameTemplate: React.FC<VideoFilenameTemplateProps> = ({
           <span className="font-mono px-1 py-0.5 rounded text-xs bg-muted">
             .64B
           </span>{' '}
-          is not recommended. Larger values can push full paths past Windows{'’'} 260-character limit, especially with deep subfolders or non-ASCII channel names. Stick with{' '}
+          is not recommended. Larger values can push full paths past Windows{'’'} 260-character limit with deep subfolders or non-ASCII channel names. Use{' '}
           <span className="font-mono px-1 py-0.5 rounded text-xs bg-muted">
             %(title).64B
           </span>{' '}

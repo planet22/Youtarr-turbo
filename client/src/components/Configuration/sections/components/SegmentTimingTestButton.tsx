@@ -63,7 +63,7 @@ export const SegmentTimingTestButton: React.FC<SegmentTimingTestButtonProps> = (
           variant={enabled ? 'filled' : 'outlined'}
         />
         <InfoTooltip
-          text={`Runs a real short HLS encode of a deliberately non-30fps synthetic source through ${hwLabel}, using time-based forced keyframes instead of the default fixed-frame-count GOP, and measures whether the real produced segments land at ~4.000s. If they do, Youtarr switches ${hwLabel} to this more accurate method for every future stream automatically; if not (some hardware encoders mishandle it), ${hwLabel} keeps using the original method. Re-running the test can flip the result either way later (e.g. after a driver update).`}
+          text={`Runs a short HLS encode of a non-30fps synthetic source through ${hwLabel} using time-based forced keyframes, and measures whether segments land at ~4.000s. If they do, Youtarr-Turbo switches ${hwLabel} to this method for every future stream; if not, ${hwLabel} keeps the original fixed-frame-count method. Re-running can change the result (e.g. after a driver update).`}
           onMobileClick={onMobileTooltipClick}
         />
       </Box>
@@ -75,15 +75,15 @@ export const SegmentTimingTestButton: React.FC<SegmentTimingTestButtonProps> = (
       {result && result.hardwareMode === hardwareMode && !error && (
         <Alert severity={result.enabled ? 'success' : 'warning'} style={{ marginBottom: 8 }}>
           {result.enabled
-            ? `Verified - segments averaged ${result.averageSeconds?.toFixed(3)}s (max deviation ${result.maxDeviationSeconds?.toFixed(3)}s from the 4s target). ${hwLabel} will now use time-based forced keyframes for every stream.`
+            ? `Verified: segments averaged ${result.averageSeconds?.toFixed(3)}s (max deviation ${result.maxDeviationSeconds?.toFixed(3)}s from the 4s target). ${hwLabel} will use time-based forced keyframes for every stream.`
             : result.error
-              ? `Not verified - ${result.error}. ${hwLabel} will keep using the original fixed-frame-count GOP.`
-              : `Not verified - segments averaged ${result.averageSeconds?.toFixed(3)}s (max deviation ${result.maxDeviationSeconds?.toFixed(3)}s from the 4s target, too far off). ${hwLabel} will keep using the original fixed-frame-count GOP.`}
+              ? `Not verified: ${result.error}. ${hwLabel} keeps using the original fixed-frame-count GOP.`
+              : `Not verified: segments averaged ${result.averageSeconds?.toFixed(3)}s (max deviation ${result.maxDeviationSeconds?.toFixed(3)}s from the 4s target). ${hwLabel} keeps using the original fixed-frame-count GOP.`}
         </Alert>
       )}
 
       <Typography variant='caption' color='textSecondary' className='block mb-1'>
-        A one-time check per hardware encoder - safe to re-run any time (e.g. after a driver/ffmpeg update).
+        One-time check per hardware encoder. Safe to re-run after a driver/ffmpeg update.
       </Typography>
     </Box>
   );

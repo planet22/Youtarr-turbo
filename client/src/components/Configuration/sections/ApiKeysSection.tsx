@@ -187,8 +187,8 @@ const ApiKeysSection: React.FC<ApiKeysSectionProps> = ({ token, apiKeyRateLimit,
   return (
     <ConfigurationAccordion title="API Keys & External Access">
       <Typography variant="body2" color="secondary" className="mb-4">
-        API keys allow external tools like bookmarklets and mobile shortcuts to send individual videos to Youtarr.
-        <strong> Note:</strong> API keys currently support single video downloads only—playlists and channels require the web UI.
+        Lets external tools (bookmarklets, mobile shortcuts) send individual videos to Youtarr-Turbo.
+        <strong> Note:</strong> single video downloads only; playlists and channels require the web UI.
       </Typography>
 
       {/* Rate Limit Setting */}
@@ -333,7 +333,7 @@ const ApiKeysSection: React.FC<ApiKeysSectionProps> = ({ token, apiKeyRateLimit,
         <DialogTitle>✓ API Key Created</DialogTitle>
         <DialogContent>
           <Alert severity="warning" className="mb-6">
-            Save this key now - it will not be shown again!
+            Key shown once. Save it now.
           </Alert>
 
           <Typography variant="subtitle2" gutterBottom>
@@ -373,7 +373,7 @@ const ApiKeysSection: React.FC<ApiKeysSectionProps> = ({ token, apiKeyRateLimit,
                 cursor: 'grab',
               }}
             >
-              📥 Send to Youtarr
+              📥 Send to Youtarr-Turbo
             </a>
           </Box>
 

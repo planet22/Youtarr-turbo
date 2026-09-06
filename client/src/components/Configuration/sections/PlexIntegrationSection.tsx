@@ -121,24 +121,24 @@ export const PlexIntegrationSection: React.FC<PlexIntegrationSectionProps> = ({
         <Typography variant="body2">
           • Automatic library refresh after downloads
           <br />• Direct library selection from Plex server
-          <br />• Required for Youtarr-managed YouTube playlists to appear as native playlists in Plex
+          <br />• Required for Youtarr-Turbo-managed YouTube playlists to appear as native playlists in Plex
           <br />
-          If you don't use Plex, your videos will still download to your specified directory.
+          Without Plex, videos still download to the specified directory.
           <br />
-          You <b>must</b> select a library once connected for automatic refresh to work.
+          A library <b>must</b> be selected once connected for automatic refresh to work.
         </Typography>
       </Alert>
 
       {plexConnectionStatus === 'not_connected' && (
         <Alert severity="warning" className="mb-6">
-          Plex is currently unreachable. Verify your Plex server is running and
-          that the IP, port, and API key above are correct, then click "Test Connection".
+          Plex is unreachable. Verify the Plex server is running and that the IP, port,
+          and API key above are correct, then click "Test Connection".
         </Alert>
       )}
 
       {plexConnectionStatus === 'not_tested' && hasPlexServerConfigured && config.plexApiKey && (
         <Alert severity="info" className="mb-4">
-          Plex configuration has changed. Click "Test Connection" to verify your settings.
+          Plex configuration changed. Click "Test Connection" to verify.
         </Alert>
       )}
 
@@ -165,7 +165,7 @@ export const PlexIntegrationSection: React.FC<PlexIntegrationSectionProps> = ({
                   />
                 ) : (
                   <InfoTooltip
-                    text="The IP address of your Plex server. Use 'host.docker.internal' on Docker Desktop (Windows/macOS), or the machine's LAN IP (e.g., 192.168.x.x) when running Docker natively on Linux. You can also use your public IP for your Plex server."
+                    text="IP address of the Plex server. Use 'host.docker.internal' on Docker Desktop (Windows/macOS), the machine's LAN IP (e.g., 192.168.x.x) on Docker native Linux, or a public IP."
                     onMobileClick={onMobileTooltipClick}
                   />
                 )}
@@ -190,7 +190,7 @@ export const PlexIntegrationSection: React.FC<PlexIntegrationSectionProps> = ({
               <Box className="flex items-center">
                 Plex Port
                 <InfoTooltip
-                  text="The TCP port Plex listens on. Defaults to 32400. Update this if you have changed the port in Plex settings or use a reverse proxy mapping."
+                  text="TCP port Plex listens on. Default: 32400. Change only if the Plex port setting or a reverse proxy mapping differs."
                   onMobileClick={onMobileTooltipClick}
                 />
               </Box>
@@ -224,7 +224,7 @@ export const PlexIntegrationSection: React.FC<PlexIntegrationSectionProps> = ({
               text={
                 isPlatformManaged.plexUrl
                   ? 'HTTPS setting managed by platform'
-                  : 'Enable if your Plex server uses HTTPS (e.g., via reverse proxy with SSL/TLS)'
+                  : 'Enable if the Plex server uses HTTPS (e.g., via reverse proxy with SSL/TLS)'
               }
               onMobileClick={onMobileTooltipClick}
             />
@@ -258,7 +258,7 @@ export const PlexIntegrationSection: React.FC<PlexIntegrationSectionProps> = ({
                   Get Key
                 </Button>
                 <InfoTooltip
-                  text="Click 'Get Key' to automatically obtain your Plex API key by logging into Plex, or enter it manually."
+                  text="'Get Key' obtains the Plex API key by logging into Plex, or enter it manually."
                   onMobileClick={onMobileTooltipClick}
                 />
                 <Typography variant="caption" color="secondary">
@@ -298,7 +298,7 @@ export const PlexIntegrationSection: React.FC<PlexIntegrationSectionProps> = ({
               Select Default Library
             </Button>
             <InfoTooltip
-              text="Test Connection will verify and auto-save your Plex credentials if successful."
+              text="Test Connection verifies and auto-saves Plex credentials on success."
               onMobileClick={onMobileTooltipClick}
             />
           </Box>

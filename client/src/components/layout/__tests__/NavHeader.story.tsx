@@ -22,7 +22,7 @@ const meta: Meta<typeof NavHeader> = {
     ),
   ],
   args: {
-    appName: 'Youtarr',
+    appName: 'Youtarr-Turbo',
     layoutPolicy: resolveThemeLayoutPolicy(getThemeById('linear'), 'desktop'),
     navItems,
     token: null,
@@ -56,7 +56,7 @@ function makeStory(themeMode: 'playful' | 'linear' | 'flat', breakpoint: 'mobile
     },
     play: async ({ canvasElement }) => {
       const canvas = within(canvasElement);
-      const expectedLinkName = themeMode === 'playful' ? 'Youtarr' : /youtarr logo youtarr/i;
+      const expectedLinkName = themeMode === 'playful' ? 'Youtarr-Turbo' : /youtarr-turbo logo youtarr-turbo/i;
       await expect(canvas.getByRole('link', { name: expectedLinkName })).toBeInTheDocument();
 
       const header = canvasElement.querySelector('[data-nav-container]') as HTMLElement;

@@ -999,7 +999,7 @@ describe('VideosPage Component', () => {
       render(<VideosPage token={mockToken} />);
 
       await waitFor(() => {
-        expect(screen.getByText('Failed to load videos. Please try refreshing the page. If this error persists, the Youtarr backend may be down.')).toBeInTheDocument();
+        expect(screen.getByText('Failed to load videos. Please try refreshing the page. If this error persists, the Youtarr-Turbo backend may be down.')).toBeInTheDocument();
       });
 
       expect(screen.getByText(/Library/)).toBeInTheDocument();

@@ -30,7 +30,7 @@ describe('UpdateAvailableBanner', () => {
     render(<UpdateAvailableBanner show serverVersion="v1.70.0" />);
 
     const banner = screen.getByRole('status');
-    expect(banner).toHaveTextContent('Youtarr v1.70.0');
+    expect(banner).toHaveTextContent('Youtarr-Turbo v1.70.0');
     expect(banner).toHaveTextContent('Pull the latest image to update.');
   });
 
@@ -38,7 +38,7 @@ describe('UpdateAvailableBanner', () => {
     render(<UpdateAvailableBanner show />);
 
     expect(screen.getByRole('status')).toHaveTextContent(
-      'A new Youtarr version is available.'
+      'A new Youtarr-Turbo version is available.'
     );
   });
 
@@ -61,7 +61,7 @@ describe('UpdateAvailableBanner', () => {
 
     render(<UpdateAvailableBanner show serverVersion="v1.71.0" />);
 
-    expect(screen.getByRole('status')).toHaveTextContent('Youtarr v1.71.0');
+    expect(screen.getByRole('status')).toHaveTextContent('Youtarr-Turbo v1.71.0');
   });
 
   test('clicking close persists the current version and hides the banner', async () => {
@@ -106,6 +106,6 @@ describe('UpdateAvailableBanner', () => {
 
     rerender(<UpdateAvailableBanner show serverVersion="v1.71.0" />);
 
-    expect(screen.getByRole('status')).toHaveTextContent('Youtarr v1.71.0');
+    expect(screen.getByRole('status')).toHaveTextContent('Youtarr-Turbo v1.71.0');
   });
 });

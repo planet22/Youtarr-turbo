@@ -53,7 +53,29 @@ export const StrmSettingsSection: React.FC<Props> = ({
   const ytstreamSelected = strm.target === 'ytstream';
 
   return (
-    <ConfigurationCard title="STRM (stream-only)">
+    <ConfigurationCard
+      title="STRM (stream-only)"
+      headerAction={
+        ytstreamSelected ? (
+          <Box className="flex items-center gap-1">
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={ytstream.debugLogging ?? false}
+                  onChange={(e) => setYtstream({ debugLogging: e.target.checked })}
+                  disabled={mediaIsDownload}
+                />
+              }
+              label="Streaming debug logging"
+            />
+            <InfoTooltip
+              text="Shows this module's high-volume diagnostic logs (segment serves, playlist polls, buffer-fetch progress, etc.) at the normal log level, without setting global Log Level to Debug (which also shows noise from every other module, e.g. the periodic database health check). Applies regardless of Playback mode."
+              onMobileClick={onMobileTooltipClick}
+            />
+          </Box>
+        ) : undefined
+      }
+    >
       <Grid container spacing={2} className="mt-2">
         <Grid item xs={12}>
           <Typography variant="subtitle2" color="textSecondary" className="mb-1">
@@ -78,7 +100,7 @@ export const StrmSettingsSection: React.FC<Props> = ({
                 <MenuItem value="both">Both (download + STRM)</MenuItem>
               </Select>
               <InfoTooltip
-                text="STRM only writes .strm (+ NFO/thumb) so Jellyfin streams on demand. Download keeps current behavior."
+                text="STRM only: writes .strm (+ NFO/thumb) for on-demand Jellyfin streaming. Download: keeps current behavior."
                 onMobileClick={onMobileTooltipClick}
               />
             </Box>
@@ -98,11 +120,11 @@ export const StrmSettingsSection: React.FC<Props> = ({
                 className="flex-1 min-w-0"
                 disabled={mediaIsDownload}
               >
-                <MenuItem value="ytstream">Youtarr direct/ffmpeg (/api/ytstream/:id)</MenuItem>
+                <MenuItem value="ytstream">Youtarr-Turbo direct/ffmpeg (/api/ytstream/:id)</MenuItem>
                 <MenuItem value="youtube">YouTube watch URL</MenuItem>
               </Select>
               <InfoTooltip
-                text="Direct/ffmpeg resolves and streams via /api/ytstream when played (redirect or ffmpeg re-mux). YouTube puts the watch URL in the .strm (client must handle YouTube)."
+                text="Direct/ffmpeg: resolves and streams via /api/ytstream on play (redirect or ffmpeg re-mux). YouTube: puts the watch URL in the .strm; client must handle YouTube."
                 onMobileClick={onMobileTooltipClick}
               />
             </Box>
@@ -123,14 +145,14 @@ export const StrmSettingsSection: React.FC<Props> = ({
                 label="Serve already-downloaded files directly"
               />
               <InfoTooltip
-                text="Checked on every /api/ytstream request, before anything else - if this video is already fully downloaded (via STRM cache-on-play, or any genuine download), the real local file is served directly with real Range/seek support, instead of live-proxying or transcoding it all over again through yt-dlp/ffmpeg. Off by default; safe to enable any time - it never affects a video that's still STRM-only, and Jellyfin never needs to rescan for this to take effect since it's the same /api/ytstream URL either way, just answered faster once a real file exists."
+                text="Checked on every /api/ytstream request before anything else: if the video is already fully downloaded (via STRM cache-on-play or a genuine download), the local file is served directly with Range/seek support instead of live-proxying or re-transcoding via yt-dlp/ffmpeg. Off by default. Has no effect on STRM-only videos; no Jellyfin rescan needed since the URL is unchanged."
                 onMobileClick={onMobileTooltipClick}
               />
             </Box>
           </Grid>
         )}
 
-        <Grid item xs={12}>
+        <Grid item xs={12} className="mt-2">
           <Box className="flex items-center gap-1">
             <TextField
               fullWidth
@@ -210,7 +232,7 @@ export const StrmSettingsSection: React.FC<Props> = ({
                 label="Write Jellyfin StrmTool cache"
               />
               <InfoTooltip
-                text="Writes a .strmtool.json sidecar (duration, codecs, resolution) next to each .strm so the jinlin-teck/StrmTool Jellyfin plugin can skip probing the stream. Requires that plugin installed in Jellyfin; harmless without it."
+                text="Writes a .strmtool.json sidecar (duration, codecs, resolution) next to each .strm so the jinlin-teck/StrmTool Jellyfin plugin can skip probing the stream. Requires that plugin; harmless without it."
                 onMobileClick={onMobileTooltipClick}
               />
             </Box>
@@ -220,7 +242,7 @@ export const StrmSettingsSection: React.FC<Props> = ({
         {(config.mediaMode === 'strm' || config.mediaMode === 'both') && (
           <Grid item xs={12}>
             <Typography variant="body2" color="textSecondary">
-              STRM mode does not store full video files. Playback needs working
+              STRM mode does not store full video files. Playback requires working
               yt-dlp/cookies and a reachable proxy URL. SponsorBlock does not
               apply to pure streams.
             </Typography>

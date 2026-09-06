@@ -52,7 +52,7 @@ function NzbRecentQueriesTable({ queries }: NzbRecentQueriesTableProps) {
               <TableRow>
                 <TableCell colSpan={9}>
                   <Typography variant="body2" color="textSecondary" style={{ padding: '8px 0' }}>
-                    No NZB queries yet - once Sonarr, Radarr, or Prowlarr search Youtarr, they'll show up here.
+                    No NZB queries yet - once Sonarr, Radarr, or Prowlarr search Youtarr-Turbo, they'll show up here.
                   </Typography>
                 </TableCell>
               </TableRow>

@@ -2,7 +2,7 @@
 
 ## Supported Versions
 
-Youtarr provides security support for the latest stable release only:
+Youtarr-Turbo provides security support for the latest stable release only:
 
 | Version | Supported |
 | --- | --- |
@@ -10,7 +10,7 @@ Youtarr provides security support for the latest stable release only:
 | Older stable releases | No |
 | Development builds (`dev-latest`, `dev-rc.<sha>`, or unreleased branch builds) | No |
 
-Youtarr is supported as a Docker-based application. Direct host-side Node.js
+Youtarr-Turbo is supported as a Docker-based application. Direct host-side Node.js
 production deployments are unsupported.
 
 ## Reporting a Vulnerability
@@ -18,7 +18,7 @@ production deployments are unsupported.
 Please report security vulnerabilities using GitHub private vulnerability
 reporting for this repository:
 
-https://github.com/DialmasterOrg/Youtarr/security/advisories/new
+https://github.com/planet22/Youtarr-Turbo/security/advisories/new
 
 Do not report vulnerabilities through public GitHub issues, public pull
 requests, Discord, or other public channels. Public reports can expose users
@@ -28,7 +28,7 @@ before a fix is available.
 
 Include as much of the following as you can:
 
-- The Youtarr version, Docker tag, or image digest you tested.
+- The Youtarr-Turbo version, Docker tag, or image digest you tested.
 - Your install method, such as helper scripts, Docker Compose, external
   database, or platform-managed deployment.
 - Host OS, Docker version, browser, and database type/version when relevant.
@@ -50,17 +50,17 @@ Examples of in-scope issues include:
 - Path traversal, unintended file writes, or unintended file deletion.
 - Exposure of secrets through logs, API responses, config handling, Docker
   images, or build context.
-- Supply-chain or release-process issues that could affect published Youtarr
+- Supply-chain or release-process issues that could affect published Youtarr-Turbo
   artifacts.
 - Database migration or data exposure issues with a security impact.
 
 Examples of out-of-scope issues include:
 
-- Generic scanner output without a Youtarr-specific exploit path.
+- Generic scanner output without a Youtarr-Turbo-specific exploit path.
 - Issues requiring administrator or root access to the Docker host, unless they
   cross a meaningful trust boundary.
 - Vulnerabilities in upstream services such as YouTube, Plex, Discord, Docker,
-  MariaDB, or yt-dlp unless Youtarr makes them exploitable in a specific way.
+  MariaDB, or yt-dlp unless Youtarr-Turbo makes them exploitable in a specific way.
 - Social engineering, spam, physical attacks, or denial of service by simply
   overwhelming a self-hosted instance.
 

@@ -644,7 +644,7 @@ const DownloadProgress: React.FC<DownloadProgressProps> = ({
                 <Alert severity="warning">
                   <AlertTitle>Terminations Could Not Be Auto-Disabled</AlertTitle>
                   <Typography variant="body2" component="div" className="mb-1">
-                    YouTube reported the following channel{finalSummary.terminationFailures.length !== 1 ? 's' : ''} as terminated, but Youtarr could not disable scheduled downloads. Check the channel manually:
+                    YouTube reported the following channel{finalSummary.terminationFailures.length !== 1 ? 's' : ''} as terminated, but Youtarr-Turbo could not disable scheduled downloads. Check the channel manually:
                   </Typography>
                   <Box className="mt-1 pl-4">
                     {finalSummary.terminationFailures.map((channelId) => (

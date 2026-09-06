@@ -146,7 +146,7 @@ const AddPlaylistDialog: React.FC<AddPlaylistDialogProps> = ({
           {!anyConfigured && (
             <Alert severity="warning">
               <Typography variant="body2">
-                No media server is currently configured. Youtarr will still download videos and
+                No media server is currently configured. Youtarr-Turbo will still download videos and
                 generate an M3U playlist file, but no native media-server playlist will be created
                 until you configure Plex, Jellyfin, or Emby in Settings.
               </Typography>
@@ -188,7 +188,7 @@ const AddPlaylistDialog: React.FC<AddPlaylistDialogProps> = ({
 
           {preview && anyConfigured && (
             <Typography variant="caption" color="text.secondary">
-              On subscribe, Youtarr will sync this playlist to: {enabledServers.join(', ')}.
+              On subscribe, Youtarr-Turbo will sync this playlist to: {enabledServers.join(', ')}.
             </Typography>
           )}
 

@@ -57,32 +57,32 @@ describe('AuthSplash', () => {
     expect(screen.getByLabelText(/username/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/password/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /login/i })).toBeInTheDocument();
-    expect(screen.getByText(/Youtarr v\d+/)).toBeInTheDocument();
+    expect(screen.getByText(/Youtarr-Turbo v\d+/)).toBeInTheDocument();
   });
 
   test('renders plain title when neither logo nor wordmark are shown', () => {
     render(<AuthSplash setToken={setToken} />);
     // Plain text title appears as a heading
-    expect(screen.getByRole('heading', { name: 'Youtarr' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Youtarr-Turbo' })).toBeInTheDocument();
   });
 
   test('renders the wordmark image when showHeaderWordmark is true', () => {
     mockUseThemeEngine.mockReturnValue({ showHeaderLogo: true, showHeaderWordmark: true });
     render(<AuthSplash setToken={setToken} />);
     // Logo + wordmark images both render
-    expect(screen.getByAltText('Youtarr logo')).toBeInTheDocument();
-    expect(screen.getByAltText('Youtarr')).toBeInTheDocument();
+    expect(screen.getByAltText('Youtarr-Turbo logo')).toBeInTheDocument();
+    expect(screen.getByAltText('Youtarr-Turbo')).toBeInTheDocument();
     // No plain heading in this branch
-    expect(screen.queryByRole('heading', { name: 'Youtarr' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Youtarr-Turbo' })).not.toBeInTheDocument();
   });
 
   test('renders only the logo when showHeaderLogo is true and wordmark is false', () => {
     mockUseThemeEngine.mockReturnValue({ showHeaderLogo: true, showHeaderWordmark: false });
     render(<AuthSplash setToken={setToken} />);
-    expect(screen.getByAltText('Youtarr logo')).toBeInTheDocument();
-    expect(screen.queryByAltText('Youtarr')).not.toBeInTheDocument();
+    expect(screen.getByAltText('Youtarr-Turbo logo')).toBeInTheDocument();
+    expect(screen.queryByAltText('Youtarr-Turbo')).not.toBeInTheDocument();
     // Plain title is shown when wordmark is false
-    expect(screen.getByRole('heading', { name: 'Youtarr' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Youtarr-Turbo' })).toBeInTheDocument();
   });
 
   test('logs in successfully and navigates to /channels', async () => {

@@ -112,12 +112,12 @@ export const YtdlpUpdateSection: React.FC<YtdlpUpdateSectionProps> = ({
 
       {platformManaged ? (
         <Typography variant="caption" color="text.secondary">
-          yt-dlp is managed by {isElfhosted ? 'Elfhosted' : 'the platform'} and cannot be updated from Youtarr. Updates are applied automatically by the platform.
+          yt-dlp is managed by {isElfhosted ? 'Elfhosted' : 'the platform'}. Updates are applied automatically; Youtarr-Turbo cannot update it directly.
         </Typography>
       ) : (
         <>
           <Typography variant="caption" color="text.secondary">
-            yt-dlp is the video download engine. If downloads are failing, try updating yt-dlp to the latest version.
+            yt-dlp is the video download engine. Update it to the latest version if downloads fail.
           </Typography>
 
           <Box className="mt-4">
@@ -135,9 +135,9 @@ export const YtdlpUpdateSection: React.FC<YtdlpUpdateSectionProps> = ({
               </Select>
               <FormHelperText>
                 <span style={{ display: 'flex', alignItems: 'center' }}>
-                  Stable is the official tested release. Nightly gets extractor fixes days earlier but may occasionally break.
+                  Stable is the official tested release. Nightly includes extractor fixes earlier but may break occasionally.
                   <InfoTooltip
-                    text="Youtarr keeps yt-dlp on the selected channel: manual updates, automatic updates, and app restarts all install the latest release of this channel. Switching back to Stable downgrades to the latest stable release."
+                    text="Manual updates, automatic updates, and app restarts install the latest release on the selected channel. Switching to Stable downgrades to the latest stable release."
                     onMobileClick={onMobileTooltipClick}
                   />
                 </span>
@@ -157,7 +157,7 @@ export const YtdlpUpdateSection: React.FC<YtdlpUpdateSectionProps> = ({
               label="Automatically update yt-dlp daily (4:00 AM)"
             />
             <InfoTooltip
-              text="Checks for a new yt-dlp release on the selected update channel each night at 4:00 AM (server local time) and installs it automatically. If an update fails, Youtarr keeps running on the previous version."
+              text="Checks the selected update channel nightly at 4:00 AM (server local time) and installs updates automatically. Youtarr-Turbo keeps running on the previous version if an update fails."
               onMobileClick={onMobileTooltipClick}
             />
           </Box>
@@ -202,7 +202,7 @@ export const YtdlpUpdateSection: React.FC<YtdlpUpdateSectionProps> = ({
             <strong>{ytDlpVersionInfo?.latestVersion || 'latest version'}</strong>.
           </DialogContentText>
           <DialogContentText className="mt-4">
-            Newer versions are not guaranteed to be fully compatible with Youtarr. Updating is only recommended if you are experiencing issues with downloading videos.
+            Newer versions are not guaranteed to be fully compatible with Youtarr-Turbo. Recommended only if downloads are currently failing.
           </DialogContentText>
         </DialogContent>
         <DialogActions>

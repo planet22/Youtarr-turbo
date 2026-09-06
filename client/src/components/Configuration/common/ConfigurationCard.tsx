@@ -1,9 +1,10 @@
 import React from 'react';
-import { Card, CardContent, Typography } from '../../ui';
+import { Card, CardContent, Typography, Box } from '../../ui';
 
 interface ConfigurationCardProps {
   title: string;
   subtitle?: string;
+  headerAction?: React.ReactNode;
   children: React.ReactNode;
 }
 
@@ -13,6 +14,7 @@ interface ConfigurationCardProps {
 export const ConfigurationCard: React.FC<ConfigurationCardProps> = ({
   title,
   subtitle,
+  headerAction,
   children,
 }) => {
   return (
@@ -24,9 +26,18 @@ export const ConfigurationCard: React.FC<ConfigurationCardProps> = ({
       }}
     >
       <CardContent>
-        <Typography variant="h5" component="h2" gutterBottom>
-          {title}
-        </Typography>
+        {headerAction ? (
+          <Box className="flex items-start justify-between gap-2 flex-wrap">
+            <Typography variant="h5" component="h2" gutterBottom>
+              {title}
+            </Typography>
+            {headerAction}
+          </Box>
+        ) : (
+          <Typography variant="h5" component="h2" gutterBottom>
+            {title}
+          </Typography>
+        )}
         {subtitle && (
           <Typography variant="body2" color="textSecondary" gutterBottom>
             {subtitle}

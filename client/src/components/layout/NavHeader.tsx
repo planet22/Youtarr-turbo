@@ -192,7 +192,7 @@ export const NavHeader: React.FC<NavHeaderProps> = ({
               {showHeaderLogo && (
                 <img
                   src="/logo192.png"
-                  alt="Youtarr logo"
+                  alt="Youtarr-Turbo logo"
                   style={{
                     width: showLandscapeNavItems ? 28 : 32,
                     height: showLandscapeNavItems ? 28 : 32,

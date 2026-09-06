@@ -87,8 +87,8 @@ jobs:
           push: true
           platforms: linux/amd64,linux/arm64
           tags: |
-            ${{ vars.DOCKERHUB_USERNAME }}/youtarr:${{ steps.version.outputs.rc_tag }}
-            ${{ vars.DOCKERHUB_USERNAME }}/youtarr:dev-latest
+            ${{ vars.DOCKERHUB_USERNAME }}/youtarr-turbo:${{ steps.version.outputs.rc_tag }}
+            ${{ vars.DOCKERHUB_USERNAME }}/youtarr-turbo:dev-latest
           no-cache: true
 
       - name: Summary
@@ -96,16 +96,16 @@ jobs:
           echo "## 🚀 Release Candidate Published" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Docker Images" >> $GITHUB_STEP_SUMMARY
-          echo "- \`${{ vars.DOCKERHUB_USERNAME }}/youtarr:${{ steps.version.outputs.rc_tag }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- \`${{ vars.DOCKERHUB_USERNAME }}/youtarr:dev-latest\`" >> $GITHUB_STEP_SUMMARY
+          echo "- \`${{ vars.DOCKERHUB_USERNAME }}/youtarr-turbo:${{ steps.version.outputs.rc_tag }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- \`${{ vars.DOCKERHUB_USERNAME }}/youtarr-turbo:dev-latest\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Pull Commands" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
           echo "# Specific RC version" >> $GITHUB_STEP_SUMMARY
-          echo "docker pull ${{ vars.DOCKERHUB_USERNAME }}/youtarr:${{ steps.version.outputs.rc_tag }}" >> $GITHUB_STEP_SUMMARY
+          echo "docker pull ${{ vars.DOCKERHUB_USERNAME }}/youtarr-turbo:${{ steps.version.outputs.rc_tag }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "# Latest dev build" >> $GITHUB_STEP_SUMMARY
-          echo "docker pull ${{ vars.DOCKERHUB_USERNAME }}/youtarr:dev-latest" >> $GITHUB_STEP_SUMMARY
+          echo "docker pull ${{ vars.DOCKERHUB_USERNAME }}/youtarr-turbo:dev-latest" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "⚠️ **Note:** This is a release candidate for testing. Use \`latest\` for stable releases." >> $GITHUB_STEP_SUMMARY

@@ -35,7 +35,7 @@ describe('InitialSetup Component', () => {
     test('renders all required fields including the setup token field', () => {
       render(<InitialSetup onSetupComplete={mockOnSetupComplete} />);
 
-      expect(screen.getByText('Welcome to Youtarr Setup')).toBeInTheDocument();
+      expect(screen.getByText('Welcome to Youtarr-Turbo Setup')).toBeInTheDocument();
       expect(screen.getByLabelText(/setup token/i)).toBeInTheDocument();
       expect(screen.getByLabelText(/^username/i)).toBeInTheDocument();
       expect(screen.getByLabelText(/^password/i)).toBeInTheDocument();

@@ -229,16 +229,34 @@ export const NzbSettingsSection: React.FC<Props> = ({
   };
 
   return (
-    <ConfigurationCard title="Sonarr / Radarr / Prowlarr (NZB)">
+    <ConfigurationCard
+      title="Sonarr / Radarr / Prowlarr (NZB)"
+      headerAction={
+        <Box className="flex items-center gap-1">
+          <FormControlLabel
+            control={
+              <Switch
+                checked={nzb.debugLogging ?? false}
+                onChange={(e) => setNzb({ debugLogging: e.target.checked })}
+              />
+            }
+            label="NZB debug logging"
+          />
+          <InfoTooltip
+            text="Shows this integration's diagnostic logs (search/caps/addfile/queue/history requests, cache hit/miss, local-filter before/after counts, remapped Sonarr/Radarr paths) at the normal log level, without needing global Log Level set to Debug."
+            onMobileClick={onMobileTooltipClick}
+          />
+        </Box>
+      }
+    >
       <Grid container spacing={2} className="mt-2">
         <Grid item xs={12}>
           <Alert severity="info" className="mb-2">
             <Typography variant="body2">
-              Makes Youtarr act as a Newznab search indexer and SABnzbd-compatible
-              download client, so Sonarr, Radarr, or Prowlarr can search YouTube and
-              trigger real Youtarr downloads. See docs/NZB.md for setup steps and the
-              shared-volume requirement (Sonarr/Radarr need to read the same output
-              folder Youtarr writes to).
+              Makes Youtarr-Turbo act as a Newznab search indexer and SABnzbd-compatible
+              download client for Sonarr, Radarr, or Prowlarr to search YouTube and
+              trigger Youtarr-Turbo downloads. See docs/NZB.md for setup steps. Requires
+              Sonarr/Radarr to read the same output folder Youtarr-Turbo writes to.
             </Typography>
           </Alert>
         </Grid>
@@ -303,10 +321,10 @@ export const NzbSettingsSection: React.FC<Props> = ({
               value={nzb.remoteBasePath ?? ''}
               onChange={(e) => setNzb({ remoteBasePath: e.target.value === '' ? null : e.target.value })}
               placeholder="Leave blank if both containers see the same path"
-              helperText="Only needed if Sonarr/Radarr's container mounts this shared folder at a different path than Youtarr does - e.g. Youtarr sees it as /usr/src/app/data but Sonarr sees the same folder at /data (or at / with no prefix)."
+              helperText="Needed only if Sonarr/Radarr's container mounts this shared folder at a different path than Youtarr-Turbo does, e.g. Youtarr-Turbo sees /usr/src/app/data but Sonarr sees the same folder at /data (or / with no prefix)."
             />
             <InfoTooltip
-              text="Swaps Youtarr's own data-root prefix for this value in every path reported to Sonarr/Radarr (history storage/path), so their import can find the file at the location their own container actually sees."
+              text="Replaces Youtarr-Turbo's data-root prefix with this value in every path reported to Sonarr/Radarr (history storage/path), matching the location their container sees."
               onMobileClick={onMobileTooltipClick}
             />
           </Box>
@@ -324,28 +342,10 @@ export const NzbSettingsSection: React.FC<Props> = ({
                 setNzb({ searchCacheMinutes: Number.isFinite(parsed) ? Math.max(0, parsed) : 0 });
               }}
               inputProps={{ min: 0 }}
-              helperText="Reuses a search's results for repeat Sonarr/Radarr/Prowlarr queries instead of re-running yt-dlp. Set to 0 to disable caching."
+              helperText="Reuses search results for repeat Sonarr/Radarr/Prowlarr queries instead of re-running yt-dlp. 0 disables caching."
             />
             <InfoTooltip
-              text="Sonarr/Radarr re-run the same search on their own schedule, which can otherwise spawn a fresh yt-dlp process (or spend YouTube API quota) for a query Youtarr just answered. Keeping this short (a few minutes) still avoids that without noticeably delaying a genuinely new upload showing up."
-              onMobileClick={onMobileTooltipClick}
-            />
-          </Box>
-        </Grid>
-
-        <Grid item xs={12} md={6}>
-          <Box className="flex items-center gap-1">
-            <FormControlLabel
-              control={
-                <Switch
-                  checked={nzb.debugLogging ?? false}
-                  onChange={(e) => setNzb({ debugLogging: e.target.checked })}
-                />
-              }
-              label="NZB debug logging"
-            />
-            <InfoTooltip
-              text="Shows this integration's own diagnostic logs (search/caps/addfile/queue/history requests, cache hit/miss, local-filter before/after counts, remapped Sonarr/Radarr paths) at the normal log level, without needing global Log Level set to Debug - which would also show unrelated noise from every other module."
+              text="Avoids spawning a fresh yt-dlp process (or spending YouTube API quota) when Sonarr/Radarr re-run the same search on schedule. A few minutes is enough to avoid repeat searches without noticeably delaying new uploads."
               onMobileClick={onMobileTooltipClick}
             />
           </Box>
@@ -357,8 +357,8 @@ export const NzbSettingsSection: React.FC<Props> = ({
           </Typography>
           <Typography variant="body2" color="textSecondary" className="mb-2">
             Each category is what Sonarr/Radarr shows as "Category" when configuring
-            the download client, and maps to a subfolder + how that category's grabs
-            get saved.
+            the download client. Maps to a subfolder and controls how that category's
+            grabs are saved.
           </Typography>
         </Grid>
 
@@ -447,7 +447,7 @@ export const NzbSettingsSection: React.FC<Props> = ({
                         updateCategory(index, { importStrategy: e.target.value as NzbCategory['importStrategy'] })
                       }
                     >
-                      <MenuItem value="hardlink">Keep in Youtarr library (hardlink)</MenuItem>
+                      <MenuItem value="hardlink">Keep in Youtarr-Turbo library (hardlink)</MenuItem>
                       <MenuItem value="untracked">Hand off to Sonarr/Radarr (untracked)</MenuItem>
                     </Select>
                     <FormHelperText>What happens after a grab completes</FormHelperText>
@@ -459,7 +459,7 @@ export const NzbSettingsSection: React.FC<Props> = ({
                       Newznab categories (matches a search naming any of these)
                     </Typography>
                     <InfoTooltip
-                      text="Sonarr/Radarr often send more than one category id together (e.g. a specific quality tier plus its general parent). Check every id this category should respond to - a search naming any one of them will match. Leave at least one checked, or Sonarr/Radarr requests for this category will silently fall through to whichever category is listed first."
+                      text="Sonarr/Radarr often send more than one category id together (e.g. a specific quality tier plus its general parent). Check every id this category should respond to; a search naming any one of them matches. At least one must stay checked, or requests for this category fall through to whichever category is listed first."
                       onMobileClick={onMobileTooltipClick}
                     />
                   </Box>
@@ -482,7 +482,7 @@ export const NzbSettingsSection: React.FC<Props> = ({
                       label="Additional local filter"
                     />
                     <InfoTooltip
-                      text="Requires the YouTube title to actually contain the search terms (and, once Sonarr/Radarr supply a season/episode, an SxxExx-style code) before a result is returned - filters out loosely-related results YouTube search often returns."
+                      text="Requires the YouTube title to contain the search terms (and, once Sonarr/Radarr supply a season/episode, an SxxExx-style code) before returning a result. Filters out loosely-related results YouTube search often returns."
                       onMobileClick={onMobileTooltipClick}
                     />
                   </Box>
@@ -504,7 +504,7 @@ export const NzbSettingsSection: React.FC<Props> = ({
                         })
                       }
                       placeholder={'advert\ntrailer\nouttakes\nbehind the scenes'}
-                      helperText="One word or phrase per line, case-insensitive. A result is dropped if its title contains any of these. Only applied when Additional local filter is on."
+                      helperText="One word or phrase per line, case-insensitive. A result is dropped if its title contains any of these. Applies only when Additional local filter is on."
                     />
                     <Button
                       variant="outlined"
@@ -526,7 +526,7 @@ export const NzbSettingsSection: React.FC<Props> = ({
                       }}
                     />
                     <InfoTooltip
-                      text="For matching quality YouTube search can't otherwise catch - DVD-extra clips, promos, and behind-the-scenes uploads often contain every one of your search keywords (they're genuinely about the show/movie) but aren't the actual episode/movie itself. Add whatever terms show up in this channel's junk titles. Import replaces the current list with the file's contents, one term per line."
+                      text="Catches matches the search itself can't: DVD-extra clips, promos, and behind-the-scenes uploads often contain every search keyword without being the actual episode/movie. Add terms that show up in this channel's junk titles. Import replaces the current list with the file's contents, one term per line."
                       onMobileClick={onMobileTooltipClick}
                     />
                   </Box>
@@ -548,7 +548,7 @@ export const NzbSettingsSection: React.FC<Props> = ({
                       label="Transcode before reporting complete"
                     />
                     <InfoTooltip
-                      text="Only takes effect when Transcode downloaded video (Settings -> yt-dlp Options, downloadTranscodeVideoCodec) is also set to something other than Off - this switch narrows that global setting to this category, it can't turn transcoding on by itself. When both are on, a grab in this category is re-encoded to the configured codec before Sonarr/Radarr are told the download is complete - useful if you want it for, say, Movies but not TV Series."
+                      text="Takes effect only when Transcode downloaded video (Settings -> yt-dlp Options, downloadTranscodeVideoCodec) is also set to something other than Off; this switch narrows that global setting to this category and can't turn transcoding on by itself. When both are on, a grab in this category is re-encoded to the configured codec before Sonarr/Radarr are told the download is complete."
                       onMobileClick={onMobileTooltipClick}
                     />
                   </Box>

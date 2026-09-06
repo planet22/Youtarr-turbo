@@ -316,7 +316,7 @@ export const NotificationsSection: React.FC<NotificationsSectionProps> = ({
             </Link>
             {' '}— supports 100+ services including Discord, Telegram, Slack, and email.
             <InfoTooltip
-              text="Receive notifications when new videos are downloaded successfully."
+              text="Sends a notification when new videos finish downloading."
               onMobileClick={onMobileTooltipClick}
             />
           </Typography>

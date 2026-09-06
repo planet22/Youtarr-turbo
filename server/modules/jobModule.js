@@ -17,6 +17,13 @@ const downloadCleanup = require('./download/downloadCleanup');
 const { serializeAuxData, parseAuxData } = require('./jobAuxData');
 const logger = require('../logger');
 
+// Scratch flag for ad-hoc verbose tracing (queue reorder/order investigation
+// as of 2026-09-06) - flip via the DETAILED_DEBUG=true env var, no rebuild
+// needed. Every log line it gates is tagged '[detailedDebug]' so `grep -r
+// detailedDebug` finds every call site (including this flag itself) when
+// it's time to rip the scaffold back out.
+const DETAILED_DEBUG = process.env.DETAILED_DEBUG === 'true';
+
 const MAX_SAVE_RETRIES = 3;
 // Download History window: jobs older than this are purged from memory,
 // and at most MAX_HISTORY_JOBS are returned to the client. DB rows are
@@ -405,6 +412,15 @@ class JobModule {
     }
   }
 
+  // FIFO position for a Pending job: manual reorders (reorderPendingJobs)
+  // set data.queueOrder; jobs never reordered fall back to creation time, so
+  // they sort oldest-first. Shared by startNextJob (what runs next) and
+  // getRunningJobs (what the client displays as queued) - they must agree,
+  // or the queue's on-screen order stops matching real run order.
+  pendingJobOrder(job) {
+    return job.data?.queueOrder ?? job.timeCreated;
+  }
+
   getInProgressJobId() {
     for (let id in this.jobs) {
       if (this.jobs[id].status === 'In Progress') {
@@ -420,15 +436,21 @@ class JobModule {
       return;
     }
 
+    // A caller (notably resumeQueueProcessing, which always calls this after
+    // unpausing) can race a job that's still actively running - without this
+    // guard, addOrUpdateJob's isNextJob branch silently no-ops (logs a
+    // warning, never assigns jobId) and the caller crashes dereferencing an
+    // undefined job id.
+    if (this.getInProgressJobId()) {
+      logger.info('A job is already in progress; not starting another');
+      return;
+    }
+
     logger.info('Looking for next job to start');
     const jobs = this.getAllJobs();
     const pendingIds = Object.keys(jobs)
       .filter((id) => jobs[id].status === 'Pending')
-      .sort((a, b) => {
-        const orderA = jobs[a].data?.queueOrder ?? jobs[a].timeCreated;
-        const orderB = jobs[b].data?.queueOrder ?? jobs[b].timeCreated;
-        return orderA - orderB;
-      });
+      .sort((a, b) => this.pendingJobOrder(jobs[a]) - this.pendingJobOrder(jobs[b]));
 
     if (pendingIds.length === 0) {
       return;
@@ -437,7 +459,14 @@ class JobModule {
     const id = pendingIds[0];
     jobs[id].id = id;
     if (jobs[id].action) {
-      jobs[id].action(jobs[id], true); // Invoke the function
+      // Fire-and-forget: nothing here awaits the job's action, so an
+      // uncaught rejection would otherwise become an unhandled promise
+      // rejection - fatal by default on Node 15+, crashing the whole
+      // process (and every other in-progress/queued job with it) over a
+      // single bad job. Log and move on instead.
+      Promise.resolve(jobs[id].action(jobs[id], true)).catch((err) => {
+        logger.error({ err, jobId: id, jobType: jobs[id].jobType }, 'Job action threw while starting next job');
+      });
     } else {
       // Job is missing its action function (likely loaded from DB after restart)
       logger.warn({ jobId: id, jobType: jobs[id].jobType },
@@ -513,11 +542,23 @@ class JobModule {
   // Ids that no longer exist or already started are silently skipped -
   // guards against a client reordering a stale snapshot of the queue.
   async reorderPendingJobs(orderedIds) {
+    if (DETAILED_DEBUG) logger.info({ orderedIds }, '[detailedDebug] reorderPendingJobs called');
     for (let index = 0; index < orderedIds.length; index++) {
       const id = orderedIds[index];
       const job = this.jobs[id];
-      if (!job || job.status !== 'Pending') continue;
+      if (!job || job.status !== 'Pending') {
+        if (DETAILED_DEBUG) {
+          logger.info(
+            { id, index, exists: !!job, status: job?.status },
+            '[detailedDebug] reorderPendingJobs skipping id (not found or not Pending)'
+          );
+        }
+        continue;
+      }
       await this.updateJob(id, { data: { queueOrder: index } });
+      if (DETAILED_DEBUG) {
+        logger.info({ id, index, queueOrder: this.jobs[id].data?.queueOrder }, '[detailedDebug] reorderPendingJobs set queueOrder');
+      }
     }
     this.emitJobsUpdated(null, 'QueueReordered');
   }
@@ -1023,8 +1064,25 @@ class JobModule {
       return { id, ...job };
     });
 
-    // Sort jobs by timeCreated in descending order
-    jobsArray.sort((a, b) => b.timeCreated - a.timeCreated);
+    // Pending jobs must appear in the same FIFO order startNextJob will run
+    // them in (oldest-first / queueOrder), not lumped in with history's
+    // newest-first sort - otherwise the queue table shows jobs in the
+    // opposite order they'll actually execute, and manual reorders (which
+    // only change queueOrder) appear to have no effect.
+    const pending = jobsArray.filter((job) => job.status === 'Pending');
+    const rest = jobsArray.filter((job) => job.status !== 'Pending');
+
+    pending.sort((a, b) => this.pendingJobOrder(a) - this.pendingJobOrder(b));
+    rest.sort((a, b) => b.timeCreated - a.timeCreated);
+
+    if (DETAILED_DEBUG && pending.length > 0) {
+      logger.info(
+        { order: pending.map((j) => ({ id: j.id, queueOrder: j.data?.queueOrder, timeCreated: j.timeCreated, sortKey: this.pendingJobOrder(j) })) },
+        '[detailedDebug] getRunningJobs pending order'
+      );
+    }
+
+    jobsArray = [...pending, ...rest];
 
     // Return the most recent jobs, capped at MAX_HISTORY_JOBS
     return jobsArray.slice(0, MAX_HISTORY_JOBS);

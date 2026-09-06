@@ -125,19 +125,17 @@ export function WatchStatusSection({ config, token, onConfigChange }: WatchStatu
   return (
     <ConfigurationCard title="Watch Status Sync">
       <Typography variant="body2" color="text.secondary" className="mb-4">
-        Periodically pulls each video&apos;s watch status
-        from your connected media servers into Youtarr. By default every server user is included;
-        other Plex users are read from the server&apos;s play history. Sync is one-way: nothing is
-        written back to your media servers.
+        Periodically pulls each video&apos;s watch status from connected media servers into Youtarr-Turbo.
+        By default every server user is included; other Plex users are read from the server&apos;s
+        play history. Sync is one-way: nothing is written back.
       </Typography>
 
       <Accordion className="mb-4">
         <AccordionSummary>What determines if a video is &quot;watched&quot;?</AccordionSummary>
         <AccordionDetails>
           <Typography variant="body2" color="text.secondary" className="mb-2">
-            Youtarr doesn&apos;t decide this; it shows whatever your media servers report. All
-            three servers mark a video played once playback passes a percentage threshold (90% by
-            default), and each server lets you change it:
+            Determined by each media server, not Youtarr-Turbo. All three mark a video played once
+            playback passes a percentage threshold (90% by default), configurable per server:
           </Typography>
           <ul className="list-disc pl-5 mb-2 text-sm text-muted-foreground space-y-1">
             <li>
@@ -236,7 +234,7 @@ export function WatchStatusSection({ config, token, onConfigChange }: WatchStatu
               </MenuItem>
             ))}
           </Select>
-          <FormHelperText>How often Youtarr checks your media servers.</FormHelperText>
+          <FormHelperText>How often Youtarr-Turbo checks your media servers.</FormHelperText>
         </Grid>
 
         <Grid item xs={12} md={6}>

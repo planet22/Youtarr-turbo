@@ -350,7 +350,7 @@ describe('ApiKeysSection Component', () => {
       });
 
       // Should show the key only once warning
-      expect(screen.getByText(/Save this key now/i)).toBeInTheDocument();
+      expect(screen.getByText(/Key shown once\. Save it now\./i)).toBeInTheDocument();
     });
 
     test('shows bookmarklet section in created key dialog', async () => {

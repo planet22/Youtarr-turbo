@@ -16,7 +16,7 @@ const meta: Meta<typeof AppShell> = {
   args: {
     token: null,
     isPlatformManaged: false,
-    appName: 'Youtarr',
+    appName: 'Youtarr-Turbo',
     versionLabel: 'v1.60.0 • yt-dlp: 2026.03.01',
     updateAvailable: false,
     updateTooltip: undefined,

@@ -94,7 +94,7 @@ const InitialSetup: React.FC<InitialSetupProps> = ({ onSetupComplete }) => {
         <Paper elevation={0} style={AUTH_SURFACE_STYLE}>
           <div style={{ textAlign: 'center', marginBottom: 24 }}>
             <Typography variant="h3" component="h1" style={AUTH_TITLE_STYLE}>
-              Welcome to Youtarr Setup
+              Welcome to Youtarr-Turbo Setup
             </Typography>
             <Typography
               variant="subtitle1"
@@ -109,11 +109,11 @@ const InitialSetup: React.FC<InitialSetupProps> = ({ onSetupComplete }) => {
             <AlertTitle>Setup token required</AlertTitle>
             <Typography variant="body2">
               Find your one-time setup token in the container logs (<code>docker logs youtarr</code>)
-              or in the <code>config/setup-token</code> file inside your Youtarr data volume.
+              or in the <code>config/setup-token</code> file inside your Youtarr-Turbo data volume.
             </Typography>
             <Typography variant="body2" style={{ marginTop: 8 }}>
               If you are running headless and cannot retrieve the token, set <code>AUTH_PRESET_USERNAME</code> and{' '}
-              <code>AUTH_PRESET_PASSWORD</code> in your <code>.env</code> file, then restart Youtarr.
+              <code>AUTH_PRESET_PASSWORD</code> in your <code>.env</code> file, then restart Youtarr-Turbo.
             </Typography>
           </Alert>
 
@@ -122,7 +122,7 @@ const InitialSetup: React.FC<InitialSetupProps> = ({ onSetupComplete }) => {
               <AlertTitle>Trusted network only</AlertTitle>
               <Typography variant="body2">
                 This page is using plain HTTP. Continue only from your private LAN, VPN, or SSH tunnel;
-                use HTTPS before exposing Youtarr outside your network.
+                use HTTPS before exposing Youtarr-Turbo outside your network.
               </Typography>
             </Alert>
           )}
@@ -195,14 +195,14 @@ const InitialSetup: React.FC<InitialSetupProps> = ({ onSetupComplete }) => {
             color="text.secondary"
             style={AUTH_FOOTER_STYLE}
           >
-            After setup, you can access Youtarr normally.
+            After setup, you can access Youtarr-Turbo normally.
           </Typography>
           <Typography
             variant="caption"
             color="text.secondary"
             style={{ ...AUTH_FOOTER_STYLE, marginTop: 4 }}
           >
-            Youtarr v{packageJson.version}
+            Youtarr-Turbo v{packageJson.version}
           </Typography>
         </Paper>
       </div>

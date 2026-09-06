@@ -58,10 +58,10 @@ const UpdateAvailableBanner: React.FC<UpdateAvailableBannerProps> = ({ show, ser
           <Typography variant="body2" className="text-center leading-tight">
             {serverVersion ? (
               <>
-                <strong>Youtarr {serverVersion}</strong> is available. Pull the latest image to update.
+                <strong>Youtarr-Turbo {serverVersion}</strong> is available. Pull the latest image to update.
               </>
             ) : (
-              <>A new Youtarr version is available. Pull the latest image to update.</>
+              <>A new Youtarr-Turbo version is available. Pull the latest image to update.</>
             )}
           </Typography>
         </Alert>

@@ -37,7 +37,7 @@ function ThemeTypographyPreview() {
             lineHeight: 1.05,
           }}
         >
-          Youtarr stays readable while each theme keeps its own voice.
+          Youtarr-Turbo stays readable while each theme keeps its own voice.
         </h1>
         <p
           data-testid="theme-typography-body"

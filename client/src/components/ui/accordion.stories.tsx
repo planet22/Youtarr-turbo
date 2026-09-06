@@ -14,9 +14,9 @@ export const SingleCollapsible: StoryObj = {
   render: () => (
     <AccordionRoot type="single" collapsible defaultValue="item-2" className="w-80">
       {[
-        { id: 'item-1', title: 'What is Youtarr?', content: 'Youtarr is a self-hosted YouTube channel downloader that keeps your media library up to date automatically.' },
-        { id: 'item-2', title: 'How does scheduling work?', content: 'You configure a cron schedule per channel and Youtarr will check for new videos and download them in the background.' },
-        { id: 'item-3', title: 'Is authentication required?', content: 'Yes, Youtarr supports local authentication. You can configure users via the settings panel.' },
+        { id: 'item-1', title: 'What is Youtarr-Turbo?', content: 'Youtarr-Turbo is a self-hosted YouTube channel downloader that keeps your media library up to date automatically.' },
+        { id: 'item-2', title: 'How does scheduling work?', content: 'You configure a cron schedule per channel and Youtarr-Turbo will check for new videos and download them in the background.' },
+        { id: 'item-3', title: 'Is authentication required?', content: 'Yes, Youtarr-Turbo supports local authentication. You can configure users via the settings panel.' },
       ].map(({ id, title, content }) => (
         <AccordionItem key={id} value={id}>
           <AccordionTrigger>{title}</AccordionTrigger>

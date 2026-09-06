@@ -512,7 +512,7 @@ function AppContent() {
                   <AppShell
                     token={token}
                     isPlatformManaged={isPlatformManaged}
-                    appName="Youtarr"
+                    appName="Youtarr-Turbo"
                     versionLabel={ytDlpLabel ? `${clientVersion} • ${ytDlpLabel}` : clientVersion}
                     updateAvailable={updateAvailable}
                     updateTooltip={updateTooltip}

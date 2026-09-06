@@ -49,7 +49,7 @@ describe('DownloadPerformanceSection Component', () => {
 
 
       expect(screen.getByText('Performance Optimization')).toBeInTheDocument();
-      expect(screen.getByText(/Configure download timeouts, retry attempts, and stall detection/i)).toBeInTheDocument();
+      expect(screen.getByText(/Timeout, retry, and stall-detection settings/i)).toBeInTheDocument();
     });
 
     test('displays correct chip when stall detection is enabled', () => {
@@ -621,7 +621,7 @@ describe('DownloadPerformanceSection Component', () => {
       renderWithProviders(<DownloadPerformanceSection {...props} />);
 
 
-      expect(screen.getByText(/How long the download must stay below the stall threshold/i)).toBeInTheDocument();
+      expect(screen.getByText(/Time the download must stay below the stall threshold/i)).toBeInTheDocument();
     });
   });
 

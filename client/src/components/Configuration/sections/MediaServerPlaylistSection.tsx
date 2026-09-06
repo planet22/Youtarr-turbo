@@ -218,12 +218,12 @@ export const MediaServerPlaylistSection: React.FC<MediaServerPlaylistSectionProp
   const selectedUserInList = users.some((u) => u.id === userId);
   const userHelperText =
     !hasCredentials && !manualEntry
-      ? `Enter the ${label} URL and API key above, then open this dropdown to load users.`
+      ? `Requires ${label} URL and API key above to load users.`
       : userId
-      ? `Account that will own Youtarr-managed playlists. ID: ${truncateId(userId)}`
+      ? `Account that will own Youtarr-Turbo-managed playlists. ID: ${truncateId(userId)}`
       : manualEntry
       ? `The user's internal ID from ${label}, not the username.`
-      : 'Account that will own Youtarr-managed playlists.';
+      : 'Account that will own Youtarr-Turbo-managed playlists.';
 
   const chipLabel = !enabled
     ? 'Disabled'
@@ -250,8 +250,8 @@ export const MediaServerPlaylistSection: React.FC<MediaServerPlaylistSectionProp
       <Alert severity="info" className="mb-4">
         <AlertTitle>For native playlist support</AlertTitle>
         <Typography variant="body2">
-          Connecting {label} is required for Youtarr-managed YouTube playlists to appear as native
-          playlists in {label} and Watch Status syncing. All downloads still work without this connection.
+          Required for Youtarr-Turbo-managed YouTube playlists to appear as native playlists in {label}, and
+          for Watch Status syncing. Downloads work without this connection.
         </Typography>
       </Alert>
 
@@ -316,7 +316,7 @@ export const MediaServerPlaylistSection: React.FC<MediaServerPlaylistSectionProp
           <Box className="mb-1.5 flex items-center gap-1">
             <InputLabel id={userLabelId}>{label} User</InputLabel>
             <Tooltip
-              title={`Youtarr creates and updates playlists owned by this ${label} account. Open the dropdown to load the accounts on your server, then pick one.`}
+              title={`Youtarr-Turbo creates and updates playlists owned by this ${label} account. Open the dropdown to select from server accounts.`}
             >
               <IconButton
                 aria-label={`About the ${label} user setting`}
@@ -373,7 +373,7 @@ export const MediaServerPlaylistSection: React.FC<MediaServerPlaylistSectionProp
 
           {userId.trim() !== '' && !SERVER_USER_ID_PATTERN.test(userId.trim()) && (
             <FormHelperText error>
-              {`This doesn't look like ${kind === 'emby' ? 'an' : 'a'} ${label} user ID; IDs are 32-character codes, not usernames. If you can't load the user list, fix the URL/API key above, then pick the user from the dropdown.`}
+              {`This doesn't look like ${kind === 'emby' ? 'an' : 'a'} ${label} user ID; IDs are 32-character codes, not usernames. Correct the URL/API key above to load the user list instead.`}
             </FormHelperText>
           )}
 
@@ -401,7 +401,7 @@ export const MediaServerPlaylistSection: React.FC<MediaServerPlaylistSectionProp
             placeholder="comma,separated,library,ids"
             value={libraryIds.join(', ')}
             onChange={handleLibraryIdsChange}
-            helperText={`${label} library IDs that contain your Youtarr videos. Optional; used to narrow playlist item resolution.`}
+            helperText={`${label} library IDs that contain your Youtarr-Turbo videos. Optional; used to narrow playlist item resolution.`}
           />
         </Grid>
 

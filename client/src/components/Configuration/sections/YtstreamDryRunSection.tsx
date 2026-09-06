@@ -80,7 +80,7 @@ export const YtstreamDryRunSection: React.FC<Props> = ({ config, token }) => {
         setState({
           loading: false,
           result: null,
-          error: 'Enter a valid YouTube video id or URL, or turn on "Force these settings" above to preview without one',
+          error: 'Enter a valid YouTube video id or URL, or enable "Force these settings" above to preview without one',
         });
         return;
       }
@@ -120,7 +120,7 @@ export const YtstreamDryRunSection: React.FC<Props> = ({ config, token }) => {
   return (
     <ConfigurationCard
       title="Streaming Dry Run"
-      subtitle="Check what a real playback request for a specific video will actually do, using your current streaming settings - without starting a real stream."
+      subtitle="Preview the playback plan for a specific video using current streaming settings, without starting a real stream."
     >
       <Grid container spacing={2} className="mt-1">
         <Grid item xs={12} md={8}>
@@ -132,8 +132,8 @@ export const YtstreamDryRunSection: React.FC<Props> = ({ config, token }) => {
             placeholder="dQw4w9WgXcQ or https://youtube.com/watch?v=..."
             helperText={
               ytstream?.forceServerSettings
-                ? 'Leave blank to preview your forced settings alone - no specific video, no yt-dlp probing.'
-                : 'Enter a video id/URL to preview it, or turn on "Force these settings" above to preview without one.'
+                ? 'Leave blank to preview forced settings alone: no specific video, no yt-dlp probing.'
+                : 'Enter a video id/URL to preview it, or enable "Force these settings" above to preview without one.'
             }
           />
         </Grid>
@@ -153,7 +153,7 @@ export const YtstreamDryRunSection: React.FC<Props> = ({ config, token }) => {
         {ytstream?.forceServerSettings && (
           <Grid item xs={12}>
             <Typography variant="body2" color="textSecondary">
-              "Force these settings" is on above, so this preview reflects your saved Settings — any mode/quality/etc. a real .strm URL carries is ignored server-side, same as it would be for real playback.
+"Force these settings" is on, so this preview reflects saved Settings; any mode/quality/etc. a real .strm URL carries is ignored server-side, same as for real playback.
             </Typography>
           </Grid>
         )}

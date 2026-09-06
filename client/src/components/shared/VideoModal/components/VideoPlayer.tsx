@@ -309,7 +309,7 @@ function VideoPlayer({ video, token, onDownloadClick, isMobile }: VideoPlayerPro
                     '0 0 4px rgba(255,255,255,0.95), 0 0 10px rgba(255,255,255,0.8), 0 0 16px rgba(255,255,255,0.55)',
                 }}
               >
-                Youtarr cannot download this video or fetch its metadata
+                Youtarr-Turbo cannot download this video or fetch its metadata
               </Typography>
             </>
           ) : (

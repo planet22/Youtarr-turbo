@@ -62,8 +62,8 @@ export const SponsorBlockSection: React.FC<SponsorBlockSectionProps> = ({
       <Alert severity="info" style={{ marginBottom: 16 }}>
         <AlertTitle>What is SponsorBlock?</AlertTitle>
         <Typography variant="body2">
-          SponsorBlock is a crowdsourced database that identifies segments in YouTube videos like sponsors, intros, outros, and self-promotions.
-          When enabled, Youtarr can automatically remove or mark these segments during download.
+          SponsorBlock is a crowdsourced database identifying segments in YouTube videos such as sponsors, intros, outros, and self-promotions.
+          When enabled, Youtarr-Turbo removes or marks these segments during download.
         </Typography>
       </Alert>
 
@@ -83,7 +83,7 @@ export const SponsorBlockSection: React.FC<SponsorBlockSectionProps> = ({
                 </Select>
               </FormControl>
               <Typography variant="caption" color="text.secondary" style={{ marginTop: 4, display: 'block' }}>
-                Remove: Cuts out segments entirely. Mark: Creates chapter markers for easy skipping.
+                Remove: cuts segments out entirely. Mark: adds chapter markers for skipping.
               </Typography>
             </Grid>
 
@@ -95,7 +95,7 @@ export const SponsorBlockSection: React.FC<SponsorBlockSectionProps> = ({
                 value={config.sponsorblockApiUrl}
                 onChange={(e) => onConfigChange({ sponsorblockApiUrl: e.target.value })}
                 placeholder="https://sponsor.ajay.app"
-                helperText="Leave empty to use the default SponsorBlock API"
+                helperText="Empty: use default SponsorBlock API"
               />
             </Grid>
 

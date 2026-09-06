@@ -311,6 +311,11 @@ class DownloadModule {
       isNextJob
     );
 
+    if (!jobId) {
+      logger.warn({ jobType }, 'Failed to create channel download job');
+      return;
+    }
+
     this.registerJobWithRun(jobData, jobId);
 
     if (jobModule.getJob(jobId).status === 'In Progress') {
@@ -683,6 +688,11 @@ class DownloadModule {
       },
       isNextJob
     );
+
+    if (!jobId) {
+      logger.warn({ jobType }, 'Failed to create specific downloads job');
+      return;
+    }
 
     this.registerJobWithRun(jobData, jobId);
 

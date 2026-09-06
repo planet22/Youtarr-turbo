@@ -1091,7 +1091,7 @@ function ChannelSettingsDialog({
                   </Typography>
                   <Typography variant="caption" color="text.secondary" style={{ display: 'block', marginBottom: 8 }}>
                     TV Series library mode only. Decode the season and episode number directly from each
-                    video&apos;s title instead of Youtarr&apos;s default (upload year as season, download order as episode).
+                    video&apos;s title instead of Youtarr-Turbo&apos;s default (upload year as season, download order as episode).
                   </Typography>
                   <Typography variant="caption" color="text.secondary" style={{ display: 'block', marginBottom: 8 }}>
                     Leave blank to keep the default. A title this pattern doesn&apos;t match also falls back to the

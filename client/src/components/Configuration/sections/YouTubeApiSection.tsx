@@ -67,12 +67,12 @@ function getChipColor(status: YouTubeApiKeyStatus): ChipColor {
 const benefitItems = [
   {
     title: 'Faster, more accurate YouTube lookups',
-    description: 'Use the YouTube Data API for channel discovery, video metadata, and YouTube searches. These lookups can be significantly faster than relying on yt-dlp alone.',
+    description: 'Uses the YouTube Data API for channel discovery, video metadata, and searches. Faster than yt-dlp alone.',
     icon: <Gauge size={18} />,
   },
   {
     title: 'Safe fallback',
-    description: 'If the key is invalid, restricted, or out of quota, Youtarr falls back to yt-dlp automatically.',
+    description: 'If the key is invalid, restricted, or out of quota, Youtarr-Turbo falls back to yt-dlp automatically.',
     icon: <ShieldCheck size={18} />,
   },
 ];
@@ -135,7 +135,7 @@ export const YouTubeApiSection: React.FC<YouTubeApiSectionProps> = ({
                 Google Cloud Console
               </a>{' '}
               with any Google account. Create a new project (or pick an existing one).
-              No billing setup is required.
+              No billing required.
             </li>
             <li>
               Go to <b>APIs &amp; Services -&gt; Library</b>, search for{' '}
@@ -150,7 +150,7 @@ export const YouTubeApiSection: React.FC<YouTubeApiSectionProps> = ({
               Click the pencil icon next to the new key, set{' '}
               <b>API restrictions</b> to <b>Restrict key</b> and select{' '}
               <b>YouTube Data API v3</b> only. Leave <b>Application restrictions</b>{' '}
-              as <b>None</b> unless you know your Youtarr host IP.
+              as <b>None</b> unless you know your Youtarr-Turbo host IP.
             </li>
             <li>
               Paste the key below and click <b>Test Key</b>.
@@ -169,8 +169,8 @@ export const YouTubeApiSection: React.FC<YouTubeApiSectionProps> = ({
 
       {status === 'quota_exhausted' && (
         <Alert severity="warning" className="mb-4">
-          Today's quota is exhausted. Youtarr will transparently fall back to
-          yt-dlp until the quota resets at midnight Pacific time.
+          Today's quota is exhausted. Youtarr-Turbo falls back to yt-dlp until the quota
+          resets at midnight Pacific time.
         </Alert>
       )}
 

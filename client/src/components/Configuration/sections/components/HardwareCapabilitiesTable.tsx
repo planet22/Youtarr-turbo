@@ -128,7 +128,7 @@ export const HardwareCapabilitiesTable: React.FC<HardwareCapabilitiesTableProps>
           {testing ? 'Testing (this can take a minute)...' : 'Test Hardware Capabilities'}
         </Button>
         <InfoTooltip
-          text='Runs a real 1-second test encode through every hardware backend x codec combo on this host, so you can see what actually works before picking a transcode setting. Also tests hardware DECODE separately (below) - a genuinely different question from encode, since a real sample has to actually be decoded, not just generated.'
+          text='Runs a 1-second test encode through every hardware backend x codec combo on this host. Also tests hardware DECODE separately (below), since a real sample must be decoded, not just generated.'
           onMobileClick={onMobileTooltipClick}
         />
       </Box>

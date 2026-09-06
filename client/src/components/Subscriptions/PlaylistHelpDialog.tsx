@@ -66,13 +66,13 @@ function PlaylistHelpDialog({ open, onClose, isMobile }: PlaylistHelpDialogProps
             defaultExpanded
           >
             <p>
-              Subscribe to a YouTube playlist the same way you subscribe to a channel. Youtarr
+              Subscribe to a YouTube playlist the same way you subscribe to a channel. Youtarr-Turbo
               tracks the playlist, pulls in its list of videos, and keeps that list in sync when the
               playlist changes on YouTube.
             </p>
             <p>
               Private and members-only videos can&apos;t be accessed, so they&apos;re left out of the
-              list and never downloaded. The video count reflects only the videos Youtarr can see.
+              list and never downloaded. The video count reflects only the videos Youtarr-Turbo can see.
             </p>
           </Section>
 
@@ -96,7 +96,7 @@ function PlaylistHelpDialog({ open, onClose, isMobile }: PlaylistHelpDialogProps
 
           <Section icon={<FileDownloadIcon size={16} style={iconColor} />} title="Downloading automatically">
             <p>
-              Turn on auto-download for a playlist and Youtarr keeps it current on the regular
+              Turn on auto-download for a playlist and Youtarr-Turbo keeps it current on the regular
               download schedule, the same way it does for channels. The first run grabs the
               playlist&apos;s most recent videos, up to the count you set under{' '}
               <strong className="text-foreground font-medium">
@@ -116,7 +116,7 @@ function PlaylistHelpDialog({ open, onClose, isMobile }: PlaylistHelpDialogProps
 
           <Section icon={<FileTextIcon size={16} style={iconColor} />} title="Playlist files (.m3u)">
             <p>
-              For every playlist you subscribe to, Youtarr writes a standard <code>.m3u</code> file
+              For every playlist you subscribe to, Youtarr-Turbo writes a standard <code>.m3u</code> file
               into a <code>__playlists__</code> folder next to your videos. It uses relative paths, so
               it keeps working if you move your library, and it&apos;s generated whether or not
               you&apos;ve connected a media server. Any player that reads <code>.m3u</code> files can
@@ -128,7 +128,7 @@ function PlaylistHelpDialog({ open, onClose, isMobile }: PlaylistHelpDialogProps
 
           <Section icon={<ServerIcon size={16} style={iconColor} />} title="Syncing to Plex, Jellyfin, and Emby">
             <p>
-              Youtarr can push playlists into Plex, Jellyfin, and Emby as native playlists. Set up the
+              Youtarr-Turbo can push playlists into Plex, Jellyfin, and Emby as native playlists. Set up the
               connection first under Settings, then turn on sync for the playlists you want. A few
               things worth knowing:
             </p>
@@ -150,7 +150,7 @@ function PlaylistHelpDialog({ open, onClose, isMobile }: PlaylistHelpDialogProps
             </ul>
             <p>
               Playlists set to MP3 Only sync as music playlists (your server needs a music-type
-              library that includes the Youtarr folder); every other playlist syncs as a video
+              library that includes the Youtarr-Turbo folder); every other playlist syncs as a video
               playlist. The playlist&apos;s Download Type setting decides this, and items
               downloaded in the other format are left out of the synced playlist.
             </p>

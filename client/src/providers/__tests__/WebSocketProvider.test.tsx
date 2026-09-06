@@ -432,7 +432,7 @@ describe('WebSocketProvider', () => {
     });
 
     await waitFor(() => {
-      expect(NotificationConstructor).toHaveBeenCalledWith('Youtarr', {
+      expect(NotificationConstructor).toHaveBeenCalledWith('Youtarr-Turbo', {
         body: 'Downloads complete: 2 videos downloaded',
         icon: '/favicon.ico',
       });

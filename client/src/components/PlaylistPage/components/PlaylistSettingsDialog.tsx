@@ -60,7 +60,7 @@ function fromPlaylist(p: Playlist): FormState {
 
 const MP3_HELPER_TEXT = 'MP3 files are saved at 192kbps in the same folder as videos.';
 const MP3_ONLY_SYNC_HINT =
-  ' MP3 Only playlists sync to media servers as music playlists: the server needs a music-type library that includes your Youtarr output folder.';
+  ' MP3 Only playlists sync to media servers as music playlists: the server needs a music-type library that includes your Youtarr-Turbo output folder.';
 
 const PlaylistSettingsDialog: React.FC<PlaylistSettingsDialogProps> = ({
   open,

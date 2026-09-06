@@ -30,7 +30,7 @@ const NAV_ITEMS = [
 type NavHeaderProps = React.ComponentProps<typeof NavHeader>;
 
 const BASE_PROPS: NavHeaderProps = {
-  appName: 'Youtarr',
+  appName: 'Youtarr-Turbo',
   layoutPolicy: resolveThemeLayoutPolicy(getThemeById('linear'), 'desktop'),
   navItems: NAV_ITEMS,
   token: 'test-token',
@@ -90,7 +90,7 @@ describe('NavHeader shared update indicator', () => {
       ytDlpUpdateTooltip: 'yt-dlp update available (2025.10.01). Go to Settings > YT-DLP to update.',
     });
 
-    const sharedIndicator = screen.getByRole('button', { name: /youtarr and yt-dlp updates available/i });
+    const sharedIndicator = screen.getByRole('button', { name: /youtarr-turbo and yt-dlp updates available/i });
     expect(sharedIndicator).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /yt-dlp update available/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /new version available/i })).not.toBeInTheDocument();
@@ -98,7 +98,7 @@ describe('NavHeader shared update indicator', () => {
     await user.hover(sharedIndicator);
 
     const tooltip = await screen.findByRole('tooltip');
-    expect(tooltip).toHaveTextContent(/Youtarr: New version \(v1.60.0\) available!/i);
+    expect(tooltip).toHaveTextContent(/Youtarr-Turbo: New version \(v1.60.0\) available!/i);
     expect(tooltip).toHaveTextContent(/yt-dlp: yt-dlp update available \(2025.10.01\)\./i);
   });
 
@@ -106,7 +106,7 @@ describe('NavHeader shared update indicator', () => {
     renderHeader({ layoutPolicy: resolveThemeLayoutPolicy(getThemeById('flat'), 'desktop') });
 
     const header = screen.getByRole('banner') as HTMLElement;
-    const titleLink = screen.getByRole('link', { name: /youtarr logo youtarr/i });
+    const titleLink = screen.getByRole('link', { name: /youtarr-turbo logo youtarr-turbo/i });
     expect(header.style.getPropertyValue('--layout-header-title-inset')).toBe('12px');
     expect(titleLink).toHaveStyle({ marginLeft: 'var(--layout-header-title-inset)' });
   });
@@ -190,7 +190,7 @@ describe('NavHeader shared update indicator', () => {
   it('renders the header wordmark 30 percent larger across themes', () => {
     renderHeader({ layoutPolicy: resolveThemeLayoutPolicy(getThemeById('flat'), 'desktop') });
 
-    const wordmark = screen.getByRole('img', { name: 'Youtarr' });
+    const wordmark = screen.getByRole('img', { name: 'Youtarr-Turbo' });
 
     expect(wordmark).toHaveStyle({
       height: '40px',

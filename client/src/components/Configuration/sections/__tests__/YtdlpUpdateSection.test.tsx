@@ -115,7 +115,7 @@ describe('YtdlpUpdateSection', () => {
     renderWithProviders(<YtdlpUpdateSection {...props} />);
 
     expect(
-      screen.getByText(/yt-dlp is managed by elfhosted and cannot be updated from youtarr/i)
+      screen.getByText(/yt-dlp is managed by elfhosted/i)
     ).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /stable \(recommended\)/i })).not.toBeInTheDocument();
     expect(
@@ -217,7 +217,7 @@ describe('YtdlpUpdateSection', () => {
     renderWithProviders(<YtdlpUpdateSection {...props} />);
     expect(screen.getByText('Managed by Elfhosted')).toBeInTheDocument();
     expect(
-      screen.getByText(/yt-dlp is managed by Elfhosted and cannot be updated from Youtarr/i)
+      screen.getByText(/yt-dlp is managed by Elfhosted/i)
     ).toBeInTheDocument();
   });
 
@@ -229,7 +229,7 @@ describe('YtdlpUpdateSection', () => {
     renderWithProviders(<YtdlpUpdateSection {...props} />);
     expect(screen.getByText('Platform Managed')).toBeInTheDocument();
     expect(
-      screen.getByText(/yt-dlp is managed by the platform and cannot be updated from Youtarr/i)
+      screen.getByText(/yt-dlp is managed by the platform/i)
     ).toBeInTheDocument();
   });
 

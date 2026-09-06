@@ -4,8 +4,6 @@ import {
   InputLabel,
   Select,
   MenuItem,
-  FormControlLabel,
-  Switch,
   TextField,
   FormHelperText,
   Grid,
@@ -15,7 +13,6 @@ import {
   Typography,
 } from '../../ui';
 import { ConfigurationAccordion } from '../common/ConfigurationAccordion';
-import { InfoTooltip } from '../common/InfoTooltip';
 import { ConfigState } from '../types';
 
 interface DownloadPerformanceSectionProps {
@@ -44,7 +41,7 @@ export const DownloadPerformanceSection: React.FC<DownloadPerformanceSectionProp
       <Alert severity="info" className="mb-4">
         <AlertTitle>Performance Optimization</AlertTitle>
         <Typography variant="body2">
-          Configure download timeouts, retry attempts, and stall detection to handle slow or interrupted downloads automatically.
+          Timeout, retry, and stall-detection settings for slow or interrupted downloads.
         </Typography>
       </Alert>
 
@@ -147,7 +144,7 @@ export const DownloadPerformanceSection: React.FC<DownloadPerformanceSectionProp
                   onChange={(e) => onConfigChange({ stallDetectionWindowSeconds: Number(e.target.value) })}
                 />
                 <FormHelperText>
-                  How long the download must stay below the stall threshold before retry logic kicks in
+                  Time the download must stay below the stall threshold before retry logic triggers
                 </FormHelperText>
               </FormControl>
             </Grid>
@@ -175,24 +172,6 @@ export const DownloadPerformanceSection: React.FC<DownloadPerformanceSectionProp
             </Grid>
           </>
         )}
-
-        <Grid item xs={12} md={6}>
-          <Box className="flex items-center gap-1">
-            <FormControlLabel
-              control={
-                <Switch
-                  checked={config.downloadQueueManagerEnabled === true}
-                  onChange={(e) => onConfigChange({ downloadQueueManagerEnabled: e.target.checked })}
-                />
-              }
-              label="Enable job queue manager table"
-            />
-            <InfoTooltip
-              text="Replaces the simple queued-jobs list on the Download Activity page with a sortable, deletable table you can reorder before letting the queue run. Also adds a pause button that stops the next job from auto-starting so you can rearrange the queue safely."
-              onMobileClick={onMobileTooltipClick}
-            />
-          </Box>
-        </Grid>
       </Grid>
     </ConfigurationAccordion>
   );

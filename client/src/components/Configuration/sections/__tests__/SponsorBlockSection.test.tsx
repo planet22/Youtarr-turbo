@@ -64,7 +64,7 @@ describe('SponsorBlockSection Component', () => {
 
       expect(screen.getByText('What is SponsorBlock?')).toBeInTheDocument();
       expect(screen.getByText(/SponsorBlock is a crowdsourced database/i)).toBeInTheDocument();
-      expect(screen.getByText(/automatically remove or mark these segments/i)).toBeInTheDocument();
+      expect(screen.getByText(/removes or marks these segments/i)).toBeInTheDocument();
     });
   });
 
@@ -302,8 +302,8 @@ describe('SponsorBlockSection Component', () => {
       renderWithProviders(<SponsorBlockSection {...props} />);
 
 
-      expect(screen.getByText(/Remove: Cuts out segments entirely/i)).toBeInTheDocument();
-      expect(screen.getByText(/Mark: Creates chapter markers for easy skipping/i)).toBeInTheDocument();
+      expect(screen.getByText(/Remove: cuts segments out entirely/i)).toBeInTheDocument();
+      expect(screen.getByText(/Mark: adds chapter markers for skipping/i)).toBeInTheDocument();
     });
   });
 
@@ -358,7 +358,7 @@ describe('SponsorBlockSection Component', () => {
       renderWithProviders(<SponsorBlockSection {...props} />);
 
 
-      expect(screen.getByText(/Leave empty to use the default SponsorBlock API/i)).toBeInTheDocument();
+      expect(screen.getByText(/Empty: use default SponsorBlock API/i)).toBeInTheDocument();
     });
 
     test('calls onConfigChange when API URL is changed', async () => {

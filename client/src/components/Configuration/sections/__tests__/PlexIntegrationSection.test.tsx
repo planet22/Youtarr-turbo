@@ -106,9 +106,9 @@ describe('PlexIntegrationSection Component', () => {
     test('shows warning when connection status is not_connected', () => {
       const props = createSectionProps({ plexConnectionStatus: 'not_connected' });
       renderWithProviders(<PlexIntegrationSection {...props} />);
-      expect(screen.getByText(/Plex is currently unreachable/i)).toBeInTheDocument();
+      expect(screen.getByText(/Plex is unreachable/i)).toBeInTheDocument();
       expect(
-        screen.getByText(/Verify your Plex server is running and that the IP, port, and API key/i)
+        screen.getByText(/Verify the Plex server is running and that the IP, port, and API key/i)
       ).toBeInTheDocument();
     });
 
@@ -119,7 +119,7 @@ describe('PlexIntegrationSection Component', () => {
         config: createConfig({ plexApiKey: 'test-key' }),
       });
       renderWithProviders(<PlexIntegrationSection {...props} />);
-      expect(screen.getByText(/Plex configuration has changed/i)).toBeInTheDocument();
+      expect(screen.getByText(/Plex configuration changed/i)).toBeInTheDocument();
       expect(screen.getByText(/Click "Test Connection" to verify/i)).toBeInTheDocument();
     });
 
@@ -148,7 +148,7 @@ describe('PlexIntegrationSection Component', () => {
         config: createConfig({ plexApiKey: 'test-key' }),
       });
       renderWithProviders(<PlexIntegrationSection {...props} />);
-      expect(screen.queryByText(/Plex configuration has changed/i)).not.toBeInTheDocument();
+      expect(screen.queryByText(/Plex configuration changed/i)).not.toBeInTheDocument();
     });
   });
 
@@ -1030,7 +1030,7 @@ describe('PlexIntegrationSection Component', () => {
       renderWithProviders(<PlexIntegrationSection {...props} />);
 
       // Check for specific alert content instead of role
-      expect(screen.getByText(/Plex is currently unreachable/i)).toBeInTheDocument();
+      expect(screen.getByText(/Plex is unreachable/i)).toBeInTheDocument();
     });
 
     test('link has proper attributes for external navigation', () => {

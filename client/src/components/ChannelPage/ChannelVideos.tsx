@@ -1221,10 +1221,10 @@ function ChannelVideos({
     (v) => v.published_at_source === 'estimated' && v.media_type !== 'short'
   );
   const dateTooltipBase =
-    'Publish dates come from YouTube, which doesn\'t always provide them, so Youtarr does the best it can with what it has. ' +
+    'Publish dates come from YouTube, which doesn\'t always provide them, so Youtarr-Turbo does the best it can with what it has. ' +
     'A ~ means the date is approximate: YouTube only reported something like "1 month ago", so it can be off by days. ' +
     'A date becomes exact once the video is downloaded or its details are opened. ' +
-    'Youtarr keeps videos in the same order they appear on YouTube as best it can; if the order looks off, click "Load More" to rebuild it.';
+    'Youtarr-Turbo keeps videos in the same order they appear on YouTube as best it can; if the order looks off, click "Load More" to rebuild it.';
   const pendingDatesSentence =
     'Some videos show "Pending" because YouTube returned this list without dates. ';
   const dateTooltipText =

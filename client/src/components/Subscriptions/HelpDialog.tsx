@@ -119,7 +119,7 @@ function HelpDialog({ open, onClose, isMobile }: HelpDialogProps) {
               Green chip = channel-specific quality override.
             </LegendItem>
             <LegendItem icon={<FolderIcon size={14} style={{ color: 'var(--muted-foreground)' }} />}>
-              Download subfolder: <code>root</code> places files at the Youtarr root, <code>global default</code> follows the global setting, or a specific folder name.
+              Download subfolder: <code>root</code> places files at the Youtarr-Turbo root, <code>global default</code> follows the global setting, or a specific folder name.
             </LegendItem>
             <LegendItem icon={<RatingIcon size={14} style={{ color: 'var(--muted-foreground)' }} />}>
               Content rating badge (e.g. PG-13, TV-MA) appears when a default rating is set.

@@ -223,7 +223,7 @@ function DownloadAllVideosDialog({
                     deleted) are not included.
                   </Typography>
                   <Typography component="li" variant="body2" color="text.secondary">
-                    Youtarr runs one download job at a time, so all other
+                    Youtarr-Turbo runs one download job at a time, so all other
                     downloads (including scheduled channel downloads) will wait
                     until this finishes.
                   </Typography>

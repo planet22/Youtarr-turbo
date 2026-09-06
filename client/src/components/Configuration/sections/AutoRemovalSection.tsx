@@ -150,9 +150,8 @@ export const AutoRemovalSection: React.FC<AutoRemovalSectionProps> = ({
       <Alert severity="warning" className="mb-4">
         <AlertTitle>Automatic Deletion</AlertTitle>
         <Typography variant="body2">
-          This feature automatically deletes downloaded videos based on your configured rules.
-          Deletions run nightly at 2:00 AM and remove the files from disk. A deleted video can
-          only be restored by downloading it again (if it&apos;s still available on YouTube).
+          Deletes downloaded videos matching the configured rules. Runs nightly at 2:00 AM and removes files from disk.
+          Restoring a deleted video requires re-downloading it (if still available on YouTube).
         </Typography>
       </Alert>
 
@@ -163,8 +162,7 @@ export const AutoRemovalSection: React.FC<AutoRemovalSectionProps> = ({
               <Grid item xs={12}>
                 <Alert severity="error" className="mb-2">
                   <Typography variant="body2">
-                    Enable at least one removal rule below (old videos, watched videos, or
-                    low disk space) when automatic removal is enabled.
+                    Enable at least one removal rule: old videos, watched videos, or low disk space.
                   </Typography>
                 </Alert>
               </Grid>
@@ -175,15 +173,11 @@ export const AutoRemovalSection: React.FC<AutoRemovalSectionProps> = ({
                 <Alert severity="warning" className="mb-2">
                   <AlertTitle>Space-Based Removal Unavailable</AlertTitle>
                     <Typography variant="body2" className="mb-2">
-                    Storage reporting is not available on your system, so the Low disk space rule is unavailable.
-                    This can happen with certain mount types like network shares, cloud storage, or virtual filesystems.
-                  </Typography>
-                  <Typography variant="body2" className="mb-2">
-                    Check the storage indicator at the top of this page - if it shows an error or is not present,
-                    storage-based auto-removal will not work.
+                    Storage reporting is unavailable, so the Low disk space rule is disabled. Common with network shares,
+                    cloud storage, or virtual filesystems.
                   </Typography>
                   <Typography variant="body2">
-                    <strong>You can still use the Old videos and Watched videos rules</strong>, which don&apos;t require storage reporting.
+                    <strong>Old videos and Watched videos rules</strong> still work without storage reporting.
                   </Typography>
                 </Alert>
               </Grid>
@@ -285,7 +279,7 @@ export const AutoRemovalSection: React.FC<AutoRemovalSectionProps> = ({
                             </FormHelperText>
                           </FormControl>
                           <InfoTooltip
-                            text="Some mount types (network shares, overlays, bind mounts) may report incorrect free space. Before enabling this, verify that the storage display at the top of this page shows accurate values. If the reported storage is incorrect, do not use space-based removal."
+                            text="Some mount types (network shares, overlays, bind mounts) may report incorrect free space. Verify the storage display above is accurate before enabling."
                             onMobileClick={onMobileTooltipClick}
                           />
                         </Box>
@@ -320,7 +314,7 @@ export const AutoRemovalSection: React.FC<AutoRemovalSectionProps> = ({
                         inputProps={{ min: 0, 'data-testid': 'auto-removal-keep-recent-input' }}
                       />
                       <InfoTooltip
-                        text="Protects the newest downloads from every removal rule on this page. For example, with a value of 50, the 50 most recently downloaded videos are always kept, no matter their age or watched state. Protected videos do not count toward this limit. Leave blank or 0 to disable."
+                        text="Protects the newest N downloads from every removal rule, regardless of age or watched state. Protected videos don't count toward this limit. Blank or 0 to disable."
                         onMobileClick={onMobileTooltipClick}
                       />
                     </Box>
@@ -337,7 +331,7 @@ export const AutoRemovalSection: React.FC<AutoRemovalSectionProps> = ({
                         inputProps={{ min: 0, 'data-testid': 'auto-removal-min-file-size-input' }}
                       />
                       <InfoTooltip
-                        text="A .strm shortcut file is only a few dozen bytes and frees no meaningful space if removed. Videos whose tracked file is smaller than this are never selected by any removal rule. Default 1 KB."
+                        text="Videos whose tracked file is smaller than this are never selected by any removal rule. Default 1 KB (a .strm shortcut file is only a few dozen bytes)."
                         onMobileClick={onMobileTooltipClick}
                       />
                     </Box>
@@ -354,7 +348,7 @@ export const AutoRemovalSection: React.FC<AutoRemovalSectionProps> = ({
                         label="Revert cached STRM videos to STRM instead of deleting"
                       />
                       <InfoTooltip
-                        text="Applies only to videos cached on play (STRM 'Cache on play' setting). When one is selected for removal, only the large cached file is deleted and the video reverts to live STRM playback, instead of removing the library entry entirely. Has no effect on ordinary downloads."
+                        text="Applies only to videos cached on play (STRM 'Cache on play' setting). On removal, deletes the cached file and reverts to live STRM playback instead of removing the library entry. No effect on ordinary downloads."
                         onMobileClick={onMobileTooltipClick}
                       />
                     </Box>

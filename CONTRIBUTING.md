@@ -526,7 +526,10 @@ If you get stuck or need help:
 - [Troubleshooting](docs/TROUBLESHOOTING.md)
 - [Media Servers](docs/MEDIA_SERVERS.md)
 
-### Repository
+### Repository Youtarr-Turbo
+- [GitHub Repository](https://github.com/planet22/Youtarr-turbo)
+- [Issue Tracker](https://github.com/planet22/Youtarr-turbo/issues)
+### orginal
 - [GitHub Repository](https://github.com/DialmasterOrg/Youtarr)
 - [Issue Tracker](https://github.com/DialmasterOrg/Youtarr/issues)
 - [Changelog](CHANGELOG.md)
@@ -537,10 +540,10 @@ If you get stuck or need help:
 
 ## License
 
-Youtarr is licensed under the ISC License. See [LICENSE.md](LICENSE.md) for full details.
+Youtarr-Turbi is licensed under the ISC License. See [LICENSE.md](LICENSE.md) for full details.
 
-By contributing to Youtarr, you agree that your contributions will be licensed under the same ISC License.
+By contributing to Youtarr-Turbo, you agree that your contributions will be licensed under the same ISC License.
 
 ---
 
-Thank you for contributing to Youtarr!
+Thank you for contributing to Youtarr-Turbo!

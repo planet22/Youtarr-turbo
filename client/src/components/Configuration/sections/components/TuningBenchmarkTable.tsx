@@ -214,9 +214,9 @@ export const TuningBenchmarkTable: React.FC<TuningBenchmarkTableProps> = ({
           </Select>
         </FormControl>
         <InfoTooltip
-          text={`Runs a real timed ${videoCodecLabel} encode for the selected encoder (${hwLabel}) across every tuning tier x resolution, using the exact args live playback uses, and reports whether each keeps up with real-time streaming. Note: real ytstream playback only ever encodes H.264 - Encode format here exists purely to explore "what if" HEVC/AV1 performance, not a real playback option.`
-            + ` Also decodes a real ${SOURCE_CODEC_LABELS[sourceCodec] || sourceCodec} sample (generated at ${decodeSourceHeight}p) via ${decodeLabel} first, so the timed result genuinely includes decode cost, not just encode - Hardware decode = Software still measures a real (CPU) decode, not a skipped one. Any resolution above ${decodeSourceHeight}p is skipped rather than silently re-tested against a too-small source.`
-            + ' Scoped to this exact encode/decode combo - usually well under a minute.'}
+          text={`Runs a timed ${videoCodecLabel} encode for the selected encoder (${hwLabel}) across every tuning tier x resolution, using the exact args live playback uses, and reports whether each keeps up with real-time streaming. Real ytstream playback only ever encodes H.264; Encode format here is for exploring HEVC/AV1 performance, not a real playback option.`
+            + ` Also decodes a real ${SOURCE_CODEC_LABELS[sourceCodec] || sourceCodec} sample (generated at ${decodeSourceHeight}p) via ${decodeLabel} first, so the timed result includes decode cost. Hardware decode = Software still measures a real (CPU) decode. Resolutions above ${decodeSourceHeight}p are skipped.`
+            + ' Scoped to this encode/decode combo; usually under a minute.'}
           onMobileClick={onMobileTooltipClick}
         />
       </Box>

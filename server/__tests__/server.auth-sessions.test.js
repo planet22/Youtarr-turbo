@@ -840,7 +840,7 @@ describe('server routes - setup', () => {
       expect(res.statusCode).toBe(200);
       expect(res.body).toEqual({
         token: 'test-uuid-token',
-        message: 'Setup complete! You can now access Youtarr normally.',
+        message: 'Setup complete! You can now access Youtarr-Turbo normally.',
         username: 'newuser'
       });
     });

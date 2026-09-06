@@ -1,6 +1,10 @@
 # Contributors
 
-Youtarr wouldn't be where it is today without the help of these awesome people.
+Youtarr-Turbo wouldn't be where it is today without the help of these awesome people.
+
+## -Turbo Core Team
+
+- [@Planet22](https://github.com/planet22) - Forked and turbocharged Youtarr
 
 ## Core Team
 
@@ -14,7 +18,7 @@ Youtarr wouldn't be where it is today without the help of these awesome people.
 
 ## Want to Help?
 
-We'd love to have you! Check out the [Contributing Guide](CONTRIBUTING.md) to get started, or just jump into [Discord](https://discord.gg/68rvWnYMtD) and say hi.
+We'd love to have you! Check out the [Contributing Guide](CONTRIBUTING.md) to get started.
 
 If you've contributed and aren't listed here, open a PR and add yourself!
 

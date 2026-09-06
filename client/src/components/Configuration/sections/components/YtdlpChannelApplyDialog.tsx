@@ -28,11 +28,11 @@ export const YtdlpChannelApplyDialog: React.FC<YtdlpChannelApplyDialogProps> = (
     <DialogContent>
       <DialogContentText>
         {targetChannel === 'nightly'
-          ? 'Youtarr will switch yt-dlp to the latest nightly build now. Nightly builds get extractor fixes sooner but may occasionally break.'
-          : 'Youtarr will switch yt-dlp back to the latest stable release now. This downgrades from the nightly build to the newest stable version.'}
+          ? 'Switches yt-dlp to the latest nightly build now. Nightly builds get extractor fixes sooner but may occasionally break.'
+          : 'Switches yt-dlp back to the latest stable release now, downgrading from the nightly build.'}
       </DialogContentText>
       <DialogContentText className="mt-4">
-        If you skip this, the change is applied at the next automatic update or app restart.
+        Otherwise applied at the next automatic update or app restart.
       </DialogContentText>
     </DialogContent>
     <DialogActions>

@@ -67,13 +67,13 @@ const MediaServerSyncGroup: React.FC<MediaServerSyncGroupProps> = ({
               Settings can be toggled.
             </p>
             <p className="mb-2">
-              Youtarr re-syncs after each download and when you Refresh from YouTube. After
+              Youtarr-Turbo re-syncs after each download and when you Refresh from YouTube. After
               changing these settings, use Sync now to apply them right away.
             </p>
             <p>
               The playlist&apos;s Download Type setting decides how it syncs: MP3 Only
               playlists sync as music playlists (the server needs a music-type library that
-              includes your Youtarr output folder; a video library and a music library can
+              includes your Youtarr-Turbo output folder; a video library and a music library can
               point at the same folder), everything else syncs as a video playlist. Items
               downloaded without a file of that type are left out.
             </p>

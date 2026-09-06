@@ -198,7 +198,7 @@ describe('ChangelogPage', () => {
       render(<ChangelogPage updateAvailable serverVersion="v1.71.0" />);
 
       const banner = screen.getByTestId('changelog-update-available');
-      expect(banner).toHaveTextContent('You are running an older version of Youtarr.');
+      expect(banner).toHaveTextContent('You are running an older version of Youtarr-Turbo.');
       expect(banner).toHaveTextContent('v1.71.0');
       expect(banner).toHaveTextContent('Pull the latest image to update.');
     });
@@ -207,7 +207,7 @@ describe('ChangelogPage', () => {
       render(<ChangelogPage updateAvailable />);
 
       const banner = screen.getByTestId('changelog-update-available');
-      expect(banner).toHaveTextContent('You are running an older version of Youtarr.');
+      expect(banner).toHaveTextContent('You are running an older version of Youtarr-Turbo.');
       expect(banner).toHaveTextContent('Pull the latest image to update.');
     });
 

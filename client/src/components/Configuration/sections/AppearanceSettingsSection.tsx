@@ -173,7 +173,7 @@ export const AppearanceSettingsSection: React.FC<AppearanceSettingsSectionProps>
                       label={<span className="text-xs">Logo</span>}
                     />
                     <InfoTooltip
-                      text="Show the circular Youtarr logo in the header"
+                      text="Show the circular Youtarr-Turbo logo in the header"
                       onMobileClick={onMobileTooltipClick}
                     />
                   </div>
@@ -190,7 +190,7 @@ export const AppearanceSettingsSection: React.FC<AppearanceSettingsSectionProps>
                       label={<span className="text-xs">Text Image</span>}
                     />
                     <InfoTooltip
-                      text="Show the Youtarr wordmark image in the header"
+                      text="Show the Youtarr-Turbo wordmark image in the header"
                       onMobileClick={onMobileTooltipClick}
                     />
                   </div>

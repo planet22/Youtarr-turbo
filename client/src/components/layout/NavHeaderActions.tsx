@@ -49,7 +49,7 @@ export const NavHeaderActions: React.FC<NavHeaderActionsProps> = ({
     const sections: string[] = [];
 
     if (hasAppUpdate && updateTooltip) {
-      sections.push(`Youtarr: ${updateTooltip}`);
+      sections.push(`Youtarr-Turbo: ${updateTooltip}`);
     }
 
     if (hasYtDlpUpdate && ytDlpUpdateTooltip) {
@@ -60,9 +60,9 @@ export const NavHeaderActions: React.FC<NavHeaderActionsProps> = ({
   }, [hasAppUpdate, hasYtDlpUpdate, updateTooltip, ytDlpUpdateTooltip]);
 
   const sharedUpdateAriaLabel = hasAppUpdate && hasYtDlpUpdate
-    ? 'Youtarr and yt-dlp updates available'
+    ? 'Youtarr-Turbo and yt-dlp updates available'
     : hasAppUpdate
-      ? 'Youtarr update available'
+      ? 'Youtarr-Turbo update available'
       : 'yt-dlp update available';
 
   const sharedUpdateIndicatorStyle: React.CSSProperties = useMemo(() => {

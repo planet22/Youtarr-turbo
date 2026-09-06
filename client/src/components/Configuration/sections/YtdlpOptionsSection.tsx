@@ -109,7 +109,7 @@ export const YtdlpOptionsSection: React.FC<YtdlpOptionsSectionProps> = ({
               <span style={{ display: 'flex', alignItems: 'center' }}>
                 Delay between yt-dlp API requests (0-30). Higher values prevent YouTube rate limiting but slow downloads.
                 <InfoTooltip
-                  text='A delay of 1-2 seconds usually works well. Increase to 5-10 seconds if you experience 429 errors or frequent throttling.'
+                  text='Default 1-2 seconds. Use 5-10 seconds to reduce 429 errors or throttling.'
                   onMobileClick={onMobileTooltipClick}
                 />
               </span>
@@ -148,7 +148,7 @@ export const YtdlpOptionsSection: React.FC<YtdlpOptionsSectionProps> = ({
               <span style={{ display: 'flex', alignItems: 'center' }}>
                 IPv4 is recommended for YouTube reliability.
                 <InfoTooltip
-                  text='Force IPv6 or Auto only if your network requires it. Downloads may become unreliable on networks where YouTube responds slowly to IPv6.'
+                  text='Use IPv6 or Auto only if the network requires it. IPv6 can be unreliable when YouTube responds slowly over it.'
                   onMobileClick={onMobileTooltipClick}
                 />
               </span>
@@ -178,11 +178,10 @@ export const YtdlpOptionsSection: React.FC<YtdlpOptionsSectionProps> = ({
             Transcode after download
           </Typography>
           <Typography variant='body2' color='textSecondary' style={{ marginBottom: 8 }}>
-            Re-encodes the already-downloaded file with ffmpeg. Separate from the
-            &quot;Preferred video codec&quot; setting above, which only picks which
-            existing YouTube stream to download - this converts the file itself
-            afterward, e.g. to a smaller AV1 file or to HEVC, and can use the same
-            hardware encoder as STRM playback transcoding.
+            Re-encodes the downloaded file with ffmpeg after download. Separate from
+            &quot;Preferred video codec&quot; above, which only selects the source
+            YouTube stream. Uses the same hardware encoder options as STRM playback
+            transcoding.
           </Typography>
         </Grid>
 
@@ -206,7 +205,7 @@ export const YtdlpOptionsSection: React.FC<YtdlpOptionsSectionProps> = ({
                 <MenuItem value='av1'>AV1 (Apple-compatible tagging)</MenuItem>
               </Select>
               <InfoTooltip
-                text='Off leaves the downloaded file exactly as yt-dlp produced it (fastest, no quality loss). HEVC gives ~30-50% smaller files at similar quality. AV1 gives the best compression but software encoding is much slower - only worth it since this runs in the background, not live. AV1 output is tagged av01 in an mp4 container so Apple devices/players recognize it.'
+                text='Off: no re-encode. HEVC: ~30-50% smaller at similar quality. AV1: best compression, slowest encode; tagged for Apple device compatibility.'
                 onMobileClick={onMobileTooltipClick}
               />
             </Box>
@@ -235,7 +234,7 @@ export const YtdlpOptionsSection: React.FC<YtdlpOptionsSectionProps> = ({
                 <MenuItem value='amf'>AMD AMF</MenuItem>
               </Select>
               <InfoTooltip
-                text='Same options as STRM playback transcoding. Not every GPU generation supports every codec here (AV1 hardware encode in particular needs a recent GPU - RTX 40-series, Intel Arc, or AMD RDNA3+). If the selected hardware encoder fails to open for a given file, Youtarr automatically retries with the software encoder for that codec instead of failing the download.'
+                text='Same options as STRM playback transcoding. AV1 hardware encode requires a recent GPU (RTX 40-series, Intel Arc, or AMD RDNA3+). If the hardware encoder fails to open, Youtarr-Turbo retries with the software encoder instead of failing the download.'
                 onMobileClick={onMobileTooltipClick}
               />
             </Box>
@@ -262,7 +261,7 @@ export const YtdlpOptionsSection: React.FC<YtdlpOptionsSectionProps> = ({
                 <MenuItem value='opus'>Opus</MenuItem>
               </Select>
               <InfoTooltip
-                text="Only applied when video transcode above isn't Off, since it runs in the same ffmpeg pass. Keep original passes the source audio through untouched (fastest). AAC is the most broadly compatible; Opus is smaller at the same quality but less universally supported by older devices/players."
+                text="Applies only when video transcode above is not Off. Keep original passes source audio through unchanged. AAC is most broadly compatible; Opus is smaller at the same quality but less supported by older devices."
                 onMobileClick={onMobileTooltipClick}
               />
             </Box>
@@ -284,7 +283,7 @@ export const YtdlpOptionsSection: React.FC<YtdlpOptionsSectionProps> = ({
           <Alert severity='warning' style={{ marginBottom: 8 }}>
             <AlertTitle>Power user feature</AlertTitle>
             <Typography variant='body2'>
-              Custom arguments are applied to every yt-dlp call. Incorrect flags can prevent downloads from working entirely or break Youtarr&apos;s behavior in unexpected ways. Use at your own risk; remove the args if you encounter problems.
+              Custom arguments apply to every yt-dlp call. Incorrect flags can break downloads or Youtarr-Turbo&apos;s behavior. Remove the args if problems occur.
             </Typography>
           </Alert>
 

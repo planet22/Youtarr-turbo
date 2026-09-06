@@ -103,12 +103,12 @@ const LocalLogin: React.FC<LocalLoginProps> = ({ setToken }) => {
           </summary>
           <div className="mt-2 space-y-2">
             <p>
-              If you have access to the Youtarr host, stop Youtarr, set{' '}
+              If you have access to the Youtarr-Turbo host, stop Youtarr-Turbo, set{' '}
               <code>AUTH_PRESET_USERNAME</code> and <code>AUTH_PRESET_PASSWORD</code> in your{' '}
-              <code>.env</code> file, then restart Youtarr and log in with those credentials.
+              <code>.env</code> file, then restart Youtarr-Turbo and log in with those credentials.
             </p>
             <p>
-              Advanced fallback: stop Youtarr, remove <code>username</code> and{' '}
+              Advanced fallback: stop Youtarr-Turbo, remove <code>username</code> and{' '}
               <code>passwordHash</code> from <code>config/config.json</code>, restart, then complete
               setup again with the one-time setup token.
             </p>

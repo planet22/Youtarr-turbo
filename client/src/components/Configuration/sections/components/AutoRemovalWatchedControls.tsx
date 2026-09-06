@@ -46,7 +46,7 @@ export const AutoRemovalWatchedControls: React.FC<AutoRemovalWatchedControlsProp
             label="Remove watched videos"
           />
           <InfoTooltip
-            text="Removes videos after they have been watched on your media server(s). What counts as watched follows the rule configured in Watch Status settings. Videos that have never been synced are treated as unwatched and are never removed by this rule."
+            text="Removes videos watched on your media server(s), per the rule in Watch Status settings. Never-synced videos are treated as unwatched."
             onMobileClick={onMobileTooltipClick}
           />
         </Box>
@@ -57,8 +57,7 @@ export const AutoRemovalWatchedControls: React.FC<AutoRemovalWatchedControlsProp
               <Grid item xs={12}>
                 <Alert severity="warning">
                   <Typography variant="body2">
-                    Watch status sync is disabled, so watched-based removal will be skipped.
-                    Enable it in Watch Status settings for this rule to take effect.
+                    Watch status sync is disabled; watched-based removal is skipped. Enable it in Watch Status settings.
                   </Typography>
                 </Alert>
               </Grid>

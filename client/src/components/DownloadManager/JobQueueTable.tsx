@@ -31,6 +31,20 @@ import { jobTypeLabel } from '../../utils/jobTypeLabel';
 import { formatAddedDateTime } from '../../utils/formatters';
 import { parseYoutubeUrls } from './ManualDownload/urlParser';
 
+// Scratch flag for ad-hoc verbose tracing (queue reorder/order investigation
+// as of 2026-09-06) - flip live from the browser console with
+// localStorage.setItem('detailedDebug', 'true') (or 'false'/remove to turn
+// off), no rebuild needed. Every console line it gates is tagged
+// '[detailedDebug]' so grepping the client source for "detailedDebug" finds
+// every call site (including this flag itself) when it's time to remove it.
+function isDetailedDebugEnabled(): boolean {
+  try {
+    return localStorage.getItem('detailedDebug') === 'true';
+  } catch {
+    return false;
+  }
+}
+
 interface JobQueueTableProps {
   pendingJobs: Job[];
   // The currently running job, if any - pinned as a "Running now" row at the
@@ -409,6 +423,24 @@ function JobQueueTable({ pendingJobs, activeJob, token }: JobQueueTableProps) {
   const [error, setError] = useState<string | null>(null);
   const [highlightedJobId, flashJobHighlight] = useMoveHighlight<string>();
   const wsContext = useContext(WebSocketContext);
+  // Id of a job whose reorder PATCH succeeded but whose new position hasn't
+  // shown up in pendingJobs yet (that only lands once the server's
+  // jobsUpdated broadcast triggers a refetch) - flashing immediately on
+  // click would fade out during that round-trip, before the row actually
+  // jumps, so the flash is deferred until the reordered data arrives.
+  const awaitingMoveIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (isDetailedDebugEnabled()) {
+      // eslint-disable-next-line no-console
+      console.log('[detailedDebug][JobQueueTable] pendingJobs prop updated', pendingJobs.map((j) => j.id));
+    }
+    const id = awaitingMoveIdRef.current;
+    if (id && pendingJobs.some((job) => job.id === id)) {
+      awaitingMoveIdRef.current = null;
+      flashJobHighlight(id);
+    }
+  }, [pendingJobs, flashJobHighlight]);
 
   const toggleExpanded = (jobId: string) => {
     setExpandedIds((prev) => {
@@ -478,9 +510,15 @@ function JobQueueTable({ pendingJobs, activeJob, token }: JobQueueTableProps) {
     const [moved] = next.splice(fromIndex, 1);
     next.splice(toIndex, 0, moved);
     const orderedIds = next.map((job) => job.id);
+    const debug = isDetailedDebugEnabled();
+
+    if (debug) {
+      // eslint-disable-next-line no-console
+      console.log('[detailedDebug][JobQueueTable] reorder requested', { fromIndex, toIndex, movedId: moved.id, orderedIds });
+    }
 
     setReorderingId(moved.id);
-    flashJobHighlight(moved.id);
+    awaitingMoveIdRef.current = moved.id;
     setError(null);
     try {
       const response = await fetch('/api/jobs/queue/reorder', {
@@ -488,13 +526,23 @@ function JobQueueTable({ pendingJobs, activeJob, token }: JobQueueTableProps) {
         headers: { ...authHeaders(), 'Content-Type': 'application/json' },
         body: JSON.stringify({ orderedIds }),
       });
+      if (debug) {
+        // eslint-disable-next-line no-console
+        console.log('[detailedDebug][JobQueueTable] reorder response', { status: response.status, ok: response.ok });
+      }
       if (!response.ok) {
         setError('Failed to reorder queue');
+        awaitingMoveIdRef.current = null;
       }
       // The jobsUpdated broadcast this triggers server-side will refetch
       // /runningjobs via useDownloadListingsRefresh in the parent.
-    } catch {
+    } catch (err) {
+      if (debug) {
+        // eslint-disable-next-line no-console
+        console.log('[detailedDebug][JobQueueTable] reorder request threw', err);
+      }
       setError('Failed to reorder queue');
+      awaitingMoveIdRef.current = null;
     } finally {
       setReorderingId(null);
     }

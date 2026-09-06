@@ -43,9 +43,9 @@ export function MaintenanceSection({ token }: MaintenanceSectionProps) {
     <ConfigurationCard title="Rescan files on disk">
       <div className="flex flex-col gap-4">
         <Typography variant="body2" color="text.secondary">
-          Use this if you have moved or converted downloaded files outside of Youtarr - for
-          example, converting mp4 to mkv. The rescan walks your Youtarr downloads folder
-          and updates Youtarr&apos;s view of which files exist and where.
+          Use this if you have moved or converted downloaded files outside of Youtarr-Turbo - for
+          example, converting mp4 to mkv. The rescan walks your Youtarr-Turbo downloads folder
+          and updates Youtarr-Turbo&apos;s view of which files exist and where.
         </Typography>
 
         <div>

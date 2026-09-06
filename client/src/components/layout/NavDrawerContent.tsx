@@ -389,7 +389,7 @@ export const NavDrawerContent: React.FC<NavDrawerContentProps> = ({
                 onClick={() => navigate('/changelog')}
                 style={{ fontWeight: 600, cursor: 'pointer' }}
               >
-                {versionLabel || 'Youtarr'}
+                {versionLabel || 'Youtarr-Turbo'}
               </Typography>
             </Tooltip>
           </div>

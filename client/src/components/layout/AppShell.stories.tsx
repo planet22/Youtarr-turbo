@@ -21,10 +21,10 @@ const meta: Meta<typeof AppShell> = {
   args: {
     token: 'storybook-token',
     isPlatformManaged: false,
-    appName: 'Youtarr',
+    appName: 'Youtarr-Turbo',
     versionLabel: 'v1.60.0 • yt-dlp: 2026.03.01',
     updateAvailable: true,
-    updateTooltip: 'New Youtarr release available.',
+    updateTooltip: 'New Youtarr-Turbo release available.',
     ytDlpUpdateAvailable: true,
     ytDlpUpdateTooltip: 'yt-dlp update available in Settings.',
     onLogout: () => {},

@@ -50,7 +50,7 @@ const showDownloadCompleteNotification = async (videos: unknown[]) => {
   };
 
   const displayNotification = () => {
-    new Notification('Youtarr', options);
+    new Notification('Youtarr-Turbo', options);
   };
 
   switch (Notification.permission) {

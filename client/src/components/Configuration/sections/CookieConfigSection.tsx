@@ -14,11 +14,9 @@ import { ConfigState, SnackbarState } from '../types';
 import { formatByteSize, formatDateTime, formatExpiresIn } from '../../../utils/formatters';
 
 const AUTH_COOKIES_EXPLAINER =
-  'These are the cookies that carry your YouTube login session (SID/HSID/SSID, ' +
-  'APISID/SAPISID and their __Secure- variants, plus LOGIN_INFO) - as opposed to ' +
-  'tracking/preference cookies, which do not affect authentication. If these expire ' +
-  'or go missing, YouTube quietly falls back to logged-out behavior, which is what ' +
-  'triggers "Sign in to confirm you\'re not a bot" and similar errors.';
+  'Cookies that carry your YouTube login session (SID/HSID/SSID, APISID/SAPISID, ' +
+  '__Secure- variants, LOGIN_INFO). If these expire, YouTube falls back to logged-out ' +
+  'mode, causing "Sign in to confirm you\'re not a bot" errors.';
 
 interface CookieConfigSectionProps {
   token: string | null;
@@ -71,8 +69,7 @@ export const CookieConfigSection: React.FC<CookieConfigSectionProps> = ({
       <Alert severity="warning" style={{ marginBottom: 16 }}>
         <AlertTitle>Security Warning</AlertTitle>
         <Typography variant="body2" style={{ marginBottom: 16 }}>
-          Cookie files contain authentication information for your Google account.
-          We strongly recommend using a throwaway account instead of your main account.
+          Cookie files contain authentication for your Google account. Use a throwaway account, not your main account.
         </Typography>
         <Typography variant="body2">
           Learn more about cookie security:{' '}
@@ -87,8 +84,7 @@ export const CookieConfigSection: React.FC<CookieConfigSectionProps> = ({
 
       <Alert severity="info" style={{ marginBottom: 16 }}>
         <Typography variant="body2">
-          Cookies help bypass YouTube's bot detection. If you encounter "Sign in to confirm you're not a bot" errors,
-          enabling cookies can resolve the issue.
+          Cookies bypass YouTube's bot detection and can resolve "Sign in to confirm you're not a bot" errors.
         </Typography>
       </Alert>
 

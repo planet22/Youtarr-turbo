@@ -142,7 +142,7 @@ export function useVideosData({
       }
       console.error('Failed to fetch videos:', error);
       setLoadError(
-        'Failed to load videos. Please try refreshing the page. If this error persists, the Youtarr backend may be down.'
+        'Failed to load videos. Please try refreshing the page. If this error persists, the Youtarr-Turbo backend may be down.'
       );
     } finally {
       if (requestId === latestRequestId.current) {

@@ -637,7 +637,7 @@ describe('CoreSettingsSection Component', () => {
     test('displays helper text about codec preferences', () => {
       const props = createSectionProps();
       renderWithProviders(<CoreSettingsSection {...props} />);
-      expect(screen.getByText(/YouTube caps H\.264 at 1080p/i)).toBeInTheDocument();
+      expect(screen.getByText(/caps at 1080p/i)).toBeInTheDocument();
     });
   });
 
@@ -817,7 +817,7 @@ describe('CoreSettingsSection Component', () => {
         await user.click(toggle);
 
         await screen.findByText('Change default file structure?');
-        expect(screen.getByText(/Previously downloaded videos are not affected/)).toBeInTheDocument();
+        expect(screen.getByText(/Existing files are not moved or renamed/)).toBeInTheDocument();
       });
 
       test('describes per-video subfolders when disabling', async () => {
@@ -862,7 +862,7 @@ describe('CoreSettingsSection Component', () => {
         await user.click(toggle);
 
         await screen.findByText('Change default file structure?');
-        await screen.findByText(/Could not determine how many channels are affected/);
+        await screen.findByText(/Could not determine affected channel count/);
         expect(
           screen.queryByText('No tracked channels are currently using the global setting.')
         ).not.toBeInTheDocument();
@@ -884,7 +884,7 @@ describe('CoreSettingsSection Component', () => {
         await user.click(toggle);
 
         await screen.findByText('Change default file structure?');
-        await screen.findByText(/Could not determine how many channels are affected/);
+        await screen.findByText(/Could not determine affected channel count/);
         expect(
           screen.queryByText('No tracked channels are currently using the global setting.')
         ).not.toBeInTheDocument();

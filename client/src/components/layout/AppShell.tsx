@@ -45,7 +45,7 @@ const APP_BAR_TOGGLE_SIZE = 44;
 export function AppShell({
   token,
   isPlatformManaged,
-  appName = 'Youtarr',
+  appName = 'Youtarr-Turbo',
   versionLabel,
   onLogout,
   updateAvailable = false,

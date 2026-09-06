@@ -249,7 +249,7 @@ export const CoreSettingsSection: React.FC<CoreSettingsSectionProps> = ({
                       label="Enable Hot Loading"
                     />
                     <InfoTooltip
-                      text="When enabled, channel lists, channel videos, and download history use infinite hot loading. When disabled, they use page-by-page controls."
+                      text="Enabled: channel lists, channel videos, and download history use infinite hot loading. Disabled: page-by-page controls."
                       onMobileClick={onMobileTooltipClick}
                     />
                   </Box>
@@ -268,7 +268,7 @@ export const CoreSettingsSection: React.FC<CoreSettingsSectionProps> = ({
                       label="Enable Subtitle Downloads"
                     />
                     <InfoTooltip
-                      text="Download subtitles in SRT format when available. Manual subtitles are preferred, with auto-generated subtitles as fallback."
+                      text="Downloads subtitles in SRT format when available. Prefers manual subtitles; falls back to auto-generated."
                       onMobileClick={onMobileTooltipClick}
                     />
                   </Box>
@@ -287,7 +287,26 @@ export const CoreSettingsSection: React.FC<CoreSettingsSectionProps> = ({
                       label="Enable Automatic Downloads"
                     />
                     <InfoTooltip
-                      text="Globally enable or disable automatic scheduled downloading of videos from your channels and playlists. Only enabled channel tabs and auto-download enabled playlists will be checked and downloaded."
+                      text="Enables or disables scheduled automatic downloads from channels and playlists. Only enabled channel tabs and auto-download-enabled playlists are checked."
+                      onMobileClick={onMobileTooltipClick}
+                    />
+                  </Box>
+                </Grid>
+
+                <Grid item xs={12} md={6}>
+                  <Box className="flex items-center gap-1">
+                    <FormControlLabel
+                      control={
+                        <Switch
+                          name="downloadQueueManagerEnabled"
+                          checked={config.downloadQueueManagerEnabled === true}
+                          onChange={handleCheckboxChange}
+                        />
+                      }
+                      label="Enable job queue manager table"
+                    />
+                    <InfoTooltip
+                      text="Replaces the queued-jobs list on the Download Activity page with a sortable, deletable, reorderable table. Adds a pause button that stops the next job from auto-starting."
                       onMobileClick={onMobileTooltipClick}
                     />
                   </Box>
@@ -311,7 +330,7 @@ export const CoreSettingsSection: React.FC<CoreSettingsSectionProps> = ({
                         <MenuItem value="debug">Debug (verbose)</MenuItem>
                       </Select>
                       <InfoTooltip
-                        text="Overrides the LOG_LEVEL environment variable for the running server, live - no restart needed, and no risk of a container recreate not picking up a changed .env file. Applies immediately on Save; 'Use LOG_LEVEL environment variable' reverts to whatever that was set to at startup."
+                        text="Overrides the LOG_LEVEL environment variable on the running server; no restart needed. Applies immediately on Save. 'Use LOG_LEVEL environment variable' reverts to the startup value."
                         onMobileClick={onMobileTooltipClick}
                       />
                     </Box>
@@ -327,7 +346,7 @@ export const CoreSettingsSection: React.FC<CoreSettingsSectionProps> = ({
                       />
                       <Box className="flex items-center min-h-[48px] mt-5">
                         <InfoTooltip
-                          text="Select one or more subtitle languages. Subtitles will be downloaded when available; videos without subtitles will still download successfully."
+                          text="Select one or more subtitle languages. Videos without subtitles in the selected language(s) still download."
                           onMobileClick={onMobileTooltipClick}
                         />
                       </Box>
@@ -392,7 +411,7 @@ export const CoreSettingsSection: React.FC<CoreSettingsSectionProps> = ({
                         ))}
                       </Select>
                       <InfoTooltip
-                        text="How many videos Youtarr will attempt to download per channel tab and per playlist when downloads run (channels: newest uploads; playlists: most recently added). Already downloaded videos will be skipped."
+                        text="Number of videos to download per channel tab or playlist per run (channels: newest uploads; playlists: most recently added). Already-downloaded videos are skipped."
                         onMobileClick={onMobileTooltipClick}
                       />
                     </Box>
@@ -419,7 +438,7 @@ export const CoreSettingsSection: React.FC<CoreSettingsSectionProps> = ({
                         <MenuItem value="360">360p</MenuItem>
                       </Select>
                       <InfoTooltip
-                        text="The resolution we will try to download from YouTube. Note that this is not guaranteed as YouTube may not have your preferred resolution available. YouTube only provides H.264 MP4 up to 1080p. Selecting 1440p or 2160p (4K) will use VP9 or AV1 (remuxed into MP4), which older Plex clients (Apple TV HD, iOS, older Rokus) may need to transcode."
+                        text="Target resolution for YouTube downloads; not guaranteed if unavailable. YouTube provides H.264 MP4 only up to 1080p. 1440p/2160p (4K) use VP9 or AV1 (remuxed into MP4), which older Plex clients (Apple TV HD, iOS, older Rokus) may need to transcode."
                         onMobileClick={onMobileTooltipClick}
                       />
                     </Box>
@@ -448,12 +467,12 @@ export const CoreSettingsSection: React.FC<CoreSettingsSectionProps> = ({
                         <MenuItem value="h265">H.265/HEVC (Balanced)</MenuItem>
                       </Select>
                       <InfoTooltip
-                        text="Select your preferred video codec. Youtarr will download this codec when available, and fall back if it is not. H.264 is recommended for Apple TV and maximum device compatibility, but YouTube does not provide H.264 above 1080p so selecting it effectively caps downloads at 1080p regardless of the resolution preference above. Default lets YouTube pick the best codec (typically VP9 or AV1 at 1440p+). H.264/H.265 also enforce the codec after downloading: if YouTube didn't actually have a matching stream to select (common - YouTube rarely serves H.264 above 1080p, and never serves H.265 at all), the file is re-encoded to match before the download job is marked complete, using the Hardware encoder/Encoding tuning configured under Settings -> Streaming. Default performs no such enforcement - whatever gets selected is what you get, unchanged. Cache-on-play (opportunistic STRM caching) downloads are never enforced/re-encoded regardless of this setting, since they're temporary and already re-encoded live on playback."
+                        text="Preferred video codec; falls back if unavailable. H.264: maximum device compatibility (Apple TV, etc.), but YouTube caps H.264 at 1080p. Default: YouTube picks the best codec (typically VP9 or AV1 at 1440p+). H.264/H.265 enforce the codec after download: if YouTube had no matching stream (common above 1080p for H.264, always for H.265), the file is re-encoded using the Hardware encoder/Encoding tuning under Settings -> Streaming. Default performs no enforcement. Cache-on-play downloads are never re-encoded by this setting."
                         onMobileClick={onMobileTooltipClick}
                       />
                     </Box>
                     <Box component="span" className="text-xs text-muted-foreground">
-                      Note: H.264 offers maximum compatibility (Apple TV HD, iOS, older Rokus direct-play) but YouTube caps H.264 at 1080p, so it will override any 1440p/2160p preference. H.264/H.265 re-encode after downloading when the selected format doesn't already match (see tooltip) - Default never does.
+                      H.264 offers maximum compatibility (Apple TV HD, iOS, older Rokus direct-play) but caps at 1080p, overriding any 1440p/2160p preference. H.264/H.265 re-encode after download when the format doesn't already match (see tooltip); Default never does.
                     </Box>
                   </FormControl>
                 </Grid>
@@ -467,19 +486,19 @@ export const CoreSettingsSection: React.FC<CoreSettingsSectionProps> = ({
                     </AccordionSummary>
                     <AccordionDetails>
                       <Typography variant="body2" style={{ marginBottom: 8 }}>
-                        Control generation of metadata and artwork files that help Kodi, Emby and Jellyfin index your downloads cleanly.
+                        Controls generation of metadata and artwork files for Kodi, Emby and Jellyfin indexing.
                       </Typography>
                       <Typography variant="body2" style={{ fontWeight: 500, marginBottom: 8 }}>
-                        For best results:
+                        Recommended library setup:
                       </Typography>
                       <Typography variant="body2">
-                        • If all your channels use Movie library mode, add your download library as Content Type: <strong>Movies</strong>
+                        • All channels in Movie library mode: add the download library as Content Type: <strong>Movies</strong>
                         <br />
-                        • If you have channels using TV Series library mode mixed in with Movie-mode channels, either use Content Type: <strong>Mixed content</strong> so Jellyfin auto-detects each channel's structure, or set a <strong>TV Series Output Subfolder</strong> below and point a second library (Content Type: <strong>Shows</strong>) at it to keep Movies and Shows fully separate.
+                        • Mixed Movie/TV Series mode channels: use Content Type: <strong>Mixed content</strong> for Jellyfin to auto-detect each channel's structure, or set a <strong>TV Series Output Subfolder</strong> below and point a second library (Content Type: <strong>Shows</strong>) at it to keep Movies and Shows separate.
                         <br />
                         • Under Metadata Readers/Savers, select <strong>Nfo</strong> to read the .nfo files
                         <br />
-                        • Uncheck all metadata downloaders since we provide metadata via .nfo files
+                        • Uncheck all metadata downloaders; metadata comes from .nfo files
                       </Typography>
                     </AccordionDetails>
                   </Accordion>
@@ -499,7 +518,7 @@ export const CoreSettingsSection: React.FC<CoreSettingsSectionProps> = ({
                         <Box className="flex items-center">
                           Generate video .nfo files
                           <InfoTooltip
-                            text="Create .nfo metadata alongside each download so Kodi, Emby and Jellyfin can import videos with full details."
+                            text="Creates .nfo metadata for each download so Kodi, Emby and Jellyfin can import full video details."
                             onMobileClick={onMobileTooltipClick}
                           />
                         </Box>
@@ -545,7 +564,7 @@ export const CoreSettingsSection: React.FC<CoreSettingsSectionProps> = ({
                         <Box className="flex items-center">
                           Create video fanart files
                           <InfoTooltip
-                            text="Create -fanart.jpg files for each video with the video thumbnail. Some Plex clients like NVIDIA Shield use this as the background preview instead of the poster."
+                            text="Creates a -fanart.jpg file (video thumbnail) for each video. Some Plex clients (e.g. NVIDIA Shield) use it as the background preview instead of the poster."
                             onMobileClick={onMobileTooltipClick}
                           />
                         </Box>
@@ -568,7 +587,7 @@ export const CoreSettingsSection: React.FC<CoreSettingsSectionProps> = ({
                         <Box className="flex items-center">
                           Create backdrop images
                           <InfoTooltip
-                            text="Generates `backdrop` image files and places them in the video and channel directories for use by Emby and Jellyfin"
+                            text="Creates `backdrop` image files in video and channel directories for Emby and Jellyfin."
                             onMobileClick={onMobileTooltipClick}
                           />
                         </Box>
@@ -627,7 +646,7 @@ export const CoreSettingsSection: React.FC<CoreSettingsSectionProps> = ({
                     />
                     <Box className="flex items-center min-h-[48px] mt-5">
                       <InfoTooltip
-                        text="Set the default download location for untracked channels and channels using 'Default Subfolder'. Leave empty to download to the root directory by default."
+                        text="Default download location for untracked channels and channels using 'Default Subfolder'. Empty: downloads to the root directory."
                         onMobileClick={onMobileTooltipClick}
                       />
                     </Box>
@@ -690,7 +709,7 @@ export const CoreSettingsSection: React.FC<CoreSettingsSectionProps> = ({
                       text={
                         isPlatformManaged.useTmpForDownloads
                           ? 'This setting is managed by your platform deployment and cannot be changed.'
-                          : 'Controls where downloads are staged before moving to final location. When enabled, uses external /tmp path (useful for slow network storage). When disabled, uses a hidden .youtarr_tmp/ folder in your output directory (faster for local/SSD storage). Both options hide in-progress files from media servers.'
+                          : 'Controls where downloads stage before moving to final location. Enabled: external /tmp path (useful for slow network storage). Disabled: hidden .youtarr_tmp/ folder in the output directory (faster for local/SSD storage). Both hide in-progress files from media servers.'
                       }
                       onMobileClick={onMobileTooltipClick}
                     />
@@ -710,7 +729,7 @@ export const CoreSettingsSection: React.FC<CoreSettingsSectionProps> = ({
                       label="Flat file structure by default"
                     />
                     <InfoTooltip
-                      text="When enabled, new downloads are saved directly in each channel folder instead of individual per-video subfolders. Channels can override this in their own settings (Flat or Video subfolders). Only affects new downloads; existing files are not moved."
+                      text="Enabled: new downloads save directly in the channel folder instead of per-video subfolders. Channels can override this individually. Affects new downloads only; existing files are not moved."
                       onMobileClick={onMobileTooltipClick}
                     />
                   </Box>
@@ -788,9 +807,8 @@ export const CoreSettingsSection: React.FC<CoreSettingsSectionProps> = ({
                       onChange={(e: ChangeEvent<HTMLInputElement>) => onConfigChange({ episodeFilenamePrefix: e.target.value })}
                       helperText={
                         'Supports %(title)s, %(season)d / %(season)0Nd, %(episode)0Nd, %(channel)s. ' +
-                        'A locked " [id].ext" suffix is always appended automatically. This uses its own ' +
-                        'placeholder syntax (resolved by Youtarr, not yt-dlp) since the episode number is ' +
-                        'only known after checking the database, unlike the Video Filename Template above.'
+                        'A locked " [id].ext" suffix is always appended. Uses Youtarr-Turbo\'s own placeholder ' +
+                        'syntax (not yt-dlp), since the episode number is only known after checking the database.'
                       }
                     />
                   </FormControl>
@@ -798,10 +816,10 @@ export const CoreSettingsSection: React.FC<CoreSettingsSectionProps> = ({
 
                 <Grid item xs={12}>
                   <Typography variant="body2" color="text.secondary">
-                    TV Series mode organizes each channel as a Jellyfin/Kodi TV show: videos are grouped into
-                    "Season &lt;year&gt;" folders by upload year and numbered as episodes. Per-channel and
-                    per-playlist overrides are available in their own settings. Only affects new downloads;
-                    existing files are not reorganized.
+                    TV Series mode organizes each channel as a Jellyfin/Kodi TV show: videos group into
+                    "Season &lt;year&gt;" folders by upload year, numbered as episodes. Per-channel and
+                    per-playlist overrides are available. Affects new downloads only; existing files are
+                    not reorganized.
                   </Typography>
                 </Grid>
               </Grid>
@@ -863,12 +881,12 @@ export const CoreSettingsSection: React.FC<CoreSettingsSectionProps> = ({
             </Box>
             {isPlatformManaged.ytdlpUpdates ? (
               <Typography variant="caption" color="text.secondary">
-                yt-dlp is managed by {deploymentEnvironment.platform?.toLowerCase() === 'elfhosted' ? 'Elfhosted' : 'the platform'} and cannot be updated from Youtarr. Updates are applied automatically by the platform.
+                yt-dlp is managed by {deploymentEnvironment.platform?.toLowerCase() === 'elfhosted' ? 'Elfhosted' : 'the platform'} and cannot be updated from Youtarr-Turbo. Updates are applied automatically by the platform.
               </Typography>
             ) : (
               <>
                 <Typography variant="caption" color="text.secondary">
-                  yt-dlp is the video download engine. If downloads are failing, try updating yt-dlp to the latest version.
+                  yt-dlp is the video download engine. Update it if downloads are failing.
                 </Typography>
 
                 <Box className="mt-4 flex items-center">
@@ -883,7 +901,7 @@ export const CoreSettingsSection: React.FC<CoreSettingsSectionProps> = ({
                     label="Automatically update yt-dlp nightly"
                   />
                   <InfoTooltip
-                    text="Checks for a new yt-dlp release each night at 4:00 AM (server local time) and installs it automatically. Updates are skipped while a download is in progress and will be retried the following night. If an update fails, Youtarr keeps running on the previous version."
+                    text="Checks for a new yt-dlp release nightly at 4:00 AM (server local time) and installs it automatically. Skipped while a download is in progress and retried the next night. Youtarr-Turbo keeps running the previous version if an update fails."
                     onMobileClick={onMobileTooltipClick}
                   />
                 </Box>
@@ -932,7 +950,7 @@ export const CoreSettingsSection: React.FC<CoreSettingsSectionProps> = ({
             <strong>{ytDlpVersionInfo?.latestVersion || 'latest version'}</strong>.
           </DialogContentText>
           <DialogContentText className="mt-4">
-            Newer versions are not guaranteed to be fully compatible with Youtarr. Updating is only recommended if you are experiencing issues with downloading videos.
+            Newer versions are not guaranteed compatible with Youtarr-Turbo. Update only if experiencing download issues.
           </DialogContentText>
         </DialogContent>
         <DialogActions>
@@ -964,8 +982,8 @@ export const CoreSettingsSection: React.FC<CoreSettingsSectionProps> = ({
           )}
           <DialogContentText>
             {pendingIsNewSubfolder
-              ? 'Would you also like to make it the default subfolder? This will affect where videos are downloaded for:'
-              : 'Setting a default subfolder will affect where videos are downloaded for:'}
+              ? 'Set it as the default subfolder? This affects where videos download for:'
+              : 'Affects where videos download for:'}
           </DialogContentText>
           <Box component="ul" className="mt-2 pl-4">
             <li>Untracked channels (manual URL downloads)</li>
@@ -1047,8 +1065,7 @@ export const CoreSettingsSection: React.FC<CoreSettingsSectionProps> = ({
               </Box>
             ) : flatAffectedChannels === null ? (
               <DialogContentText style={{ color: 'var(--warning)' }}>
-                Could not determine how many channels are affected. You can still continue, but the
-                affected channel count is unknown.
+                Could not determine affected channel count. You can still continue.
               </DialogContentText>
             ) : flatAffectedChannels.count === 0 ? (
               <DialogContentText>
@@ -1082,7 +1099,7 @@ export const CoreSettingsSection: React.FC<CoreSettingsSectionProps> = ({
           </Box>
 
           <DialogContentText>
-            Previously downloaded videos are not affected. Existing files will not be moved or renamed; only new downloads use the new structure.
+            Existing files are not moved or renamed; only new downloads use the new structure.
           </DialogContentText>
         </DialogContent>
         <DialogActions>

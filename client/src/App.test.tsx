@@ -241,7 +241,7 @@ describe('App Component', () => {
     render(<App />);
 
     await waitFor(() => {
-      expect(screen.getByAltText('Youtarr')).toBeInTheDocument();
+      expect(screen.getByAltText('Youtarr-Turbo')).toBeInTheDocument();
     });
 
     expect(screen.getByText('Settings')).toBeInTheDocument();
@@ -441,7 +441,7 @@ describe('App Component', () => {
     render(<App />);
 
     await waitFor(() => {
-      expect(screen.getByAltText('Youtarr')).toBeInTheDocument();
+      expect(screen.getByAltText('Youtarr-Turbo')).toBeInTheDocument();
     });
     // ElfHosted platform sets token via platform-managed auth
   });
@@ -470,7 +470,7 @@ describe('App Component', () => {
 
     await waitFor(() => {
       // App should render on mobile (toggle visibility depends on theme)
-      expect(screen.getByAltText('Youtarr')).toBeInTheDocument();
+      expect(screen.getByAltText('Youtarr-Turbo')).toBeInTheDocument();
     });
   });
 
@@ -535,7 +535,7 @@ describe('App Component', () => {
     render(<App />);
 
     await waitFor(() => {
-      expect(screen.getByAltText('Youtarr')).toBeInTheDocument();
+      expect(screen.getByAltText('Youtarr-Turbo')).toBeInTheDocument();
     });
 
     expect(screen.queryByText(/New version.*available/)).not.toBeInTheDocument();
@@ -548,7 +548,7 @@ describe('App Component', () => {
 
     await waitFor(() => {
       // Verify the app renders the main navigation when authenticated
-      expect(screen.getByAltText('Youtarr')).toBeInTheDocument();
+      expect(screen.getByAltText('Youtarr-Turbo')).toBeInTheDocument();
     });
   });
 
@@ -603,7 +603,7 @@ describe('App Component', () => {
       render(<App />);
 
       await waitFor(() => {
-        expect(screen.getByAltText('Youtarr')).toBeInTheDocument();
+        expect(screen.getByAltText('Youtarr-Turbo')).toBeInTheDocument();
       });
 
       expect(screen.queryByTestId('database-error-overlay')).not.toBeInTheDocument();
@@ -744,7 +744,7 @@ describe('App Component', () => {
       render(<App />);
 
       await waitFor(() => {
-        expect(screen.getByAltText('Youtarr')).toBeInTheDocument();
+        expect(screen.getByAltText('Youtarr-Turbo')).toBeInTheDocument();
       });
 
       expect(screen.queryByTestId('database-error-overlay')).not.toBeInTheDocument();
@@ -872,7 +872,7 @@ describe('App Component', () => {
 
       // Wait for app to load
       await waitFor(() => {
-        expect(screen.getByAltText('Youtarr')).toBeInTheDocument();
+        expect(screen.getByAltText('Youtarr-Turbo')).toBeInTheDocument();
       });
 
       // Verify interceptor was registered

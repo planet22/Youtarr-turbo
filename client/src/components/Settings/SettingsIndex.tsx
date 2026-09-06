@@ -33,7 +33,7 @@ export const SETTINGS_PAGES = [
   { key: 'plex', title: 'Plex', description: 'Plex integration and library configuration.', icon: Server },
   { key: 'jellyfin', title: 'Jellyfin', description: 'Jellyfin connection for native playlist sync.', icon: Server },
   { key: 'emby', title: 'Emby', description: 'Emby connection for native playlist sync.', icon: Server },
-  { key: 'watch-status', title: 'Watch Status', description: 'Sync watched state from your media servers into Youtarr.', icon: Eye },
+  { key: 'watch-status', title: 'Watch Status', description: 'Sync watched state from your media servers into Youtarr-Turbo.', icon: Eye },
   { key: 'nzb', title: 'Sonarr/Radarr (NZB)', description: 'Newznab search indexer + SABnzbd download client for Sonarr/Radarr/Prowlarr.', icon: Rss },
   { key: 'notifications', title: 'Notifications', description: 'Toast notifications and alert behavior.', icon: Bell },
   { key: 'appearance', title: 'Appearance', description: 'Theme, animations, and visual preferences.', icon: Palette },

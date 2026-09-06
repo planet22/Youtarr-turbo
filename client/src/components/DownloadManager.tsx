@@ -14,6 +14,7 @@ import DownloadProgress from './DownloadManager/DownloadProgress';
 import DownloadHistory from './DownloadManager/DownloadHistory';
 import WebSocketContext from '../contexts/WebSocketContext';
 import { useDownloadListingsRefresh } from '../hooks/useDownloadListingsRefresh';
+import { useConfig } from '../hooks/useConfig';
 import { Job } from '../types/Job';
 
 interface DownloadManagerProps {
@@ -21,6 +22,7 @@ interface DownloadManagerProps {
 }
 
 function DownloadManager({ token }: DownloadManagerProps) {
+  const { config } = useConfig(token);
   const [videoUrls, setVideoUrls] = useState('');
   const [jobs, setJobs] = useState<Job[]>([]);
   const [currentTime, setCurrentTime] = useState(new Date());
@@ -99,6 +101,7 @@ function DownloadManager({ token }: DownloadManagerProps) {
               downloadInitiatedRef={downloadInitiatedRef}
               jobs={jobs}
               token={token}
+              queueManagerEnabled={config.downloadQueueManagerEnabled}
             />
           </Grid>
         }

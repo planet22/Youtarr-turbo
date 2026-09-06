@@ -57,6 +57,13 @@ const Badge = React.forwardRef<HTMLSpanElement, BadgeProps>(
                 ? 'h-2 w-2 rounded-full p-0'
                 : 'min-w-[18px] h-[18px] rounded-full px-1 text-[10px]'
             )}
+            // A same-color ring cutout (matching whatever surface the badge
+            // sits on) so it stays visible even when badgeColorMap's color
+            // matches the parent it's overlapping - e.g. a "contained"
+            // primary button under a color="primary" badge, which otherwise
+            // disappears entirely whenever --primary is a saturated color
+            // like the app's default blue.
+            style={{ boxShadow: '0 0 0 2px var(--card)' }}
           >
             {variant !== 'dot' && display}
           </span>

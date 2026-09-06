@@ -4,11 +4,17 @@ jest.mock('../../modules/filenamePreview', () => ({
   validateTemplate: jest.fn().mockResolvedValue({ ok: true }),
 }));
 
+jest.mock('../../modules/subscriptionImport/cookiesFetcher', () => ({
+  runYtdlp: jest.fn(),
+  parseChannelEntries: jest.fn(),
+}));
+
 const express = require('express');
 const supertest = require('supertest');
 
 const createConfigRoutes = require('../config');
 const filenamePreview = require('../../modules/filenamePreview');
+const cookiesFetcher = require('../../modules/subscriptionImport/cookiesFetcher');
 
 function makeApp() {
   const app = express();
@@ -32,6 +38,7 @@ function makeApp() {
     getConfig: jest.fn(function () { return this._config; }),
     updateConfig: jest.fn(function (next) { this._config = next; }),
     getCookiesStatus: jest.fn(),
+    getCookiesPath: jest.fn(),
     isElfhostedPlatform: jest.fn(() => false),
     writeCustomCookiesFile: jest.fn(),
     deleteCustomCookiesFile: jest.fn(),
@@ -59,6 +66,60 @@ beforeEach(() => {
   filenamePreview.validateTemplate.mockReset();
   filenamePreview.validateTemplate.mockResolvedValue({ ok: true });
   filenamePreview.previewTemplate.mockReset();
+  cookiesFetcher.runYtdlp.mockReset();
+  cookiesFetcher.parseChannelEntries.mockReset();
+});
+
+describe('POST /api/cookies/test', () => {
+  test('returns 400 when no custom cookie file is active', async () => {
+    const { app, configModule } = makeApp();
+    configModule.getCookiesPath.mockReturnValue(null);
+
+    const res = await supertest(app).post('/api/cookies/test');
+
+    expect(res.status).toBe(400);
+    expect(res.body.success).toBe(false);
+    expect(cookiesFetcher.runYtdlp).not.toHaveBeenCalled();
+  });
+
+  test('returns success with the channel count when yt-dlp succeeds', async () => {
+    const { app, configModule } = makeApp();
+    configModule.getCookiesPath.mockReturnValue('/config/cookies.user.txt');
+    cookiesFetcher.runYtdlp.mockResolvedValue({ stdout: '{"entries":[]}', stderr: '' });
+    cookiesFetcher.parseChannelEntries.mockReturnValue([
+      { channelId: 'UC1', title: 'A', url: 'https://youtube.com/channel/UC1' },
+      { channelId: 'UC2', title: 'B', url: 'https://youtube.com/channel/UC2' },
+    ]);
+
+    const res = await supertest(app).post('/api/cookies/test');
+
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.channelCount).toBe(2);
+    expect(cookiesFetcher.runYtdlp).toHaveBeenCalledWith('/config/cookies.user.txt');
+  });
+
+  test('returns success:false with the classified error when yt-dlp fails', async () => {
+    const { app, configModule } = makeApp();
+    configModule.getCookiesPath.mockReturnValue('/config/cookies.user.txt');
+    cookiesFetcher.runYtdlp.mockRejectedValue(
+      Object.assign(new Error('expired'), {
+        userMessage: 'Your cookies appear to be expired or invalid.',
+        code: 'EXPIRED_COOKIES',
+        details: 'stderr tail',
+      })
+    );
+
+    const res = await supertest(app).post('/api/cookies/test');
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({
+      success: false,
+      error: 'Your cookies appear to be expired or invalid.',
+      code: 'EXPIRED_COOKIES',
+      details: 'stderr tail',
+    });
+  });
 });
 
 describe('POST /updateconfig', () => {

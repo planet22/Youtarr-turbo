@@ -94,6 +94,18 @@ module.exports = function createVideoRoutes({ verifyToken, videosModule, downloa
    *           format: date
    *         description: Filter videos up to this date
    *       - in: query
+   *         name: addedDateFrom
+   *         schema:
+   *           type: string
+   *           format: date
+   *         description: Filter videos downloaded/added from this date (distinct from dateFrom, which is the YouTube publish date)
+   *       - in: query
+   *         name: addedDateTo
+   *         schema:
+   *           type: string
+   *           format: date
+   *         description: Filter videos downloaded/added up to this date (distinct from dateTo, which is the YouTube publish date)
+   *       - in: query
    *         name: sortBy
    *         schema:
    *           type: string
@@ -155,6 +167,13 @@ module.exports = function createVideoRoutes({ verifyToken, videosModule, downloa
    *           default: off
    *         description: Tri-state filter on the opportunistic STRM cache-on-play materialization (Videos.cached_at)
    *       - in: query
+   *         name: metadataOnlyFilter
+   *         schema:
+   *           type: string
+   *           enum: [off, only, exclude]
+   *           default: off
+   *         description: Tri-state filter on untracked rows that have cached metadata but no cached video (no real Videos row backs them)
+   *       - in: query
    *         name: showUntracked
    *         schema:
    *           type: boolean
@@ -170,7 +189,7 @@ module.exports = function createVideoRoutes({ verifyToken, videosModule, downloa
     req.log.info('Getting videos');
 
     try {
-      const { page, limit, search, dateFrom, dateTo, sortBy, sortOrder, channelFilter, protectedFilter, missingFilter, watchedFilter, strmFilter, metadataCacheFilter, cachedVideoFilter, showUntracked } = req.query;
+      const { page, limit, search, dateFrom, dateTo, addedDateFrom, addedDateTo, sortBy, sortOrder, channelFilter, protectedFilter, missingFilter, watchedFilter, strmFilter, metadataCacheFilter, cachedVideoFilter, metadataOnlyFilter, showUntracked } = req.query;
 
       const parseFilterMode = (value) => (value === 'only' || value === 'exclude' ? value : 'off');
 
@@ -180,6 +199,8 @@ module.exports = function createVideoRoutes({ verifyToken, videosModule, downloa
         search: search || '',
         dateFrom: dateFrom || null,
         dateTo: dateTo || null,
+        addedDateFrom: addedDateFrom || null,
+        addedDateTo: addedDateTo || null,
         sortBy: sortBy || 'added',
         sortOrder: sortOrder || 'desc',
         channelFilter: channelFilter || '',
@@ -189,6 +210,7 @@ module.exports = function createVideoRoutes({ verifyToken, videosModule, downloa
         strmFilter: parseFilterMode(strmFilter),
         metadataCacheFilter: parseFilterMode(metadataCacheFilter),
         cachedVideoFilter: parseFilterMode(cachedVideoFilter),
+        metadataOnlyFilter: parseFilterMode(metadataOnlyFilter),
         showUntracked: showUntracked === 'true',
       };
 

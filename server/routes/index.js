@@ -115,7 +115,7 @@ function registerRoutes(app, deps) {
   app.use(createMediaServerRoutes({ verifyToken, configModule, mediaServers }));
 
   // Maintenance routes
-  app.use(createMaintenanceRoutes({ verifyToken, videosModule, configModule }));
+  app.use(createMaintenanceRoutes({ verifyToken, videosModule, configModule, jobModule }));
 
   // Subfolder registry routes
   app.use(createSubfolderRoutes({ verifyToken, subfolderModule }));

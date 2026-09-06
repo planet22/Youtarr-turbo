@@ -64,6 +64,18 @@ function nearestAllowedCount(requested) {
   return ALLOWED_SEARCH_COUNTS.reduce((best, c) => (Math.abs(c - n) < Math.abs(best - n) ? c : best), ALLOWED_SEARCH_COUNTS[0]);
 }
 
+// Newznab's offset+limit paging: unlike nearestAllowedCount (used for the
+// page-size Sonarr/Radarr/Prowlarr asked for), fetching enough raw results
+// to actually SLICE out a later page needs to round UP to the smallest
+// bucket that covers offset+limit, not just the closest one - "closest to
+// 60" is 50, which would leave a page spanning items 40-59 two items short.
+// Caps at the largest bucket (100): a page starting past that isn't
+// fetchable in one search call, so it comes back empty rather than erroring.
+function minAllowedCountAtLeast(needed) {
+  const found = ALLOWED_SEARCH_COUNTS.find((c) => c >= needed);
+  return found !== undefined ? found : ALLOWED_SEARCH_COUNTS[ALLOWED_SEARCH_COUNTS.length - 1];
+}
+
 // SABnzbd's timeleft is "H:MM:SS" (no zero-padded hours).
 function formatTimeleft(etaSeconds) {
   const total = Math.max(0, Math.round(etaSeconds || 0));
@@ -196,17 +208,44 @@ function stageForSonarrImport(job, categoryName, videoRow) {
  * because the original copy is gone from where it used to be.
  */
 async function untrackFromYoutarrLibrary(job, videoRow) {
-  if (job.data.nzb.untracked) return;
+  if (job.data.nzb.untracked) {
+    logger.info({ jobId: job.id, videoId: videoRow?.id }, 'nzb: untrackFromYoutarrLibrary - already untracked, no-op');
+    return { outcome: 'already-untracked' };
+  }
   const videoId = videoRow?.id;
-  if (!videoId) return;
+  if (!videoId) {
+    logger.warn(
+      { jobId: job.id, videoRow },
+      'nzb: untrackFromYoutarrLibrary - resolveNzbVideoRow returned no usable id, nothing was destroyed'
+    );
+    return { outcome: 'no-video-id' };
+  }
+  let counts = null;
   try {
     const { JobVideo, VideoWatchStatus } = require('../models');
-    await JobVideo.destroy({ where: { video_id: videoId } });
-    await VideoWatchStatus.destroy({ where: { video_id: videoId } });
-    await Video.destroy({ where: { id: videoId } });
+    const jobVideoCount = await JobVideo.destroy({ where: { video_id: videoId } });
+    const watchStatusCount = await VideoWatchStatus.destroy({ where: { video_id: videoId } });
+    const videoCount = await Video.destroy({ where: { id: videoId } });
+    counts = { jobVideoCount, watchStatusCount, videoCount };
     job.data.nzb.untracked = true;
+    if (videoCount === 0) {
+      // destroy() resolves with 0 rather than throwing when nothing matches,
+      // so this is the only signal that the "successful" untrack above was
+      // actually a no-op - the Video row this call thought it was removing
+      // either didn't exist under this id, or something else already removed
+      // it (in which case jobVideoCount/watchStatusCount being 0 too is
+      // expected and fine; jobVideoCount > 0 here alongside videoCount === 0
+      // would mean the id was stale/wrong, not just already-cleaned-up).
+      logger.warn(
+        { jobId: job.id, videoId, counts },
+        'nzb: untrackFromYoutarrLibrary - Video.destroy matched 0 rows; video row was not actually removed'
+      );
+    } else {
+      logger.info({ jobId: job.id, videoId, counts }, 'nzb: untrackFromYoutarrLibrary - destroyed tracking rows');
+    }
   } catch (err) {
-    logger.warn({ err, videoId }, 'nzb: failed to remove untracked video from Youtarr DB');
+    logger.warn({ err, jobId: job.id, videoId }, 'nzb: failed to remove untracked video from Youtarr DB');
+    return { outcome: 'error', counts };
   }
   if (videoRow?.youtubeId) {
     try {
@@ -216,6 +255,161 @@ async function untrackFromYoutarrLibrary(job, videoRow) {
       logger.warn({ err, youtubeId: videoRow.youtubeId }, 'nzb: failed to remove untracked video from yt-dlp archive');
     }
   }
+  return { outcome: counts.videoCount > 0 ? 'destroyed' : 'zero-rows-matched', counts };
+}
+
+/**
+ * Best-effort CLEANUP counterpart to untrackFromYoutarrLibrary's
+ * history-delete path, for importStrategy 'untracked'. That path is and
+ * remains the primary/authoritative untrack mechanism (an explicit
+ * mode=history&name=delete call from Sonarr/Radarr) - this function only
+ * exists because plenty of real installs never send that call at all (e.g.
+ * Sonarr/Radarr's own "Remove completed downloads" setting left off), which
+ * without this would leave the Video row behind forever once the import has
+ * already moved the real file away: Youtarr's own file check then
+ * (correctly, from its own point of view) flags it removed=true, and
+ * instead of quietly disappearing the way an 'untracked' grab is supposed
+ * to, it shows up in the Library as a permanently "Missing" video.
+ *
+ * Deliberately looks the video up via the persisted JobVideo -> Job
+ * relation (both are real DB tables, never pruned) rather than scanning
+ * jobModule's in-memory job cache by youtubeId - that cache is capped/aged
+ * out (see JOB_RETENTION_DAYS/MAX_HISTORY_JOBS in jobModule.js) and isn't a
+ * reliable way to answer "did this specific video come from an
+ * 'untracked'-strategy nzb job" days or weeks later.
+ *
+ * Also removes the video from yt-dlp's download-archive (complete.list),
+ * same as untrackFromYoutarrLibrary and for the same reason: jobModule's
+ * backfillFromCompleteList runs on every server startup (not just its
+ * 2:20am cron) and will silently RECREATE a Video row for any youtubeId
+ * still listed in complete.list whose jobs/info/<id>.info.json sidecar is
+ * still lying around. Skipping this cleanup here used to mean a video
+ * whose *actual* removal happened via this fallback path (rather than the
+ * primary delete-call path) would resurrect itself on every subsequent
+ * restart, indefinitely - the JobVideo row's own removal is what makes the
+ * DB side of this idempotent (a later call for the same video finds no
+ * JobVideo rows and is a no-op), but that idempotency doesn't help once
+ * complete.list keeps bringing the row back to life.
+ *
+ * Called from videosModule's real-time per-page file check and its backfill
+ * safety-net sweep, both right after a video is confirmed removed=true: the
+ * missing file IS the proof Sonarr/Radarr already imported it (Youtarr
+ * itself never deletes the file on its own), so it's safe to finish
+ * clearing Youtarr's own tracking rows here instead of waiting on a delete
+ * call that may never arrive.
+ * @param {{id: number, youtubeId: string}} videoRow
+ * @returns {Promise<boolean>} true if the video's tracking rows were removed
+ */
+async function reconcileMovedUntrackedVideo(videoRow) {
+  if (!videoRow?.id) return false;
+  const { JobVideo, Job, VideoWatchStatus } = require('../models');
+  const { parseAuxData } = require('../modules/jobAuxData');
+
+  const jobVideos = await JobVideo.findAll({ where: { video_id: videoRow.id } });
+  if (!jobVideos.length) {
+    logger.info(
+      { videoId: videoRow.id, youtubeId: videoRow.youtubeId },
+      'nzb: reconcileMovedUntrackedVideo - no JobVideo row for this video (nothing to untrack)'
+    );
+    return false;
+  }
+
+  // More than one JobVideo row pointing at the same video_id is unexpected
+  // for an 'untracked' video (the whole point of untrackFromYoutarrLibrary is
+  // to remove this row's JobVideo the moment the first job is done with it) -
+  // if it happens, it means either a prior untrack silently failed to clear
+  // the old link, or a second job got attached to an already-tracked video
+  // (e.g. yt-dlp's archive-skip fallback re-resolving by youtubeId). Logging
+  // the full set up front makes that visible instead of only ever reporting
+  // whichever one wins the importStrategy match below.
+  if (jobVideos.length > 1) {
+    logger.warn(
+      { videoId: videoRow.id, youtubeId: videoRow.youtubeId, jobIds: jobVideos.map((jv) => jv.job_id) },
+      'nzb: reconcileMovedUntrackedVideo - multiple JobVideo rows for one video_id (expected at most one for an untracked-strategy video)'
+    );
+  }
+
+  const jobs = await Job.findAll({
+    where: { id: jobVideos.map((jv) => jv.job_id) },
+    order: [['timeCreated', 'DESC']],
+  });
+  const cfg = configModule.getConfig();
+
+  let matchedJobId = null;
+  let sawNzbJob = false;
+  for (const job of jobs) {
+    const aux = parseAuxData(job.aux_data);
+    if (!aux.nzb) continue;
+    sawNzbJob = true;
+    const category = findCategory(cfg.nzb?.categories || [], { name: aux.nzb.categoryName });
+    if ((category?.importStrategy || 'hardlink') === 'untracked') {
+      matchedJobId = job.id;
+      break;
+    }
+  }
+
+  if (!matchedJobId) {
+    logger.info(
+      { videoId: videoRow.id, youtubeId: videoRow.youtubeId, jobCount: jobs.length, sawNzbJob },
+      'nzb: reconcileMovedUntrackedVideo - no associated job uses importStrategy "untracked", leaving video as Missing'
+    );
+    return false;
+  }
+
+  let counts;
+  try {
+    const jobVideoCount = await JobVideo.destroy({ where: { video_id: videoRow.id } });
+    const watchStatusCount = await VideoWatchStatus.destroy({ where: { video_id: videoRow.id } });
+    const videoCount = await Video.destroy({ where: { id: videoRow.id } });
+    counts = { jobVideoCount, watchStatusCount, videoCount };
+  } catch (err) {
+    logger.warn({ err, videoId: videoRow.id }, 'nzb: reconcileMovedUntrackedVideo - failed to remove tracking rows');
+    return false;
+  }
+
+  if (counts.videoCount === 0) {
+    // Same blind spot as untrackFromYoutarrLibrary: destroy() doesn't throw
+    // on a 0-row match, so without checking the count this would otherwise
+    // log success and return true for a video row that's still sitting in
+    // the DB - exactly the symptom of the same video getting "untracked"
+    // again on a later sweep/backfill with no error ever logged anywhere.
+    logger.warn(
+      { jobId: matchedJobId, videoId: videoRow.id, youtubeId: videoRow.youtubeId, counts },
+      'nzb: reconcileMovedUntrackedVideo - Video.destroy matched 0 rows; video row was NOT actually removed'
+    );
+    return false;
+  }
+
+  // Verify the row is actually gone rather than trusting the destroy count
+  // alone - catches cases like a replica/connection-pool read seeing stale
+  // state, or another process re-inserting a row with the same id in the
+  // gap between destroy() and this check.
+  const stillExists = await Video.findByPk(videoRow.id);
+  if (stillExists) {
+    logger.warn(
+      { jobId: matchedJobId, videoId: videoRow.id, youtubeId: videoRow.youtubeId, counts },
+      'nzb: reconcileMovedUntrackedVideo - Video.destroy reported a row removed, but the id still exists on immediate re-read'
+    );
+    return false;
+  }
+
+  if (videoRow.youtubeId) {
+    try {
+      const archiveModule = require('../modules/archiveModule');
+      await archiveModule.removeVideoFromArchive(videoRow.youtubeId);
+    } catch (err) {
+      logger.warn(
+        { err, jobId: matchedJobId, videoId: videoRow.id, youtubeId: videoRow.youtubeId },
+        'nzb: reconcileMovedUntrackedVideo - failed to remove video from yt-dlp archive (it will resurrect on next backfillFromCompleteList run if this keeps failing)'
+      );
+    }
+  }
+
+  logger.info(
+    { jobId: matchedJobId, videoId: videoRow.id, youtubeId: videoRow.youtubeId, counts },
+    'nzb: untracked video after its file was moved away by Sonarr/Radarr import (no history-delete call received)'
+  );
+  return true;
 }
 
 /**
@@ -303,8 +497,12 @@ async function handleHistoryDeleteRequest(jobIds) {
       const category = findCategory(categories, { name: job.data.nzb.categoryName });
       if ((category?.importStrategy || 'hardlink') === 'untracked') {
         const videoRow = await resolveNzbVideoRow(job);
-        await untrackFromYoutarrLibrary(job, videoRow);
-        logger.info({ jobId }, 'nzb: removed untracked video in response to history delete request');
+        logger.info(
+          { jobId, resolvedVideoId: videoRow?.id ?? null, resolvedYoutubeId: videoRow?.youtubeId ?? null, resolvedFilePath: videoRow?.filePath ?? null },
+          'nzb: resolved video row for history delete request'
+        );
+        const result = await untrackFromYoutarrLibrary(job, videoRow);
+        logger.info({ jobId, result }, 'nzb: processed untracked video in response to history delete request');
       } else {
         logger.info({ jobId }, 'nzb: hid history entry in response to delete request (hardlink strategy - library video untouched)');
       }
@@ -384,13 +582,219 @@ function titleMatchesEpisodeCode(title, season, ep) {
   return patterns.some((re) => re.test(title));
 }
 
-function applyLocalTitleFilter(results, query, { season = null, ep = null } = {}) {
+/**
+ * Best-effort read of WHATEVER season/episode-shaped marker a title
+ * actually contains, regardless of what was being searched for - used only
+ * to explain why titleMatchesEpisodeCode rejected a title (never to decide
+ * whether to accept one; that decision stays entirely in the exact-match
+ * patterns above). Same three structured shapes as titleMatchesEpisodeCode,
+ * checked most-specific-first, falling back to season-only/episode-only if
+ * no combined marker is found. The NxM shape is the least reliable (a
+ * resolution like "1920x1080" can false-positive as season 1920 episode
+ * 1080) but it's the same risk titleMatchesEpisodeCode itself already
+ * accepts as valid evidence, so this is no less accurate than the real
+ * filter - only mis-describing an already-correct rejection in a rare edge
+ * case, never changing which results are kept.
+ * @returns {{season: number|null, ep: number|null, matchedText: string|null}}
+ */
+function findAnySeasonEpisode(title) {
+  let m = /\bs0*(\d+)\s*[.\-]?\s*e0*(\d+)\b/i.exec(title);
+  if (m) return { season: Number(m[1]), ep: Number(m[2]), matchedText: m[0] };
+
+  m = /\bs(?:eason|eries)?\.?\s*0*(\d+)\D{0,20}?e(?:p(?:isode)?)?\.?\s*0*(\d+)\b/i.exec(title);
+  if (m) return { season: Number(m[1]), ep: Number(m[2]), matchedText: m[0] };
+
+  m = /\b0*(\d+)\s*x\s*0*(\d+)\b/i.exec(title);
+  if (m) return { season: Number(m[1]), ep: Number(m[2]), matchedText: m[0] };
+
+  const seasonOnly = /\bs(?:eason|eries)?\.?\s*0*(\d+)(?!\d)/i.exec(title);
+  const epOnly = /\be(?:p(?:isode)?)?\.?\s*0*(\d+)\b/i.exec(title) || /#\s*0*(\d+)\b/.exec(title);
+  return {
+    season: seasonOnly ? Number(seasonOnly[1]) : null,
+    ep: epOnly ? Number(epOnly[1]) : null,
+    matchedText: seasonOnly ? seasonOnly[0] : (epOnly ? epOnly[0] : null),
+  };
+}
+
+/**
+ * Per-category, user-maintained denylist ("Exclude if title contains" in
+ * Settings) - case/diacritic-insensitive substrings that mark a result as
+ * definitely NOT the thing being searched for even though it legitimately
+ * contains every query keyword: DVD-extra clips ("outtakes", "behind the
+ * scenes", "unseen", "deleted scenes"), promos ("advert", "trailer",
+ * "sneak peek"). Unlike titleMatchesEpisodeCode, there's no structural
+ * SxxEyy-style signal for movies to check instead - a plain substring list
+ * is the only practical way to teach the filter about a specific channel's
+ * junk-title conventions. Deliberately plain substrings, not regex: safe
+ * (no ReDoS surface from a user-typed pattern) and something a non-technical
+ * user can read back and understand.
+ *
+ * evaluateTitleFilter is the single source of truth for why a title is kept
+ * or rejected - used both by applyLocalTitleFilter (the real filtering) and
+ * by the NZB diagnostics page's per-search trace (see recordSearchTrace),
+ * so the reason shown there can never drift from the reason actually
+ * applied. The episode-code failure path is broken down into the specific
+ * sub-reason (wrong season/wrong episode/no episode marker at all/nothing
+ * found) rather than one generic bucket, since "S20 search rejected a S21
+ * title" and "S20 search rejected an untitled advert" need very different
+ * fixes from whoever's reading the diagnostics page.
+ * @returns {{kept: boolean, reason: 'keyword'|'excluded-term'|'wrong-season'|'wrong-episode'|'no-episode-marker'|'episode-code'|null, matchedTerm: string|null}}
+ */
+function evaluateTitleFilter(title, query, { season = null, ep = null, excludeTerms = [] } = {}) {
   const terms = queryTerms(query);
-  return results.filter((r) => {
-    const normalizedTitle = normalizeForMatch(r.title);
-    const termsOk = terms.every((term) => normalizedTitle.includes(term));
-    return termsOk && titleMatchesEpisodeCode(r.title, season, ep);
+  const normalizedTitle = normalizeForMatch(title);
+
+  const missingTerm = terms.find((term) => !normalizedTitle.includes(term));
+  if (missingTerm !== undefined) {
+    return { kept: false, reason: 'keyword', matchedTerm: missingTerm };
+  }
+
+  const excludeMatch = (excludeTerms || [])
+    .map((term) => ({ raw: term, normalized: normalizeForMatch(term) }))
+    .find(({ normalized }) => normalized.length > 0 && normalizedTitle.includes(normalized));
+  if (excludeMatch) {
+    return { kept: false, reason: 'excluded-term', matchedTerm: excludeMatch.raw };
+  }
+
+  if (!titleMatchesEpisodeCode(title, season, ep)) {
+    const found = findAnySeasonEpisode(title);
+    if (season != null && found.season != null && found.season !== season) {
+      return { kept: false, reason: 'wrong-season', matchedTerm: found.matchedText };
+    }
+    if (ep != null && found.ep != null && found.ep !== ep) {
+      return { kept: false, reason: 'wrong-episode', matchedTerm: found.matchedText };
+    }
+    if (season != null && ep == null && found.season === season && found.ep == null) {
+      return { kept: false, reason: 'no-episode-marker', matchedTerm: found.matchedText };
+    }
+    return { kept: false, reason: 'episode-code', matchedTerm: null };
+  }
+
+  return { kept: true, reason: null, matchedTerm: null };
+}
+
+function applyLocalTitleFilter(results, query, opts = {}) {
+  return results.filter((r) => evaluateTitleFilter(r.title, query, opts).kept);
+}
+
+// Rolling trace of recent searches (raw candidates + why each was kept or
+// rejected) for the NZB diagnostics page's per-search detail view - separate
+// from videoSearchModule's own recentQueries/cache stats, which only know
+// about the underlying yt-dlp/API fetch, not this file's category-level
+// filtering. Recorded for every real search (query non-blank), regardless
+// of whether additionalLocalFilter is even on, so the raw candidate list is
+// always inspectable - not just the ones that got rejected.
+const MAX_SEARCH_TRACES = 20;
+const searchTraces = [];
+
+function recordSearchTrace(trace) {
+  searchTraces.unshift(trace);
+  if (searchTraces.length > MAX_SEARCH_TRACES) searchTraces.length = MAX_SEARCH_TRACES;
+}
+
+function getRecentSearchTraces() {
+  return searchTraces;
+}
+
+// Rolling list of NZB grabs that completed with nothing to show for it (see
+// the mode=history handler's `failed` computation below) - the only place
+// this is otherwise visible is a server log line for the underlying error
+// (age-restricted content, yt-dlp bot-check, network failure, etc.), which
+// the regular Download History page has no way to surface since the job
+// itself isn't marked Error/Terminated. Deduped by job id (recordedFailedGrabJobIds)
+// so Sonarr/Radarr's repeated history polling doesn't push the same failure
+// in over and over.
+const MAX_FAILED_GRABS = 20;
+const failedGrabs = [];
+const recordedFailedGrabJobIds = new Set();
+
+function recordFailedGrab(job, message) {
+  if (recordedFailedGrabJobIds.has(job.id)) return;
+  recordedFailedGrabJobIds.add(job.id);
+  failedGrabs.unshift({
+    jobId: String(job.id),
+    categoryName: job.data?.nzb?.categoryName || null,
+    youtubeId: job.data?.nzb?.youtubeId || null,
+    nzbName: job.data?.nzb?.nzbName || null,
+    message,
+    timestamp: Date.now(),
   });
+  if (failedGrabs.length > MAX_FAILED_GRABS) failedGrabs.length = MAX_FAILED_GRABS;
+}
+
+function getRecentFailedGrabs() {
+  return failedGrabs;
+}
+
+/**
+ * A job that isn't explicitly Error/Terminated but still has no resolvable
+ * video (e.g. StrmMaterializer's metadata fetch threw - age-restricted,
+ * bot-check, network failure) genuinely produced nothing. Reporting that to
+ * Sonarr/Radarr as Completed with an empty path tells them the grab
+ * succeeded, so they never retry with a different release - both the real
+ * mode=history handler and the read-only diagnostics snapshot below treat
+ * this the same way, via this one shared check.
+ * @returns {Promise<{failed: boolean, explicitlyFailed: boolean, videoRow: object|null}>}
+ */
+async function resolveNzbJobOutcome(job) {
+  const explicitlyFailed = job.status === 'Error' || job.status === 'Terminated';
+  const videoRow = explicitlyFailed ? null : await resolveNzbVideoRow(job);
+  const failed = explicitlyFailed || !videoRow;
+  if (failed && !explicitlyFailed) {
+    recordFailedGrab(job, 'Completed with no video file produced - check server logs for the underlying error (e.g. age-restricted content, yt-dlp bot-check, network failure).');
+  }
+  return { failed, explicitlyFailed, videoRow };
+}
+
+/**
+ * Read-only snapshot of NZB-originated jobs (active queue + recent history)
+ * for the NZB diagnostics page - a Newznab/SABnzbd-filtered lens on the same
+ * jobModule data the regular Download Activity/History pages already show,
+ * not a replacement for them. No independent state of its own; recomputed
+ * fresh on every read.
+ */
+async function getNzbJobsSnapshot() {
+  const activeJobs = jobModule.getRunningJobs().filter(
+    (j) => j.data?.nzb && (j.status === 'Pending' || j.status === 'In Progress')
+  );
+  let currentSnapshot = null;
+  try {
+    const downloadModule = require('../modules/downloadModule');
+    currentSnapshot = downloadModule.getCurrentActivitySnapshot ? downloadModule.getCurrentActivitySnapshot() : null;
+  } catch { /* best-effort only */ }
+
+  const active = activeJobs.map((j) => {
+    const isCurrent = currentSnapshot && String(currentSnapshot.jobId) === String(j.id);
+    const progress = isCurrent ? currentSnapshot.activity?.progress : null;
+    return {
+      jobId: String(j.id),
+      isCurrent: Boolean(isCurrent),
+      status: j.status === 'In Progress' ? 'Downloading' : 'Queued',
+      categoryName: j.data.nzb.categoryName || null,
+      nzbName: j.data.nzb.nzbName || null,
+      percent: progress?.percent ? Math.trunc(progress.percent) : 0,
+      etaSeconds: progress?.etaSeconds || 0,
+      totalBytes: progress?.totalBytes || 0,
+      downloadedBytes: progress?.downloadedBytes || 0,
+    };
+  });
+
+  const historyJobs = jobModule.getRunningJobs().filter(
+    (j) => j.data?.nzb && !j.data.nzb.historyRemoved &&
+      ['Complete', 'Complete with Warnings', 'Error', 'Terminated'].includes(j.status)
+  );
+  const history = await Promise.all(historyJobs.map(async (j) => {
+    const { failed, videoRow } = await resolveNzbJobOutcome(j);
+    return {
+      jobId: String(j.id),
+      status: failed ? 'Failed' : 'Completed',
+      categoryName: j.data.nzb.categoryName || null,
+      nzbName: j.data.nzb.nzbName || null,
+      bytes: videoRow?.fileSize || 0,
+    };
+  }));
+
+  return { active, history };
 }
 
 module.exports = function createNzbRoutes() {
@@ -420,7 +824,16 @@ module.exports = function createNzbRoutes() {
       }
 
       const query = String(req.query.q || '').trim();
-      const count = nearestAllowedCount(req.query.limit);
+      const limit = nearestAllowedCount(req.query.limit);
+      // Newznab clients occasionally page past the first `limit` results
+      // (offset=N) rather than assuming there are none beyond it - previously
+      // ignored entirely, so every page request silently returned page one
+      // again. fetchCount is how many raw results we actually ask for so a
+      // later page can be sliced out of them (see minAllowedCountAtLeast);
+      // the response itself is still exactly `limit` items (or fewer, past
+      // the end), sliced below after filtering.
+      const offset = Math.max(0, Number.parseInt(req.query.offset, 10) || 0);
+      const fetchCount = minAllowedCountAtLeast(offset + limit);
       const responseOpts = {
         categoryName: category.name,
         newznabCategoryIds: category.newznabCategoryIds,
@@ -445,7 +858,8 @@ module.exports = function createNzbRoutes() {
           const recent = await ChannelVideo.findAll({
             where: { ignored: false, youtube_removed: false, media_type: 'video' },
             order: [['publishedAt', 'DESC']],
-            limit: count,
+            limit,
+            offset,
           });
           const results = recent.map((v) => ({
             youtubeId: v.youtube_id,
@@ -498,8 +912,14 @@ module.exports = function createNzbRoutes() {
           }
         }
 
-        let results = await videoSearchModule.searchVideos(newquery, count, { origin: 'nzb' });
+        const rawResults = await videoSearchModule.searchVideos(newquery, fetchCount, { origin: 'nzb' });
+        let results = rawResults;
 
+        // Per-candidate verdict (kept/rejected + why) - computed regardless
+        // of whether additionalLocalFilter is even on, so the trace below
+        // always has something to show. When the filter is off every
+        // candidate is trivially "kept" (nothing evaluated it).
+        let traceItems;
         if (category.additionalLocalFilter) {
           const beforeCount = results.length;
           // Only enforce the season/episode-code requirement in 'episode'
@@ -512,12 +932,46 @@ module.exports = function createNzbRoutes() {
           // "S22" - text real YouTube titles essentially never have -
           // which quietly filtered every real result down to zero.
           const codeConstraint = (t === 'tvsearch' && category.searchMode === 'episode') ? { season, ep } : {};
-          results = applyLocalTitleFilter(results, query, codeConstraint);
+          const filterOpts = { ...codeConstraint, excludeTerms: category.excludeTerms || [] };
+
+          traceItems = rawResults.map((r) => ({
+            youtubeId: r.youtubeId,
+            title: r.title,
+            ...evaluateTitleFilter(r.title, query, filterOpts),
+          }));
+          results = rawResults.filter((_, i) => traceItems[i].kept);
+
           logger.info(
             { categoryName: category.name, beforeCount, afterCount: results.length },
             'nzb: applied additional local filter'
           );
+          const rejected = traceItems.filter((item) => !item.kept);
+          if (rejected.length > 0) {
+            nzbDebug({ categoryName: category.name, rejected }, 'nzb: local filter rejected results');
+          }
+        } else {
+          traceItems = rawResults.map((r) => ({ youtubeId: r.youtubeId, title: r.title, kept: true, reason: null, matchedTerm: null }));
         }
+
+        // Slice the requested page out of the (possibly filtered) results -
+        // see fetchCount's comment above for why enough raw results were
+        // fetched to cover this. Past the end of what's available, this is
+        // just an empty page, not an error.
+        results = results.slice(offset, offset + limit);
+
+        recordSearchTrace({
+          timestamp: Date.now(),
+          categoryName: category.name,
+          searchType: t,
+          query,
+          newquery: newquery !== query ? newquery : null,
+          season,
+          ep,
+          additionalLocalFilterEnabled: Boolean(category.additionalLocalFilter),
+          offset,
+          limit,
+          items: traceItems,
+        });
 
         nzbDebug({ results }, 'nzb: search complete');
 
@@ -771,8 +1225,7 @@ module.exports = function createNzbRoutes() {
       // clients keep history entries until told to remove them - see
       // untrackFromYoutarrLibrary below).
       const slots = await Promise.all(jobs.map(async (j) => {
-        const failed = j.status === 'Error' || j.status === 'Terminated';
-        const videoRow = failed ? null : await resolveNzbVideoRow(j);
+        const { failed, explicitlyFailed, videoRow } = await resolveNzbJobOutcome(j);
         const bytes = videoRow?.fileSize || 0;
         const category = findCategory(categories, { name: j.data.nzb.categoryName });
         const strategy = category?.importStrategy || 'hardlink';
@@ -793,7 +1246,9 @@ module.exports = function createNzbRoutes() {
           action_line: '',
           duplicate_key: String(j.id),
           meta: null,
-          fail_message: failed ? (j.output || 'Failed') : '',
+          fail_message: failed
+            ? (explicitlyFailed ? (j.output || 'Failed') : 'No video file was produced - check Youtarr server logs')
+            : '',
           loaded: false,
           size: formatBytes(bytes),
           category: j.data.nzb.categoryName || 'youtarr',
@@ -849,3 +1304,17 @@ module.exports = function createNzbRoutes() {
 // spinning up an Express app/request - see __tests__/nzb.test.js.
 module.exports.titleMatchesEpisodeCode = titleMatchesEpisodeCode;
 module.exports.applyLocalTitleFilter = applyLocalTitleFilter;
+module.exports.evaluateTitleFilter = evaluateTitleFilter;
+// Real production use (not just testability, unlike the two above): the
+// NZB diagnostics page's GET /api/nzb/stats (server/routes/config.js) reads
+// this same factory-function property to surface the per-search trace -
+// works because createNzbRoutes is a function object, and Node caches
+// require() results, so every require('./nzb') (this route registration in
+// server/routes/index.js, and config.js's lazy require) shares the same
+// in-memory searchTraces array.
+module.exports.getRecentSearchTraces = getRecentSearchTraces;
+module.exports.getRecentFailedGrabs = getRecentFailedGrabs;
+module.exports.getNzbJobsSnapshot = getNzbJobsSnapshot;
+// Consumed by videosModule's real-time file check - see this function's own
+// doc comment for why the reconciliation can't just live inside nzb.js.
+module.exports.reconcileMovedUntrackedVideo = reconcileMovedUntrackedVideo;

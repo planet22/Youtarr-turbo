@@ -13,6 +13,8 @@ export interface UseVideosDataParams {
   channelFilter: string;
   dateFrom: string;
   dateTo: string;
+  addedDateFrom: string;
+  addedDateTo: string;
   maxRatingFilter: string;
   protectedFilter: ChipFilterMode;
   missingFilter: ChipFilterMode;
@@ -20,6 +22,7 @@ export interface UseVideosDataParams {
   strmFilter: ChipFilterMode;
   metadataCacheFilter: ChipFilterMode;
   cachedVideoFilter: ChipFilterMode;
+  metadataOnlyFilter: ChipFilterMode;
   showUntracked: boolean;
   useInfiniteScroll: boolean;
 }
@@ -58,6 +61,8 @@ export function useVideosData({
   channelFilter,
   dateFrom,
   dateTo,
+  addedDateFrom,
+  addedDateTo,
   maxRatingFilter,
   protectedFilter,
   missingFilter,
@@ -65,6 +70,7 @@ export function useVideosData({
   strmFilter,
   metadataCacheFilter,
   cachedVideoFilter,
+  metadataOnlyFilter,
   showUntracked,
   useInfiniteScroll,
 }: UseVideosDataParams): UseVideosDataResult {
@@ -93,6 +99,8 @@ export function useVideosData({
     if (channelFilter) params.append('channelFilter', channelFilter);
     if (dateFrom) params.append('dateFrom', dateFrom);
     if (dateTo) params.append('dateTo', dateTo);
+    if (addedDateFrom) params.append('addedDateFrom', addedDateFrom);
+    if (addedDateTo) params.append('addedDateTo', addedDateTo);
     if (maxRatingFilter) params.append('maxRating', maxRatingFilter);
     if (protectedFilter !== 'off') params.append('protectedFilter', protectedFilter);
     if (missingFilter !== 'off') params.append('missingFilter', missingFilter);
@@ -100,6 +108,7 @@ export function useVideosData({
     if (strmFilter !== 'off') params.append('strmFilter', strmFilter);
     if (metadataCacheFilter !== 'off') params.append('metadataCacheFilter', metadataCacheFilter);
     if (cachedVideoFilter !== 'off') params.append('cachedVideoFilter', cachedVideoFilter);
+    if (metadataOnlyFilter !== 'off') params.append('metadataOnlyFilter', metadataOnlyFilter);
     if (showUntracked) params.append('showUntracked', 'true');
 
     try {
@@ -150,6 +159,8 @@ export function useVideosData({
     channelFilter,
     dateFrom,
     dateTo,
+    addedDateFrom,
+    addedDateTo,
     maxRatingFilter,
     protectedFilter,
     missingFilter,
@@ -157,6 +168,7 @@ export function useVideosData({
     strmFilter,
     metadataCacheFilter,
     cachedVideoFilter,
+    metadataOnlyFilter,
     showUntracked,
     useInfiniteScroll,
   ]);

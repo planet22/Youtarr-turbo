@@ -139,6 +139,20 @@ export interface CookieStatus {
   cookiesEnabled: boolean;
   customCookiesUploaded: boolean;
   customFileExists: boolean;
+  sizeBytes?: number;
+  uploadedAt?: string;
+  authCookiesFound?: number;
+  hasExpiredAuthCookie?: boolean;
+  earliestExpiry?: string | null;
+  earliestExpiryName?: string | null;
+}
+
+export interface CookieTestResult {
+  success: boolean;
+  message?: string;
+  error?: string;
+  channelCount?: number;
+  testedAt: string;
 }
 
 export interface SnackbarState {

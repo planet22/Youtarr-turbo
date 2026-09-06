@@ -73,6 +73,53 @@ describe('Cookie Module Integration Tests', () => {
       });
     });
 
+    test('getCookiesStatus should include auth cookie expiry metadata when parseable', () => {
+      configModule.config.cookiesEnabled = true;
+      configModule.config.customCookiesUploaded = true;
+      fs.existsSync.mockReturnValue(true);
+
+      const expiredEpoch = 1; // 1970 - long expired
+      const futureEpoch = Math.floor(Date.now() / 1000) + 3600 * 24 * 365;
+      const cookieFileContent = [
+        '# Netscape HTTP Cookie File',
+        `.youtube.com\tTRUE\t/\tTRUE\t${futureEpoch}\tSAPISID\tabc`,
+        `.youtube.com\tTRUE\t/\tTRUE\t${expiredEpoch}\tHSID\tdef`,
+        '.youtube.com\tTRUE\t/\tFALSE\t0\tCONSENT\tghi',
+      ].join('\n');
+
+      fs.statSync = jest.fn().mockReturnValue({
+        size: cookieFileContent.length,
+        mtime: new Date('2026-01-01T00:00:00.000Z'),
+      });
+      fs.readFileSync.mockReturnValueOnce(cookieFileContent);
+
+      const status = configModule.getCookiesStatus();
+
+      expect(status.authCookiesFound).toBe(2); // SAPISID + HSID, not CONSENT
+      expect(status.hasExpiredAuthCookie).toBe(true);
+      expect(status.earliestExpiryName).toBe('HSID');
+      expect(status.earliestExpiry).toBe(new Date(expiredEpoch * 1000).toISOString());
+      expect(status.sizeBytes).toBe(cookieFileContent.length);
+      expect(status.uploadedAt).toBe('2026-01-01T00:00:00.000Z');
+    });
+
+    test('getCookiesStatus omits metadata when the file cannot be stat-ed', () => {
+      configModule.config.cookiesEnabled = true;
+      configModule.config.customCookiesUploaded = true;
+      fs.existsSync.mockReturnValue(true);
+      fs.statSync = jest.fn().mockImplementation(() => {
+        throw new Error('ENOENT');
+      });
+
+      const status = configModule.getCookiesStatus();
+
+      expect(status).toEqual({
+        cookiesEnabled: true,
+        customCookiesUploaded: true,
+        customFileExists: true,
+      });
+    });
+
     test('writeCustomCookiesFile should handle file upload', () => {
       const mockCookieContent = '# Netscape HTTP Cookie File\n.youtube.com\tTRUE\t/\tFALSE\t1234567890\tcookie_name\tcookie_value';
       const mockBuffer = Buffer.from(mockCookieContent);

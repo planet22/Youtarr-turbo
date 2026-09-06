@@ -7,6 +7,7 @@ import {
   FileVideo as StrmIcon,
   Database as MetadataCacheIcon,
   Storage as CachedVideoIcon,
+  FileText as MetadataOnlyIcon,
 } from '../../../lib/icons';
 import type { FilterConfig } from './types';
 
@@ -18,7 +19,8 @@ export type StatusChipId =
   | 'watched'
   | 'strm'
   | 'metadataCache'
-  | 'cachedVideo';
+  | 'cachedVideo'
+  | 'metadataOnly';
 export type StatusFilterConfig = Extract<FilterConfig, { id: StatusChipId }>;
 
 // Shape kept deliberately thin: the Icon component (not an element) so each
@@ -39,6 +41,12 @@ export const STATUS_CHIP_DESCRIPTORS: Record<StatusChipId, StatusChipDescriptor>
   strm: { Icon: StrmIcon, noun: 'STRM' },
   metadataCache: { Icon: MetadataCacheIcon, noun: 'Cached Metadata' },
   cachedVideo: { Icon: CachedVideoIcon, noun: 'Cached Video' },
+  // Untracked rows that exist purely because their metadata got cached
+  // (e.g. a channel scan or preview) but nothing was ever played/downloaded
+  // - no cached video file backs them. Distinct from "Cached Metadata"
+  // above, which also matches rows that have real downloaded/cached video
+  // content alongside their cached metadata.
+  metadataOnly: { Icon: MetadataOnlyIcon, noun: 'Metadata-Only' },
 };
 
 export function isStatusChipId(id: string): id is StatusChipId {

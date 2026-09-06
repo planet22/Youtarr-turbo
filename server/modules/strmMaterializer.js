@@ -29,12 +29,15 @@ const { copySyncWithFallback } = require('./filesystem');
  */
 class StrmMaterializer {
   constructor() {
-    // Tracks the currently-running materializeMany batch, if any, so it can
-    // be cancelled between videos. Unlike a real yt-dlp download, STRM
-    // materialize has no live child process for downloadExecutor to SIGTERM
-    // (see downloadExecutor.terminateCurrentJob) - this is the only way the
-    // Terminate button can reach it.
-    this._activeCancellation = null;
+    // Tracks the currently-running materializeMany batch, if any: cancel /
+    // pause / resume, plus the live mutable queue of not-yet-processed URLs
+    // (reorder/remove read and write remainingUrls directly while the loop
+    // in materializeMany consumes from the same array). Unlike a real
+    // yt-dlp download, STRM materialize has no live child process for
+    // downloadExecutor to SIGTERM (see downloadExecutor.terminateCurrentJob)
+    // - this object is the only way the Terminate button (and the queue
+    // manager's pause/reorder/remove controls) can reach an active batch.
+    this._activeBatch = null;
   }
 
   /**
@@ -46,11 +49,95 @@ class StrmMaterializer {
    * @returns {boolean} true if a matching in-progress batch was found and marked
    */
   cancelActiveJob(jobId) {
-    if (this._activeCancellation && this._activeCancellation.jobId === jobId) {
-      this._activeCancellation.cancelled = true;
+    const batch = this._activeBatch;
+    if (batch && batch.jobId === jobId) {
+      batch.cancelled = true;
       return true;
     }
     return false;
+  }
+
+  // Below: live controls for the queue manager UI. All take effect between
+  // videos (same boundary as cancelActiveJob), never mid-fetch.
+
+  /**
+   * Pauses the active batch's loop after the video currently in flight
+   * finishes - it will not advance to the next queued video until resumed.
+   * @param {string} jobId
+   * @returns {boolean} true if a matching in-progress batch was found
+   */
+  pauseActiveJob(jobId) {
+    const batch = this._activeBatch;
+    if (batch && batch.jobId === jobId) {
+      batch.paused = true;
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * @param {string} jobId
+   * @returns {boolean} true if a matching in-progress batch was found
+   */
+  resumeActiveJob(jobId) {
+    const batch = this._activeBatch;
+    if (batch && batch.jobId === jobId) {
+      batch.paused = false;
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Read-only snapshot of the active batch for `jobId`, if any - lets a
+   * route handler know what "remaining" currently means before/after a
+   * reorder or removal, so it can mirror the change onto the Job record's
+   * display-facing data.urls.
+   * @param {string} jobId
+   * @returns {{processedUrls: string[], remainingUrls: string[], paused: boolean}|null}
+   */
+  getActiveBatchState(jobId) {
+    const batch = this._activeBatch;
+    if (!batch || batch.jobId !== jobId) return null;
+    return {
+      processedUrls: [...batch.processedUrls],
+      remainingUrls: [...batch.remainingUrls],
+      paused: batch.paused,
+    };
+  }
+
+  /**
+   * Replaces the not-yet-processed portion of the active batch's queue -
+   * used for both reordering (same URLs, new order) and removing individual
+   * videos (a subset of the current remaining URLs). Rejects a list that
+   * introduces a URL that wasn't already in the remaining queue, since that
+   * isn't a real edit of this batch.
+   * @param {string} jobId
+   * @param {string[]} orderedRemainingUrls
+   * @returns {{success: boolean, error?: string}}
+   */
+  setActiveJobRemainingUrls(jobId, orderedRemainingUrls) {
+    const batch = this._activeBatch;
+    if (!batch || batch.jobId !== jobId) {
+      return { success: false, error: 'No active STRM batch for this job' };
+    }
+    if (!Array.isArray(orderedRemainingUrls) || orderedRemainingUrls.length === 0) {
+      return { success: false, error: 'orderedRemainingUrls must be a non-empty array' };
+    }
+    const currentSet = new Set(batch.remainingUrls);
+    // Drop (rather than reject outright) any URL the batch has already
+    // moved past - the client's idea of "still pending" comes from its last
+    // /runningjobs poll, which can lag the batch's actual progress by the
+    // few seconds a metadata-only fetch takes. Rejecting the whole edit over
+    // one stale entry would make every reorder/remove fail while a batch is
+    // actively running.
+    const filtered = orderedRemainingUrls.filter((url) => currentSet.has(url));
+    if (filtered.length === 0) {
+      return { success: false, error: 'None of the given videos are still queued in this batch' };
+    }
+    batch.remainingUrls.length = 0;
+    batch.remainingUrls.push(...filtered);
+    return { success: true };
   }
 
   /**
@@ -462,6 +549,43 @@ class StrmMaterializer {
     };
   }
 
+  // Shared by the live per-video sync below and the final job-record update
+  // in downloadModule.js's STRM branch.
+  _toFailedVideos(results) {
+    return results
+      .filter((r) => !r.ok)
+      .map((r) => {
+        const idMatch = String(r.url).match(/(?:v=|youtu\.be\/)([a-zA-Z0-9_-]{6,20})/);
+        return { youtubeId: idMatch ? idMatch[1] : r.url, title: r.title || 'Unknown', error: r.error };
+      });
+  }
+
+  // Keeps the job record's data.videos/failedVideos current as each video in
+  // the batch finishes, not just once at the very end. Without this, the
+  // queue manager's per-video Done/Failed/Pending chips (and the reorder/
+  // remove validation, which treats "Pending" as "still editable") stay
+  // wrong for a video that's actually already complete, for the entire
+  // remaining duration of a long batch.
+  _syncJobProgress(jobId, results) {
+    if (!jobId) return;
+    try {
+      const jobModule = require('./jobModule');
+      const job = jobModule.getJob(jobId);
+      if (!job) return;
+      job.data = job.data || {};
+      job.data.videos = results
+        .filter((r) => r.ok)
+        .map((r) => ({
+          youtubeId: r.youtubeId,
+          youTubeVideoName: (r.meta && (r.meta.fulltitle || r.meta.title)) || undefined,
+        }));
+      job.data.failedVideos = this._toFailedVideos(results);
+      jobModule.emitJobsUpdated(jobId, 'VideoProgress');
+    } catch (err) {
+      logger.debug({ err, jobId }, 'STRM materialize: failed to sync live job progress');
+    }
+  }
+
   /**
    * Materialize many URLs (sequential to avoid hammering YouTube).
    * @param {string[]} urls
@@ -469,7 +593,7 @@ class StrmMaterializer {
    */
   async materializeMany(urls, options = {}) {
     const results = [];
-    const total = urls.length;
+    let total = urls.length;
     let current = 0;
     let completed = 0;
     const jobId = options.jobId || null;
@@ -505,10 +629,13 @@ class StrmMaterializer {
 
     // Registered for the duration of this batch so cancelActiveJob (wired
     // up to the Terminate button via downloadModule.terminateCurrentDownload)
-    // can reach it. Takes effect between videos, not mid-fetch - see
-    // cancelActiveJob's doc comment.
-    const cancellation = { jobId, cancelled: false };
-    this._activeCancellation = cancellation;
+    // and the queue manager's pause/reorder/remove controls (see
+    // pauseActiveJob/resumeActiveJob/setActiveJobRemainingUrls above) can
+    // reach it. remainingUrls is a live mutable queue: this loop consumes it
+    // with .shift() specifically so an external reorder/removal is picked up
+    // on the very next iteration, not just at batch-start.
+    const batch = { jobId, cancelled: false, paused: false, remainingUrls: [...urls], processedUrls: [] };
+    this._activeBatch = batch;
 
     // Carries the last-known title across the gap between "start the next
     // video" and "its metadata resolves" - each STRM item is fast (a
@@ -519,12 +646,24 @@ class StrmMaterializer {
     let lastVideoInfo = null;
 
     try {
-      for (const url of urls) {
-        if (cancellation.cancelled) {
+      while (batch.remainingUrls.length > 0) {
+        // Pause takes effect only between videos (same boundary cancel
+        // already used) - park here without spawning anything until
+        // resumed or cancelled.
+        while (batch.paused && !batch.cancelled) {
+          await new Promise((resolve) => setTimeout(resolve, 300));
+        }
+        if (batch.cancelled) {
           logger.info({ jobId, current, total }, 'STRM materialize: cancelled, stopping before next video');
           break;
         }
+
+        const url = batch.remainingUrls.shift();
+        batch.processedUrls.push(url);
         current += 1;
+        // Recomputed each iteration so a mid-batch removal (fewer videos
+        // left than originally submitted) is reflected in "current of total".
+        total = batch.processedUrls.length + batch.remainingUrls.length;
         emitProgress('materializing_strm', lastVideoInfo);
         try {
           const r = await this.materializeOne(url, {
@@ -547,27 +686,27 @@ class StrmMaterializer {
           results.push({ ok: true, ...r });
         } catch (err) {
           logger.error({ err, url }, 'STRM materialize failed');
-          results.push({ ok: false, url, error: err.message });
+          // If metadata resolved before the failure (e.g. an NFO/thumbnail
+          // write error, not a metadata-fetch error), lastVideoInfo still
+          // holds this video's title - carry it onto the failure record
+          // rather than reporting it as an unknown video.
+          results.push({ ok: false, url, error: err.message, title: lastVideoInfo?.title || undefined });
           lastVideoInfo = null;
           emitProgress('materializing_strm', null);
         }
+        this._syncJobProgress(jobId, results);
       }
     } finally {
-      if (this._activeCancellation === cancellation) {
-        this._activeCancellation = null;
+      if (this._activeBatch === batch) {
+        this._activeBatch = null;
       }
     }
 
     const ok = results.filter((r) => r.ok).length;
     const failed = results.length - ok;
-    const failedVideos = results
-      .filter((r) => !r.ok)
-      .map((r) => {
-        const idMatch = String(r.url).match(/(?:v=|youtu\.be\/)([a-zA-Z0-9_-]{6,20})/);
-        return { youtubeId: idMatch ? idMatch[1] : r.url, title: 'Unknown', error: r.error };
-      });
+    const failedVideos = this._toFailedVideos(results);
 
-    const finalState = cancellation.cancelled ? 'terminated' : (failed > 0 && ok === 0 ? 'error' : 'complete');
+    const finalState = batch.cancelled ? 'terminated' : (failed > 0 && ok === 0 ? 'error' : 'complete');
     emitProgress(finalState, null, {
       warning: finalState === 'terminated' || undefined,
       terminationReason: finalState === 'terminated' ? 'User requested termination' : undefined,
@@ -588,10 +727,16 @@ class StrmMaterializer {
       },
     });
 
-    // Array with an extra `cancelled` flag - the STRM early-exit in
-    // downloadModule.js reads results.cancelled to report the job as
-    // Terminated rather than Complete/Error.
-    results.cancelled = cancellation.cancelled;
+    // Array with extra `cancelled`/`failedVideos`/`notStartedCount` fields -
+    // the STRM early-exit in downloadModule.js reads these to report the job
+    // as Terminated rather than Complete/Error, and to persist per-video
+    // outcomes onto the job record the same way a regular download's
+    // finalizer does (data.videos gets backfilled separately, from the
+    // JobVideo rows materializeOne already creates - see jobModule.js's
+    // updateJob "isCompletedJob && jobIsDownload" reload).
+    results.cancelled = batch.cancelled;
+    results.failedVideos = failedVideos;
+    results.notStartedCount = batch.remainingUrls.length;
     return results;
   }
 

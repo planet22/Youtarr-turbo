@@ -67,6 +67,7 @@ function renderFilter(filter: FilterConfig, compact: boolean): React.ReactNode {
         onFromChange={filter.onFromChange}
         onToChange={filter.onToChange}
         compact={compact}
+        label={filter.label}
       />
     );
   }
@@ -89,6 +90,21 @@ function renderFilter(filter: FilterConfig, compact: boolean): React.ReactNode {
   if (filter.id === 'channel') {
     return (
       <ChannelFilter value={filter.value} options={filter.options} onChange={filter.onChange} />
+    );
+  }
+  if (filter.id === 'select') {
+    return (
+      <ChannelFilter
+        value={filter.value}
+        options={filter.options}
+        onChange={filter.onChange}
+        entityLabel={filter.label}
+      />
+    );
+  }
+  if (filter.id === 'toggle') {
+    return (
+      <BooleanChipFilter value={filter.value} onChange={filter.onChange} icon={filter.icon} label={filter.label} />
     );
   }
   if (filter.id === 'showUntracked') {
@@ -120,8 +136,9 @@ function filterLabel(filter: FilterConfig): string {
     case 'duration':
       return 'Duration';
     case 'dateRange':
-    case 'dateRangeString':
       return 'Published Date';
+    case 'dateRangeString':
+      return filter.label ? `${filter.label} Date` : 'Published Date';
     case 'maxRating':
       return 'Max Rating';
     case 'channel':
@@ -130,6 +147,9 @@ function filterLabel(filter: FilterConfig): string {
       return 'Untracked';
     case 'showFilePaths':
       return 'File Paths';
+    case 'select':
+    case 'toggle':
+      return filter.label;
   }
   return '';
 }
@@ -137,8 +157,9 @@ function filterLabel(filter: FilterConfig): string {
 // Rendered alongside the status chips (not the row above) so they line up
 // with Cached Video/Cached Metadata etc. instead of sitting on a different
 // row - they're plain boolean toggles, not tri-state status chips, but
-// visually belong with the other row-of-videos toggles.
-const INLINE_ROW_TOGGLE_IDS = new Set(['showUntracked', 'showFilePaths']);
+// visually belong with the other row-of-videos toggles. The generic
+// 'toggle' kind joins them here too (e.g. Download History's "no videos").
+const INLINE_ROW_TOGGLE_IDS = new Set(['showUntracked', 'showFilePaths', 'toggle']);
 
 function InlinePanel({ filters, open, customFilters }: { filters: FilterConfig[]; open: boolean; customFilters?: React.ReactNode }) {
   if (!open) return null;

@@ -1,7 +1,3 @@
-export function formatBackendSource(source: string): string {
-  return source.replace(/-cache$/, '');
-}
-
 export function formatDurationMs(durationMs: number): string {
   if (durationMs < 1000) return `${Math.round(durationMs)}ms`;
   return `${(durationMs / 1000).toFixed(1)}s`;

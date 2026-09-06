@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { ConfigState, CookieStatus, SnackbarState } from '../types';
+import { ConfigState, CookieStatus, CookieTestResult, SnackbarState } from '../types';
 
 interface UseCookieManagementParams {
   token: string | null;
@@ -14,6 +14,8 @@ export const useCookieManagement = ({
 }: UseCookieManagementParams) => {
   const [cookieStatus, setCookieStatus] = useState<CookieStatus | null>(null);
   const [uploadingCookie, setUploadingCookie] = useState(false);
+  const [testingCookies, setTestingCookies] = useState(false);
+  const [cookieTestResult, setCookieTestResult] = useState<CookieTestResult | null>(null);
 
   // Fetch cookie status on mount
   useEffect(() => {
@@ -77,6 +79,35 @@ export const useCookieManagement = ({
     }
   }, [token, setConfig, setSnackbar]);
 
+  const testCookies = useCallback(async () => {
+    setTestingCookies(true);
+    setCookieTestResult(null);
+    try {
+      const response = await fetch('/api/cookies/test', {
+        method: 'POST',
+        headers: {
+          'x-access-token': token || '',
+        },
+      });
+      const data = await response.json();
+      setCookieTestResult({
+        success: !!data.success,
+        message: data.message,
+        error: data.error,
+        channelCount: data.channelCount,
+        testedAt: new Date().toISOString(),
+      });
+    } catch (error) {
+      setCookieTestResult({
+        success: false,
+        error: 'Failed to reach the server to test cookies',
+        testedAt: new Date().toISOString(),
+      });
+    } finally {
+      setTestingCookies(false);
+    }
+  }, [token]);
+
   const deleteCookies = useCallback(async () => {
     try {
       const response = await fetch('/api/cookies', {
@@ -89,6 +120,7 @@ export const useCookieManagement = ({
       if (response.ok) {
         const data = await response.json();
         setCookieStatus(data.cookieStatus);
+        setCookieTestResult(null);
         setConfig(prev => ({
           ...prev,
           customCookiesUploaded: false,
@@ -115,5 +147,8 @@ export const useCookieManagement = ({
     uploadingCookie,
     uploadCookieFile,
     deleteCookies,
+    testingCookies,
+    cookieTestResult,
+    testCookies,
   };
 };

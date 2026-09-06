@@ -6,6 +6,7 @@ export interface NavSubItem {
   key: string;
   label: string;
   to: string;
+  icon?: ReactNode;
 }
 
 export interface NavItem {

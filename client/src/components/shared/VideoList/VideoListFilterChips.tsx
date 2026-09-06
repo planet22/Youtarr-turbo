@@ -50,10 +50,10 @@ function formatDateString(value: string): string {
   return parsed.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
-function formatDateStringRange(from: string, to: string): string {
-  if (from && to) return `Published: ${formatDateString(from)} - ${formatDateString(to)}`;
-  if (from) return `Published: From ${formatDateString(from)}`;
-  if (to) return `Published: Until ${formatDateString(to)}`;
+function formatDateStringRange(from: string, to: string, label = 'Published'): string {
+  if (from && to) return `${label}: ${formatDateString(from)} - ${formatDateString(to)}`;
+  if (from) return `${label}: From ${formatDateString(from)}`;
+  if (to) return `${label}: Until ${formatDateString(to)}`;
   return '';
 }
 
@@ -123,9 +123,9 @@ function VideoListFilterChips({ filters }: VideoListFilterChipsProps) {
       };
       chips.push(
         <Chip
-          key="dateRangeString"
+          key={`dateRangeString-${filter.label ?? 'Published'}`}
           icon={<CalendarIcon size={14} />}
-          label={formatDateStringRange(filter.dateFrom, filter.dateTo)}
+          label={formatDateStringRange(filter.dateFrom, filter.dateTo, filter.label)}
           size="small"
           onDelete={clear}
           onClick={clear}
@@ -220,6 +220,40 @@ function VideoListFilterChips({ filters }: VideoListFilterChipsProps) {
           variant="outlined"
         />
       );
+      continue;
+    }
+
+    if (filter.id === 'select' && filter.value) {
+      chips.push(
+        <Chip
+          key={`select-${filter.label}`}
+          icon={<FilterIcon size={14} />}
+          label={`${filter.label}: ${filter.value}`}
+          size="small"
+          onDelete={() => filter.onChange('')}
+          onClick={() => filter.onChange('')}
+          deleteIcon={<CloseIcon data-testid="CancelIcon" size={14} />}
+          color="primary"
+          variant="outlined"
+        />
+      );
+      continue;
+    }
+
+    if (filter.id === 'toggle' && filter.value) {
+      chips.push(
+        <Chip
+          key={`toggle-${filter.label}`}
+          icon={filter.icon}
+          label={filter.label}
+          size="small"
+          onDelete={() => filter.onChange(false)}
+          onClick={() => filter.onChange(false)}
+          deleteIcon={<CloseIcon data-testid="CancelIcon" size={14} />}
+          color="primary"
+          variant="outlined"
+        />
+      );
     }
   }
 
@@ -248,6 +282,8 @@ export function countActiveFilters(filters: FilterConfig[]): number {
     else if (filter.id === 'channel' && filter.value) count++;
     else if (filter.id === 'showUntracked' && filter.value) count++;
     else if (filter.id === 'showFilePaths' && filter.value) count++;
+    else if (filter.id === 'select' && filter.value) count++;
+    else if (filter.id === 'toggle' && filter.value) count++;
   }
   return count;
 }
@@ -276,6 +312,10 @@ export function clearAllFilters(filters: FilterConfig[]): void {
     } else if (filter.id === 'showUntracked') {
       filter.onChange(false);
     } else if (filter.id === 'showFilePaths') {
+      filter.onChange(false);
+    } else if (filter.id === 'select') {
+      filter.onChange('');
+    } else if (filter.id === 'toggle') {
       filter.onChange(false);
     }
   }

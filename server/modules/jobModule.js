@@ -1,4 +1,5 @@
 const { v4: uuidv4 } = require('uuid');
+const { Op } = require('sequelize');
 const fs = require('fs');
 const fsPromises = fs.promises;
 const path = require('path');
@@ -30,6 +31,9 @@ class JobModule {
     this.jobsFilePathOld = path.join(this.jobsDir, 'jobs.json.old');
     this.isSaving = false; // Locking mechanism to prevent multiple saves at the same time
     this.jobs = {}; // Initialize this.jobs as an empty object
+    // In-memory only, intentionally not persisted: a forgotten pause should
+    // never survive a restart and silently stall downloads forever.
+    this.queueProcessingPaused = false;
 
     if (!fs.existsSync(this.jobsDir)) {
       fs.mkdirSync(this.jobsDir, { recursive: true });
@@ -411,29 +415,157 @@ class JobModule {
   }
 
   async startNextJob() {
+    if (this.queueProcessingPaused) {
+      logger.info('Queue processing paused; not starting next job');
+      return;
+    }
+
     logger.info('Looking for next job to start');
     const jobs = this.getAllJobs();
-    for (let id in jobs) {
-      if (jobs[id].status === 'Pending') {
-        jobs[id].id = id;
-        if (jobs[id].action) {
-          jobs[id].action(jobs[id], true); // Invoke the function
-        } else {
-          // Job is missing its action function (likely loaded from DB after restart)
-          logger.warn({ jobId: id, jobType: jobs[id].jobType },
-            'Cannot start pending job - missing action function, marking as Terminated');
+    const pendingIds = Object.keys(jobs)
+      .filter((id) => jobs[id].status === 'Pending')
+      .sort((a, b) => {
+        const orderA = jobs[a].data?.queueOrder ?? jobs[a].timeCreated;
+        const orderB = jobs[b].data?.queueOrder ?? jobs[b].timeCreated;
+        return orderA - orderB;
+      });
 
-          await this.updateJob(id, {
-            status: 'Terminated',
-            output: 'Job could not be started after server restart',
-          });
-
-          // Try to start the next pending job
-          this.startNextJob();
-        }
-        break;
-      }
+    if (pendingIds.length === 0) {
+      return;
     }
+
+    const id = pendingIds[0];
+    jobs[id].id = id;
+    if (jobs[id].action) {
+      jobs[id].action(jobs[id], true); // Invoke the function
+    } else {
+      // Job is missing its action function (likely loaded from DB after restart)
+      logger.warn({ jobId: id, jobType: jobs[id].jobType },
+        'Cannot start pending job - missing action function, marking as Terminated');
+
+      await this.updateJob(id, {
+        status: 'Terminated',
+        output: 'Job could not be started after server restart',
+      });
+
+      // Try to start the next pending job
+      this.startNextJob();
+    }
+  }
+
+  pauseQueueProcessing() {
+    this.queueProcessingPaused = true;
+    this.emitQueuePauseChanged();
+    this.pauseActiveStrmBatchIfAny();
+  }
+
+  resumeQueueProcessing() {
+    this.queueProcessingPaused = false;
+    this.emitQueuePauseChanged();
+    this.resumeActiveStrmBatchIfAny();
+    this.startNextJob().catch((err) => {
+      logger.error({ err }, 'Failed to start next job after resuming queue processing');
+    });
+  }
+
+  // "Pause Queue" implies nothing moves forward, including the job
+  // currently running - if that job is a STRM batch (metadata-only, one
+  // yt-dlp call per video, so genuinely pausable between videos - see
+  // strmMaterializer.js), pause its loop too rather than only blocking the
+  // *next* job from starting while this one keeps running to completion.
+  pauseActiveStrmBatchIfAny() {
+    const inProgressJobId = this.getInProgressJobId();
+    const job = inProgressJobId && this.jobs[inProgressJobId];
+    if (!job || !job.data?.isStrmBatch) return;
+
+    const strmMaterializer = require('./strmMaterializer');
+    if (strmMaterializer.pauseActiveJob(inProgressJobId)) {
+      job.data.strmPaused = true;
+      this.emitJobsUpdated(inProgressJobId, 'StrmPaused');
+    }
+  }
+
+  // Mirrors pauseActiveStrmBatchIfAny so "Resume Queue" undoes what
+  // "Pause Queue" itself paused.
+  resumeActiveStrmBatchIfAny() {
+    const inProgressJobId = this.getInProgressJobId();
+    const job = inProgressJobId && this.jobs[inProgressJobId];
+    if (!job || !job.data?.isStrmBatch || !job.data.strmPaused) return;
+
+    const strmMaterializer = require('./strmMaterializer');
+    if (strmMaterializer.resumeActiveJob(inProgressJobId)) {
+      job.data.strmPaused = false;
+      this.emitJobsUpdated(inProgressJobId, 'StrmResumed');
+    }
+  }
+
+  isQueueProcessingPaused() {
+    return this.queueProcessingPaused;
+  }
+
+  emitQueuePauseChanged() {
+    MessageEmitter.emitMessage('broadcast', null, 'download', 'queuePauseChanged', {
+      paused: this.queueProcessingPaused,
+    });
+  }
+
+  // Reassigns queueOrder for Pending jobs to match the given id order.
+  // Ids that no longer exist or already started are silently skipped -
+  // guards against a client reordering a stale snapshot of the queue.
+  async reorderPendingJobs(orderedIds) {
+    for (let index = 0; index < orderedIds.length; index++) {
+      const id = orderedIds[index];
+      const job = this.jobs[id];
+      if (!job || job.status !== 'Pending') continue;
+      await this.updateJob(id, { data: { queueOrder: index } });
+    }
+    this.emitJobsUpdated(null, 'QueueReordered');
+  }
+
+  // Replaces the video URL list on a queued (never-started) job - lets the
+  // queue manager UI remove/reorder individual videos inside a still-pending
+  // multi-video job before it runs. Not supported once a job is In Progress:
+  // a normal (non-STRM) download hands its whole URL list to one yt-dlp
+  // subprocess call, which Node has no way to interrupt or edit mid-run.
+  async updateJobVideoUrls(jobId, urls) {
+    const job = this.jobs[jobId];
+    if (!job) {
+      return { success: false, error: 'Job not found' };
+    }
+    if (job.status !== 'Pending') {
+      return { success: false, error: 'Only pending (not yet started) jobs can have their video list edited' };
+    }
+    if (!Array.isArray(urls) || urls.length === 0) {
+      return { success: false, error: 'urls must be a non-empty array' };
+    }
+
+    await this.updateJob(jobId, { data: { urls } });
+    this.emitJobsUpdated(jobId, 'VideosUpdated');
+    return { success: true };
+  }
+
+  // Removes a queued (never-started) job entirely - an in-progress job is
+  // cancelled via terminateCurrentDownload/the Stop Job button instead.
+  async removePendingJob(jobId) {
+    const job = this.jobs[jobId];
+    if (!job) {
+      return { success: false, error: 'Job not found' };
+    }
+    if (job.status !== 'Pending') {
+      return { success: false, error: 'Only pending (not yet started) jobs can be removed from the queue' };
+    }
+
+    try {
+      await JobVideo.destroy({ where: { job_id: jobId } });
+      await Job.destroy({ where: { id: jobId } });
+    } catch (error) {
+      logger.error({ err: error, jobId }, 'Failed to remove pending job');
+      return { success: false, error: error.message };
+    }
+
+    delete this.jobs[jobId];
+    this.emitJobsUpdated(jobId, 'Removed');
+    return { success: true };
   }
 
   async addOrUpdateJob(jobData, isNextJob = false) {
@@ -443,6 +575,15 @@ class JobModule {
       if (inProgressJobId) {
         // If there is a job in progress, create a new job with status Pending
         logger.info({ jobType: jobData.jobType }, 'A job is already in progress. Adding job to the queue');
+        jobData.status = 'Pending';
+        jobId = await this.addJob(jobData);
+      } else if (this.queueProcessingPaused) {
+        // Nothing is running, but the queue is paused: queue this job as
+        // Pending instead of starting it immediately - otherwise a fresh job
+        // submission (e.g. clicking Download All again) would bypass the
+        // pause entirely, since startNextJob() is the only other place that
+        // checks queueProcessingPaused and this path never calls it.
+        logger.info({ jobType: jobData.jobType }, 'Queue processing paused; adding job to the queue instead of starting it');
         jobData.status = 'Pending';
         jobId = await this.addJob(jobData);
       } else {
@@ -764,8 +905,18 @@ class JobModule {
 
           let videoInstance = await Video.findOne({ where: { youtubeId: info.id } });
           if (!videoInstance && needsVideo) {
-            await Video.create(payload);
+            const created = await Video.create(payload);
             videosUpserts += 1;
+            // Diagnostic for the nzb 'untracked' resurrection bug: this is
+            // the exact point where a video whose DB row was removed (by
+            // Sonarr/Radarr-triggered untrack) comes back to life, as long
+            // as it's still listed in complete.list. If a video keeps
+            // reappearing after being untracked, this log confirms it's
+            // this path recreating it, and with what new id.
+            logger.info(
+              { newVideoId: created.id, youtubeId: info.id, removed: payload.removed },
+              'backfillFromCompleteList: recreated a Video row from complete.list + info.json (was missing from Videos table)'
+            );
           } else if (videoInstance) {
             const updates = {};
 
@@ -963,6 +1114,53 @@ class JobModule {
     return this.jobs;
   }
 
+  // Jobs still doing something (In Progress/Pending) are the only ones
+  // "critical to function" - queued/active work that must survive a compact.
+  // Everything else is finished history that just accumulates over time.
+  getCompactableJobIds() {
+    return Object.entries(this.jobs)
+      .filter(([, job]) => job.status !== 'In Progress' && job.status !== 'Pending')
+      .map(([id]) => id);
+  }
+
+  // Dry-run counts for the Maintenance page's "Compact History" preview -
+  // read-only, makes no changes.
+  previewCompactHistory() {
+    const totalJobs = Object.keys(this.jobs).length;
+    const compactableCount = this.getCompactableJobIds().length;
+    return { totalJobs, compactableCount };
+  }
+
+  // Deletes every finished job (everything but In Progress/Pending) from
+  // both the DB and memory, so history stops growing without bound.
+  // JobVideos has no onDelete on its job_id FK (see
+  // migrations/20230602155921-create-jobvideos-table.js), so those rows
+  // must be removed before the Job row itself, or the delete would fail
+  // with a foreign key constraint error; JobVideoDownloads has a real
+  // ON DELETE CASCADE and cleans itself up.
+  async compactHistory() {
+    const idsToDelete = this.getCompactableJobIds();
+
+    if (idsToDelete.length === 0) {
+      return { success: true, deletedCount: 0 };
+    }
+
+    try {
+      await JobVideo.destroy({ where: { job_id: { [Op.in]: idsToDelete } } });
+      await Job.destroy({ where: { id: { [Op.in]: idsToDelete } } });
+    } catch (error) {
+      logger.error({ err: error }, 'Failed to compact job history');
+      return { success: false, error: error.message, deletedCount: 0 };
+    }
+
+    for (const id of idsToDelete) {
+      delete this.jobs[id];
+    }
+
+    this.emitJobsUpdated(null, 'HistoryCompacted');
+    return { success: true, deletedCount: idsToDelete.length };
+  }
+
   // Lets listing pages (e.g. Download History) refetch when a job is enqueued or starts.
   emitJobsUpdated(jobId, status) {
     MessageEmitter.emitMessage('broadcast', null, 'download', 'jobsUpdated', {
@@ -976,6 +1174,14 @@ class JobModule {
     job.timeInitiated = Date.now();
     job.timeCreated = Date.now();
     job.id = jobId;
+    if (job.status === 'Pending') {
+      job.data = job.data || {};
+      if (job.data.queueOrder === undefined) {
+        // Defaults to creation order, preserving today's FIFO behavior for
+        // anyone who never reorders the queue.
+        job.data.queueOrder = job.timeCreated;
+      }
+    }
     this.jobs[jobId] = job;
 
     try {

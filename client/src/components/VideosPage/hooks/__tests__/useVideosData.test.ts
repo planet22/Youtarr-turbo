@@ -18,6 +18,8 @@ const baseParams = {
   channelFilter: '',
   dateFrom: '',
   dateTo: '',
+  addedDateFrom: '',
+  addedDateTo: '',
   maxRatingFilter: '',
   protectedFilter: 'off' as const,
   missingFilter: 'off' as const,
@@ -69,6 +71,8 @@ describe('useVideosData', () => {
         channelFilter: 'Bar',
         dateFrom: '2024-01-01',
         dateTo: '2024-02-01',
+        addedDateFrom: '2024-03-01',
+        addedDateTo: '2024-04-01',
         maxRatingFilter: 'TV-MA',
         protectedFilter: 'only',
         missingFilter: 'exclude',
@@ -86,6 +90,8 @@ describe('useVideosData', () => {
     expect(url).toContain('channelFilter=Bar');
     expect(url).toContain('dateFrom=2024-01-01');
     expect(url).toContain('dateTo=2024-02-01');
+    expect(url).toContain('addedDateFrom=2024-03-01');
+    expect(url).toContain('addedDateTo=2024-04-01');
     expect(url).toContain('maxRating=TV-MA');
     expect(url).toContain('protectedFilter=only');
     expect(url).toContain('missingFilter=exclude');

@@ -25,6 +25,10 @@ jest.mock('../download/downloadExecutor', () => {
   }));
 });
 jest.mock('../../logger');
+jest.mock('../strmMaterializer', () => ({
+  pauseActiveJob: jest.fn(),
+  resumeActiveJob: jest.fn(),
+}));
 
 const { v4: uuidv4 } = require('uuid');
 
@@ -924,6 +928,19 @@ describe('JobModule', () => {
       expect(result).toBe('new-job-id');
     });
 
+    test('should queue as Pending (not start immediately) when nothing is running but the queue is paused', async () => {
+      JobModule.jobs = {};
+      JobModule.queueProcessingPaused = true;
+
+      const jobData = { jobType: 'download' };
+      const result = await JobModule.addOrUpdateJob(jobData);
+
+      expect(JobModule.addJob).toHaveBeenCalledWith(
+        expect.objectContaining({ jobType: 'download', status: 'Pending' })
+      );
+      expect(result).toBe('new-job-id');
+    });
+
     test('should update next job to in progress when appropriate', async () => {
       JobModule.jobs = {};
 
@@ -1050,6 +1067,349 @@ describe('JobModule', () => {
         'jobsUpdated',
         expect.anything()
       );
+    });
+
+    test('should default queueOrder to timeCreated for a Pending job', async () => {
+      const jobData = { jobType: 'download', status: 'Pending' };
+      const jobId = await JobModule.addJob(jobData);
+
+      expect(JobModule.jobs[jobId].data.queueOrder).toBe(JobModule.jobs[jobId].timeCreated);
+    });
+
+    test('should preserve an explicit queueOrder for a Pending job', async () => {
+      const jobData = { jobType: 'download', status: 'Pending', data: { queueOrder: 42 } };
+      const jobId = await JobModule.addJob(jobData);
+
+      expect(JobModule.jobs[jobId].data.queueOrder).toBe(42);
+    });
+
+    test('should not add queueOrder for a non-Pending job', async () => {
+      const jobData = { jobType: 'download', status: 'In Progress' };
+      const jobId = await JobModule.addJob(jobData);
+
+      expect(JobModule.jobs[jobId].data).toBeUndefined();
+    });
+  });
+
+  describe('queue processing pause/resume', () => {
+    beforeEach(() => {
+      fs.existsSync.mockReturnValue(false);
+      fs.readFileSync.mockReturnValue(JSON.stringify({
+        plexApiKey: 'test-key',
+      }));
+      JobModule = require('../jobModule');
+    });
+
+    test('starts unpaused', () => {
+      expect(JobModule.isQueueProcessingPaused()).toBe(false);
+    });
+
+    test('pauseQueueProcessing sets paused and broadcasts', () => {
+      JobModule.pauseQueueProcessing();
+
+      expect(JobModule.isQueueProcessingPaused()).toBe(true);
+      expect(MessageEmitter.emitMessage).toHaveBeenCalledWith(
+        'broadcast',
+        null,
+        'download',
+        'queuePauseChanged',
+        { paused: true }
+      );
+    });
+
+    test('resumeQueueProcessing clears paused, broadcasts, and starts the next job', () => {
+      const mockAction = jest.fn();
+      JobModule.jobs = {
+        'job-1': { status: 'Pending', action: mockAction }
+      };
+      JobModule.pauseQueueProcessing();
+
+      JobModule.resumeQueueProcessing();
+
+      expect(JobModule.isQueueProcessingPaused()).toBe(false);
+      expect(MessageEmitter.emitMessage).toHaveBeenCalledWith(
+        'broadcast',
+        null,
+        'download',
+        'queuePauseChanged',
+        { paused: false }
+      );
+      expect(mockAction).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'job-1', status: 'Pending' }),
+        true
+      );
+    });
+
+    test('startNextJob is a no-op while paused', () => {
+      const mockAction = jest.fn();
+      JobModule.jobs = {
+        'job-1': { status: 'Pending', action: mockAction }
+      };
+      JobModule.pauseQueueProcessing();
+
+      JobModule.startNextJob();
+
+      expect(mockAction).not.toHaveBeenCalled();
+    });
+
+    test('pauseQueueProcessing also pauses an in-progress STRM batch', () => {
+      const strmMaterializer = require('../strmMaterializer');
+      strmMaterializer.pauseActiveJob.mockReturnValue(true);
+      JobModule.jobs = {
+        'job-strm': { status: 'In Progress', data: { isStrmBatch: true } }
+      };
+
+      JobModule.pauseQueueProcessing();
+
+      expect(strmMaterializer.pauseActiveJob).toHaveBeenCalledWith('job-strm');
+      expect(JobModule.jobs['job-strm'].data.strmPaused).toBe(true);
+      expect(MessageEmitter.emitMessage).toHaveBeenCalledWith(
+        'broadcast',
+        null,
+        'download',
+        'jobsUpdated',
+        { jobId: 'job-strm', status: 'StrmPaused' }
+      );
+    });
+
+    test('pauseQueueProcessing does nothing extra when the in-progress job is not a STRM batch', () => {
+      const strmMaterializer = require('../strmMaterializer');
+      JobModule.jobs = {
+        'job-regular': { status: 'In Progress', data: {} }
+      };
+
+      JobModule.pauseQueueProcessing();
+
+      expect(strmMaterializer.pauseActiveJob).not.toHaveBeenCalled();
+    });
+
+    test('resumeQueueProcessing resumes an in-progress STRM batch that pauseQueueProcessing paused', () => {
+      const strmMaterializer = require('../strmMaterializer');
+      strmMaterializer.pauseActiveJob.mockReturnValue(true);
+      strmMaterializer.resumeActiveJob.mockReturnValue(true);
+      JobModule.jobs = {
+        'job-strm': { status: 'In Progress', data: { isStrmBatch: true } }
+      };
+      JobModule.pauseQueueProcessing();
+
+      JobModule.resumeQueueProcessing();
+
+      expect(strmMaterializer.resumeActiveJob).toHaveBeenCalledWith('job-strm');
+      expect(JobModule.jobs['job-strm'].data.strmPaused).toBe(false);
+      expect(MessageEmitter.emitMessage).toHaveBeenCalledWith(
+        'broadcast',
+        null,
+        'download',
+        'jobsUpdated',
+        { jobId: 'job-strm', status: 'StrmResumed' }
+      );
+    });
+
+    test('resumeQueueProcessing does not touch a STRM batch that was never paused', () => {
+      const strmMaterializer = require('../strmMaterializer');
+      JobModule.jobs = {
+        'job-strm': { status: 'In Progress', data: { isStrmBatch: true, strmPaused: false } }
+      };
+
+      JobModule.resumeQueueProcessing();
+
+      expect(strmMaterializer.resumeActiveJob).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('startNextJob queue ordering', () => {
+    beforeEach(() => {
+      fs.existsSync.mockReturnValue(false);
+      fs.readFileSync.mockReturnValue(JSON.stringify({
+        plexApiKey: 'test-key',
+      }));
+      JobModule = require('../jobModule');
+    });
+
+    test('starts the Pending job with the lowest queueOrder, not insertion order', () => {
+      const firstAction = jest.fn();
+      const secondAction = jest.fn();
+      JobModule.jobs = {
+        'job-inserted-first': { status: 'Pending', action: firstAction, data: { queueOrder: 20 } },
+        'job-inserted-second': { status: 'Pending', action: secondAction, data: { queueOrder: 10 } }
+      };
+
+      JobModule.startNextJob();
+
+      expect(secondAction).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'job-inserted-second' }),
+        true
+      );
+      expect(firstAction).not.toHaveBeenCalled();
+    });
+
+    test('falls back to timeCreated when queueOrder is missing', () => {
+      const olderAction = jest.fn();
+      const newerAction = jest.fn();
+      JobModule.jobs = {
+        'job-newer': { status: 'Pending', action: newerAction, timeCreated: 200 },
+        'job-older': { status: 'Pending', action: olderAction, timeCreated: 100 }
+      };
+
+      JobModule.startNextJob();
+
+      expect(olderAction).toHaveBeenCalled();
+      expect(newerAction).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('reorderPendingJobs', () => {
+    beforeEach(() => {
+      fs.existsSync.mockReturnValue(false);
+      fs.readFileSync.mockReturnValue(JSON.stringify({
+        plexApiKey: 'test-key',
+      }));
+      JobModule = require('../jobModule');
+      JobModule.saveJobs = jest.fn().mockResolvedValue();
+      JobModule.saveJobOnly = jest.fn().mockResolvedValue();
+    });
+
+    test('assigns queueOrder to match the given id order', async () => {
+      JobModule.jobs = {
+        'job-a': { status: 'Pending', data: { queueOrder: 1 } },
+        'job-b': { status: 'Pending', data: { queueOrder: 0 } }
+      };
+
+      await JobModule.reorderPendingJobs(['job-b', 'job-a']);
+
+      expect(JobModule.jobs['job-b'].data.queueOrder).toBe(0);
+      expect(JobModule.jobs['job-a'].data.queueOrder).toBe(1);
+      expect(MessageEmitter.emitMessage).toHaveBeenCalledWith(
+        'broadcast',
+        null,
+        'download',
+        'jobsUpdated',
+        { jobId: null, status: 'QueueReordered' }
+      );
+    });
+
+    test('skips ids that no longer exist or already started', async () => {
+      JobModule.jobs = {
+        'job-a': { status: 'Pending', data: { queueOrder: 5 } },
+        'job-b': { status: 'In Progress', data: {} }
+      };
+
+      await JobModule.reorderPendingJobs(['missing-job', 'job-b', 'job-a']);
+
+      expect(JobModule.jobs['job-b'].data.queueOrder).toBeUndefined();
+      expect(JobModule.jobs['job-a'].data.queueOrder).toBe(2);
+    });
+  });
+
+  describe('updateJobVideoUrls', () => {
+    beforeEach(() => {
+      fs.existsSync.mockReturnValue(false);
+      fs.readFileSync.mockReturnValue(JSON.stringify({
+        plexApiKey: 'test-key',
+      }));
+      JobModule = require('../jobModule');
+      JobModule.saveJobs = jest.fn().mockResolvedValue();
+    });
+
+    test('replaces the url list on a Pending job', async () => {
+      JobModule.jobs = {
+        'job-a': { status: 'Pending', data: { urls: ['https://youtu.be/a', 'https://youtu.be/b'] } }
+      };
+
+      const result = await JobModule.updateJobVideoUrls('job-a', ['https://youtu.be/b']);
+
+      expect(result).toEqual({ success: true });
+      expect(JobModule.jobs['job-a'].data.urls).toEqual(['https://youtu.be/b']);
+      expect(MessageEmitter.emitMessage).toHaveBeenCalledWith(
+        'broadcast',
+        null,
+        'download',
+        'jobsUpdated',
+        { jobId: 'job-a', status: 'VideosUpdated' }
+      );
+    });
+
+    test('rejects a job that is not found', async () => {
+      JobModule.jobs = {};
+
+      const result = await JobModule.updateJobVideoUrls('missing-job', ['https://youtu.be/a']);
+
+      expect(result).toEqual({ success: false, error: 'Job not found' });
+    });
+
+    test('rejects a job that is not Pending', async () => {
+      JobModule.jobs = {
+        'job-a': { status: 'In Progress', data: { urls: ['https://youtu.be/a'] } }
+      };
+
+      const result = await JobModule.updateJobVideoUrls('job-a', ['https://youtu.be/a']);
+
+      expect(result.success).toBe(false);
+      expect(JobModule.jobs['job-a'].data.urls).toEqual(['https://youtu.be/a']);
+    });
+
+    test('rejects an empty or non-array urls list', async () => {
+      JobModule.jobs = {
+        'job-a': { status: 'Pending', data: { urls: ['https://youtu.be/a'] } }
+      };
+
+      const emptyResult = await JobModule.updateJobVideoUrls('job-a', []);
+      expect(emptyResult.success).toBe(false);
+
+      const invalidResult = await JobModule.updateJobVideoUrls('job-a', 'not-an-array');
+      expect(invalidResult.success).toBe(false);
+    });
+  });
+
+  describe('removePendingJob', () => {
+    beforeEach(() => {
+      fs.existsSync.mockReturnValue(false);
+      fs.readFileSync.mockReturnValue(JSON.stringify({
+        plexApiKey: 'test-key',
+      }));
+      JobModule = require('../jobModule');
+      JobVideo.destroy = jest.fn().mockResolvedValue();
+      Job.destroy = jest.fn().mockResolvedValue();
+    });
+
+    test('removes a Pending job and its JobVideo rows', async () => {
+      JobModule.jobs = {
+        'job-a': { status: 'Pending' }
+      };
+
+      const result = await JobModule.removePendingJob('job-a');
+
+      expect(result).toEqual({ success: true });
+      expect(JobVideo.destroy).toHaveBeenCalledWith({ where: { job_id: 'job-a' } });
+      expect(Job.destroy).toHaveBeenCalledWith({ where: { id: 'job-a' } });
+      expect(JobModule.jobs['job-a']).toBeUndefined();
+      expect(MessageEmitter.emitMessage).toHaveBeenCalledWith(
+        'broadcast',
+        null,
+        'download',
+        'jobsUpdated',
+        { jobId: 'job-a', status: 'Removed' }
+      );
+    });
+
+    test('rejects a job that is not found', async () => {
+      JobModule.jobs = {};
+
+      const result = await JobModule.removePendingJob('missing-job');
+
+      expect(result).toEqual({ success: false, error: 'Job not found' });
+    });
+
+    test('rejects a job that is not Pending', async () => {
+      JobModule.jobs = {
+        'job-a': { status: 'In Progress' }
+      };
+
+      const result = await JobModule.removePendingJob('job-a');
+
+      expect(result.success).toBe(false);
+      expect(Job.destroy).not.toHaveBeenCalled();
+      expect(JobModule.jobs['job-a']).toBeDefined();
     });
   });
 
@@ -2906,6 +3266,78 @@ describe('JobModule', () => {
       await JobModule.loadJobsFromDB();
 
       expect(JobModule.jobs['job-4'].data).toEqual({ videos: [] });
+    });
+  });
+
+  describe('compactHistory / previewCompactHistory', () => {
+    const JobVideoModel = () => require('../../models/jobvideo');
+
+    beforeEach(async () => {
+      fs.existsSync.mockReturnValue(false);
+      fs.readFileSync.mockReturnValue(JSON.stringify({ plexApiKey: 'test-key' }));
+      JobModule = require('../jobModule');
+      // The constructor's initial loadJobsFromDB() runs asynchronously and
+      // would otherwise overwrite this.jobs with {} right after we seed it
+      // below - let it settle first.
+      await new Promise(resolve => setTimeout(resolve, 10));
+      // Active jobs (In Progress/Pending) must survive; everything else is
+      // compactable finished history.
+      JobModule.jobs = {
+        'active-progress': { status: 'In Progress' },
+        'active-pending': { status: 'Pending' },
+        'done-complete': { status: 'Complete' },
+        'done-error': { status: 'Error' },
+        'done-terminated': { status: 'Terminated' }
+      };
+    });
+
+    test('previewCompactHistory counts compactable jobs without changing anything', () => {
+      const preview = JobModule.previewCompactHistory();
+
+      expect(preview).toEqual({ totalJobs: 5, compactableCount: 3 });
+      expect(Object.keys(JobModule.jobs)).toHaveLength(5);
+    });
+
+    test('compactHistory removes finished jobs from the DB and memory, keeping active ones', async () => {
+      Job.destroy = jest.fn().mockResolvedValue(3);
+      JobVideoModel().destroy = jest.fn().mockResolvedValue(0);
+
+      const result = await JobModule.compactHistory();
+
+      expect(result).toEqual({ success: true, deletedCount: 3 });
+      expect(JobVideoModel().destroy).toHaveBeenCalledWith({
+        where: { job_id: { [require('sequelize').Op.in]: ['done-complete', 'done-error', 'done-terminated'] } }
+      });
+      expect(Job.destroy).toHaveBeenCalledWith({
+        where: { id: { [require('sequelize').Op.in]: ['done-complete', 'done-error', 'done-terminated'] } }
+      });
+      expect(Object.keys(JobModule.jobs).sort()).toEqual(['active-pending', 'active-progress']);
+      expect(MessageEmitter.emitMessage).toHaveBeenCalledWith(
+        'broadcast', null, 'download', 'jobsUpdated', { jobId: null, status: 'HistoryCompacted' }
+      );
+    });
+
+    test('compactHistory is a no-op when nothing is compactable', async () => {
+      JobModule.jobs = { 'active-progress': { status: 'In Progress' } };
+      Job.destroy = jest.fn().mockResolvedValue(0);
+      JobVideoModel().destroy = jest.fn().mockResolvedValue(0);
+
+      const result = await JobModule.compactHistory();
+
+      expect(result).toEqual({ success: true, deletedCount: 0 });
+      expect(Job.destroy).not.toHaveBeenCalled();
+      expect(JobVideoModel().destroy).not.toHaveBeenCalled();
+    });
+
+    test('compactHistory reports failure and leaves memory untouched when the DB delete throws', async () => {
+      Job.destroy = jest.fn().mockRejectedValue(new Error('DB Error'));
+      JobVideoModel().destroy = jest.fn().mockResolvedValue(0);
+
+      const result = await JobModule.compactHistory();
+
+      expect(result).toEqual({ success: false, error: 'DB Error', deletedCount: 0 });
+      expect(logger.error).toHaveBeenCalled();
+      expect(Object.keys(JobModule.jobs)).toHaveLength(5);
     });
   });
 });

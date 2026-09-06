@@ -1769,6 +1769,64 @@ describe('DownloadProgress', () => {
     });
   });
 
+  describe('queue manager toggle', () => {
+    beforeEach(() => {
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        json: jest.fn().mockResolvedValue({ paused: false }),
+      });
+    });
+
+    afterEach(() => {
+      jest.restoreAllMocks();
+    });
+
+    const pendingJobs = [
+      {
+        id: 'job-1',
+        jobType: 'Channel Downloads',
+        status: 'Pending',
+        timeCreated: Date.now(),
+        timeInitiated: Date.now(),
+        output: '',
+        data: { videos: [] }
+      }
+    ];
+
+    test('shows the chip list (not the table) when queueManagerEnabled is false', () => {
+      renderWithContext(
+        <DownloadProgress
+          downloadProgressRef={mockDownloadProgressRef}
+          downloadInitiatedRef={mockDownloadInitiatedRef}
+          jobs={pendingJobs}
+          token="test-token"
+        />
+      );
+
+      expect(screen.getByText('1 job queued')).toBeInTheDocument();
+      expect(screen.queryByText('Job Queue')).not.toBeInTheDocument();
+    });
+
+    test('shows the queue table (not the chip list) when queueManagerEnabled is true', async () => {
+      renderWithContext(
+        <DownloadProgress
+          downloadProgressRef={mockDownloadProgressRef}
+          downloadInitiatedRef={mockDownloadInitiatedRef}
+          jobs={pendingJobs}
+          token="test-token"
+          queueManagerEnabled
+        />
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText('Job Queue')).toBeInTheDocument();
+      });
+      expect(screen.getByText('Next up')).toBeInTheDocument();
+      // The chip-list variant's index-prefixed chip should not also render.
+      expect(screen.queryByText('1. Channel update')).not.toBeInTheDocument();
+    });
+  });
+
   describe('activity awareness', () => {
     const buildJob = (overrides: Record<string, unknown> = {}) => ({
       id: 'job-active',

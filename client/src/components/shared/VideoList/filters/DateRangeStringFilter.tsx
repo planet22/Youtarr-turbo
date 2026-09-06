@@ -8,6 +8,10 @@ export interface DateRangeStringFilterProps {
   onFromChange: (value: string) => void;
   onToChange: (value: string) => void;
   compact?: boolean;
+  // Distinguishes this instance when a page has more than one date-range
+  // filter (e.g. "Published" vs "Downloaded"); drives the field label and
+  // the date-picker buttons' aria-labels.
+  label?: string;
 }
 
 function DateRangeStringFilter({
@@ -16,7 +20,10 @@ function DateRangeStringFilter({
   onFromChange,
   onToChange,
   compact = false,
+  label = 'Published',
 }: DateRangeStringFilterProps) {
+  const lowerLabel = label.toLowerCase();
+
   if (compact) {
     return (
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
@@ -24,8 +31,8 @@ function DateRangeStringFilter({
           value={dateFrom}
           onChange={onFromChange}
           placeholder="From"
-          ariaLabel="Published from date"
-          clearAriaLabel="Clear published from date"
+          ariaLabel={`${label} from date`}
+          clearAriaLabel={`Clear ${lowerLabel} from date`}
         />
         <Typography variant="body2" color="text.secondary">
           to
@@ -34,8 +41,8 @@ function DateRangeStringFilter({
           value={dateTo}
           onChange={onToChange}
           placeholder="To"
-          ariaLabel="Published to date"
-          clearAriaLabel="Clear published to date"
+          ariaLabel={`${label} to date`}
+          clearAriaLabel={`Clear ${lowerLabel} to date`}
         />
       </div>
     );
@@ -43,14 +50,14 @@ function DateRangeStringFilter({
 
   return (
     <FormControl>
-      <InputLabel shrink>Published</InputLabel>
+      <InputLabel shrink>{label}</InputLabel>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
         <DatePickerButton
           value={dateFrom}
           onChange={onFromChange}
           placeholder="From"
-          ariaLabel="Published from date"
-          clearAriaLabel="Clear published from date"
+          ariaLabel={`${label} from date`}
+          clearAriaLabel={`Clear ${lowerLabel} from date`}
           minWidth={160}
         />
         <Typography variant="body2" color="text.secondary">
@@ -60,8 +67,8 @@ function DateRangeStringFilter({
           value={dateTo}
           onChange={onToChange}
           placeholder="To"
-          ariaLabel="Published to date"
-          clearAriaLabel="Clear published to date"
+          ariaLabel={`${label} to date`}
+          clearAriaLabel={`Clear ${lowerLabel} to date`}
           minWidth={160}
         />
       </div>

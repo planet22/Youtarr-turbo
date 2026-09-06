@@ -10,6 +10,29 @@ export const formatFileSize = (bytes: number | null | undefined): string => {
   return `${mb.toFixed(0)}MB`;
 };
 
+const BYTES_PER_KB = 1024;
+const BYTES_PER_MB = 1024 * 1024;
+const BYTES_PER_GB = 1024 * 1024 * 1024;
+
+// Full B/KB/MB/GB scaling (unlike formatFileSize above, which only ever
+// shows MB/GB - fine for video files, but too coarse for small byte counts
+// like a failed/partial NZB grab). Originally VideoModal/VideoTechnical.tsx's
+// own local helper; shared here so other byte-size displays (the NZB
+// diagnostics page's job/history tables) can reuse the same scaling instead
+// of re-deriving it.
+export const formatByteSize = (bytes: number): string => {
+  if (bytes >= BYTES_PER_GB) {
+    return `${(bytes / BYTES_PER_GB).toFixed(2)} GB`;
+  }
+  if (bytes >= BYTES_PER_MB) {
+    return `${(bytes / BYTES_PER_MB).toFixed(1)} MB`;
+  }
+  if (bytes >= BYTES_PER_KB) {
+    return `${(bytes / BYTES_PER_KB).toFixed(1)} KB`;
+  }
+  return `${bytes} B`;
+};
+
 export const decodeHtml = (html: string): string => {
   const txt = document.createElement('textarea');
   txt.innerHTML = html;

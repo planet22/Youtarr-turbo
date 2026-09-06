@@ -5,6 +5,68 @@ const EventEmitter = require('events');
 const logger = require('../logger');
 const { getDefaultNameForUrl } = require('./notificationHelpers');
 
+// Cookies that actually carry YouTube's login session; their expiry (Netscape
+// column 5, epoch seconds) is the earliest useful signal that an export is
+// stale, well before a download fails against it.
+const AUTH_COOKIE_NAMES = new Set([
+  'SID', 'HSID', 'SSID', 'APISID', 'SAPISID',
+  '__Secure-1PSID', '__Secure-3PSID',
+  '__Secure-1PAPISID', '__Secure-3PAPISID',
+  'LOGIN_INFO',
+]);
+
+// Parses a Netscape-format cookies file for diagnostics only (upload size,
+// age, and how close the auth cookies are to expiring) - never used for the
+// actual yt-dlp auth path, which just points --cookies at the file.
+function parseCookieFileMetadata(filePath) {
+  let stat;
+  try {
+    stat = fs.statSync(filePath);
+  } catch (err) {
+    return null;
+  }
+
+  let earliestExpirySeconds = null;
+  let earliestExpiryName = null;
+  let authCookiesFound = 0;
+  let hasExpiredAuthCookie = false;
+
+  try {
+    const content = fs.readFileSync(filePath, 'utf8');
+    const nowSeconds = Date.now() / 1000;
+    for (const line of content.split('\n')) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) continue;
+      const fields = trimmed.split('\t');
+      if (fields.length < 7) continue;
+      const [, , , , expiryStr, name] = fields;
+      if (!AUTH_COOKIE_NAMES.has(name)) continue;
+
+      authCookiesFound += 1;
+      const expiry = Number(expiryStr);
+      if (!Number.isFinite(expiry) || expiry <= 0) continue;
+      if (expiry < nowSeconds) hasExpiredAuthCookie = true;
+      if (earliestExpirySeconds === null || expiry < earliestExpirySeconds) {
+        earliestExpirySeconds = expiry;
+        earliestExpiryName = name;
+      }
+    }
+  } catch (err) {
+    logger.warn({ err, filePath }, 'Failed to parse cookie file for expiry metadata');
+  }
+
+  return {
+    sizeBytes: stat.size,
+    uploadedAt: stat.mtime.toISOString(),
+    authCookiesFound,
+    hasExpiredAuthCookie,
+    earliestExpiry: earliestExpirySeconds !== null
+      ? new Date(earliestExpirySeconds * 1000).toISOString()
+      : null,
+    earliestExpiryName,
+  };
+}
+
 class ConfigModule extends EventEmitter {
   constructor() {
     super();
@@ -524,11 +586,20 @@ class ConfigModule extends EventEmitter {
     const customPath = path.join(configDir, 'cookies.user.txt');
     const customExists = fs.existsSync(customPath);
 
-    return {
+    const status = {
       cookiesEnabled: this.config.cookiesEnabled,
       customCookiesUploaded: this.config.customCookiesUploaded,
       customFileExists: customExists
     };
+
+    if (customExists) {
+      const metadata = parseCookieFileMetadata(customPath);
+      if (metadata) {
+        Object.assign(status, metadata);
+      }
+    }
+
+    return status;
   }
 
   writeCustomCookiesFile(buffer) {

@@ -768,6 +768,14 @@ class DownloadModule {
       if (mediaMode === 'strm') {
         try {
           logger.info({ jobId, count: urls.length }, 'STRM mode: materializing instead of downloading');
+          // Marks this job as eligible for the queue manager's live STRM
+          // pause/reorder/skip controls - see strmMaterializer.js's
+          // pauseActiveJob/setActiveJobRemainingUrls and the
+          // /api/jobs/:jobId/strm/* routes. Unlike a real yt-dlp download
+          // (one subprocess call owns the whole URL list), STRM materialize
+          // fetches metadata one video at a time in a plain Node loop, so it
+          // can genuinely be paused/reordered between videos.
+          await jobModule.updateJob(jobId, { data: { isStrmBatch: true } });
           const results = await strmMaterializer.materializeMany(urls, {
             jobId,
             jobType,
@@ -789,14 +797,27 @@ class DownloadModule {
           });
           const ok = results.filter((r) => r.ok).length;
           const failed = results.length - ok;
+          // Videos never attempted before a mid-batch cancellation - distinct
+          // from `failed` (attempted, errored). Without calling this out
+          // separately, a job's video list (backfilled from JobVideo rows
+          // below) only ever shows the successes, which reads as if the
+          // "Terminated" badge somehow applies to videos that actually
+          // completed fine, rather than to the ones that never ran.
+          const notStarted = results.notStartedCount || 0;
 
           await jobModule.updateJob(jobId, {
             status: results.cancelled
               ? 'Terminated'
               : (failed > 0 && ok === 0 ? 'Error' : (failed > 0 ? 'Complete with Warnings' : 'Complete')),
             output: results.cancelled
-              ? `STRM: terminated by user (${ok} ok, ${failed} failed before stopping)`
+              ? `STRM: terminated by user (${ok} ok, ${failed} failed, ${notStarted} not started before stopping)`
               : `STRM: ${ok} ok, ${failed} failed`,
+            // data.videos is backfilled separately from JobVideo rows by
+            // jobModule.updateJob's own "isCompletedJob && jobIsDownload"
+            // reload (materializeOne already links each success to this job)
+            // - only failures need to be supplied explicitly here, mirroring
+            // the regular download finalizer's persistCompletedVideosBeforeTerminalUpdate.
+            data: { failedVideos: results.failedVideos || [] },
           });
 
           // Media server refresh: STRM materialize never goes through

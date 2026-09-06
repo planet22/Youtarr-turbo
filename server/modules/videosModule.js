@@ -22,6 +22,15 @@ const BACKFILL_UPDATE_BATCH_SIZE = 100;
 // ~4x without piling up subprocesses next to downloads and Plex.
 const BACKFILL_PROBE_CONCURRENCY = 4;
 
+// Throttle for the broader nzb-untracked sweep in getVideosPaginated (see
+// its call site) - it's an O(removed rows x in-memory nzb jobs) scan, cheap
+// for a normal library but pointless to redo on every single page request
+// when nothing changed in between (rapid pagination, multiple browser tabs,
+// the duplicate-request pattern the frontend is already known to produce).
+// One minute keeps a freshly-moved nzb video from sitting as "Missing" for
+// more than about that long, without re-scanning on every request.
+const NZB_UNTRACKED_SWEEP_INTERVAL_MS = 60 * 1000;
+
 // Safety cap on the "Show untracked" bucket (videos with no Videos row at
 // all, surfaced only via youtube_metadata_cache / the untracked buffer
 // cache dir) - this is a debugging/cache-management view, not meant to
@@ -50,6 +59,7 @@ class VideosModule {
     this._backfillRunning = false;
     this._resolutionTagBackfillRunning = false;
     this._imageRegenRunning = false;
+    this._lastNzbUntrackedSweepAt = 0;
   }
 
   async getVideosPaginated(options = {}) {
@@ -59,6 +69,8 @@ class VideosModule {
       search = '',
       dateFrom = null,
       dateTo = null,
+      addedDateFrom = null,
+      addedDateTo = null,
       sortBy = 'added',
       sortOrder = 'desc',
       channelFilter = '',
@@ -68,8 +80,16 @@ class VideosModule {
       strmFilter = 'off',
       metadataCacheFilter = 'off',
       cachedVideoFilter = 'off',
+      metadataOnlyFilter = 'off',
       showUntracked = false,
     } = options;
+
+    // What "Downloaded" means everywhere it's used (this filter, the
+    // "added" sort, and the timeCreated column returned to the client):
+    // when it was actually downloaded, falling back to the job that
+    // produced it, falling back to its YouTube publish date for videos
+    // backfilled before last_downloaded_at existed.
+    const ADDED_DATE_EXPR = "COALESCE(Videos.last_downloaded_at, Jobs.timeCreated, STR_TO_DATE(Videos.originalDate, '%Y%m%d'))";
 
     try {
       const offset = (page - 1) * limit;
@@ -96,6 +116,19 @@ class VideosModule {
       if (dateTo) {
         whereConditions.push('Videos.originalDate <= :dateTo');
         replacements.dateTo = dateTo.replace(/-/g, '');
+      }
+
+      // Unlike originalDate (YYYYMMDD text, compared as a stripped string),
+      // ADDED_DATE_EXPR resolves to a real DATETIME, so these compare
+      // against proper day-boundary timestamps instead.
+      if (addedDateFrom) {
+        whereConditions.push(`${ADDED_DATE_EXPR} >= :addedDateFrom`);
+        replacements.addedDateFrom = `${addedDateFrom} 00:00:00`;
+      }
+
+      if (addedDateTo) {
+        whereConditions.push(`${ADDED_DATE_EXPR} <= :addedDateTo`);
+        replacements.addedDateTo = `${addedDateTo} 23:59:59`;
       }
 
       if (protectedFilter === 'only') {
@@ -138,6 +171,15 @@ class VideosModule {
         whereConditions.push('Videos.cached_at IS NULL');
       }
 
+      // "Metadata-only" (cached metadata with no cached/downloaded video
+      // backing it) only ever describes untracked rows below - every tracked
+      // row here has a real Videos record, so it's never "only" metadata.
+      // 'only' therefore excludes all tracked rows; 'exclude' is a no-op for
+      // them (nothing to exclude).
+      if (metadataOnlyFilter === 'only') {
+        whereConditions.push('1 = 0');
+      }
+
       const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
 
       // Build ORDER BY
@@ -145,7 +187,7 @@ class VideosModule {
       if (sortBy === 'published') {
         orderByColumn = 'Videos.originalDate';
       } else {
-        orderByColumn = 'COALESCE(Videos.last_downloaded_at, Jobs.timeCreated, STR_TO_DATE(Videos.originalDate, \'%Y%m%d\'))';
+        orderByColumn = ADDED_DATE_EXPR;
       }
       const orderByClause = `ORDER BY ${orderByColumn} ${sortOrder.toUpperCase()}`;
 
@@ -174,23 +216,38 @@ class VideosModule {
       // 'untracked') - sourced from youtube_metadata_cache and the untracked
       // hls-buffer cache dir, a fundamentally different source with no FK to
       // Videos - into the SAME chronologically-sorted, paginated list as
-      // tracked rows. search/dateFrom/dateTo/channelFilter still don't apply
-      // to untracked candidates (would require parsing every candidate's
-      // raw_info_json up front, defeating the point of the cheap-columns-
-      // first pass in _getUntrackedCandidates).
+      // tracked rows. search/dateFrom/dateTo/channelFilter are pushed down
+      // into _getUntrackedCandidates' own SQL (JSON_EXTRACT against
+      // raw_info_json, same fields _hydrateUntrackedRows already reads) so
+      // MySQL/MariaDB does the JSON parsing per-row there instead of this
+      // process parsing every candidate's blob in JS. addedDateFrom/
+      // addedDateTo are cheaper still - they compare fetched_at/the buffer
+      // file's own mtime, columns _getUntrackedCandidates already selects.
+      // A buffer-cache-only entry (no youtube_metadata_cache row at all) has
+      // no title/channel/upload-date to check search/dateFrom/dateTo/
+      // channelFilter against, so it's excluded whenever one of those is
+      // active rather than shown as an unverifiable match.
       //
-      // Like the STRM filter, metadataCacheFilter/cachedVideoFilter only
-      // narrow whatever's already in scope - they never flip showUntracked
-      // on by themselves. showUntracked defaults true client-side, so in
-      // practice untracked rows are already there to be narrowed; a user
-      // who explicitly turns showUntracked off is asking to not see
-      // untracked rows at all, and a cache filter shouldn't override that.
+      // Like the STRM filter, metadataCacheFilter/cachedVideoFilter/
+      // metadataOnlyFilter only narrow whatever's already in scope - they
+      // never flip showUntracked on by themselves. showUntracked defaults
+      // true client-side, so in practice untracked rows are already there to
+      // be narrowed; a user who explicitly turns showUntracked off is asking
+      // to not see untracked rows at all, and a cache filter shouldn't
+      // override that.
       const untrackedCandidates = showUntracked
-        ? (await this._getUntrackedCandidates({ sortOrder })).filter((c) => {
+        ? (await this._getUntrackedCandidates({
+          sortOrder, search, dateFrom, dateTo, addedDateFrom, addedDateTo, channelFilter,
+        })).filter((c) => {
           if (metadataCacheFilter === 'only' && !c.hasCachedMetadata) return false;
           if (metadataCacheFilter === 'exclude' && c.hasCachedMetadata) return false;
           if (cachedVideoFilter === 'only' && !c.hasCachedVideo) return false;
           if (cachedVideoFilter === 'exclude' && c.hasCachedVideo) return false;
+          // metadata-only = has cached metadata but no cached video (nothing
+          // playable backs the row).
+          const isMetadataOnly = c.hasCachedMetadata && !c.hasCachedVideo;
+          if (metadataOnlyFilter === 'only' && !isMetadataOnly) return false;
+          if (metadataOnlyFilter === 'exclude' && isMetadataOnly) return false;
           return true;
         })
         : [];
@@ -223,7 +280,7 @@ class VideosModule {
           Videos.cached_at AS cachedVideoAt,
           ymc.fetched_at AS cachedMetadataAt,
           ymc.last_accessed_at AS cachedMetadataLastAccessedAt,
-          COALESCE(Videos.last_downloaded_at, Jobs.timeCreated, STR_TO_DATE(Videos.originalDate, '%Y%m%d')) AS timeCreated
+          ${ADDED_DATE_EXPR} AS timeCreated
       `;
       const videoJoinsSql = `
         FROM Videos
@@ -252,7 +309,7 @@ class VideosModule {
         // only an aggregate of the sort expression is selected alongside it.
         const sortKeyExpr = sortBy === 'published'
           ? 'STR_TO_DATE(Videos.originalDate, \'%Y%m%d\')'
-          : 'COALESCE(Videos.last_downloaded_at, Jobs.timeCreated, STR_TO_DATE(Videos.originalDate, \'%Y%m%d\'))';
+          : ADDED_DATE_EXPR;
         const trackedIdRows = await sequelize.query(
           `SELECT Videos.id AS id, MAX(${sortKeyExpr}) AS sortKey ${videoJoinsSql} ${whereClause} GROUP BY Videos.id`,
           { replacements, type: Sequelize.QueryTypes.SELECT }
@@ -327,6 +384,74 @@ class VideosModule {
 
       // Batch update the database if there are changes
       await fileCheckModule.applyVideoUpdates(sequelize, Sequelize, updates);
+
+      // NZB importStrategy:'untracked' videos are meant to vanish from
+      // Youtarr's own library the moment Sonarr/Radarr's import moves the
+      // real file away - normally handled by an explicit history-delete
+      // call from Sonarr/Radarr, but plenty of installs never send one (see
+      // nzb.js's reconcileMovedUntrackedVideo doc comment). The file check
+      // above just flipped these rows to removed=true; catch that here and
+      // finish the untrack immediately so they disappear instead of sitting
+      // in the Library as a permanently "Missing" video. Only considers
+      // rows THIS pass freshly flipped, so it's a cheap no-op on every other
+      // page load.
+      const freshlyRemovedIds = new Set(updates.filter((u) => u.removed === true).map((u) => u.id));
+      if (freshlyRemovedIds.size > 0) {
+        const nzbRoutes = require('../routes/nzb');
+        const untrackedIds = new Set();
+        for (const video of videos) {
+          if (!freshlyRemovedIds.has(video.id)) continue;
+          try {
+            const wasUntracked = await nzbRoutes.reconcileMovedUntrackedVideo(video);
+            if (wasUntracked) untrackedIds.add(video.id);
+          } catch (err) {
+            logger.warn({ err, videoId: video.id }, 'Failed to reconcile possibly-untracked nzb video');
+          }
+        }
+        if (untrackedIds.size > 0) {
+          videos = videos.filter((v) => !untrackedIds.has(v.id));
+        }
+      }
+
+      // Broader net for the same gap: the check above only ever gets ONE
+      // chance per video, right at the instant fileCheckModule first flips
+      // it to removed=true on some page load - fileCheckModule never emits
+      // another update for a row that's already removed=true, so a video
+      // whose one shot missed (the matching nzb job hadn't loaded yet, a
+      // transient error, etc.) would otherwise sit as "Missing" until the
+      // next nightly/manual backfill. Piggyback a full sweep of every
+      // removed=true row onto Library page loads too, throttled to once a
+      // minute (NZB_UNTRACKED_SWEEP_INTERVAL_MS) since it's an O(removed
+      // rows x in-memory nzb jobs) scan that would otherwise redo the exact
+      // same work on every page navigation/duplicate request for nothing.
+      const nowMs = Date.now();
+      if (nowMs - this._lastNzbUntrackedSweepAt > NZB_UNTRACKED_SWEEP_INTERVAL_MS) {
+        this._lastNzbUntrackedSweepAt = nowMs;
+        try {
+          const removedVideos = await Video.findAll({
+            where: { removed: true },
+            attributes: ['id', 'youtubeId'],
+          });
+          if (removedVideos.length) {
+            const nzbRoutes = require('../routes/nzb');
+            const sweptIds = new Set();
+            for (const video of removedVideos) {
+              try {
+                if (await nzbRoutes.reconcileMovedUntrackedVideo(video)) {
+                  sweptIds.add(video.id);
+                }
+              } catch (err) {
+                logger.warn({ err, videoId: video.id }, 'Failed to reconcile one possibly-untracked nzb video during Library sweep');
+              }
+            }
+            if (sweptIds.size > 0) {
+              videos = videos.filter((v) => !sweptIds.has(v.id));
+            }
+          }
+        } catch (err) {
+          logger.warn({ err }, 'Failed to run nzb-untracked sweep during Library page load');
+        }
+      }
 
       // Check if videos still exist on YouTube and mark as removed if they don't
       const videoValidationModule = require('./videoValidationModule');
@@ -470,24 +595,78 @@ class VideosModule {
    * row that still have a youtube_metadata_cache row and/or an untracked
    * hls-buffer cache file. Capped and sorted (most-recent-first by default,
    * flipped for 'asc') so the caller can slice a page out of it the same
-   * way the tracked-row SQL query does. search/dateFrom/dateTo/channelFilter
-   * are NOT applied here (see getVideosPaginated's doc comment) - only the
-   * two cache-presence tri-states matter, and those two buckets ARE this
-   * method's two data sources, so they're implicit rather than re-filtered.
+   * way the tracked-row SQL query does.
+   *
+   * search/dateFrom/dateTo/channelFilter are pushed down as SQL WHERE
+   * clauses against youtube_metadata_cache using JSON_EXTRACT on
+   * raw_info_json (the only place title/uploader/channel/upload_date live -
+   * see _hydrateUntrackedRows for the equivalent JS-side parse of that same
+   * blob, used only for the handful of rows that make it onto the actual
+   * page) so MySQL/MariaDB does the per-row JSON parsing instead of this
+   * process walking every candidate in JS. addedDateFrom/addedDateTo are
+   * cheaper - they compare fetched_at (metadata rows) or the buffer file's
+   * own mtime (buffer-only rows), columns already being selected here.
    * @returns {Promise<Array<object>>}
    */
-  async _getUntrackedCandidates({ sortOrder = 'desc' } = {}) {
-    // Cheap columns only - never raw_info_json here, it can be large and
-    // this pass may scan up to UNTRACKED_BUCKET_CAP rows just to know
-    // what's out there. ORDER BY fetched_at DESC bounds an unbounded cache
-    // to its most-recently-cached entries before any further sorting below.
+  async _getUntrackedCandidates({
+    sortOrder = 'desc',
+    search = '',
+    dateFrom = null,
+    dateTo = null,
+    addedDateFrom = null,
+    addedDateTo = null,
+    channelFilter = '',
+  } = {}) {
+    const metadataWhere = ['youtube_id NOT IN (SELECT youtubeId FROM Videos WHERE youtubeId IS NOT NULL)'];
+    const metadataReplacements = { cap: UNTRACKED_BUCKET_CAP };
+
+    if (search) {
+      metadataWhere.push(`(
+        JSON_UNQUOTE(JSON_EXTRACT(raw_info_json, '$.title')) LIKE :search
+        OR JSON_UNQUOTE(JSON_EXTRACT(raw_info_json, '$.uploader')) LIKE :search
+        OR JSON_UNQUOTE(JSON_EXTRACT(raw_info_json, '$.channel')) LIKE :search
+      )`);
+      metadataReplacements.search = `%${search}%`;
+    }
+    if (dateFrom) {
+      // upload_date is yt-dlp's YYYYMMDD text, same format/comparison as
+      // getVideosPaginated's Videos.originalDate handling.
+      metadataWhere.push(`JSON_UNQUOTE(JSON_EXTRACT(raw_info_json, '$.upload_date')) >= :dateFrom`);
+      metadataReplacements.dateFrom = dateFrom.replace(/-/g, '');
+    }
+    if (dateTo) {
+      metadataWhere.push(`JSON_UNQUOTE(JSON_EXTRACT(raw_info_json, '$.upload_date')) <= :dateTo`);
+      metadataReplacements.dateTo = dateTo.replace(/-/g, '');
+    }
+    if (addedDateFrom) {
+      metadataWhere.push('fetched_at >= :addedDateFrom');
+      metadataReplacements.addedDateFrom = `${addedDateFrom} 00:00:00`;
+    }
+    if (addedDateTo) {
+      metadataWhere.push('fetched_at <= :addedDateTo');
+      metadataReplacements.addedDateTo = `${addedDateTo} 23:59:59`;
+    }
+    if (channelFilter) {
+      metadataWhere.push(`(
+        JSON_UNQUOTE(JSON_EXTRACT(raw_info_json, '$.uploader')) = :channelFilter
+        OR JSON_UNQUOTE(JSON_EXTRACT(raw_info_json, '$.channel')) = :channelFilter
+      )`);
+      metadataReplacements.channelFilter = channelFilter;
+    }
+
+    // Cheap columns only - never raw_info_json itself here, it can be large
+    // and this pass may scan up to UNTRACKED_BUCKET_CAP rows just to know
+    // what's out there (the JSON_EXTRACT filters above run server-side in
+    // the DB without pulling the blob back). ORDER BY fetched_at DESC
+    // bounds an unbounded cache to its most-recently-cached entries before
+    // any further sorting below.
     const metadataRows = await sequelize.query(
       `SELECT youtube_id, duration_seconds, fetched_at, last_accessed_at
        FROM youtube_metadata_cache
-       WHERE youtube_id NOT IN (SELECT youtubeId FROM Videos WHERE youtubeId IS NOT NULL)
+       WHERE ${metadataWhere.join(' AND ')}
        ORDER BY fetched_at DESC
        LIMIT :cap`,
-      { replacements: { cap: UNTRACKED_BUCKET_CAP }, type: Sequelize.QueryTypes.SELECT }
+      { replacements: metadataReplacements, type: Sequelize.QueryTypes.SELECT }
     );
 
     const ytstreamRoutes = require('../routes/ytstream');
@@ -511,18 +690,29 @@ class VideosModule {
     // A buffer file may exist for a youtubeId this dir-listing alone can't
     // tell is actually tracked (e.g. the video was properly downloaded
     // after being cached) - only resolve that for entries not already known
-    // untracked via the metadata-cache pass above.
+    // untracked via the metadata-cache pass above. When search/dateFrom/
+    // dateTo/channelFilter is active, an id missing from `merged` might just
+    // have failed one of those filters rather than have no metadata row at
+    // all - either way there's no title/channel/upload_date here to check
+    // it against, so it's left out as a brand-new bare candidate rather
+    // than shown as an unverifiable match. addedDateFrom/addedDateTo don't
+    // have that problem (the file's own mtime always answers them), so
+    // they're still applied to bare candidates below.
+    const bareCandidateUnverifiable = Boolean(search || dateFrom || dateTo || channelFilter);
     const unresolvedBufferIds = bufferEntries
       .map((e) => e.youtubeId)
       .filter((id) => !merged.has(id));
     let trackedIdSet = new Set();
-    if (unresolvedBufferIds.length) {
+    if (!bareCandidateUnverifiable && unresolvedBufferIds.length) {
       const trackedRows = await sequelize.query(
         'SELECT youtubeId FROM Videos WHERE youtubeId IN (:ids)',
         { replacements: { ids: unresolvedBufferIds }, type: Sequelize.QueryTypes.SELECT }
       );
       trackedIdSet = new Set(trackedRows.map((r) => r.youtubeId));
     }
+
+    const addedFromMs = addedDateFrom ? new Date(`${addedDateFrom} 00:00:00`).getTime() : null;
+    const addedToMs = addedDateTo ? new Date(`${addedDateTo} 23:59:59`).getTime() : null;
 
     for (const entry of bufferEntries) {
       const existing = merged.get(entry.youtubeId);
@@ -531,7 +721,10 @@ class VideosModule {
         existing.cachedVideoAt = entry.mtime;
         existing.cachedVideoFilePath = entry.filePath;
         existing.cachedVideoFileSize = entry.size;
-      } else if (!trackedIdSet.has(entry.youtubeId)) {
+      } else if (!bareCandidateUnverifiable && !trackedIdSet.has(entry.youtubeId)) {
+        const entryMs = new Date(entry.mtime).getTime();
+        if (addedFromMs !== null && entryMs < addedFromMs) continue;
+        if (addedToMs !== null && entryMs > addedToMs) continue;
         merged.set(entry.youtubeId, {
           youtubeId: entry.youtubeId,
           durationSeconds: null,
@@ -1132,6 +1325,33 @@ class VideosModule {
         }
       } catch (err) {
         logger.warn({ err }, 'Failed to reconcile stale cached-video state during backfill');
+      }
+
+      // Same idea as the reconciliation above, for NZB importStrategy:
+      // 'untracked' videos: the real-time per-page check already tries an
+      // untrack the moment a row is freshly flipped to removed=true (see
+      // nzb.js's reconcileMovedUntrackedVideo doc comment), but that only
+      // fires for videos on a page someone actually viewed. This catches
+      // anything missed - e.g. Sonarr/Radarr's import moved the file while
+      // nobody had the Library page open.
+      try {
+        const removedVideos = await Video.findAll({ where: { removed: true } });
+        if (removedVideos.length) {
+          const nzbRoutes = require('../routes/nzb');
+          let untracked = 0;
+          for (const video of removedVideos) {
+            try {
+              if (await nzbRoutes.reconcileMovedUntrackedVideo(video)) untracked += 1;
+            } catch (err) {
+              logger.warn({ err, videoId: video.id }, 'Failed to reconcile one possibly-untracked nzb video during backfill');
+            }
+          }
+          if (untracked) {
+            logProgress(`Untracked ${untracked} nzb video(s) whose file was moved away by Sonarr/Radarr`);
+          }
+        }
+      } catch (err) {
+        logger.warn({ err }, 'Failed to reconcile untracked nzb videos during backfill');
       }
 
       // Redundant safety net for the untracked hls-buffer cache's own TTL

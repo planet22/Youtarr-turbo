@@ -221,28 +221,29 @@ describe('DownloadHistory', () => {
     expect(cellTexts.some(text => text === '30m15s')).toBe(true);
   });
 
-  test('handles show/hide jobs with no videos checkbox', async () => {
+  test('handles show/hide jobs with no videos toggle', async () => {
     const user = userEvent.setup();
 
     render(<DownloadHistory {...defaultProps} jobs={sampleJobs} />);
 
-    const checkbox = screen.getByRole('checkbox', { name: 'Show jobs with no videos' });
-    expect(checkbox).not.toBeChecked();
+    // The Source/Status/date/toggle filters live behind the "Filters" button,
+    // matching the Videos page's filter panel.
+    await user.click(screen.getByTestId('video-list-filters-button'));
+
+    const toggle = screen.getByRole('button', { name: 'Show jobs with no videos' });
+    expect(toggle).toHaveAttribute('aria-pressed', 'false');
 
     // Count initial rows
     const initialRows = screen.getAllByRole('row');
     expect(initialRows.length).toBeGreaterThan(1); // At least header + some jobs
 
-    // Check the checkbox
-    await user.click(checkbox);
-    expect(checkbox).toBeChecked();
+    // Toggle it on
+    await user.click(toggle);
+    expect(toggle).toHaveAttribute('aria-pressed', 'true');
 
-    // Count rows after checking
-    const rowsAfterCheck = screen.getAllByRole('row');
-    expect(rowsAfterCheck.length).toBeGreaterThan(1); // Still have header + jobs
-
-    // Verify checkbox actually changed
-    expect(checkbox).toBeChecked();
+    // Count rows after toggling
+    const rowsAfterToggle = screen.getAllByRole('row');
+    expect(rowsAfterToggle.length).toBeGreaterThan(1); // Still have header + jobs
   });
 
   test('handles pagination with many jobs', async () => {
@@ -456,7 +457,7 @@ describe('DownloadHistory', () => {
     expect(cellTexts.filter(text => text === 'None').length).toBeGreaterThanOrEqual(2);
   });
 
-  test('filters jobs correctly with checkbox', async () => {
+  test('filters jobs correctly with the no-videos toggle', async () => {
     const user = userEvent.setup();
     const mixedJobs: Job[] = [
       {
@@ -499,11 +500,12 @@ describe('DownloadHistory', () => {
     let rows = screen.getAllByRole('row');
     expect(rows.length).toBe(2); // 1 header + 1 job (job-with-videos only)
 
-    // Toggle checkbox to show all jobs
-    const checkbox = screen.getByRole('checkbox', { name: 'Show jobs with no videos' });
-    await user.click(checkbox);
+    // Toggle "Show jobs with no videos" (behind the Filters panel) to show all jobs
+    await user.click(screen.getByTestId('video-list-filters-button'));
+    const toggle = screen.getByRole('button', { name: 'Show jobs with no videos' });
+    await user.click(toggle);
 
-    // After checking, both jobs should be visible
+    // After toggling, both jobs should be visible
     await waitFor(() => {
       const allRows = screen.getAllByRole('row');
       expect(allRows.length).toBe(3); // 1 header + 2 jobs
@@ -571,6 +573,9 @@ describe('DownloadHistory', () => {
     expect(screen.getByText('Channel Vid')).toBeInTheDocument();
     expect(screen.getByText('Manual Vid')).toBeInTheDocument();
 
+    // Source/Status/date filters live behind the "Filters" button, matching
+    // the Videos page's filter panel.
+    await user.click(screen.getByTestId('video-list-filters-button'));
     await user.click(screen.getByRole('button', { name: /Filter by Source/i }));
     await user.click(screen.getByTestId('filter-menu-Channels'));
 
@@ -681,13 +686,15 @@ describe('DownloadHistory', () => {
 
       render(<DownloadHistory {...defaultProps} jobs={sweepJob} />);
 
-      const tableCells = screen.getAllByRole('cell');
+      // No content at all renders the shared empty state (no table), so
+      // there may be zero cells - queryAllByRole tolerates that.
+      const tableCells = screen.queryAllByRole('cell');
       const cellTexts = tableCells.map(cell => cell.textContent || '');
       expect(cellTexts.some(text => text === 'Playlists')).toBe(false);
       expect(screen.getByText('No jobs currently running')).toBeInTheDocument();
     });
 
-    test('displays the idle playlist sweep when "Show jobs with no videos" is checked', async () => {
+    test('displays the idle playlist sweep when "Show jobs with no videos" is toggled on', async () => {
       const user = userEvent.setup();
       const sweepJob: Job[] = [{
         id: 'sweep-job',
@@ -701,7 +708,8 @@ describe('DownloadHistory', () => {
 
       render(<DownloadHistory {...defaultProps} jobs={sweepJob} />);
 
-      await user.click(screen.getByRole('checkbox', { name: 'Show jobs with no videos' }));
+      await user.click(screen.getByTestId('video-list-filters-button'));
+      await user.click(screen.getByRole('button', { name: 'Show jobs with no videos' }));
 
       const tableCells = screen.getAllByRole('cell');
       const cellTexts = tableCells.map(cell => cell.textContent || '');

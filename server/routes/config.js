@@ -2,6 +2,7 @@ const express = require('express');
 const multer = require('multer');
 const customArgsParser = require('../modules/download/customArgsParser');
 const filenamePreview = require('../modules/filenamePreview');
+const { runYtdlp, parseChannelEntries } = require('../modules/subscriptionImport/cookiesFetcher');
 
 // Mirror of the frontend RATE_LIMIT_REGEX. Matches yt-dlp's --limit-rate
 // format: digits with optional decimal, optional K/M/G suffix.
@@ -293,9 +294,20 @@ module.exports = function createConfigRoutes({ verifyToken, configModule, valida
    * videoSearchModule.getNzbStats's doc comment) - manual "Find Videos"
    * searches never affect this.
    */
-  router.get('/api/nzb/stats', verifyToken, (req, res) => {
-    const videoSearchModule = require('../modules/videoSearchModule');
-    res.json(videoSearchModule.getNzbStats());
+  router.get('/api/nzb/stats', verifyToken, async (req, res, next) => {
+    try {
+      const videoSearchModule = require('../modules/videoSearchModule');
+      const createNzbRoutes = require('./nzb');
+      const jobs = await createNzbRoutes.getNzbJobsSnapshot();
+      res.json({
+        ...videoSearchModule.getNzbStats(),
+        searchTraces: createNzbRoutes.getRecentSearchTraces(),
+        failedGrabs: createNzbRoutes.getRecentFailedGrabs(),
+        jobs,
+      });
+    } catch (err) {
+      next(err);
+    }
   });
 
   /**
@@ -490,6 +502,49 @@ module.exports = function createConfigRoutes({ verifyToken, configModule, valida
     } catch (error) {
       req.log.error({ err: error }, 'Failed to delete cookie file');
       res.status(500).json({ error: 'Failed to delete cookie file' });
+    }
+  });
+
+  /**
+   * @swagger
+   * /api/cookies/test:
+   *   post:
+   *     summary: Test the active cookie file
+   *     description: >
+   *       Runs yt-dlp against the stored cookie file to confirm YouTube
+   *       still accepts it, instead of waiting for a download to fail.
+   *     tags: [Configuration]
+   *     responses:
+   *       200:
+   *         description: Test completed (check `success` for the result)
+   *       400:
+   *         description: No custom cookie file is active
+   */
+  router.post('/api/cookies/test', verifyToken, async (req, res) => {
+    const cookiesPath = configModule.getCookiesPath();
+    if (!cookiesPath) {
+      return res.status(400).json({
+        success: false,
+        error: 'No custom cookie file is active. Upload one first.'
+      });
+    }
+
+    try {
+      const { stdout } = await runYtdlp(cookiesPath);
+      const channels = parseChannelEntries(stdout);
+      res.json({
+        success: true,
+        message: `Cookies are working (found ${channels.length} subscribed channel${channels.length === 1 ? '' : 's'}).`,
+        channelCount: channels.length
+      });
+    } catch (error) {
+      req.log.warn({ err: error }, 'Cookie test failed');
+      res.json({
+        success: false,
+        error: error.userMessage || 'Cookie test failed.',
+        code: error.code,
+        details: error.details
+      });
     }
   });
 

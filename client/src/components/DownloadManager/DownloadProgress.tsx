@@ -35,6 +35,7 @@ import {
 } from './types';
 import TerminateJobDialog from './TerminateJobDialog';
 import FailedVideoLineList from './FailedVideoLineList';
+import JobQueueTable from './JobQueueTable';
 
 interface DownloadProgressProps {
   downloadProgressRef: React.MutableRefObject<{
@@ -44,6 +45,9 @@ interface DownloadProgressProps {
   downloadInitiatedRef: React.MutableRefObject<boolean>;
   jobs: Job[];
   token: string | null;
+  // Config-gated: swaps the queued-jobs chip list for a reorderable/deletable
+  // table with a queue pause control. Defaults to the existing chip list.
+  queueManagerEnabled?: boolean;
 }
 
 interface ErrorDetails {
@@ -72,6 +76,7 @@ const DownloadProgress: React.FC<DownloadProgressProps> = ({
   downloadInitiatedRef,
   jobs,
   token,
+  queueManagerEnabled = false,
 }) => {
   const [currentProgress, setCurrentProgress] = useState<StructuredProgress | null>(null);
   const [videoCount, setVideoCount] = useState<VideoCount>({
@@ -103,6 +108,12 @@ const DownloadProgress: React.FC<DownloadProgressProps> = ({
     [jobs]
   );
 
+  // STRM materialize is the only job type that can genuinely pause between
+  // videos (see strmMaterializer.js) - while paused, the indeterminate
+  // progress bar animation is misleading (it looks like it's still working),
+  // so this freezes it and swaps the label for "Paused" instead.
+  const isStrmPaused = Boolean(activeJob?.data?.isStrmBatch && activeJob?.data?.strmPaused);
+
   // Live payloads usually carry the jobType; job records cover the quiet
   // windows with no broadcasts.
   const activityLabel = useMemo(() => {
@@ -118,6 +129,8 @@ const DownloadProgress: React.FC<DownloadProgressProps> = ({
   const progressColor = useMemo(() => {
     if (!currentProgress) return 'var(--muted-foreground)';
 
+    if (isStrmPaused) return 'var(--warning)';
+
     if (currentProgress.stalled) return 'var(--warning)';
 
     switch (currentProgress.state) {
@@ -132,11 +145,15 @@ const DownloadProgress: React.FC<DownloadProgressProps> = ({
       default:
         return 'var(--primary)';
     }
-  }, [currentProgress]);
+  }, [currentProgress, isStrmPaused]);
 
   const overlayContent = useMemo(() => {
     if (!currentProgress) {
       return { title: '', eta: '' };
+    }
+
+    if (isStrmPaused) {
+      return { title: 'Paused', eta: '' };
     }
 
     // Only hide video title when we're preparing the NEXT video (between videos)
@@ -160,7 +177,7 @@ const DownloadProgress: React.FC<DownloadProgressProps> = ({
       title: displayTitle,
       eta: formattedEta
     };
-  }, [currentProgress]);
+  }, [currentProgress, isStrmPaused]);
 
   const overlayTextColor = useMemo(() => {
     const percent = currentProgress?.progress?.percent ?? 0;
@@ -178,6 +195,8 @@ const DownloadProgress: React.FC<DownloadProgressProps> = ({
   // Derive status message from state
   const statusMessage = useMemo(() => {
     if (!currentProgress) return 'Initiating download...';
+
+    if (isStrmPaused) return 'Paused';
 
     if (currentProgress.stalled) return 'Download stalled - retrying...';
 
@@ -200,7 +219,7 @@ const DownloadProgress: React.FC<DownloadProgressProps> = ({
       case 'error': return 'Download failed';
       default: return 'Processing...';
     }
-  }, [currentProgress]);
+  }, [currentProgress, isStrmPaused]);
 
   // Format bytes to human readable
   const formatBytes = (bytes: number): string => {
@@ -451,8 +470,9 @@ const DownloadProgress: React.FC<DownloadProgressProps> = ({
           )}
         </Box>
 
-        {/* Show queued jobs if any */}
-        {pendingJobs.length > 0 && (
+        {/* Show queued jobs if any (config-gated table shows further down,
+            below the progress/status area) */}
+        {!queueManagerEnabled && pendingJobs.length > 0 && (
           <Box className="px-4 pb-2">
             <Accordion
               elevation={0}
@@ -700,19 +720,28 @@ const DownloadProgress: React.FC<DownloadProgressProps> = ({
             <Box className="relative mb-2">
               <LinearProgress
                 variant={
-                  // Show determinate for actual downloads (video, audio, subtitles)
-                  // Show indeterminate for processing stages without progress data
-                  currentProgress.state === 'merging' ||
-                  currentProgress.state === 'metadata' ||
-                  currentProgress.state === 'processing' ||
-                  currentProgress.state === 'preparing' ||
-                  currentProgress.state === 'preparing_subtitles' ||
-                  currentProgress.state === 'processing_metadata' ||
-                  currentProgress.state === 'materializing_strm'
+                  // Paused freezes the bar at its current fill instead of
+                  // continuing to animate an indeterminate stripe, which
+                  // would otherwise look like it's still working.
+                  isStrmPaused
+                    ? 'determinate'
+                    // Show determinate for actual downloads (video, audio, subtitles)
+                    // Show indeterminate for processing stages without progress data
+                    : currentProgress.state === 'merging' ||
+                      currentProgress.state === 'metadata' ||
+                      currentProgress.state === 'processing' ||
+                      currentProgress.state === 'preparing' ||
+                      currentProgress.state === 'preparing_subtitles' ||
+                      currentProgress.state === 'processing_metadata' ||
+                      currentProgress.state === 'materializing_strm'
                     ? 'indeterminate'
                     : 'determinate'
                 }
-                value={currentProgress.progress?.percent ?? 0}
+                value={
+                  isStrmPaused
+                    ? (videoCount.total > 0 ? (videoCount.current / videoCount.total) * 100 : 0)
+                    : (currentProgress.progress?.percent ?? 0)
+                }
                 height={32}
                 barColor={progressColor}
                 className="shadow-sm"
@@ -824,6 +853,15 @@ const DownloadProgress: React.FC<DownloadProgressProps> = ({
                 Downloads will appear here when started
               </Typography>
             </Box>
+          </Box>
+        )}
+
+        {/* Job Queue table (config-gated) - sits below the progress/status
+            area above, not above it, so the live download bar stays the
+            first thing you see. */}
+        {queueManagerEnabled && (
+          <Box className="px-4 pb-2">
+            <JobQueueTable pendingJobs={pendingJobs} activeJob={activeJob} token={token} />
           </Box>
         )}
 

@@ -124,6 +124,11 @@ export const CONFIG_FIELDS = {
   stallDetectionWindowSeconds: { default: 30, trackChanges: true },
   stallDetectionRateThreshold: { default: '100K', trackChanges: true },
 
+  // Replaces the simple queued-jobs chip list on the Download Activity page
+  // with a reorderable/deletable table plus a queue pause button. Purely a
+  // client presentation choice - see JobQueueTable.tsx.
+  downloadQueueManagerEnabled: { default: false, trackChanges: true },
+
   // Advanced settings
   sleepRequests: { default: 1, trackChanges: true },
   proxy: { default: '', trackChanges: true },
@@ -402,6 +407,12 @@ export const CONFIG_FIELDS = {
         // that only share a keyword (see applyLocalTitleFilter in
         // server/routes/nzb.js).
         additionalLocalFilter: boolean;
+        // Case-insensitive substrings ("advert", "outtakes", "behind the
+        // scenes") that mark a result as junk even though it legitimately
+        // contains every search keyword - a DVD-extra clip or promo often
+        // does. Only applied when additionalLocalFilter is also on. See
+        // titleContainsExcludedTerm in server/routes/nzb.js.
+        excludeTerms: string[];
         // Gates the post-download transcode (downloadTranscodeVideoCodec,
         // Settings -> yt-dlp Options) for this category specifically - the
         // global setting must ALSO be on (not 'off') for this category to
@@ -551,6 +562,7 @@ export const DEFAULT_CONFIG: ConfigState = {
   enableStallDetection: CONFIG_FIELDS.enableStallDetection.default,
   stallDetectionWindowSeconds: CONFIG_FIELDS.stallDetectionWindowSeconds.default,
   stallDetectionRateThreshold: CONFIG_FIELDS.stallDetectionRateThreshold.default,
+  downloadQueueManagerEnabled: CONFIG_FIELDS.downloadQueueManagerEnabled.default,
   sleepRequests: CONFIG_FIELDS.sleepRequests.default,
   proxy: CONFIG_FIELDS.proxy.default,
   logLevel: CONFIG_FIELDS.logLevel.default,

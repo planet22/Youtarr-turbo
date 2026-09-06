@@ -23,6 +23,11 @@ export type FilterConfig =
       onToChange: (value: string) => void;
       onClear?: () => void;
       hidden?: boolean;
+      // Distinguishes this instance when a page has more than one date-range
+      // filter (e.g. "Published" vs "Downloaded") - drives the field label,
+      // drawer subtitle, and active-filter chip text. Defaults to
+      // "Published" for the original single-date-filter consumers.
+      label?: string;
     }
   | {
       id: 'maxRating';
@@ -70,6 +75,11 @@ export type FilterConfig =
       onChange: (value: ChipFilterMode) => void;
     }
   | {
+      id: 'metadataOnly';
+      value: ChipFilterMode;
+      onChange: (value: ChipFilterMode) => void;
+    }
+  | {
       id: 'showUntracked';
       value: boolean;
       onChange: (value: boolean) => void;
@@ -94,6 +104,25 @@ export type FilterConfig =
       value: string;
       options: string[];
       onChange: (value: string) => void;
+    }
+  // Generic single-select dropdown for pages whose filter isn't one of the
+  // named video-specific kinds above (e.g. Download History's Source/Status)
+  // - label drives both the panel heading and the active-filter chip text.
+  | {
+      id: 'select';
+      label: string;
+      value: string;
+      options: string[];
+      onChange: (value: string) => void;
+    }
+  // Generic on/off chip toggle, the non-video-specific sibling of
+  // showUntracked/showFilePaths above.
+  | {
+      id: 'toggle';
+      label: string;
+      icon: React.ReactNode;
+      value: boolean;
+      onChange: (value: boolean) => void;
     };
 
 export interface SortOption {

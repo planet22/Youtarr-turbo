@@ -9,7 +9,6 @@ import {
   TableHead,
   TableRow,
   Typography,
-  Chip,
   Checkbox,
   Box,
   Button,
@@ -18,6 +17,7 @@ import {
 } from '../../ui';
 import { NzbCachedEntry } from '../../../hooks/useNzbStats';
 import { formatCountdown, formatRelativeTime } from '../utils';
+import NzbSettingsIcons from './NzbSettingsIcons';
 
 interface NzbCachedQueriesTableProps {
   entries: NzbCachedEntry[];
@@ -62,7 +62,7 @@ function NzbCachedQueriesTable({ entries, onDelete }: NzbCachedQueriesTableProps
   };
 
   return (
-    <Paper style={{ overflow: 'hidden' }}>
+    <Paper variant="outlined" style={{ overflow: 'hidden' }}>
       <Box className="flex items-center justify-between px-4 py-3 gap-2 flex-wrap">
         <Box>
           <Typography variant="subtitle1">Cached NZB Queries</Typography>
@@ -83,9 +83,9 @@ function NzbCachedQueriesTable({ entries, onDelete }: NzbCachedQueriesTableProps
           </Button>
         )}
       </Box>
-      <TableContainer>
+      <TableContainer style={{ maxHeight: 420, overflowY: 'auto' }}>
         <Table size="small">
-          <TableHead>
+          <TableHead style={{ position: 'sticky', top: 0, zIndex: 1, backgroundColor: 'var(--card)' }}>
             <TableRow>
               <TableCell style={{ width: 42 }}>
                 <Checkbox
@@ -97,17 +97,18 @@ function NzbCachedQueriesTable({ entries, onDelete }: NzbCachedQueriesTableProps
               </TableCell>
               <TableCell component="th">Query</TableCell>
               <TableCell component="th" style={{ width: 70 }}>Count</TableCell>
-              <TableCell component="th" style={{ width: 110 }}>Source</TableCell>
+              <TableCell component="th" style={{ width: 140 }}>Source</TableCell>
               <TableCell component="th" style={{ width: 90 }}>Results</TableCell>
               <TableCell component="th" style={{ width: 100 }}>Cached</TableCell>
               <TableCell component="th" style={{ width: 100 }}>Expires in</TableCell>
+              <TableCell style={{ width: 90 }} />
               <TableCell component="th" style={{ width: 60 }} />
             </TableRow>
           </TableHead>
           <TableBody>
             {entries.length === 0 && (
               <TableRow>
-                <TableCell colSpan={8}>
+                <TableCell colSpan={9}>
                   <Typography variant="body2" color="textSecondary" style={{ padding: '8px 0' }}>
                     Nothing cached right now - either caching is disabled (Settings, "Search result cache"), or nothing has been searched recently.
                   </Typography>
@@ -126,11 +127,12 @@ function NzbCachedQueriesTable({ entries, onDelete }: NzbCachedQueriesTableProps
                   </TableCell>
                   <TableCell>{entry.count}</TableCell>
                   <TableCell>
-                    <Chip size="small" label={entry.source} variant="outlined" />
+                    <NzbSettingsIcons settings={entry.settingsSnapshot} />
                   </TableCell>
                   <TableCell>{entry.resultCount}</TableCell>
                   <TableCell>{formatRelativeTime(entry.cachedAt)}</TableCell>
                   <TableCell>{formatCountdown(entry.expiresInMs)}</TableCell>
+                  <TableCell />
                   <TableCell>
                     <Tooltip title="Delete cached entry">
                       <span>

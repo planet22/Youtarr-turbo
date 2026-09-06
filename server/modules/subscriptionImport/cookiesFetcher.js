@@ -163,4 +163,4 @@ async function fetchWithCookies(buffer) {
   }
 }
 
-module.exports = { fetchWithCookies, FetchError, isNetscapeFormat };
+module.exports = { fetchWithCookies, FetchError, isNetscapeFormat, runYtdlp, parseChannelEntries };

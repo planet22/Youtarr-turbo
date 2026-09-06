@@ -6,6 +6,7 @@ import { MOBILE_NAV_PRIMARY_HEIGHT, NAV_SUB_FONT_SIZE } from './navLayoutConstan
 import { useScrollEdges } from './useScrollEdges';
 
 const SUBNAV_SCROLL_FADE_WIDTH = 24;
+const NAV_SUB_ICON_SIZE = 14;
 
 interface NavSidebarMobileBottomNavProps {
   navItems: NavItem[];
@@ -13,6 +14,7 @@ interface NavSidebarMobileBottomNavProps {
   navigate: NavigateFunction;
   activeItem: NavItem | null;
   activeItemWithSubItems: NavItem | null;
+  showSectionIcons?: boolean;
 }
 
 // The mobile nav in practice is a fixed bottom primary bar plus an optional
@@ -25,6 +27,7 @@ export const NavSidebarMobileBottomNav: React.FC<NavSidebarMobileBottomNavProps>
   navigate,
   activeItem,
   activeItemWithSubItems,
+  showSectionIcons = true,
 }) => {
   const activeIndex = navItems.findIndex((item) => item === activeItem);
   const subNavBottom = `calc(${MOBILE_NAV_PRIMARY_HEIGHT}px + env(safe-area-inset-bottom))`;
@@ -103,8 +106,25 @@ export const NavSidebarMobileBottomNav: React.FC<NavSidebarMobileBottomNavProps>
                   transition: 'all 200ms var(--transition-bouncy)',
                   textTransform: 'var(--mobile-subnav-item-text-transform)' as React.CSSProperties['textTransform'],
                   letterSpacing: 'var(--mobile-subnav-item-letter-spacing)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: showSectionIcons && subItem.icon ? 6 : 0,
                 }}
               >
+                {showSectionIcons && subItem.icon && (
+                  <span
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      width: NAV_SUB_ICON_SIZE,
+                      height: NAV_SUB_ICON_SIZE,
+                      flexShrink: 0,
+                    }}
+                  >
+                    {subItem.icon}
+                  </span>
+                )}
                 {subItem.label}
               </button>
             );

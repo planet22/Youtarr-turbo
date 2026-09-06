@@ -10,7 +10,7 @@ const logger = require('../logger');
  *   name: Maintenance
  *   description: Filesystem reconciliation actions
  */
-function createMaintenanceRoutes({ verifyToken, videosModule, configModule }) {
+function createMaintenanceRoutes({ verifyToken, videosModule, configModule, jobModule }) {
   const router = express.Router();
 
   /**
@@ -149,6 +149,80 @@ function createMaintenanceRoutes({ verifyToken, videosModule, configModule }) {
     } catch (err) {
       logger.error({ err }, 'Failed to read channel image regeneration status');
       return res.status(500).json({ error: 'Failed to read channel image regeneration status' });
+    }
+  });
+
+  /**
+   * @swagger
+   * /api/maintenance/compact-history-preview:
+   *   get:
+   *     summary: Dry-run count for compacting Download History
+   *     description: >
+   *       Read-only. Counts how many job history rows would be removed by
+   *       POST /api/maintenance/compact-history (everything except jobs
+   *       still In Progress or Pending) versus the total currently stored,
+   *       so the UI can show "N of M will be removed" before the user commits.
+   *     tags: [Maintenance]
+   *     responses:
+   *       200:
+   *         description: Preview counts
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 totalJobs:
+   *                   type: number
+   *                 compactableCount:
+   *                   type: number
+   */
+  router.get('/api/maintenance/compact-history-preview', verifyToken, (req, res) => {
+    try {
+      const preview = jobModule.previewCompactHistory();
+      return res.status(200).json(preview);
+    } catch (err) {
+      logger.error({ err }, 'Failed to preview history compaction');
+      return res.status(500).json({ error: 'Failed to preview history compaction' });
+    }
+  });
+
+  /**
+   * @swagger
+   * /api/maintenance/compact-history:
+   *   post:
+   *     summary: Delete finished job history rows (everything but In Progress/Pending)
+   *     description: >
+   *       Permanently deletes every job in history that isn't still active,
+   *       along with its JobVideo join rows, so Download History doesn't grow
+   *       without bound. Jobs still In Progress or Pending are never touched.
+   *       This cannot be undone - the client should confirm against the
+   *       compact-history-preview counts first.
+   *     tags: [Maintenance]
+   *     responses:
+   *       200:
+   *         description: Compaction result
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 success:
+   *                   type: boolean
+   *                 deletedCount:
+   *                   type: number
+   *       500:
+   *         description: Compaction failed
+   */
+  router.post('/api/maintenance/compact-history', verifyToken, async (req, res) => {
+    try {
+      const result = await jobModule.compactHistory();
+      if (!result.success) {
+        return res.status(500).json(result);
+      }
+      return res.status(200).json(result);
+    } catch (err) {
+      logger.error({ err }, 'Failed to compact job history');
+      return res.status(500).json({ error: 'Failed to compact job history' });
     }
   });
 

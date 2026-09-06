@@ -134,6 +134,7 @@ export const NavSidebar: React.FC<NavSidebarProps> = ({
         navigate={navigate}
         activeItem={activeItem}
         activeItemWithSubItems={activeItemWithSubItems}
+        showSectionIcons={showSectionIcons}
       />
     );
   }

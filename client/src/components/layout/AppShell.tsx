@@ -13,7 +13,18 @@ import { HEADER_HEIGHT_DESKTOP, HEADER_HEIGHT_MOBILE, NAV_SIDEBAR_COLLAPSED_WIDT
 import './layoutFallback.css';
 
 import { Tv as SubscriptionsIcon, Library as VideoLibraryIcon, Radio as StreamingIcon, Rss as NzbIcon } from 'lucide-react';
-import { Download as DownloadIcon, Settings as SettingsIcon } from '../../lib/icons';
+import {
+  Download as DownloadIcon,
+  Settings as SettingsIcon,
+  List as ChannelsListIcon,
+  Search as FindIcon,
+  Upload as ImportIcon,
+  Video as VideoIcon,
+  Play as LiveIcon,
+  AccessTime as HistoryIcon,
+  FileDownload as ManualDownloadIcon,
+  Gauge as ActivityIcon,
+} from '../../lib/icons';
 
 interface AppShellProps {
   token: string | null;
@@ -84,34 +95,34 @@ export function AppShell({
 
   const streamingSubItems = useMemo(
     () => [
-      { key: 'streaming-live', label: 'Live', to: '/streaming' },
-      { key: 'streaming-history', label: 'History', to: '/streaming/history' },
+      { key: 'streaming-live', label: 'Live', to: '/streaming', icon: <LiveIcon size={14} /> },
+      { key: 'streaming-history', label: 'History', to: '/streaming/history', icon: <HistoryIcon size={14} /> },
     ],
     []
   );
 
   const downloadsSubItems = useMemo(
     () => [
-      { key: 'download-manual', label: 'Manual Download', to: '/downloads/manual' },
-      { key: 'download-activity', label: 'Activity', to: '/downloads/activity' },
-      { key: 'download-history', label: 'History', to: '/downloads/history' },
+      { key: 'download-manual', label: 'Manual Download', to: '/downloads/manual', icon: <ManualDownloadIcon size={14} /> },
+      { key: 'download-activity', label: 'Activity', to: '/downloads/activity', icon: <ActivityIcon size={14} /> },
+      { key: 'download-history', label: 'History', to: '/downloads/history', icon: <HistoryIcon size={14} /> },
     ],
     []
   );
 
   const channelsSubItems = useMemo(
     () => [
-      { key: 'subscriptions-list', label: 'Channels & Playlists', to: '/subscriptions' },
-      { key: 'subscriptions-find', label: 'Find Channels on YouTube', to: '/subscriptions/find' },
-      { key: 'subscriptions-imports', label: 'Import Channels', to: '/subscriptions/imports' },
+      { key: 'subscriptions-list', label: 'Channels & Playlists', to: '/subscriptions', icon: <ChannelsListIcon size={14} /> },
+      { key: 'subscriptions-find', label: 'Find Channels on YouTube', to: '/subscriptions/find', icon: <FindIcon size={14} /> },
+      { key: 'subscriptions-imports', label: 'Import Channels', to: '/subscriptions/imports', icon: <ImportIcon size={14} /> },
     ],
     []
   );
 
   const videosSubItems = useMemo(
     () => [
-      { key: 'videos-downloaded', label: 'Downloaded Videos', to: '/videos' },
-      { key: 'videos-find', label: 'Find Videos on YouTube', to: '/videos/find' },
+      { key: 'videos-downloaded', label: 'Downloaded Videos', to: '/videos', icon: <VideoIcon size={14} /> },
+      { key: 'videos-find', label: 'Find Videos on YouTube', to: '/videos/find', icon: <FindIcon size={14} /> },
     ],
     []
   );
@@ -122,6 +133,7 @@ export function AppShell({
         key: page.key,
         label: page.title,
         to: `/settings/${page.key}`,
+        icon: <page.icon size={14} />,
       })),
     []
   );

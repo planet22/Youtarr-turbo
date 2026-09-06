@@ -175,6 +175,24 @@ export const DownloadPerformanceSection: React.FC<DownloadPerformanceSectionProp
             </Grid>
           </>
         )}
+
+        <Grid item xs={12} md={6}>
+          <Box className="flex items-center gap-1">
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={config.downloadQueueManagerEnabled === true}
+                  onChange={(e) => onConfigChange({ downloadQueueManagerEnabled: e.target.checked })}
+                />
+              }
+              label="Enable job queue manager table"
+            />
+            <InfoTooltip
+              text="Replaces the simple queued-jobs list on the Download Activity page with a sortable, deletable table you can reorder before letting the queue run. Also adds a pause button that stops the next job from auto-starting so you can rearrange the queue safely."
+              onMobileClick={onMobileTooltipClick}
+            />
+          </Box>
+        </Grid>
       </Grid>
     </ConfigurationAccordion>
   );

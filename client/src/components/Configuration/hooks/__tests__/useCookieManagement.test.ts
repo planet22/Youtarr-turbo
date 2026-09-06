@@ -930,6 +930,180 @@ describe('useCookieManagement', () => {
     });
   });
 
+  describe('Test Cookies', () => {
+    test('reports success and clears testingCookies afterward', async () => {
+      const mockFetch = global.fetch as jest.MockedFunction<typeof fetch>;
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          json: jest.fn().mockResolvedValueOnce(mockCookieStatus),
+        } as any)
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          json: jest.fn().mockResolvedValueOnce({
+            success: true,
+            message: 'Cookies are working (found 3 subscribed channels).',
+            channelCount: 3,
+          }),
+        } as any);
+
+      const { result } = renderHook(() =>
+        useCookieManagement({
+          token: mockToken,
+          setConfig: mockSetConfig,
+          setSnackbar: mockSetSnackbar,
+        })
+      );
+
+      await waitFor(() => {
+        expect(result.current.cookieStatus).not.toBeNull();
+      });
+
+      expect(result.current.testingCookies).toBe(false);
+
+      await act(async () => {
+        await result.current.testCookies();
+      });
+
+      const testCall = mockFetch.mock.calls[1];
+      expect(testCall[0]).toBe('/api/cookies/test');
+      expect(testCall[1]?.method).toBe('POST');
+      expect(testCall[1]?.headers).toEqual({ 'x-access-token': mockToken });
+
+      expect(result.current.testingCookies).toBe(false);
+      expect(result.current.cookieTestResult).toMatchObject({
+        success: true,
+        message: 'Cookies are working (found 3 subscribed channels).',
+        channelCount: 3,
+      });
+    });
+
+    test('reports failure from a non-throwing error response', async () => {
+      const mockFetch = global.fetch as jest.MockedFunction<typeof fetch>;
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          json: jest.fn().mockResolvedValueOnce(mockCookieStatus),
+        } as any)
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          json: jest.fn().mockResolvedValueOnce({
+            success: false,
+            error: 'Your cookies appear to be expired or invalid.',
+            code: 'EXPIRED_COOKIES',
+          }),
+        } as any);
+
+      const { result } = renderHook(() =>
+        useCookieManagement({
+          token: mockToken,
+          setConfig: mockSetConfig,
+          setSnackbar: mockSetSnackbar,
+        })
+      );
+
+      await waitFor(() => {
+        expect(result.current.cookieStatus).not.toBeNull();
+      });
+
+      await act(async () => {
+        await result.current.testCookies();
+      });
+
+      expect(result.current.cookieTestResult).toMatchObject({
+        success: false,
+        error: 'Your cookies appear to be expired or invalid.',
+      });
+    });
+
+    test('reports failure when the request itself throws', async () => {
+      const mockFetch = global.fetch as jest.MockedFunction<typeof fetch>;
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          json: jest.fn().mockResolvedValueOnce(mockCookieStatus),
+        } as any)
+        .mockRejectedValueOnce(new Error('Network error'));
+
+      const { result } = renderHook(() =>
+        useCookieManagement({
+          token: mockToken,
+          setConfig: mockSetConfig,
+          setSnackbar: mockSetSnackbar,
+        })
+      );
+
+      await waitFor(() => {
+        expect(result.current.cookieStatus).not.toBeNull();
+      });
+
+      await act(async () => {
+        await result.current.testCookies();
+      });
+
+      expect(result.current.testingCookies).toBe(false);
+      expect(result.current.cookieTestResult).toMatchObject({
+        success: false,
+        error: 'Failed to reach the server to test cookies',
+      });
+    });
+
+    test('clears the previous test result when cookies are deleted', async () => {
+      const mockFetch = global.fetch as jest.MockedFunction<typeof fetch>;
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          json: jest.fn().mockResolvedValueOnce(mockCookieStatus),
+        } as any)
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          json: jest.fn().mockResolvedValueOnce({ success: true, message: 'ok' }),
+        } as any)
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          json: jest.fn().mockResolvedValueOnce({
+            cookieStatus: {
+              cookiesEnabled: true,
+              customCookiesUploaded: false,
+              customFileExists: false,
+            },
+          }),
+        } as any);
+
+      const { result } = renderHook(() =>
+        useCookieManagement({
+          token: mockToken,
+          setConfig: mockSetConfig,
+          setSnackbar: mockSetSnackbar,
+        })
+      );
+
+      await waitFor(() => {
+        expect(result.current.cookieStatus).not.toBeNull();
+      });
+
+      await act(async () => {
+        await result.current.testCookies();
+      });
+
+      expect(result.current.cookieTestResult).not.toBeNull();
+
+      await act(async () => {
+        await result.current.deleteCookies();
+      });
+
+      expect(result.current.cookieTestResult).toBeNull();
+    });
+  });
+
   describe('Hook Stability', () => {
     test('uploadCookieFile function reference remains stable', async () => {
       const mockFetch = global.fetch as jest.MockedFunction<typeof fetch>;

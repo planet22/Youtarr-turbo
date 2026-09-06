@@ -1,6 +1,6 @@
 import React from 'react';
 import { Box, Typography, Skeleton, Tooltip, Chip, Accordion, AccordionSummary, AccordionDetails } from '../../../ui';
-import { formatDate } from '../../../../utils/formatters';
+import { formatDate, formatByteSize } from '../../../../utils/formatters';
 import { tierFromDimensions } from '../../../../utils/videoResolution';
 import { VideoModalData, VideoExtendedMetadata } from '../types';
 
@@ -10,24 +10,7 @@ interface VideoTechnicalProps {
   loading: boolean;
 }
 
-const BYTES_PER_KB = 1024;
-const BYTES_PER_MB = 1024 * 1024;
-const BYTES_PER_GB = 1024 * 1024 * 1024;
-
 const INTERNAL_PATH_PREFIX = '/usr/src/app/data/';
-
-function formatFileSize(bytes: number): string {
-  if (bytes >= BYTES_PER_GB) {
-    return `${(bytes / BYTES_PER_GB).toFixed(2)} GB`;
-  }
-  if (bytes >= BYTES_PER_MB) {
-    return `${(bytes / BYTES_PER_MB).toFixed(1)} MB`;
-  }
-  if (bytes >= BYTES_PER_KB) {
-    return `${(bytes / BYTES_PER_KB).toFixed(1)} KB`;
-  }
-  return `${bytes} B`;
-}
 
 function stripInternalPath(filePath: string): string {
   if (filePath.startsWith(INTERNAL_PATH_PREFIX)) {
@@ -86,7 +69,7 @@ interface FileRowProps {
 
 function FileRow({ label, filePath, fileSize }: FileRowProps) {
   const displayPath = stripInternalPath(filePath);
-  const sizeLabel = fileSize ? formatFileSize(fileSize) : 'Unknown size';
+  const sizeLabel = fileSize ? formatByteSize(fileSize) : 'Unknown size';
 
   return (
     <Box style={{ paddingTop: 6, paddingBottom: 6 }}>

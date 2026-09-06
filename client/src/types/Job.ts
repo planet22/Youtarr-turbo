@@ -17,6 +17,13 @@ export interface DownloadDiagnosis {
   count: number;
 }
 
+export interface TerminatedChannelInfo {
+  channelId: string;
+  uploader?: string | null;
+  url?: string | null;
+  terminatedAt?: string | null;
+}
+
 export interface Job {
   jobType: string;
   status: string;
@@ -33,5 +40,32 @@ export interface Job {
       youtubeId?: string;
       nzbName?: string;
     };
+    // Advisory explanation for the terminal status (e.g. cookie/bot-detection
+    // guidance, a manual/timeout termination reason, or a terminated-channel
+    // count) - not always present, since a plain success has nothing to add.
+    notes?: string;
+    errorCode?: string;
+    // ISO timestamp of when the finalizer persisted the terminal status;
+    // paired with timeInitiated to show how long a completed job ran for.
+    endDate?: string;
+    // Already-downloaded videos this job's yt-dlp run skipped, accumulated
+    // across all groups for multi-channel jobs.
+    cumulativeSkipped?: number;
+    terminatedChannels?: TerminatedChannelInfo[];
+    terminationFailures?: string[];
+    // Determines start order among Pending jobs (ascending) - see
+    // JobQueueTable.tsx and server/modules/jobModule.js's startNextJob.
+    queueOrder?: number;
+    urls?: string[];
+    groups?: Array<{ channels?: Array<{ uploader?: string | null; channel_id?: string | null }> }>;
+    autoRetryAttempt?: number;
+    // STRM materialize fetches metadata one video at a time (one yt-dlp call
+    // per video, not one batch call), so unlike a regular download its
+    // active-job loop can genuinely be paused/reordered - see
+    // strmMaterializer.js's pauseActiveJob/setActiveJobRemainingUrls and the
+    // /api/jobs/:jobId/strm/* routes. isStrmBatch marks a job as eligible for
+    // those live controls; strmPaused mirrors the live pause state.
+    isStrmBatch?: boolean;
+    strmPaused?: boolean;
   };
 }

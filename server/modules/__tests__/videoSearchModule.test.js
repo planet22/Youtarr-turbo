@@ -24,6 +24,7 @@ jest.mock('../youtubeApi', () => ({
 // between tests even though it's active within a single test.
 jest.mock('../configModule', () => ({
   getConfig: jest.fn(() => ({})),
+  getCookiesPath: jest.fn(() => null),
 }));
 
 describe('videoSearchModule', () => {
@@ -281,6 +282,32 @@ describe('videoSearchModule', () => {
       const second = await videoSearchModule.searchVideos('same query', 25, {});
       expect(second).toHaveLength(1);
       expect(ytDlpRunner.run).toHaveBeenCalledTimes(1);
+    });
+
+    test('expired entries are pruned on read - from both the snapshot and the underlying cache', async () => {
+      // The NZB diagnostics page's "Cached NZB Queries" table reads
+      // getNzbStats().cachedEntries - an expired-but-not-yet-overwritten
+      // entry must disappear from there (not linger showing as "cached"
+      // when it no longer serves hits), and actually be evicted from the
+      // Map, not just hidden - otherwise one-off queries accumulate forever.
+      jest.useFakeTimers();
+      try {
+        const ndjson = JSON.stringify({ id: 'expiring-id', title: 'Expiring' }) + '\n';
+        ytDlpRunner.run.mockResolvedValueOnce(ndjson);
+
+        await videoSearchModule.searchVideos('expiring query', 25, {});
+        expect(videoSearchModule.getNzbStats().cachedEntries.some((e) => e.query === 'expiring query')).toBe(true);
+
+        jest.advanceTimersByTime(11 * 60 * 1000); // past the 10-minute default TTL
+
+        expect(videoSearchModule.getNzbStats().cachedEntries.some((e) => e.query === 'expiring query')).toBe(false);
+
+        ytDlpRunner.run.mockResolvedValueOnce(ndjson);
+        await videoSearchModule.searchVideos('expiring query', 25, {});
+        expect(ytDlpRunner.run).toHaveBeenCalledTimes(2);
+      } finally {
+        jest.useRealTimers();
+      }
     });
   });
 });

@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import axios from 'axios';
-import { Eye, EyeOff, Trash2, ChevronDown } from 'lucide-react';
+import { Eye, EyeOff, Trash2, ChevronDown, Upload } from 'lucide-react';
 import {
   FormControlLabel,
   Switch,
@@ -57,6 +57,7 @@ const blankCategory = (): NzbCategory => ({
   importStrategy: 'hardlink',
   newznabCategoryIds: ['5040'],
   additionalLocalFilter: false,
+  excludeTerms: [],
   postEncode: false,
 });
 
@@ -123,6 +124,8 @@ export const NzbSettingsSection: React.FC<Props> = ({
   const [regenerating, setRegenerating] = useState(false);
   const [showApiKey, setShowApiKey] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [importErrors, setImportErrors] = useState<Record<number, string | null>>({});
+  const importFileInputRefs = useRef<Record<number, HTMLInputElement | null>>({});
 
   const setNzb = (patch: Partial<typeof nzb>) => {
     onConfigChange({ nzb: { ...nzb, ...patch } });
@@ -148,6 +151,63 @@ export const NzbSettingsSection: React.FC<Props> = ({
 
   const addCategory = () => {
     setNzb({ categories: [...nzb.categories, blankCategory()] });
+  };
+
+  const MAX_EXCLUDE_TERMS_FILE_SIZE = 256 * 1024; // generous for a word list; guards against picking the wrong file
+
+  // Cheap plain-text sniff: real word lists never contain a NUL byte (a
+  // reliable binary marker), and shouldn't be dense with other control
+  // characters either. Not a full text/binary classifier - just enough to
+  // reject "oops, wrong file" (an image, an .nzb, a spreadsheet) before it
+  // gets split into garbage "terms".
+  const looksLikePlainText = (content: string): boolean => {
+    if (content.includes('\u0000')) return false;
+    const sample = content.slice(0, 8000);
+    if (sample.length === 0) return true;
+    let controlCount = 0;
+    for (let i = 0; i < sample.length; i++) {
+      const code = sample.charCodeAt(i);
+      if (code < 32 && code !== 9 && code !== 10 && code !== 13) controlCount += 1;
+    }
+    return controlCount / sample.length < 0.01;
+  };
+
+  const handleImportClick = (index: number) => {
+    setImportErrors((prev) => ({ ...prev, [index]: null }));
+    importFileInputRefs.current[index]?.click();
+  };
+
+  const handleImportFile = (index: number, file: File | undefined) => {
+    if (!file) return;
+    const setFileError = (message: string | null) =>
+      setImportErrors((prev) => ({ ...prev, [index]: message }));
+    setFileError(null);
+
+    if (!file.name.toLowerCase().endsWith('.txt')) {
+      setFileError('Only .txt files can be imported.');
+      return;
+    }
+    if (file.size > MAX_EXCLUDE_TERMS_FILE_SIZE) {
+      setFileError('File is too large (max 256KB) - this should just be a list of words/phrases, one per line.');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const content = String(reader.result ?? '');
+      if (!looksLikePlainText(content)) {
+        setFileError("That doesn't look like a plain text file - import a .txt file with one word or phrase per line.");
+        return;
+      }
+      const terms = content.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+      if (terms.length === 0) {
+        setFileError('That file has no terms in it.');
+        return;
+      }
+      updateCategory(index, { excludeTerms: terms });
+    };
+    reader.onerror = () => setFileError('Failed to read the file.');
+    reader.readAsText(file);
   };
 
   const handleRegenerateKey = async () => {
@@ -426,6 +486,53 @@ export const NzbSettingsSection: React.FC<Props> = ({
                       onMobileClick={onMobileTooltipClick}
                     />
                   </Box>
+                </Grid>
+                <Grid item xs={12}>
+                  <Box className="flex items-center gap-1">
+                    <TextField
+                      fullWidth
+                      multiline
+                      minRows={2}
+                      label="Exclude if title contains"
+                      value={(cat.excludeTerms || []).join('\n')}
+                      onChange={(e) =>
+                        updateCategory(index, {
+                          excludeTerms: e.target.value
+                            .split('\n')
+                            .map((line) => line.trim())
+                            .filter(Boolean),
+                        })
+                      }
+                      placeholder={'advert\ntrailer\nouttakes\nbehind the scenes'}
+                      helperText="One word or phrase per line, case-insensitive. A result is dropped if its title contains any of these. Only applied when Additional local filter is on."
+                    />
+                    <Button
+                      variant="outlined"
+                      size="small"
+                      onClick={() => handleImportClick(index)}
+                      style={{ whiteSpace: 'nowrap' }}
+                    >
+                      <Upload size={16} style={{ marginRight: 6 }} />
+                      Import .txt
+                    </Button>
+                    <input
+                      ref={(el) => { importFileInputRefs.current[index] = el; }}
+                      type="file"
+                      accept=".txt,text/plain"
+                      style={{ display: 'none' }}
+                      onChange={(e) => {
+                        handleImportFile(index, e.target.files?.[0]);
+                        e.target.value = '';
+                      }}
+                    />
+                    <InfoTooltip
+                      text="For matching quality YouTube search can't otherwise catch - DVD-extra clips, promos, and behind-the-scenes uploads often contain every one of your search keywords (they're genuinely about the show/movie) but aren't the actual episode/movie itself. Add whatever terms show up in this channel's junk titles. Import replaces the current list with the file's contents, one term per line."
+                      onMobileClick={onMobileTooltipClick}
+                    />
+                  </Box>
+                  {importErrors[index] && (
+                    <Alert severity="error" className="mt-2">{importErrors[index]}</Alert>
+                  )}
                 </Grid>
                 <Grid item xs={12} md={6}>
                   <Box className="flex items-center">

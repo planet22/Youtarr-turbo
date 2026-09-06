@@ -17,9 +17,9 @@ interface StatTile {
 function NzbStatCards({ stats }: NzbStatCardsProps) {
   const tiles: StatTile[] = [
     {
-      key: 'qps',
-      label: 'Queries / sec (last 60s)',
-      value: stats ? stats.queriesPerSecond.toFixed(2) : '--',
+      key: 'qpm',
+      label: 'Queries / min (last hour)',
+      value: stats ? stats.queriesPerMinute.toFixed(2) : '--',
       icon: <Gauge size={20} />,
     },
     {

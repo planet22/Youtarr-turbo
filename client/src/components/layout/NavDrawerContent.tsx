@@ -22,6 +22,7 @@ import {
 const NAV_MAIN_MIN_HEIGHT = 40;
 const NAV_SUB_MIN_HEIGHT = 20;
 const NAV_ICON_SIZE = 25;
+const NAV_SUB_ICON_SIZE = 14;
 const NAV_ICON_MARGIN = 0.35;
 const NAV_PRIMARY_FONT_SIZE = '0.85rem';
 const NAV_PRIMARY_LINE_HEIGHT = 1.15;
@@ -262,27 +263,52 @@ export const NavDrawerContent: React.FC<NavDrawerContentProps> = ({
                               color: subSelected ? 'var(--nav-item-text-selected)' : 'inherit',
                             }}
                           >
-                            <ListItemText
-                              primary={subItem.label}
+                            <div
                               style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: showSectionIcons && subItem.icon ? 6 : 0,
                                 minWidth: 0,
+                                width: '100%',
                                 paddingLeft: sp(NAV_SUB_HIGHLIGHT_LEFT_PADDING),
-                                overflow: 'hidden',
-                                whiteSpace: 'nowrap',
-                                textOverflow: 'ellipsis',
                               }}
-                              primaryTypographyProps={{
-                                variant: 'body2',
-                                style: {
-                                  fontWeight: subSelected ? 600 : 400,
-                                  fontSize: NAV_SUB_FONT_SIZE,
-                                  lineHeight: NAV_SUB_LINE_HEIGHT,
+                            >
+                              {showSectionIcons && subItem.icon && (
+                                <span
+                                  style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    width: NAV_SUB_ICON_SIZE,
+                                    height: NAV_SUB_ICON_SIZE,
+                                    flexShrink: 0,
+                                    color: subSelected ? 'var(--nav-item-text-selected)' : 'inherit',
+                                  }}
+                                >
+                                  {subItem.icon}
+                                </span>
+                              )}
+                              <ListItemText
+                                primary={subItem.label}
+                                style={{
+                                  minWidth: 0,
                                   overflow: 'hidden',
+                                  whiteSpace: 'nowrap',
                                   textOverflow: 'ellipsis',
-                                },
-                                noWrap: true,
-                              }}
-                            />
+                                }}
+                                primaryTypographyProps={{
+                                  variant: 'body2',
+                                  style: {
+                                    fontWeight: subSelected ? 600 : 400,
+                                    fontSize: NAV_SUB_FONT_SIZE,
+                                    lineHeight: NAV_SUB_LINE_HEIGHT,
+                                    overflow: 'hidden',
+                                    textOverflow: 'ellipsis',
+                                  },
+                                  noWrap: true,
+                                }}
+                              />
+                            </div>
                           </ListItemButton>
                         );
                       })}

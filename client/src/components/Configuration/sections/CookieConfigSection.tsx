@@ -8,8 +8,17 @@ import {
   Chip,
 } from '../../ui';
 import { ConfigurationAccordion } from '../common/ConfigurationAccordion';
+import { InfoTooltip } from '../common/InfoTooltip';
 import { useCookieManagement } from '../hooks/useCookieManagement';
 import { ConfigState, SnackbarState } from '../types';
+import { formatByteSize, formatDateTime, formatExpiresIn } from '../../../utils/formatters';
+
+const AUTH_COOKIES_EXPLAINER =
+  'These are the cookies that carry your YouTube login session (SID/HSID/SSID, ' +
+  'APISID/SAPISID and their __Secure- variants, plus LOGIN_INFO) - as opposed to ' +
+  'tracking/preference cookies, which do not affect authentication. If these expire ' +
+  'or go missing, YouTube quietly falls back to logged-out behavior, which is what ' +
+  'triggers "Sign in to confirm you\'re not a bot" and similar errors.';
 
 interface CookieConfigSectionProps {
   token: string | null;
@@ -34,6 +43,9 @@ export const CookieConfigSection: React.FC<CookieConfigSectionProps> = ({
     uploadingCookie,
     uploadCookieFile,
     deleteCookies,
+    testingCookies,
+    cookieTestResult,
+    testCookies,
   } = useCookieManagement({ token, setConfig, setSnackbar });
 
   const handleCookieUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -110,6 +122,15 @@ export const CookieConfigSection: React.FC<CookieConfigSectionProps> = ({
                       />
                       <Button
                         variant="outlined"
+                        size="small"
+                        disabled={testingCookies}
+                        loading={testingCookies}
+                        onClick={testCookies}
+                      >
+                        {testingCookies ? 'Testing...' : 'Test Cookies'}
+                      </Button>
+                      <Button
+                        variant="outlined"
                         color="error"
                         size="small"
                         onClick={deleteCookies}
@@ -126,13 +147,61 @@ export const CookieConfigSection: React.FC<CookieConfigSectionProps> = ({
               </div>
             </Grid>
 
+            {cookieTestResult && (
+              <Grid item xs={12}>
+                <Alert severity={cookieTestResult.success ? 'success' : 'error'}>
+                  {cookieTestResult.success
+                    ? cookieTestResult.message
+                    : cookieTestResult.error || 'Cookie test failed.'}
+                </Alert>
+              </Grid>
+            )}
+
             {cookieStatus && (
               <Grid item xs={12}>
-                <Typography variant="caption" style={{ color: 'var(--muted-foreground)' }}>
-                  Status: {cookieStatus.customFileExists ?
-                    'Using custom cookies' :
-                    'No cookie file uploaded'}
-                </Typography>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <Typography variant="caption" style={{ color: 'var(--muted-foreground)' }}>
+                    Status: {cookieStatus.customFileExists ?
+                      'Using custom cookies' :
+                      'No cookie file uploaded'}
+                  </Typography>
+
+                  {cookieStatus.customFileExists && (
+                    <>
+                      {typeof cookieStatus.sizeBytes === 'number' && cookieStatus.uploadedAt && (
+                        <Typography variant="caption" style={{ color: 'var(--muted-foreground)' }}>
+                          {formatByteSize(cookieStatus.sizeBytes)}, uploaded {formatDateTime(cookieStatus.uploadedAt)}
+                        </Typography>
+                      )}
+
+                      {typeof cookieStatus.authCookiesFound === 'number' && (
+                        <div style={{ display: 'flex', alignItems: 'center' }}>
+                          <Typography variant="caption" style={{ color: 'var(--muted-foreground)' }}>
+                            {cookieStatus.authCookiesFound > 0
+                              ? `${cookieStatus.authCookiesFound} login cookie${cookieStatus.authCookiesFound === 1 ? '' : 's'} found`
+                              : 'No login cookies found in this file'}
+                          </Typography>
+                          <InfoTooltip text={AUTH_COOKIES_EXPLAINER} onMobileClick={onMobileTooltipClick} />
+                        </div>
+                      )}
+
+                      {cookieStatus.earliestExpiry && (
+                        <Typography
+                          variant="caption"
+                          style={{
+                            color: cookieStatus.hasExpiredAuthCookie
+                              ? 'var(--destructive)'
+                              : 'var(--muted-foreground)',
+                          }}
+                        >
+                          {cookieStatus.hasExpiredAuthCookie
+                            ? `${cookieStatus.earliestExpiryName} expired ${formatDateTime(cookieStatus.earliestExpiry)}`
+                            : `${cookieStatus.earliestExpiryName} ${formatExpiresIn(cookieStatus.earliestExpiry)}`}
+                        </Typography>
+                      )}
+                    </>
+                  )}
+                </div>
               </Grid>
             )}
           </>

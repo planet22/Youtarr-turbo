@@ -14,6 +14,7 @@ describe('Maintenance routes', () => {
   let app;
   let mockVideosModule;
   let mockConfigModule;
+  let mockJobModule;
   let mockVerifyToken;
 
   beforeEach(() => {
@@ -28,6 +29,10 @@ describe('Maintenance routes', () => {
     mockConfigModule = {
       getConfig: jest.fn().mockReturnValue({})
     };
+    mockJobModule = {
+      previewCompactHistory: jest.fn().mockReturnValue({ totalJobs: 0, compactableCount: 0 }),
+      compactHistory: jest.fn().mockResolvedValue({ success: true, deletedCount: 0 })
+    };
     mockVerifyToken = (req, res, next) => next();
 
     const createMaintenanceRoutes = require('../maintenance');
@@ -37,7 +42,8 @@ describe('Maintenance routes', () => {
     app.use(createMaintenanceRoutes({
       verifyToken: mockVerifyToken,
       videosModule: mockVideosModule,
-      configModule: mockConfigModule
+      configModule: mockConfigModule,
+      jobModule: mockJobModule
     }));
   });
 
@@ -146,6 +152,55 @@ describe('Maintenance routes', () => {
 
       expect(res.status).toBe(200);
       expect(res.body).toEqual({ running: true, lastRun });
+    });
+  });
+
+  describe('GET /api/maintenance/compact-history-preview', () => {
+    test('returns the preview counts from jobModule', async () => {
+      mockJobModule.previewCompactHistory.mockReturnValue({ totalJobs: 42, compactableCount: 37 });
+
+      const res = await request(app).get('/api/maintenance/compact-history-preview');
+
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ totalJobs: 42, compactableCount: 37 });
+    });
+
+    test('returns 500 when the preview throws', async () => {
+      mockJobModule.previewCompactHistory.mockImplementation(() => {
+        throw new Error('boom');
+      });
+
+      const res = await request(app).get('/api/maintenance/compact-history-preview');
+
+      expect(res.status).toBe(500);
+    });
+  });
+
+  describe('POST /api/maintenance/compact-history', () => {
+    test('returns the deleted count on success', async () => {
+      mockJobModule.compactHistory.mockResolvedValue({ success: true, deletedCount: 37 });
+
+      const res = await request(app).post('/api/maintenance/compact-history');
+
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ success: true, deletedCount: 37 });
+    });
+
+    test('returns 500 when jobModule reports failure', async () => {
+      mockJobModule.compactHistory.mockResolvedValue({ success: false, error: 'db down', deletedCount: 0 });
+
+      const res = await request(app).post('/api/maintenance/compact-history');
+
+      expect(res.status).toBe(500);
+      expect(res.body).toEqual({ success: false, error: 'db down', deletedCount: 0 });
+    });
+
+    test('returns 500 when compactHistory throws', async () => {
+      mockJobModule.compactHistory.mockRejectedValue(new Error('boom'));
+
+      const res = await request(app).post('/api/maintenance/compact-history');
+
+      expect(res.status).toBe(500);
     });
   });
 });

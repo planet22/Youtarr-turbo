@@ -31,7 +31,11 @@ const rawResultsCache = new Map();
 // manual "Find Videos" UI search, so the page reflects Sonarr/Radarr/
 // Prowlarr traffic specifically rather than a human browsing YouTube.
 const MAX_RECENT_NZB_QUERIES = 50;
-const QPS_WINDOW_MS = 60_000;
+// Sonarr/Radarr/Prowlarr traffic is bursty and sparse (a handful of
+// searches per RSS sync cycle) - a 60s window mostly reads 0, which isn't a
+// useful rate to look at. An hour gives a rate that actually reflects
+// typical polling cadence.
+const QPM_WINDOW_MS = 60 * 60 * 1000;
 const nzbStats = {
   totalQueries: 0,
   cacheHits: 0,
@@ -40,28 +44,42 @@ const nzbStats = {
   recentTimestamps: [],
 };
 
-function recordNzbQuery({ query, count, source, cacheHit, resultCount, durationMs }) {
+function recordNzbQuery({ query, count, source, cacheHit, resultCount, durationMs, settingsSnapshot }) {
   const now = Date.now();
   nzbStats.totalQueries += 1;
   if (cacheHit) nzbStats.cacheHits += 1;
   else nzbStats.cacheMisses += 1;
 
-  nzbStats.recentQueries.unshift({ query, count, source, cacheHit, resultCount, durationMs, timestamp: now });
+  nzbStats.recentQueries.unshift({ query, count, source, cacheHit, resultCount, durationMs, settingsSnapshot, timestamp: now });
   if (nzbStats.recentQueries.length > MAX_RECENT_NZB_QUERIES) {
     nzbStats.recentQueries.length = MAX_RECENT_NZB_QUERIES;
   }
 
   nzbStats.recentTimestamps.push(now);
-  const cutoff = now - QPS_WINDOW_MS;
+  const cutoff = now - QPM_WINDOW_MS;
   while (nzbStats.recentTimestamps.length && nzbStats.recentTimestamps[0] < cutoff) {
     nzbStats.recentTimestamps.shift();
   }
 }
 
+// rawResultsCache is never proactively swept on a timer - entries only ever
+// get overwritten (a fresh fetch for the same key) or explicitly deleted
+// (the NZB diagnostics page's delete action). Without this, an expired
+// entry would sit in the Map forever showing as "cached" even though
+// _fetchRaw's own expiresAt check already treats it as a miss - misleading
+// on the diagnostics page, and an unbounded memory leak over long uptimes
+// as distinct one-off queries pile up. Called on every stats read (polled
+// every 5s by the diagnostics page), so eviction happens naturally without
+// needing a separate timer.
 function getCacheSnapshot() {
   const now = Date.now();
-  return Array.from(rawResultsCache.entries())
-    .map(([key, entry]) => ({
+  const entries = [];
+  for (const [key, entry] of rawResultsCache.entries()) {
+    if (entry.expiresAt <= now) {
+      rawResultsCache.delete(key);
+      continue;
+    }
+    entries.push({
       key,
       query: entry.query,
       count: entry.count,
@@ -69,9 +87,11 @@ function getCacheSnapshot() {
       resultCount: entry.results.length,
       cachedAt: entry.cachedAt,
       expiresAt: entry.expiresAt,
-      expiresInMs: Math.max(0, entry.expiresAt - now),
-    }))
-    .sort((a, b) => b.expiresAt - a.expiresAt);
+      expiresInMs: entry.expiresAt - now,
+      settingsSnapshot: entry.settingsSnapshot,
+    });
+  }
+  return entries.sort((a, b) => b.expiresAt - a.expiresAt);
 }
 
 function deleteCacheEntries(keys) {
@@ -82,21 +102,45 @@ function deleteCacheEntries(keys) {
   return removed;
 }
 
+/**
+ * Plain-language summary of what currently determines the search cache key
+ * (see _fetchRaw) - for the NZB diagnostics page. Deliberately NOT the raw
+ * args array/JSON key itself (meaningless to read, and cookies/proxy could
+ * be sensitive) - just enough for a human to understand "why would a cache
+ * entry from before now be considered different from a fresh search," e.g.
+ * after toggling cookies or changing the proxy. These are global settings,
+ * not per-entry - the same summary applies to every current+future cache
+ * write until one of these settings changes.
+ */
+function getSearchSettingsSummary() {
+  const configModule = require('./configModule');
+  const config = configModule.getConfig();
+  const usingApi = youtubeApi.isAvailable();
+  return {
+    backend: usingApi ? 'youtube-api' : 'yt-dlp',
+    cookiesEnabled: usingApi ? null : Boolean(configModule.getCookiesPath()),
+    proxy: usingApi ? null : (config.proxy && config.proxy.trim()) || null,
+    ipFamily: usingApi ? null : (config.ytdlpIpFamily || 'ipv4'),
+    hasCustomArgs: usingApi ? null : Boolean(config.ytdlpCustomArgs && config.ytdlpCustomArgs.trim()),
+  };
+}
+
 function getNzbStats() {
   const now = Date.now();
-  const cutoff = now - QPS_WINDOW_MS;
+  const cutoff = now - QPM_WINDOW_MS;
   // recentTimestamps is already pruned to the window on every write, but
   // pruning only happens on the next recordNzbQuery call - filter again here
-  // so a stats read during a quiet period doesn't report stale QPS.
+  // so a stats read during a quiet period doesn't report a stale rate.
   const windowCount = nzbStats.recentTimestamps.filter((t) => t >= cutoff).length;
   return {
     totalQueries: nzbStats.totalQueries,
     cacheHits: nzbStats.cacheHits,
     cacheMisses: nzbStats.cacheMisses,
     cacheHitRate: nzbStats.totalQueries > 0 ? nzbStats.cacheHits / nzbStats.totalQueries : 0,
-    queriesPerSecond: windowCount / (QPS_WINDOW_MS / 1000),
+    queriesPerMinute: windowCount / (QPM_WINDOW_MS / 60_000),
     recentQueries: nzbStats.recentQueries,
     cachedEntries: getCacheSnapshot(),
+    searchSettings: getSearchSettingsSummary(),
   };
 }
 
@@ -126,6 +170,12 @@ class VideoSearchModule {
         cacheHit: source.endsWith('-cache'),
         resultCount: resultsCopy.length,
         durationMs: Date.now() - startedAt,
+        // Current settings at the moment of THIS request - not necessarily
+        // what produced `source` on a cache hit (that reflects whatever was
+        // true when the cache entry was originally written). Lets the
+        // diagnostics page show, per row, whether a search happened under
+        // today's settings or something has since changed.
+        settingsSnapshot: getSearchSettingsSummary(),
       });
     }
 
@@ -154,7 +204,29 @@ class VideoSearchModule {
     // the settings page appearing to show it already on at 10 minutes.
     const rawSearchCacheMinutes = configModule.getConfig().nzb?.searchCacheMinutes;
     const cacheTtlMinutes = rawSearchCacheMinutes === undefined ? 10 : Number(rawSearchCacheMinutes);
-    const cacheKey = `${count} ${query}`;
+
+    // The cache key is the actual parameters this call would use to fetch -
+    // not just query+count - so a hit always means "this really is the
+    // response we'd get right now," never "the same query text happened to
+    // repeat under different settings." On the yt-dlp path that's the full
+    // constructed arg list (buildSearchArgs already bakes in cookies, proxy,
+    // IP family, and any custom yt-dlp args - every one of those can change
+    // what YouTube actually returns, e.g. cookies unlock age-restricted
+    // results or personalize ranking, a proxy changes the effective region).
+    // On the API path there's no such variability to capture - the YouTube
+    // Data API call only ever depends on query+count - so it gets its own
+    // distinctly-shaped key, deliberately never colliding with a yt-dlp key
+    // for the same query+count.
+    const usingApi = youtubeApi.isAvailable();
+    // Computed unconditionally (cheap, synchronous - no yt-dlp process
+    // spawned yet) so it's available below both to key the yt-dlp-path cache
+    // entry and, unchanged, as the actual args if the API path is skipped or
+    // falls back to yt-dlp - one source of truth instead of building it
+    // twice and risking the two calls drifting apart.
+    const ytdlpArgs = ytdlpCommandBuilder.buildSearchArgs(query, count);
+    const cacheKey = usingApi
+      ? JSON.stringify({ backend: 'youtube-api', query, count })
+      : JSON.stringify({ backend: 'yt-dlp', args: ytdlpArgs });
 
     if (Number.isFinite(cacheTtlMinutes) && cacheTtlMinutes > 0) {
       const cached = rawResultsCache.get(cacheKey);
@@ -167,7 +239,7 @@ class VideoSearchModule {
     let results = null;
     let source = null;
 
-    if (youtubeApi.isAvailable()) {
+    if (usingApi) {
       try {
         const apiKey = youtubeApi.getApiKey();
         const apiResults = await youtubeApi.client.searchVideos(apiKey, query, count, { signal });
@@ -185,10 +257,9 @@ class VideoSearchModule {
     }
 
     if (results === null) {
-      const args = ytdlpCommandBuilder.buildSearchArgs(query, count);
       let stdout;
       try {
-        stdout = await ytDlpRunner.run(args, { timeoutMs: SEARCH_TIMEOUT_MS, signal });
+        stdout = await ytDlpRunner.run(ytdlpArgs, { timeoutMs: SEARCH_TIMEOUT_MS, signal });
       } catch (err) {
         if (err.name === 'AbortError') throw new SearchCanceledError();
         if (err.code === 'YTDLP_TIMEOUT') throw new SearchTimeoutError();
@@ -206,6 +277,11 @@ class VideoSearchModule {
         count,
         cachedAt: Date.now(),
         expiresAt: Date.now() + cacheTtlMinutes * 60_000,
+        // Snapshot of what produced this entry - shown per-row on the
+        // diagnostics page so a stale-looking entry (created before cookies
+        // were turned on, say) is visibly different from what's cached now,
+        // rather than only being distinguishable by silently missing.
+        settingsSnapshot: getSearchSettingsSummary(),
       });
     }
 

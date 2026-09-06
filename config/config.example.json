@@ -42,6 +42,7 @@
     "enableStallDetection": true,
     "stallDetectionWindowSeconds": 30,
     "stallDetectionRateThreshold": "100K",
+    "downloadQueueManagerEnabled": false,
     "sleepRequests": 1,
     "proxy": "",
     "logLevel": "",

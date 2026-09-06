@@ -397,6 +397,28 @@ describe('VideosModule', () => {
       expect(replacements.dateTo).toBe('20241231');
     });
 
+    test('should handle added (downloaded) date filters correctly, distinct from published date filters', async () => {
+      mockSequelize.query.mockResolvedValueOnce([{ total: 0 }]);
+      mockSequelize.query.mockResolvedValueOnce([]);
+      mockSequelize.query.mockResolvedValueOnce([]); // getAllUniqueChannels
+
+      await VideosModule.getVideosPaginated({
+        addedDateFrom: '2024-01-01',
+        addedDateTo: '2024-12-31'
+      });
+
+      const query = mockSequelize.query.mock.calls[0][0];
+      const replacements = mockSequelize.query.mock.calls[0][1].replacements;
+
+      const addedDateExpr = "COALESCE(Videos.last_downloaded_at, Jobs.timeCreated, STR_TO_DATE(Videos.originalDate, '%Y%m%d'))";
+      expect(query).toContain(`${addedDateExpr} >= :addedDateFrom`);
+      expect(query).toContain(`${addedDateExpr} <= :addedDateTo`);
+      // Unlike originalDate's stripped-string comparison, these compare
+      // against a real DATETIME expression, so full day-boundary timestamps.
+      expect(replacements.addedDateFrom).toBe('2024-01-01 00:00:00');
+      expect(replacements.addedDateTo).toBe('2024-12-31 23:59:59');
+    });
+
     test('should handle channel filter correctly', async () => {
       mockSequelize.query.mockResolvedValueOnce([{ total: 5 }]);
       mockSequelize.query.mockResolvedValueOnce([]);

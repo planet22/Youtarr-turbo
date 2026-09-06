@@ -122,8 +122,8 @@ function VideosTable({
                 />
               </TableCell>
               <TableCell component="th" style={{ width: 160 }}>Thumbnail</TableCell>
-              <TableCell component="th">Title</TableCell>
-              <TableCell component="th" style={{ width: '18%' }}>Channel</TableCell>
+              <TableCell component="th" style={{ width: '28%' }}>Title</TableCell>
+              <TableCell component="th" style={{ width: '10%' }}>Channel</TableCell>
               <TableCell component="th" style={{ whiteSpace: 'nowrap', width: 120 }}>
                 <TableSortLabel
                   active={orderBy === 'published'}
@@ -300,29 +300,31 @@ function VideosTable({
                     </Box>
                   </TableCell>
                   <TableCell onClick={(e) => e.stopPropagation()}>
-                    <Typography
-                      variant="body2"
-                      className="font-semibold"
-                      style={{
-                        cursor: 'pointer',
-                        lineHeight: 1.3,
-                        display: '-webkit-box',
-                        WebkitLineClamp: 2,
-                        WebkitBoxOrient: 'vertical',
-                        overflow: 'hidden',
-                      }}
-                      onClick={() => onOpenModal(video)}
-                      onKeyDown={(event) => {
-                        if (event.key === 'Enter' || event.key === ' ') {
-                          event.preventDefault();
-                          onOpenModal(video);
-                        }
-                      }}
-                      role="button"
-                      tabIndex={0}
-                    >
-                      {video.youTubeVideoName}
-                    </Typography>
+                    <Tooltip title={video.youTubeVideoName} enterDelay={400}>
+                      <Typography
+                        variant="body2"
+                        className="font-semibold"
+                        style={{
+                          cursor: 'pointer',
+                          lineHeight: 1.3,
+                          display: '-webkit-box',
+                          WebkitLineClamp: 2,
+                          WebkitBoxOrient: 'vertical',
+                          overflow: 'hidden',
+                        }}
+                        onClick={() => onOpenModal(video)}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter' || event.key === ' ') {
+                            event.preventDefault();
+                            onOpenModal(video);
+                          }
+                        }}
+                        role="button"
+                        tabIndex={0}
+                      >
+                        {video.youTubeVideoName}
+                      </Typography>
+                    </Tooltip>
                   </TableCell>
                   <TableCell onClick={(e) => e.stopPropagation()}>
                     <ChannelNameDisplay

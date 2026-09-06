@@ -119,6 +119,8 @@ function VideosPage({ token }: VideosPageProps) {
   const [orderBy, setOrderBy] = useState<'published' | 'added'>('added');
   const [dateFrom, setDateFrom] = useState<string>('');
   const [dateTo, setDateTo] = useState<string>('');
+  const [addedDateFrom, setAddedDateFrom] = useState<string>('');
+  const [addedDateTo, setAddedDateTo] = useState<string>('');
   const [maxRatingFilter, setMaxRatingFilter] = useState('');
   const [protectedFilter, setProtectedFilter] = useState<ChipFilterMode>('off');
   const [missingFilter, setMissingFilter] = useState<ChipFilterMode>('off');
@@ -126,6 +128,7 @@ function VideosPage({ token }: VideosPageProps) {
   const [strmFilter, setStrmFilter] = useState<ChipFilterMode>('off');
   const [metadataCacheFilter, setMetadataCacheFilter] = useState<ChipFilterMode>('off');
   const [cachedVideoFilter, setCachedVideoFilter] = useState<ChipFilterMode>('off');
+  const [metadataOnlyFilter, setMetadataOnlyFilter] = useState<ChipFilterMode>('off');
   // Defaults on - untracked cache-only videos (played/cached but never
   // downloaded) are part of what this page is for surfacing, not an
   // edge case someone has to opt into seeing.
@@ -207,6 +210,8 @@ function VideosPage({ token }: VideosPageProps) {
     channelFilter,
     dateFrom,
     dateTo,
+    addedDateFrom,
+    addedDateTo,
     maxRatingFilter,
     protectedFilter,
     missingFilter,
@@ -214,6 +219,7 @@ function VideosPage({ token }: VideosPageProps) {
     strmFilter,
     metadataCacheFilter,
     cachedVideoFilter,
+    metadataOnlyFilter,
     showUntracked,
     useInfiniteScroll,
   });
@@ -492,6 +498,8 @@ function VideosPage({ token }: VideosPageProps) {
     channelFilter,
     dateFrom,
     dateTo,
+    addedDateFrom,
+    addedDateTo,
     maxRatingFilter,
     protectedFilter,
     missingFilter,
@@ -499,6 +507,7 @@ function VideosPage({ token }: VideosPageProps) {
     strmFilter,
     metadataCacheFilter,
     cachedVideoFilter,
+    metadataOnlyFilter,
     showUntracked,
     selection.clear,
   ]);
@@ -886,10 +895,19 @@ function VideosPage({ token }: VideosPageProps) {
     return [
       {
         id: 'dateRangeString',
+        label: 'Published',
         dateFrom,
         dateTo,
         onFromChange: withPageReset(setDateFrom),
         onToChange: withPageReset(setDateTo),
+      },
+      {
+        id: 'dateRangeString',
+        label: 'Downloaded',
+        dateFrom: addedDateFrom,
+        dateTo: addedDateTo,
+        onFromChange: withPageReset(setAddedDateFrom),
+        onToChange: withPageReset(setAddedDateTo),
       },
       { id: 'maxRating', value: maxRatingFilter, onChange: withPageReset(setMaxRatingFilter) },
       { id: 'protected', value: protectedFilter, onChange: withPageReset(setProtectedFilter) },
@@ -898,6 +916,7 @@ function VideosPage({ token }: VideosPageProps) {
       { id: 'strm', value: strmFilter, onChange: withPageReset(setStrmFilter) },
       { id: 'metadataCache', value: metadataCacheFilter, onChange: withPageReset(setMetadataCacheFilter) },
       { id: 'cachedVideo', value: cachedVideoFilter, onChange: withPageReset(setCachedVideoFilter) },
+      { id: 'metadataOnly', value: metadataOnlyFilter, onChange: withPageReset(setMetadataOnlyFilter) },
       {
         id: 'channel',
         value: channelFilter,
@@ -910,7 +929,7 @@ function VideosPage({ token }: VideosPageProps) {
       { id: 'showFilePaths', value: showFilePaths, onChange: setShowFilePaths },
     ];
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dateFrom, dateTo, maxRatingFilter, protectedFilter, missingFilter, watchedFilter, strmFilter, metadataCacheFilter, cachedVideoFilter, channelFilter, uniqueChannels, showUntracked, showFilePaths]);
+  }, [dateFrom, dateTo, addedDateFrom, addedDateTo, maxRatingFilter, protectedFilter, missingFilter, watchedFilter, strmFilter, metadataCacheFilter, cachedVideoFilter, metadataOnlyFilter, channelFilter, uniqueChannels, showUntracked, showFilePaths]);
 
   const sortConfig: SortConfig = useMemo(
     () => ({
@@ -933,11 +952,6 @@ function VideosPage({ token }: VideosPageProps) {
       <Typography variant={isMobile ? 'h6' : 'h5'} component="h2" gutterBottom align="center">
         Library ({totalVideos} total)
       </Typography>
-      {showUntracked && (
-        <Typography variant="caption" color="text.secondary" align="center" style={{ display: 'block' }}>
-          Showing untracked cache-only videos — search and date filters don&apos;t apply to them.
-        </Typography>
-      )}
     </div>
   );
 

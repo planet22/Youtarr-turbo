@@ -1,6 +1,14 @@
 import { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 
+export interface NzbSearchSettings {
+  backend: 'yt-dlp' | 'youtube-api';
+  cookiesEnabled: boolean | null;
+  proxy: string | null;
+  ipFamily: string | null;
+  hasCustomArgs: boolean | null;
+}
+
 export interface NzbRecentQuery {
   query: string;
   count: number;
@@ -9,6 +17,7 @@ export interface NzbRecentQuery {
   resultCount: number;
   durationMs: number;
   timestamp: number;
+  settingsSnapshot: NzbSearchSettings;
 }
 
 export interface NzbCachedEntry {
@@ -20,6 +29,72 @@ export interface NzbCachedEntry {
   cachedAt: number;
   expiresAt: number;
   expiresInMs: number;
+  settingsSnapshot: NzbSearchSettings;
+}
+
+export type NzbFilterReason =
+  | 'keyword'
+  | 'excluded-term'
+  | 'wrong-season'
+  | 'wrong-episode'
+  | 'no-episode-marker'
+  | 'episode-code'
+  | null;
+
+export interface NzbSearchTraceItem {
+  youtubeId: string;
+  title: string;
+  kept: boolean;
+  reason: NzbFilterReason;
+  matchedTerm: string | null;
+}
+
+export interface NzbSearchTrace {
+  timestamp: number;
+  categoryName: string;
+  searchType: string;
+  query: string;
+  newquery: string | null;
+  season: number | null;
+  ep: number | null;
+  additionalLocalFilterEnabled: boolean;
+  offset: number;
+  limit: number;
+  items: NzbSearchTraceItem[];
+}
+
+export interface NzbFailedGrab {
+  jobId: string;
+  categoryName: string | null;
+  youtubeId: string | null;
+  nzbName: string | null;
+  message: string;
+  timestamp: number;
+}
+
+export interface NzbActiveJob {
+  jobId: string;
+  isCurrent: boolean;
+  status: 'Downloading' | 'Queued';
+  categoryName: string | null;
+  nzbName: string | null;
+  percent: number;
+  etaSeconds: number;
+  totalBytes: number;
+  downloadedBytes: number;
+}
+
+export interface NzbHistoryJob {
+  jobId: string;
+  status: 'Completed' | 'Failed';
+  categoryName: string | null;
+  nzbName: string | null;
+  bytes: number;
+}
+
+export interface NzbJobsSnapshot {
+  active: NzbActiveJob[];
+  history: NzbHistoryJob[];
 }
 
 export interface NzbStats {
@@ -27,9 +102,13 @@ export interface NzbStats {
   cacheHits: number;
   cacheMisses: number;
   cacheHitRate: number;
-  queriesPerSecond: number;
+  queriesPerMinute: number;
   recentQueries: NzbRecentQuery[];
   cachedEntries: NzbCachedEntry[];
+  searchSettings: NzbSearchSettings;
+  searchTraces: NzbSearchTrace[];
+  failedGrabs: NzbFailedGrab[];
+  jobs: NzbJobsSnapshot;
 }
 
 interface UseNzbStatsResult {
@@ -38,6 +117,7 @@ interface UseNzbStatsResult {
   error: boolean;
   refetch: () => Promise<void>;
   deleteCacheEntries: (keys: string[]) => Promise<void>;
+  cancelCurrentJob: () => Promise<void>;
 }
 
 const POLL_INTERVAL_MS = 5000;
@@ -84,5 +164,19 @@ export const useNzbStats = (token: string | null): UseNzbStatsResult => {
     [token, fetchStats]
   );
 
-  return { stats, loading, error, refetch: fetchStats, deleteCacheEntries };
+  const cancelCurrentJob = useCallback(async () => {
+    if (!token) return;
+    // Reuses the same endpoint the Download Activity page's own "Terminate"
+    // action calls - it terminates whatever job is currently actively
+    // downloading, not a specific jobId (downloadModule only runs one job
+    // at a time). Only meaningful for a row where isCurrent is true.
+    await axios.post(
+      '/api/jobs/terminate',
+      {},
+      { headers: { 'x-access-token': token } }
+    );
+    await fetchStats();
+  }, [token, fetchStats]);
+
+  return { stats, loading, error, refetch: fetchStats, deleteCacheEntries, cancelCurrentJob };
 };

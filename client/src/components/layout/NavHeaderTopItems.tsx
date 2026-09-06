@@ -117,7 +117,9 @@ export const NavHeaderTopItems: React.FC<NavHeaderTopItemsProps> = ({
                         to={subItem.to}
                         onClick={handleUnitLeave}
                         style={{
-                          display: 'block',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: showSectionIcons && subItem.icon ? 8 : 0,
                           textDecoration: 'none',
                           width: '100%',
                           borderRadius: 'var(--layout-header-menu-radius)',
@@ -130,6 +132,21 @@ export const NavHeaderTopItems: React.FC<NavHeaderTopItemsProps> = ({
                           boxSizing: 'border-box',
                         }}
                       >
+                        {showSectionIcons && subItem.icon && (
+                          <span
+                            aria-hidden="true"
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              width: 14,
+                              height: 14,
+                              flexShrink: 0,
+                            }}
+                          >
+                            {subItem.icon}
+                          </span>
+                        )}
                         {subItem.label}
                       </RouterLink>
                     );

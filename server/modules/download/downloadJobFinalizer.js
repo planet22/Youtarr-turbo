@@ -273,6 +273,17 @@ async function finalizeDownloadJob({
       terminationFailures: errorTracker.terminationFailures
     });
 
+    // Only the branches below that actually end the job (unconditionally, or
+    // via the `!skipJobTransition` final-group path) read from dataPayload -
+    // the two skipJobTransition intermediate-group paths build their own
+    // `data` object via saveIntermediateGroupResults instead. So it's safe to
+    // stamp these once here rather than per-branch: an in-progress multi-group
+    // job never gets a premature endDate, and cumulativeSkipped always adds
+    // this group's count on top of what prior groups already accumulated.
+    const priorSkipped = jobModule.getJob(jobId)?.data?.cumulativeSkipped || 0;
+    dataPayload.cumulativeSkipped = priorSkipped + (monitor.videoCount.skipped || 0);
+    dataPayload.endDate = new Date().toISOString();
+
     if (errorTracker.terminatedChannelIds.size > 0) {
       logger.warn({ terminatedChannels: errorTracker.terminatedChannels }, 'Channels marked terminated during this job');
     }
@@ -287,15 +298,19 @@ async function finalizeDownloadJob({
         ? 'Bot detection encountered even though cookies are configured - they are likely expired or rotated.'
         : 'Bot detection encountered. Please set cookies in your Configuration.';
 
+      const botDetectedNotes = cookiesEnabled
+        ? 'YouTube requires authentication and your uploaded cookies appear stale. Re-export fresh cookies from your browser and upload them in Settings -> Cookies.'
+        : 'YouTube requires authentication. Enable cookies in Configuration to resolve this issue.';
+      dataPayload.notes = botDetectedNotes;
+      dataPayload.errorCode = 'COOKIES_REQUIRED';
+
       await persistCompletedVideosBeforeTerminalUpdate(jobId, videoData, failedVideosList);
       await jobModule.updateJob(jobId, {
         status: status,
         endDate: Date.now(),
         output: output,
         data: dataPayload,
-        notes: cookiesEnabled
-          ? 'YouTube requires authentication and your uploaded cookies appear stale. Re-export fresh cookies from your browser and upload them in Settings -> Cookies.'
-          : 'YouTube requires authentication. Enable cookies in Configuration to resolve this issue.',
+        notes: botDetectedNotes,
         error: 'COOKIES_REQUIRED'
       });
       jobErrorCode = 'COOKIES_REQUIRED';
@@ -310,6 +325,7 @@ async function finalizeDownloadJob({
       const terminationReason = wasManuallyTerminated
         ? manualReason
         : (timeoutController.shutdownReason || 'Download terminated due to timeout');
+      dataPayload.notes = terminationReason;
 
       // Persist videos to DB before updateJob reloads them from DB.
       await persistCompletedVideosBeforeTerminalUpdate(jobId, videoData, failedVideosList);
@@ -370,6 +386,8 @@ async function finalizeDownloadJob({
           terminatedChannelCount: errorTracker.terminatedChannelIds.size,
           hasPartialSuccess: nonZero.hasPartialSuccess
         });
+        dataPayload.notes = nonZero.notes;
+        if (nonZero.errorCode) dataPayload.errorCode = nonZero.errorCode;
         await jobModule.updateJob(jobId, {
           status: terminalStatus,
           endDate: Date.now(),
@@ -410,6 +428,7 @@ async function finalizeDownloadJob({
       if (errorTracker.terminatedChannelIds.size > 0) {
         status = 'Complete with Warnings';
         output = `${videoCount} videos, ${errorTracker.terminatedChannelIds.size} channel${errorTracker.terminatedChannelIds.size !== 1 ? 's' : ''} marked terminated.`;
+        dataPayload.notes = `${errorTracker.terminatedChannelIds.size} channel${errorTracker.terminatedChannelIds.size !== 1 ? 's' : ''} marked terminated by YouTube`;
       } else {
         status = 'Complete';
         output = `${videoCount} videos.`;

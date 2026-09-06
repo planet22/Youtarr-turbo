@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 import { CookieConfigSection } from '../CookieConfigSection';
 import { renderWithProviders } from '../../../../test-utils';
-import { ConfigState, SnackbarState, CookieStatus } from '../../types';
+import { ConfigState, SnackbarState, CookieStatus, CookieTestResult } from '../../types';
 import { DEFAULT_CONFIG } from '../../../../config/configSchema';
 
 const mockUseCookieManagement = jest.fn();
@@ -18,6 +18,9 @@ type HookValue = {
   uploadingCookie: boolean;
   uploadCookieFile: jest.Mock;
   deleteCookies: jest.Mock;
+  testingCookies: boolean;
+  cookieTestResult: CookieTestResult | null;
+  testCookies: jest.Mock;
 };
 
 const createHookValue = (overrides: Partial<HookValue> = {}) => {
@@ -26,6 +29,9 @@ const createHookValue = (overrides: Partial<HookValue> = {}) => {
     uploadingCookie: false,
     uploadCookieFile: jest.fn(),
     deleteCookies: jest.fn(),
+    testingCookies: false,
+    cookieTestResult: null,
+    testCookies: jest.fn(),
     ...overrides,
   };
   mockUseCookieManagement.mockReturnValue(value);
@@ -92,6 +98,86 @@ describe('CookieConfigSection', () => {
     await user.click(deleteButton);
 
     expect(hookValue.deleteCookies).toHaveBeenCalledTimes(1);
+  });
+
+  test('clicking Test Cookies calls the hook and shows the result', async () => {
+    const user = userEvent.setup();
+    const hookValue = createHookValue({
+      cookieStatus: {
+        cookiesEnabled: true,
+        customCookiesUploaded: true,
+        customFileExists: true,
+      },
+      cookieTestResult: {
+        success: true,
+        message: 'Cookies are working (found 12 subscribed channels).',
+        testedAt: new Date().toISOString(),
+      },
+    });
+
+    const props = createSectionProps({
+      config: createConfig({ cookiesEnabled: true }),
+    });
+
+    renderWithProviders(<CookieConfigSection {...props} />);
+
+    const testButton = screen.getByRole('button', { name: /test cookies/i });
+    await user.click(testButton);
+
+    expect(hookValue.testCookies).toHaveBeenCalledTimes(1);
+    expect(
+      screen.getByText('Cookies are working (found 12 subscribed channels).')
+    ).toBeInTheDocument();
+  });
+
+  test('shows an error alert when the cookie test fails', () => {
+    createHookValue({
+      cookieStatus: {
+        cookiesEnabled: true,
+        customCookiesUploaded: true,
+        customFileExists: true,
+      },
+      cookieTestResult: {
+        success: false,
+        error: 'Your cookies appear to be expired or invalid.',
+        testedAt: new Date().toISOString(),
+      },
+    });
+
+    const props = createSectionProps({
+      config: createConfig({ cookiesEnabled: true }),
+    });
+
+    renderWithProviders(<CookieConfigSection {...props} />);
+
+    expect(
+      screen.getByText('Your cookies appear to be expired or invalid.')
+    ).toBeInTheDocument();
+  });
+
+  test('shows expiry metadata for the uploaded cookie file', () => {
+    createHookValue({
+      cookieStatus: {
+        cookiesEnabled: true,
+        customCookiesUploaded: true,
+        customFileExists: true,
+        sizeBytes: 4096,
+        uploadedAt: new Date().toISOString(),
+        authCookiesFound: 8,
+        hasExpiredAuthCookie: true,
+        earliestExpiry: new Date(Date.now() - 60_000).toISOString(),
+        earliestExpiryName: 'SAPISID',
+      },
+    });
+
+    const props = createSectionProps({
+      config: createConfig({ cookiesEnabled: true }),
+    });
+
+    renderWithProviders(<CookieConfigSection {...props} />);
+
+    expect(screen.getByText(/8 login cookies found/i)).toBeInTheDocument();
+    expect(screen.getByText(/SAPISID expired/i)).toBeInTheDocument();
   });
 
   test('passes selected file to uploadCookieFile via the hook', async () => {

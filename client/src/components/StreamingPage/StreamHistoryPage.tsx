@@ -1,11 +1,40 @@
-import React, { useEffect, useState } from 'react';
-import { Box, Typography, Button } from '../ui';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Box, Grid, Typography, Button } from '../ui';
 import { Trash2 as DeleteIcon } from '../../lib/icons';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
 import { useStreamHistory } from '../../hooks/useStreamHistory';
-import { useListPageSize, VideoListPaginationBar, type PageSize } from '../shared/VideoList';
-import StreamHistoryTable from './components/StreamHistoryTable';
+import {
+  useListPageSize,
+  useVideoListState,
+  VideoListContainer,
+  VideoListPaginationBar,
+  type FilterConfig,
+  type PageSize,
+  type VideoListViewMode,
+} from '../shared/VideoList';
+import StreamHistoryTable, { RESULT_CHIPS, STREAM_STATUS_OPTIONS } from './components/StreamHistoryTable';
+import StreamHistoryCard from './components/StreamHistoryCard';
 import DeleteStreamHistoryDialog from './components/DeleteStreamHistoryDialog';
+import { MODE_LABELS, STREAM_MODE_OPTIONS } from './utils';
+
+const VIEW_MODES: VideoListViewMode[] = ['grid', 'table'];
+
+// The Mode/Result filter dropdowns need to show the same friendly text as
+// the table's own Mode chip / Result chip (formatModeLabel / resultChipFor),
+// not the raw `mode`/`end_reason` database values the API actually filters
+// by - these translate between the two in both directions. Module-level
+// (not per-render) since they're derived purely from the static option
+// lists/label maps imported above.
+const MODE_LABEL_OPTIONS = STREAM_MODE_OPTIONS.map((value) => MODE_LABELS[value] || value);
+const MODE_LABEL_TO_VALUE: Record<string, string> = Object.fromEntries(
+  STREAM_MODE_OPTIONS.map((value) => [MODE_LABELS[value] || value, value])
+);
+const STATUS_LABEL_OF: Record<string, string> = { 'in-progress': 'In progress' };
+for (const [value, chip] of Object.entries(RESULT_CHIPS)) STATUS_LABEL_OF[value] = chip.label;
+const STATUS_LABEL_OPTIONS = STREAM_STATUS_OPTIONS.map((value) => STATUS_LABEL_OF[value] || value);
+const STATUS_LABEL_TO_VALUE: Record<string, string> = Object.fromEntries(
+  STREAM_STATUS_OPTIONS.map((value) => [STATUS_LABEL_OF[value] || value, value])
+);
 
 interface StreamHistoryPageProps {
   token: string | null;
@@ -20,6 +49,11 @@ interface StreamHistoryPageProps {
  */
 function StreamHistoryPage({ token }: StreamHistoryPageProps) {
   const isMobile = useMediaQuery('(max-width: 767px)');
+  // Same search box / filters button+badge / active-filter chips chrome as
+  // the Videos and (live) Streaming pages, for a consistent filtering
+  // experience across list-style pages. Grid defaults on mobile, same as
+  // those pages; both views are always available on either size.
+  const listState = useVideoListState({ initialViewMode: isMobile ? 'grid' : 'table' });
   const [page, setPage] = useState(1);
   // Same shared page-size control/values (and localStorage persistence) as
   // the Videos/Library page - GET /api/ytstream/history's `limit` is capped
@@ -29,16 +63,70 @@ function StreamHistoryPage({ token }: StreamHistoryPageProps) {
     setPageSize(newSize);
     setPage(1);
   };
-  const { rows, total, loading, refetch, deleteEntries } = useStreamHistory(token, page, pageSize);
+
+  const [modeFilter, setModeFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const normalizedSearch = listState.search.trim();
+
+  // Filters are applied server-side (see useStreamHistory/GET
+  // /api/ytstream/history) since this page is server-paginated - a
+  // client-side filter would only ever see whatever happens to already be
+  // on the current page.
+  const filters = useMemo(
+    () => ({
+      mode: modeFilter || undefined,
+      status: statusFilter || undefined,
+      search: normalizedSearch || undefined,
+      dateFrom: dateFrom || undefined,
+      dateTo: dateTo || undefined,
+    }),
+    [modeFilter, statusFilter, normalizedSearch, dateFrom, dateTo]
+  );
+  const hasActiveFilters = Boolean(modeFilter || statusFilter || dateFrom || dateTo);
+
+  const { rows, total, loading, refetch, deleteEntries } = useStreamHistory(token, page, pageSize, filters);
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
 
-  // Selection is page-scoped, like the rest of this simple, non-VideoList page.
+  // Selection is page-scoped (own checkbox state, not VideoListContainer's
+  // selection prop - this page keeps its existing simple delete flow rather
+  // than adopting the shared multi-select pill).
   useEffect(() => {
     setSelectedIds([]);
   }, [page, pageSize]);
+
+  // A filter change makes the previous page number meaningless against the
+  // new, smaller/different result set - same reasoning as Download History.
+  useEffect(() => {
+    setPage(1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modeFilter, statusFilter, normalizedSearch, dateFrom, dateTo]);
+
+  const filterConfigs = useMemo<FilterConfig[]>(
+    () => [
+      {
+        id: 'select',
+        label: 'Mode',
+        value: MODE_LABELS[modeFilter] || modeFilter,
+        options: MODE_LABEL_OPTIONS,
+        onChange: (label: string) => setModeFilter(MODE_LABEL_TO_VALUE[label] || ''),
+      },
+      // Labeled "Result" (not "Status") to match the table's own Result column.
+      {
+        id: 'select',
+        label: 'Result',
+        value: STATUS_LABEL_OF[statusFilter] || statusFilter,
+        options: STATUS_LABEL_OPTIONS,
+        onChange: (label: string) => setStatusFilter(STATUS_LABEL_TO_VALUE[label] || ''),
+      },
+      { id: 'dateRangeString', label: 'Started', dateFrom, dateTo, onFromChange: setDateFrom, onToChange: setDateTo },
+    ],
+    [modeFilter, statusFilter, dateFrom, dateTo]
+  );
 
   const handleToggleSelect = (streamId: string) => {
     setSelectedIds((prev) =>
@@ -59,41 +147,60 @@ function StreamHistoryPage({ token }: StreamHistoryPageProps) {
     }
   };
 
-  return (
-    <Box style={{ padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: 16 }}>
-      <Box style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, flexWrap: 'wrap' }}>
-        <Typography variant={isMobile ? 'h6' : 'h5'} align="center">
-          Stream History ({total} session{total === 1 ? '' : 's'})
-        </Typography>
-        {selectedIds.length > 0 && (
-          <Button
-            size="small"
-            variant="outlined"
-            color="error"
-            startIcon={<DeleteIcon size={14} />}
-            onClick={() => setDeleteDialogOpen(true)}
-          >
-            Delete {selectedIds.length} selected
-          </Button>
-        )}
-      </Box>
+  const headerSlot = (
+    <Box style={{ padding: '12px 16px 0 16px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, flexWrap: 'wrap' }}>
+      <Typography variant={isMobile ? 'h6' : 'h5'} align="center">
+        Stream History ({total} session{total === 1 ? '' : 's'})
+      </Typography>
+      {selectedIds.length > 0 && (
+        <Button
+          size="small"
+          variant="outlined"
+          color="error"
+          startIcon={<DeleteIcon size={14} />}
+          onClick={() => setDeleteDialogOpen(true)}
+        >
+          Delete {selectedIds.length} selected
+        </Button>
+      )}
+    </Box>
+  );
 
-      {loading && rows.length === 0 ? (
-        <Typography variant="body2" align="center" color="textSecondary">
-          Loading...
-        </Typography>
-      ) : rows.length === 0 ? (
-        <Typography variant="body2" align="center" color="textSecondary">
-          No streaming activity yet.
-        </Typography>
-      ) : (
-        <>
-          <StreamHistoryTable
-            rows={rows}
-            selectedIds={selectedIds}
-            onToggleSelect={handleToggleSelect}
-            onSelectAll={handleSelectAll}
-          />
+  return (
+    <>
+      <VideoListContainer<string>
+        state={listState}
+        viewModes={VIEW_MODES}
+        filters={filterConfigs}
+        searchPlaceholder="Search by video, IP, or client..."
+        headerSlot={headerSlot}
+        itemCount={rows.length}
+        isLoading={loading}
+        isError={false}
+        customEmptyMessage={hasActiveFilters || normalizedSearch ? 'No sessions found matching your filters' : 'No streaming activity yet.'}
+        renderContent={(mode) =>
+          mode === 'grid' ? (
+            <Grid container spacing={2}>
+              {rows.map((row) => (
+                <Grid item xs={12} sm={6} md={4} lg={3} key={row.streamId}>
+                  <StreamHistoryCard
+                    row={row}
+                    isSelected={selectedIds.includes(row.streamId)}
+                    onToggleSelect={handleToggleSelect}
+                  />
+                </Grid>
+              ))}
+            </Grid>
+          ) : (
+            <StreamHistoryTable
+              rows={rows}
+              selectedIds={selectedIds}
+              onToggleSelect={handleToggleSelect}
+              onSelectAll={handleSelectAll}
+            />
+          )
+        }
+        pagination={
           <VideoListPaginationBar
             placement="bottom"
             hasContent={rows.length > 0}
@@ -105,8 +212,9 @@ function StreamHistoryPage({ token }: StreamHistoryPageProps) {
             onPageSizeChange={handlePageSizeChange}
             isMobile={isMobile}
           />
-        </>
-      )}
+        }
+        isMobile={isMobile}
+      />
 
       <DeleteStreamHistoryDialog
         open={deleteDialogOpen}
@@ -114,7 +222,7 @@ function StreamHistoryPage({ token }: StreamHistoryPageProps) {
         onConfirm={handleDeleteConfirm}
         entryCount={selectedIds.length}
       />
-    </Box>
+    </>
   );
 }
 

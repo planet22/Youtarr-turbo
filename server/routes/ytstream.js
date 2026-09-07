@@ -1670,6 +1670,24 @@ const PROBE_CLIP_CACHE_DIR = path.join(YTSTREAM_CLIPS_DIR, 'probe-shortcut');
 const PROBE_CLIP_DURATION_SECONDS = 2;
 const probeClipGenerationPromises = new Map();
 
+// Jellyfin's own ffprobe keyframe-extraction pass (for accurate seeking in
+// transcoded HLS playback) reads scattered chunks across an entire cached
+// file in one short burst - a handful of separate bare-Lavf requests a few
+// hundred ms apart, all for the same youtubeId. Without this, the quick-serve
+// StreamHistory logging below (added so these otherwise-invisible hits show
+// up somewhere) turns one such burst into a handful of near-duplicate rows
+// that look like repeated "sessions" for the same video. Keyed by
+// youtubeId only (not per-request), so a burst logs exactly one row.
+const recentQuickServeHistoryLogAt = new Map();
+const QUICK_SERVE_HISTORY_LOG_COOLDOWN_MS = 60_000;
+function shouldLogQuickServeHistory(youtubeId) {
+  const now = Date.now();
+  const last = recentQuickServeHistoryLogAt.get(youtubeId);
+  if (last && now - last < QUICK_SERVE_HISTORY_LOG_COOLDOWN_MS) return false;
+  recentQuickServeHistoryLogAt.set(youtubeId, now);
+  return true;
+}
+
 // Jellyfin's prober sets a video's RunTimeTicks straight from ffprobe's
 // `format.duration`, unconditionally overwriting whatever it already knew -
 // so a short probe clip gets recorded as the video's real length. FFmpeg's
@@ -1810,8 +1828,8 @@ async function tryServeProbeClip(req, res, { hardwareMode, tuning, width, height
 
     const size = body ? body.length : (await fs.promises.stat(clip.filePath)).size;
     logger.info(
-      { ua: req.headers['user-agent'], size, url: req.originalUrl, patchedDurationSeconds: body ? knownDurationSeconds : null },
-      'ytstream: serving cached probe-shortcut clip to a detected metadata-probe request'
+      { youtubeId, servedAs: 'fake', ua: req.headers['user-agent'], size, url: req.originalUrl, patchedDurationSeconds: body ? knownDurationSeconds : null },
+      'ytstream: probe-shortcut detected a likely metadata-probe request; served the synthetic clip'
     );
     res.set({
       'Content-Type': 'video/x-matroska',
@@ -4882,7 +4900,42 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
     // than the page-size math on the client expects.
     const limit = Math.min(128, Math.max(1, Number.parseInt(req.query.limit, 10) || 25));
     try {
+      const { Op } = require('sequelize');
+      const where = {};
+      if (req.query.mode) where.mode = req.query.mode;
+      // 'in-progress' isn't a real end_reason value - it's the client's label
+      // for "ended_at IS NULL" (see StreamHistoryTable's resultChipFor).
+      if (req.query.status === 'in-progress') {
+        where.ended_at = null;
+      } else if (req.query.status) {
+        where.end_reason = req.query.status;
+      }
+      if (req.query.dateFrom || req.query.dateTo) {
+        where.started_at = {};
+        if (req.query.dateFrom) where.started_at[Op.gte] = new Date(`${req.query.dateFrom}T00:00:00`);
+        if (req.query.dateTo) where.started_at[Op.lte] = new Date(`${req.query.dateTo}T23:59:59.999`);
+      }
+      const search = (req.query.search || '').trim();
+      if (search) {
+        // Title isn't a stream_history column (it's joined from Video below
+        // for display) - resolve matching youtube_ids from Video first so a
+        // title search can still be OR'd in against the other columns.
+        const matchingVideoIds = models.Video
+          ? (await models.Video.findAll({
+              where: { youTubeVideoName: { [Op.like]: `%${search}%` } },
+              attributes: ['youtubeId'],
+              limit: 500,
+            })).map((v) => v.youtubeId)
+          : [];
+        where[Op.or] = [
+          { youtube_id: { [Op.like]: `%${search}%` } },
+          { client_ip: { [Op.like]: `%${search}%` } },
+          { user_agent: { [Op.like]: `%${search}%` } },
+          ...(matchingVideoIds.length ? [{ youtube_id: { [Op.in]: matchingVideoIds } }] : []),
+        ];
+      }
       const { count, rows } = await models.StreamHistory.findAndCountAll({
+        where,
         order: [['started_at', 'DESC']],
         limit,
         offset: (page - 1) * limit,
@@ -5407,6 +5460,24 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
       }
     }
 
+    // Direct-family modes already get their own "ignored" step above; every
+    // other mode actually runs these through an ffmpeg encode, but until
+    // now had no step spelling out the resolved values themselves - only
+    // ever visible buried in wouldCall's streamViaFfmpeg(...) call string,
+    // or not at all for hls/hls-buffer (whose wouldCall is just an opaque
+    // session key hash). container is always a real choice here; hardware/
+    // tuning only matter once transcode has resolved to h264 (see
+    // getModeFieldCompatibility) - copy never touches an encoder.
+    if (!isDirectFamily) {
+      steps.push({
+        step: 'container/transcode/hardwareMode/tuning',
+        detail: transcode === 'h264'
+          ? `container="${container}", transcode="${transcode}", hardware="${hardwareMode}", tuning="${tuning}"`
+          : `container="${container}", transcode="${transcode}" - hardware encoder and tuning are ignored (copy never touches an encoder)`,
+        probed: false,
+      });
+    }
+
     // Execution/fallback narrative - describes what happens once the
     // resolved mode/quality/transcode is handed to the real serve function,
     // including retry chains (serveDirect/resolveDirectUrl,
@@ -5432,7 +5503,7 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
         steps.push({ step: 'execution', detail: 'if that yt-dlp call fails with a client/session extraction error, retry once with player_client=android', probed: false });
         steps.push({
           step: 'execution',
-          detail: 'once resolved, respond with a 302 redirect straight to that URL - Youtarr never fetches the bytes itself, so no cookies/Referer/User-Agent travel with it, and whatever happens next (success or a vprv=1 403) happens entirely between the player and googlevideo, invisible to Youtarr\'s own logs',
+          detail: 'once resolved, respond with a 302 redirect straight to that URL - Youtarr never fetches the bytes itself, so whatever happens next (success or failure) happens directly between the player and YouTube, invisible to Youtarr\'s own logs',
           probed: false,
         });
       } else {
@@ -5453,29 +5524,33 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
           });
         }
         if (mode === 'hls-buffer') {
+          // Kept short and user-facing here; the full mechanism (exact
+          // timings, DB field names, STRM/untracked bookkeeping) is
+          // documented on the code this trace mirrors, not repeated to the
+          // user in the dry-run preview.
           steps.push({
             step: 'execution',
-            detail: 'a separate, independent yt-dlp+yt-dlp+ffmpeg pipeline (its own network pull, not shared with the HLS encode above) starts immediately and pulls the whole video once, unthrottled, remuxing (-c copy) into a local MPEG-TS buffer file - not tied to this session\'s encode pass, so it keeps running even across seeks or if the viewer stops watching',
+            detail: 'a separate background pipeline starts immediately, pulling the whole video once (unthrottled) into a local buffer file - independent of this session\'s playback, so it keeps running even if you seek or stop watching',
             probed: false,
           });
           steps.push({
             step: 'execution',
-            detail: 'the cold-start/first pass never waits on a FRESH buffer fetch to catch up - it starts network-sourced immediately, identically to plain mode=hls (so instant-start\'s placeholder segment, if enabled, behaves exactly the same as it does for mode=hls too). The one exception: if this exact video was already fully buffered by a previous play (see the untracked-video case below), that complete local file is used from the very first pass instead, since there\'s nothing left to wait for',
+            detail: 'the first pass does not wait for that buffer - it streams from the network right away, same as plain Enhanced HLS. Exception: if this video was already fully buffered from an earlier play, that finished file is used immediately instead',
             probed: false,
           });
           steps.push({
             step: 'execution',
-            detail: 'every later pass (a seek restart, or a calculatedLength missing-segment restart) waits up to 45s for the buffer to have safely written past its target timestamp, then reads that local file directly instead of pulling from the network; on timeout, that one pass falls back to the same network-sourced path plain mode=hls uses (the buffer fetch itself is unaffected and keeps running)',
+            detail: 'later passes (a seek, or a missing-segment restart) wait up to 45s for the buffer to catch up, then read from that local file instead of the network; on timeout, that one pass falls back to streaming from the network (the buffer itself keeps running either way)',
             probed: false,
           });
           steps.push({
             step: 'execution',
-            detail: 'if this video has a Video row in Youtarr\'s own library and is currently STRM: once the buffer fetch finishes cleanly, its file is moved into the video\'s library folder, the Video row is flipped off STRM (is_strm=false), and every subsequent pass (this session and any other) reads from that finished file - same as hotSwapToCache\'s finalized output',
+            detail: 'if this video is already in your library as a STRM placeholder: once buffering finishes, that file replaces the placeholder and every future play uses it directly',
             probed: false,
           });
           steps.push({
             step: 'execution',
-            detail: 'if this video has NO Video row (an NZB mediaMode:\'strm\' grab Youtarr never catalogued, or one it later disowned via importStrategy:\'untracked\'): the buffer-fetch still runs (there\'s nothing library-specific about the fetch itself), but the finished file lands in Youtarr\'s own untracked-buffer cache instead, keyed by youtube id alone - no Video/Job row, not a library entry, never shows up in Download History. A later play of this same untracked video reuses that cached file directly (no network fetch, used from the very first pass) instead of buffering again',
+            detail: 'if this video is not in your library at all (e.g. an NZB-only grab): the finished buffer file is cached separately instead, and reused on later plays of that same video - it just will not show up in Download History or your library',
             probed: false,
           });
         }
@@ -5558,15 +5633,41 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
     {
       const probeCfg = (configModule.getConfig().ytstream) || {};
       const probeQueryOverride = (name) => (probeCfg.forceServerSettings === true ? undefined : req.query[name]);
-      if (evaluateProbeShortcut(req, configModule.getConfig()).wouldFire) {
-        const existingCachedFilePath = hasActiveSessionForVideo ? null : await findExistingCachedVideoFilePath(youtubeId, models);
+      // if (evaluateProbeShortcut(req, configModule.getConfig()).wouldFire) {
+      if (!hasActiveSessionForVideo && evaluateProbeShortcut(req, configModule.getConfig()).wouldFire) {
+        // const existingCachedFilePath = hasActiveSessionForVideo ? null : await findExistingCachedVideoFilePath(youtubeId, models);
+        const existingCachedFilePath = await findExistingCachedVideoFilePath(youtubeId, models);
         if (existingCachedFilePath) {
           logger.info(
-            { youtubeId, filePath: existingCachedFilePath },
-            'ytstream: probe-shortcut - a real cached copy of this video already exists; serving it directly instead of the synthetic clip'
+            { youtubeId, servedAs: 'cache', filePath: existingCachedFilePath },
+            'ytstream: probe-shortcut detected a likely metadata-probe request; served the real cached file instead of the synthetic clip'
           );
+          // Not a live/trackable session (no HLS process, done before this
+          // function returns) - just a StreamHistory audit row, same
+          // reasoning as mode=direct below, so this quick cache-hit shows up
+          // somewhere instead of being invisible to the Streaming page.
+          // shouldLogQuickServeHistory collapses a burst of these (e.g.
+          // Jellyfin's own ffprobe keyframe-extraction pass, which reads
+          // scattered chunks across the whole file in a handful of requests
+          // a few hundred ms apart) into a single row per youtubeId per
+          // cooldown window, instead of one row per request.
+          const historyEntry = shouldLogQuickServeHistory(youtubeId)
+            ? {
+                streamId: crypto.randomUUID(),
+                mode: 'probe-cache-hit',
+                youtubeId,
+                clientIp: resolveClientIp(req),
+                userAgent: req.headers['user-agent'] || null,
+                startedAt: Date.now(),
+              }
+            : null;
+          if (historyEntry) persistStreamHistoryStart(historyEntry);
           const servedReal = await tryServeCachedVideoFile(req, res, existingCachedFilePath);
-          if (servedReal) return;
+          if (servedReal) {
+            if (historyEntry) persistStreamHistoryEnd(historyEntry, 'completed', null);
+            return;
+          }
+          if (historyEntry) persistStreamHistoryEnd(historyEntry, 'error', 'cached file vanished before serving');
           // Fell through (e.g. the file vanished between the check and the
           // stat) - fall back to the synthetic clip below rather than fail
           // the probe outright.
@@ -5583,7 +5684,10 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
           resolveDurationSeconds: (id) => getVideoDurationSeconds(id, configModule.getConfig()),
         });
         if (served) return;
-        // Generation failed - fall through to normal handling below.
+        logger.warn(
+          { youtubeId, servedAs: 'none' },
+          'ytstream: probe-shortcut detected a likely metadata-probe request but could not serve a cached file or the synthetic clip; falling through to normal handling'
+        );
       }
     }
 
@@ -5620,8 +5724,25 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
           }
           if (cachedVideo && cachedVideo.is_strm === false && cachedVideo.filePath && fs.existsSync(cachedVideo.filePath)) {
             logger.info({ youtubeId, filePath: cachedVideo.filePath }, 'ytstream: serving already-downloaded local file directly (serveCachedFile)');
+            // See shouldLogQuickServeHistory's comment above (probe-shortcut
+            // branch) - same burst-collapsing, same reason.
+            const historyEntry = shouldLogQuickServeHistory(youtubeId)
+              ? {
+                  streamId: crypto.randomUUID(),
+                  mode: 'cached-file',
+                  youtubeId,
+                  clientIp: resolveClientIp(req),
+                  userAgent: req.headers['user-agent'] || null,
+                  startedAt: Date.now(),
+                }
+              : null;
+            if (historyEntry) persistStreamHistoryStart(historyEntry);
             const served = await tryServeCachedVideoFile(req, res, cachedVideo.filePath);
-            if (served) return;
+            if (served) {
+              if (historyEntry) persistStreamHistoryEnd(historyEntry, 'completed', null);
+              return;
+            }
+            if (historyEntry) persistStreamHistoryEnd(historyEntry, 'error', 'cached file vanished before serving');
           }
         } catch (err) {
           logger.warn({ err, youtubeId }, 'ytstream: serveCachedFile lookup failed; falling back to normal handling');

@@ -528,7 +528,7 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
       {modeCompat.hardwareMode?.status !== 'ignored' && (
         <Grid item xs={12} sm={6} md={4}>
           <FormControl fullWidth>
-            <InputLabel>Hardware decode</InputLabel>
+            <InputLabel>Hardware decode *(not used in streaming)</InputLabel>
             <Box className="flex items-center gap-1">
               <Select
                 value={ytstream.hardwareDecodeMode || 'none'}

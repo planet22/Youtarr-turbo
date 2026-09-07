@@ -52,19 +52,24 @@ export function isLikelyProbeRequest(userAgent: string | null | undefined): bool
   return !!userAgent && /^Lavf\//i.test(userAgent);
 }
 
-const MODE_LABELS: Record<string, string> = {
+export const MODE_LABELS: Record<string, string> = {
   hls: 'HLS',
   'hls-buffer': 'HLS + Buffered Download',
   ffmpeg: 'FFmpeg',
   direct: 'Direct',
   'direct-pipe': 'Direct (piped)',
   'direct-redirect': 'Direct (redirect)',
+  'cached-file': 'Cached file',
+  'probe-cache-hit': 'Probe (cached)',
 };
 
 /** Falls back to the raw mode string for anything not listed above, rather than mislabeling it. */
 export function formatModeLabel(mode: string): string {
   return MODE_LABELS[mode] || mode;
 }
+
+/** Shared with StreamHistoryPage's Mode filter dropdown, so its option list always matches this labeling. */
+export const STREAM_MODE_OPTIONS = Object.keys(MODE_LABELS);
 
 export function formatElapsed(startedAt: number, now: number = Date.now()): string {
   const totalSeconds = Math.max(0, Math.floor((now - startedAt) / 1000));

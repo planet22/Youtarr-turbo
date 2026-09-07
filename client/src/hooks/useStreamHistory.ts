@@ -27,25 +27,41 @@ interface StreamHistoryResponse {
   limit: number;
 }
 
+export interface StreamHistoryFilters {
+  mode?: string;
+  status?: string;
+  search?: string;
+  dateFrom?: string;
+  dateTo?: string;
+}
+
 /**
  * Server-side-paginated fetch of the persisted stream-history audit trail
  * (server/models/streamhistory.js, via GET /api/ytstream/history) - unlike
  * useActiveStreams, which fetches everything (the live-stream count is
  * naturally small). History has no such bound, so page/limit are query
- * params rather than client-side slicing.
+ * params rather than client-side slicing - filters are applied server-side
+ * for the same reason (a client-side filter would only ever see whatever
+ * happens to be on the current page).
  *
  * Only refetches on a `streamStopped` broadcast while viewing page 1 - a
  * newly-finished stream should appear at the top of "recent activity"
  * without the user having to manually refresh, but older pages don't shift
  * around under a viewer just because something elsewhere finished.
  */
-export function useStreamHistory(token: string | null, page: number, limit = 25) {
+export function useStreamHistory(
+  token: string | null,
+  page: number,
+  limit = 25,
+  filters: StreamHistoryFilters = {}
+) {
   const [rows, setRows] = useState<StreamHistoryRow[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const wsContext = useContext(WebSocketContext);
   const subscribe = wsContext?.subscribe;
   const unsubscribe = wsContext?.unsubscribe;
+  const { mode, status, search, dateFrom, dateTo } = filters;
 
   const fetchHistory = useCallback(async () => {
     if (!token) {
@@ -57,7 +73,7 @@ export function useStreamHistory(token: string | null, page: number, limit = 25)
     setLoading(true);
     try {
       const response = await axios.get<StreamHistoryResponse>('/api/ytstream/history', {
-        params: { page, limit },
+        params: { page, limit, mode, status, search, dateFrom, dateTo },
         headers: { 'x-access-token': token },
       });
       setRows(response.data?.rows || []);
@@ -67,7 +83,7 @@ export function useStreamHistory(token: string | null, page: number, limit = 25)
     } finally {
       setLoading(false);
     }
-  }, [token, page, limit]);
+  }, [token, page, limit, mode, status, search, dateFrom, dateTo]);
 
   useEffect(() => {
     fetchHistory();

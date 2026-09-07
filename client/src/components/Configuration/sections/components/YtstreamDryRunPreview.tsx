@@ -26,9 +26,32 @@ const STEP_LABELS: Record<string, string> = {
   execution: 'What happens',
 };
 
+// Consecutive steps sharing the same step key (the "execution" narrative in
+// particular can run to 5-8 entries for hls-buffer) render as one labeled
+// group with its own sub-bullets, instead of repeating the same bold label
+// once per entry - that repetition added noise without adding information.
+interface StepGroup {
+  step: string;
+  details: string[];
+}
+
+function groupConsecutiveSteps(steps: { step: string; detail: string }[]): StepGroup[] {
+  const groups: StepGroup[] = [];
+  for (const { step, detail } of steps) {
+    const last = groups[groups.length - 1];
+    if (last && last.step === step) {
+      last.details.push(detail);
+    } else {
+      groups.push({ step, details: [detail] });
+    }
+  }
+  return groups;
+}
+
 export const YtstreamDryRunPreview: React.FC<YtstreamDryRunPreviewProps> = ({ result }) => {
   const [showTechnical, setShowTechnical] = useState(false);
   const { plan, formatSelectors, hls, wouldCall } = result;
+  const stepGroups = groupConsecutiveSteps(plan.steps);
 
   return (
     <Box className="mt-2">
@@ -46,10 +69,20 @@ export const YtstreamDryRunPreview: React.FC<YtstreamDryRunPreviewProps> = ({ re
           Would call: {wouldCall}
         </Typography>
         <Box component="ul" className="mt-1 pl-4">
-          {plan.steps.map((step, index) => (
+          {stepGroups.map((group, index) => (
             <Typography key={`dryrun-step-${index}`} component="li" variant="body2">
-              <Box component="span" className="font-medium">{STEP_LABELS[step.step] || step.step}: </Box>
-              {step.detail}
+              <Box component="span" className="font-medium">{STEP_LABELS[group.step] || group.step}: </Box>
+              {group.details.length === 1 ? (
+                group.details[0]
+              ) : (
+                <Box component="ol" className="mt-1 pl-4 list-decimal">
+                  {group.details.map((detail, detailIndex) => (
+                    <Typography key={`dryrun-step-${index}-${detailIndex}`} component="li" variant="body2">
+                      {detail}
+                    </Typography>
+                  ))}
+                </Box>
+              )}
             </Typography>
           ))}
         </Box>

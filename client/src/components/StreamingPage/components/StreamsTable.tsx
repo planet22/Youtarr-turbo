@@ -1,5 +1,4 @@
-import React, { useEffect, useState } from 'react';
-import axios from 'axios';
+import React from 'react';
 import {
   Paper,
   Table,
@@ -18,23 +17,28 @@ import { Stop as StopIcon, Search as ProbeIcon } from '../../../lib/icons';
 import { formatFileSize } from '../../../utils/formatters';
 import { StreamSnapshot } from '../../../hooks/useActiveStreams';
 import { YOUTUBE_URL_BASE } from '../../shared/VideoModal/constants';
-import { formatBytesPerSecond, formatElapsed, parseClientLabel, isLikelyProbeRequest, formatModeLabel } from '../utils';
-import { SegmentActivityStrip, SegmentActivityDialog } from './SegmentActivityGrid';
+import { formatBytesPerSecond, parseClientLabel, isLikelyProbeRequest, formatModeLabel } from '../utils';
+import { useStreamRowActions } from '../hooks/useStreamRowActions';
+import { SegmentActivityStrip } from './SegmentActivityGrid';
 
 export interface StreamsTableProps {
   streams: StreamSnapshot[];
   token: string | null;
   onStopped: (streamId: string) => void;
+  onOpenSegments: (streamId: string) => void;
 }
 
-const STATE_CHIP_COLOR: Record<StreamSnapshot['state'], 'default' | 'success' | 'warning' | 'error'> = {
+// Shared with StreamCard's State chip (grid view), so both views color a
+// given state identically.
+export const STATE_CHIP_COLOR: Record<StreamSnapshot['state'], 'default' | 'success' | 'warning' | 'error'> = {
   starting: 'warning',
   active: 'success',
   cached: 'default',
   failed: 'error',
 };
 
-function formatDetail(stream: StreamSnapshot): string {
+// Shared with StreamCard (grid view).
+export function formatDetail(stream: StreamSnapshot): string {
   const parts = [stream.quality, stream.container, stream.transcode];
   if (stream.hardwareMode && stream.hardwareMode !== 'none') {
     parts.push(stream.hardwareMode);
@@ -53,36 +57,7 @@ function StreamRow({
   onStopped: (id: string) => void;
   onOpenSegments: (streamId: string) => void;
 }) {
-  // Plain wall-clock elapsed since the session started. A lastActivityAt-based
-  // freeze (tried and reverted) sounds appealing for "pause the clock when
-  // paused," but a healthy player pre-buffers several segments ahead and then
-  // goes quiet on the network for a while *while still actively playing* from
-  // that buffer - indistinguishable, from the server's request-timing view,
-  // from a real pause. That froze the display during completely normal
-  // playback, which is worse than this column just being a "since started"
-  // session-age clock rather than a live playback-position indicator.
-  const [elapsed, setElapsed] = useState(() => formatElapsed(stream.startedAt));
-  const [stopping, setStopping] = useState(false);
-
-  useEffect(() => {
-    const timer = setInterval(() => setElapsed(formatElapsed(stream.startedAt)), 1000);
-    return () => clearInterval(timer);
-  }, [stream.startedAt]);
-
-  const handleStop = async () => {
-    if (!token || stopping) return;
-    setStopping(true);
-    try {
-      await axios.post(
-        `/api/ytstream/streams/${encodeURIComponent(stream.streamId)}/stop`,
-        {},
-        { headers: { 'x-access-token': token } }
-      );
-      onStopped(stream.streamId);
-    } catch {
-      setStopping(false);
-    }
-  };
+  const { elapsed, stopping, handleStop } = useStreamRowActions(stream, token, onStopped);
 
   return (
     <TableRow hover>
@@ -168,15 +143,7 @@ function StreamRow({
   );
 }
 
-function StreamsTable({ streams, token, onStopped }: StreamsTableProps) {
-  // Stores the id, not a snapshot of the stream object - `streams` refreshes
-  // every 1.5s (streamProgress), so re-deriving `selectedStream` from the
-  // current `streams` prop below on every render is what makes the open
-  // dialog's segment grid keep updating live instead of freezing at
-  // whatever it looked like the moment it was opened.
-  const [selectedStreamId, setSelectedStreamId] = useState<string | null>(null);
-  const selectedStream = selectedStreamId ? streams.find((s) => s.streamId === selectedStreamId) || null : null;
-
+function StreamsTable({ streams, token, onStopped, onOpenSegments }: StreamsTableProps) {
   return (
     <Paper style={{ overflow: 'hidden' }}>
       <TableContainer>
@@ -202,18 +169,12 @@ function StreamsTable({ streams, token, onStopped }: StreamsTableProps) {
                 stream={stream}
                 token={token}
                 onStopped={onStopped}
-                onOpenSegments={setSelectedStreamId}
+                onOpenSegments={onOpenSegments}
               />
             ))}
           </TableBody>
         </Table>
       </TableContainer>
-      <SegmentActivityDialog
-        open={selectedStream !== null}
-        onClose={() => setSelectedStreamId(null)}
-        title={selectedStream?.title || selectedStream?.youtubeId || ''}
-        segments={selectedStream?.segments ?? null}
-      />
     </Paper>
   );
 }

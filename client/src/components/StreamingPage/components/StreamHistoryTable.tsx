@@ -17,7 +17,7 @@ import {
 import { formatFileSize } from '../../../utils/formatters';
 import { StreamHistoryRow } from '../../../hooks/useStreamHistory';
 import { YOUTUBE_URL_BASE } from '../../shared/VideoModal/constants';
-import { parseClientLabel, formatElapsed, formatModeLabel } from '../utils';
+import { parseClientLabel, formatModeLabel } from '../utils';
 
 export interface StreamHistoryTableProps {
   rows: StreamHistoryRow[];
@@ -32,7 +32,7 @@ type ResultChip = { label: string; color: 'default' | 'success' | 'warning' | 'e
 // ytstream.js (destroyHlsSession's `reason` param, streamViaFfmpeg's
 // handleFailure/onClientGone/ff.on('close')) plus 'server-restart' from this
 // module's own startup orphan-cleanup - see server/routes/ytstream.js.
-const RESULT_CHIPS: Record<string, ResultChip> = {
+export const RESULT_CHIPS: Record<string, ResultChip> = {
   completed: { label: 'Completed', color: 'success' },
   redirected: { label: 'Redirected', color: 'success' },
   error: { label: 'Error', color: 'error' },
@@ -44,12 +44,17 @@ const RESULT_CHIPS: Record<string, ResultChip> = {
   'server-restart': { label: 'Interrupted (restart)', color: 'warning' },
 };
 
-function resultChipFor(row: StreamHistoryRow): ResultChip {
+/** Shared with StreamHistoryPage's Status filter dropdown - 'in-progress' isn't a real end_reason value, it's the label for ended_at===null (see resultChipFor below). */
+export const STREAM_STATUS_OPTIONS = ['in-progress', ...Object.keys(RESULT_CHIPS)];
+
+// resultChipFor/formatDetail/formatStarted/formatDuration are also used by
+// StreamHistoryCard (grid view), so both views render identical text/colors.
+export function resultChipFor(row: StreamHistoryRow): ResultChip {
   if (!row.endedAt) return { label: 'In progress', color: 'info' };
   return RESULT_CHIPS[row.endReason || ''] || { label: row.endReason || 'Ended', color: 'default' };
 }
 
-function formatDetail(row: StreamHistoryRow): string {
+export function formatDetail(row: StreamHistoryRow): string {
   const parts = [row.quality, row.container, row.transcode];
   if (row.hardwareMode && row.hardwareMode !== 'none') {
     parts.push(row.hardwareMode);
@@ -57,21 +62,40 @@ function formatDetail(row: StreamHistoryRow): string {
   return parts.filter(Boolean).join(' · ');
 }
 
-function formatStarted(iso: string): string {
+// Seconds + milliseconds (not just minute) so a "Started" time can be
+// cross-referenced against the server log's own millisecond timestamps -
+// several rows can otherwise land in the same displayed minute (e.g. a
+// probe-shortcut burst) with no way to tell them apart.
+export function formatStarted(iso: string): string {
   const date = new Date(iso);
   return date.toLocaleString('en-US', {
     month: 'short',
     day: 'numeric',
     hour: 'numeric',
     minute: '2-digit',
+    second: '2-digit',
+    fractionalSecondDigits: 3,
     hour12: true,
   });
 }
 
-function formatDuration(row: StreamHistoryRow): string {
+// Millisecond precision (not just formatElapsed's seconds, which is right
+// for the live page's once-a-second ticking clock but useless here) - a
+// probe-shortcut/cached-file "session" is a single quick-serve that starts
+// and ends within the same request, so its whole duration can be under a
+// second; seconds-only would round every one of those down to "0:00".
+export function formatDuration(row: StreamHistoryRow): string {
   const startedAt = new Date(row.startedAt).getTime();
   const endedAt = row.endedAt ? new Date(row.endedAt).getTime() : Date.now();
-  return formatElapsed(startedAt, endedAt);
+  const totalMs = Math.max(0, endedAt - startedAt);
+  const totalSeconds = Math.floor(totalMs / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  const ms = totalMs % 1000;
+  const pad = (n: number, len = 2) => String(n).padStart(len, '0');
+  const base = hours > 0 ? `${hours}:${pad(minutes)}:${pad(seconds)}` : `${minutes}:${pad(seconds)}`;
+  return `${base}.${pad(ms, 3)}`;
 }
 
 function StreamHistoryRowView({

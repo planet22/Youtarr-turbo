@@ -604,7 +604,7 @@ export const CoreSettingsSection: React.FC<CoreSettingsSectionProps> = ({
           <Accordion defaultExpanded style={{ border: 'var(--border-weight) solid var(--border)', borderRadius: 'var(--radius-ui)' }}>
             <AccordionSummary>
               <Typography variant="subtitle2" style={{ fontWeight: 700 }}>
-                File Structure Settings
+                Default File Structure Settings
               </Typography>
             </AccordionSummary>
             <AccordionDetails>

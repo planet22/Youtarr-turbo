@@ -73,7 +73,7 @@ export default function SearchBar({
         <Button variant="contained" onClick={onSearch} disabled={!canSearch}>Search</Button>
       )}
       <Box className="flex shrink-0 self-center rounded-[var(--radius-ui)] overflow-hidden border border-border">
-        {(['table', 'grid'] as const).map((mode) => {
+        {(['grid', 'table'] as const).map((mode) => {
           const isActive = viewMode === mode;
           const Icon = mode === 'table' ? TableChartIcon : ViewModuleIcon;
           const label = mode === 'table' ? 'Table View' : 'Grid View';

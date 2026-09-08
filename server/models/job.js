@@ -36,6 +36,10 @@ Job.init(
       type: DataTypes.TEXT('medium'),
       allowNull: true,
     },
+    ytdlpCommand: {
+      type: DataTypes.TEXT('medium'),
+      allowNull: true,
+    },
   },
   {
     sequelize,

@@ -32,7 +32,7 @@ const dark: StreamingPalette = {
 };
 
 const light: StreamingPalette = {
-  background: '0 0% 100%',
+  background: '212 40% 98%', // faint Disney-blue-tinted white
   foreground: '229 65% 8%', // #060A14
   foregroundHex: '#060A14',
   card: '220 30% 97%', // #F5F7FA

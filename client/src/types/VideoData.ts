@@ -21,6 +21,12 @@ export interface VideoData {
   fileSize?: string | null;
   audioFilePath?: string | null;
   audioFileSize?: string | null;
+  // Wall-clock time from download start to file-verified-on-disk (includes
+  // yt-dlp post-processing), and the resulting average MB/s - see
+  // server/modules/download/videoMetadataProcessor.js. null for rows that
+  // predate this field, or that never had a real file verified.
+  downloadDurationSeconds?: number | null;
+  avgDownloadMBps?: number | null;
   removed?: boolean;
   youtube_removed?: boolean;
   channel_id?: string | null;

@@ -4,7 +4,7 @@ import {
   AccessTime as DurationIcon,
   CalendarToday as CalendarIcon,
   Close as CloseIcon,
-  ListFilter as FilterIcon,
+  Filter as FilterIcon,
   Unlink as UntrackedIcon,
   Folder as FilePathIcon,
 } from '../../../lib/icons';

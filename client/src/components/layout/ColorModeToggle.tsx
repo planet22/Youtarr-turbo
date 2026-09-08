@@ -42,7 +42,7 @@ export const ColorModeToggle: React.FC = () => {
                 height: 24,
                 borderRadius: 'calc(var(--radius-ui) - 2px)',
                 color: isActive ? 'var(--primary-foreground)' : 'var(--muted-foreground)',
-                backgroundColor: isActive ? 'hsl(var(--primary))' : 'transparent',
+                backgroundColor: isActive ? 'var(--primary)' : 'transparent',
                 transition: 'background-color 0.15s ease-out, color 0.15s ease-out',
               }}
             >

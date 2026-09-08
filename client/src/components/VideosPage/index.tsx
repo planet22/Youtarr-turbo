@@ -3,7 +3,7 @@ import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
 import { useSwipeable } from 'react-swipeable';
 import { Alert, Box, Grid, Snackbar, Typography } from '../ui';
-import { Trash2 as DeleteIcon, Star as RatingIcon, Download as DownloadIcon, Purge as PurgeIcon, Wifi as StrmIcon, Database as MetadataCacheIcon, Storage as CachedVideoIcon } from '../../lib/icons';
+import { Trash2 as DeleteIcon, Star as RatingIcon, Download as DownloadIcon, Purge as PurgeIcon, Obliterate as ObliterateIcon, Wifi as StrmIcon, Database as MetadataCacheIcon, Storage as CachedVideoIcon } from '../../lib/icons';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
 import { useConfig } from '../../hooks/useConfig';
 import { useDownloadListingsRefresh } from '../../hooks/useDownloadListingsRefresh';
@@ -14,6 +14,7 @@ import DeleteVideosDialog from '../shared/DeleteVideosDialog';
 import { useVideoDeletion } from '../shared/useVideoDeletion';
 import PurgeVideosDialog from '../shared/PurgeVideosDialog';
 import { useVideoPurge } from '../shared/useVideoPurge';
+import ObliterateVideosDialog from '../shared/ObliterateVideosDialog';
 import StrmDownloadDialog from '../shared/StrmDownloadDialog';
 import StrmRevertDialog from '../shared/StrmRevertDialog';
 import { useStrmSwitch } from '../shared/useStrmSwitch';
@@ -58,6 +59,7 @@ const YOUTUBE_CHANNEL_ID_PATTERN = /^UC[a-zA-Z0-9_-]{22}$/;
 interface VideoSelectionMeta {
   id: number | null;
   youtubeId: string;
+  title: string;
   channelId: string | null;
   removed: boolean;
   youtubeRemoved: boolean;
@@ -138,6 +140,8 @@ function VideosPage({ token }: VideosPageProps) {
   const [imageErrors, setImageErrors] = useState<Record<string, boolean>>({});
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [purgeDialogOpen, setPurgeDialogOpen] = useState(false);
+  const [obliterateDialogOpen, setObliterateDialogOpen] = useState(false);
+  const [obliterateLoading, setObliterateLoading] = useState(false);
   const [strmDownloadDialogOpen, setStrmDownloadDialogOpen] = useState(false);
   const [strmRevertDialogOpen, setStrmRevertDialogOpen] = useState(false);
   // Set for a single-row chip click (bypasses the checkbox selection so the
@@ -231,6 +235,7 @@ function VideosPage({ token }: VideosPageProps) {
       videoMetaRef.current.set(video.youtubeId, {
         id: video.id ?? null,
         youtubeId: video.youtubeId,
+        title: video.youTubeVideoName,
         channelId: video.channel_id || null,
         removed: Boolean(video.removed),
         youtubeRemoved: Boolean(video.youtube_removed),
@@ -346,6 +351,75 @@ function VideosPage({ token }: VideosPageProps) {
     }
   };
 
+  // Combined delete + purge + clear-cache action. Reuses the same
+  // hooks/endpoints as the separate bulk actions above rather than a new
+  // server route - runs whichever of those apply to each selected video,
+  // not all three, since most rows only have some of them (see getObliterateCounts).
+  const handleObliterateConfirm = async (selectedYoutubeIds: string[]) => {
+    setObliterateDialogOpen(false);
+    const metas = selectedYoutubeIds
+      .map((youtubeId) => videoMetaRef.current.get(youtubeId))
+      .filter((meta): meta is VideoSelectionMeta =>
+        Boolean(meta && (meta.isTracked || meta.hasCachedMetadata || meta.hasCachedVideo))
+      );
+    if (metas.length === 0) return;
+
+    setObliterateLoading(true);
+    try {
+      // Phase 1 (parallel): clear caches. A tracked row's cached video is
+      // the STRM cache-on-play file - clearing it means reverting to STRM
+      // first, so the phase-2 delete below actually removes the file
+      // instead of silently reverting to STRM itself (see
+      // videoDeletionModule.deleteVideoById's own STRM-revert fallback).
+      const trackedCachedVideoIds = metas
+        .filter((m) => m.isTracked && m.hasCachedVideo && m.id !== null)
+        .map((m) => m.id as number);
+      const untrackedCachedVideoIds = metas
+        .filter((m) => !m.isTracked && m.hasCachedVideo)
+        .map((m) => m.youtubeId);
+      const cachedMetadataIds = metas
+        .filter((m) => m.hasCachedMetadata)
+        .map((m) => m.youtubeId);
+
+      await Promise.all([
+        trackedCachedVideoIds.length ? revertToStrm(trackedCachedVideoIds, token) : Promise.resolve(null),
+        untrackedCachedVideoIds.length ? cacheActions.bulkClearVideoCache(untrackedCachedVideoIds) : Promise.resolve(null),
+        cachedMetadataIds.length ? cacheActions.bulkClearMetadataCache(cachedMetadataIds) : Promise.resolve(null),
+      ]);
+
+      // Phase 2: delete every tracked, not-yet-removed video (files + mark removed).
+      const toDeleteIds = metas
+        .filter((m) => m.isTracked && !m.removed && m.id !== null)
+        .map((m) => m.id as number);
+      const deleteResult = toDeleteIds.length
+        ? await deleteVideos(toDeleteIds, token)
+        : { success: true, deleted: [], failed: [] };
+
+      // Phase 3: purge every video now marked removed - the ones just
+      // deleted above, plus any already missing from disk in the selection.
+      const alreadyRemovedIds = metas
+        .filter((m) => m.isTracked && m.removed && m.id !== null)
+        .map((m) => m.id as number);
+      const toPurgeIds = [...deleteResult.deleted as number[], ...alreadyRemovedIds];
+      const purgeResult = toPurgeIds.length
+        ? await purgeVideos(toPurgeIds, token)
+        : { success: true, purged: [], failed: [] };
+
+      const failedCount = deleteResult.failed.length + purgeResult.failed.length;
+      if (failedCount === 0) {
+        setSuccessMessage(`Obliterated ${metas.length} video${metas.length !== 1 ? 's' : ''}`);
+      } else {
+        setSuccessMessage(
+          `Obliterated ${metas.length} video${metas.length !== 1 ? 's' : ''}, but ${failedCount} step${failedCount !== 1 ? 's' : ''} failed`
+        );
+      }
+      selection.clear();
+      refetch();
+    } finally {
+      setObliterateLoading(false);
+    }
+  };
+
   const handleApplyRating = async (rating: string | null, selectedYoutubeIds: string[]) => {
     if (!token) return;
     const selectedIds = selectedYoutubeIds
@@ -427,6 +501,25 @@ function VideosPage({ token }: VideosPageProps) {
         onClick: () => setPurgeDialogOpen(true),
       },
       {
+        id: 'obliterate',
+        label: 'Obliterate',
+        icon: <ObliterateIcon size={14} />,
+        intent: 'danger',
+        // Eligible if there's anything at all to remove for a video - a
+        // downloaded file, a database row, or cached metadata/video. Each
+        // step below only fires for the videos it actually applies to.
+        disabled: (ids) =>
+          deleteLoading ||
+          purgeLoading ||
+          strmSwitchLoading ||
+          obliterateLoading ||
+          !ids.some((id) => {
+            const meta = videoMetaRef.current.get(id);
+            return Boolean(meta && (meta.isTracked || meta.hasCachedMetadata || meta.hasCachedVideo));
+          }),
+        onClick: () => setObliterateDialogOpen(true),
+      },
+      {
         id: 'strm-download',
         label: 'Force Download',
         icon: <DownloadIcon size={14} />,
@@ -483,7 +576,7 @@ function VideosPage({ token }: VideosPageProps) {
         onClick: () => setClearCachedVideoDialogOpen(true),
       },
     ],
-    [deleteLoading, purgeLoading, strmSwitchLoading]
+    [deleteLoading, purgeLoading, strmSwitchLoading, obliterateLoading]
   );
 
   const selection = useVideoSelection<string>({ actions: selectionActions });
@@ -546,6 +639,13 @@ function VideosPage({ token }: VideosPageProps) {
     ? getDownloadCounts()
     : { missing: 0, replace: 0, unavailable: 0, eligible: 0 };
 
+  const downloadPreviewVideos = downloadDialogOpen
+    ? selection.selectedIds
+        .map((id) => videoMetaRef.current.get(id))
+        .filter((meta): meta is VideoSelectionMeta => Boolean(meta && !meta.youtubeRemoved))
+        .map((meta) => ({ id: meta.youtubeId, title: meta.title }))
+    : [];
+
   const getDeleteCounts = () => {
     let deletable = 0;
     let skipped = 0;
@@ -575,6 +675,21 @@ function VideosPage({ token }: VideosPageProps) {
     return { purgeable, skipped };
   };
   const purgeCounts = getPurgeCounts();
+
+  const getObliterateCounts = () => {
+    let obliterable = 0;
+    let skipped = 0;
+    for (const id of selection.selectedIds) {
+      const meta = videoMetaRef.current.get(id);
+      if (meta && (meta.isTracked || meta.hasCachedMetadata || meta.hasCachedVideo)) {
+        obliterable += 1;
+      } else {
+        skipped += 1;
+      }
+    }
+    return { obliterable, skipped };
+  };
+  const obliterateCounts = getObliterateCounts();
 
   // The active STRM dialog acts on a single clicked video (pendingStrmVideoId,
   // a youtubeId) when set, otherwise the current bulk selection - see
@@ -1032,11 +1147,15 @@ function VideosPage({ token }: VideosPageProps) {
           selectedVideos={selection.selectedIds}
           enabledChannels={enabledChannels}
           imageErrors={imageErrors}
+          deleteDisabled={deleteLoading}
           onToggleSelect={handleToggleSelect}
           onOpenModal={handleOpenModal}
           onToggleProtection={handleToggleProtection}
+          onDeleteSingle={handleDeleteSingleVideo}
           onImageError={handleImageError}
           onAddChannel={handleAddChannel}
+          onOpenCacheDetail={handleOpenCacheDetail}
+          onClearCachedRow={handleOpenClearCachedRow}
           showFilePath={showFilePaths}
         />
       );
@@ -1116,6 +1235,14 @@ function VideosPage({ token }: VideosPageProps) {
         onConfirm={() => handlePurgeConfirm(selection.selectedIds)}
         videoCount={purgeCounts.purgeable}
         skippedCount={purgeCounts.skipped}
+      />
+
+      <ObliterateVideosDialog
+        open={obliterateDialogOpen}
+        onClose={() => setObliterateDialogOpen(false)}
+        onConfirm={() => handleObliterateConfirm(selection.selectedIds)}
+        videoCount={obliterateCounts.obliterable}
+        skippedCount={obliterateCounts.skipped}
       />
 
       <StrmDownloadDialog
@@ -1204,6 +1331,7 @@ function VideosPage({ token }: VideosPageProps) {
         defaultResolutionSource="global"
         mode="manual"
         token={token}
+        previewVideos={downloadPreviewVideos}
       />
 
       <Snackbar

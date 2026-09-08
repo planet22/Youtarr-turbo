@@ -96,6 +96,7 @@ function VideoModal({
     video_quality?: string | null;
     audio_format?: string | null;
     default_rating?: string | null;
+    media_mode?: string | null;
     enabled?: boolean;
   }
   const [channelSettings, setChannelSettings] = useState<ChannelSettings>({});
@@ -189,6 +190,10 @@ function VideoModal({
   const hasChannelAudioOverride = Boolean(channelSettings.audio_format);
   const defaultAudioFormat = channelSettings.audio_format || null;
   const defaultAudioFormatSource: 'channel' | 'global' = hasChannelAudioOverride ? 'channel' : 'global';
+  // Same channel > global precedence as resolveMediaMode on the server
+  // (downloadSettingsResolver.js) - no playlist tier here since this is a
+  // single video outside any playlist context.
+  const calculatedMediaMode = channelSettings.media_mode || config.mediaMode || 'download';
 
   const canAddChannel = channelSubscription === 'unsubscribed' && Boolean(video.channelId);
 
@@ -311,6 +316,8 @@ function VideoModal({
         defaultResolutionSource={defaultResolutionSource}
         defaultAudioFormat={defaultAudioFormat}
         defaultAudioFormatSource={defaultAudioFormatSource}
+        defaultMediaMode={calculatedMediaMode}
+        previewVideos={[{ id: displayVideo.youtubeId, title: displayVideo.title }]}
       />
 
       <ChangeRatingDialog

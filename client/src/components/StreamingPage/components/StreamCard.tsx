@@ -3,7 +3,15 @@ import { Chip, Tooltip, IconButton, Box, Typography } from '../../ui';
 import { Stop as StopIcon, Search as ProbeIcon } from '../../../lib/icons';
 import { formatFileSize } from '../../../utils/formatters';
 import { StreamSnapshot } from '../../../hooks/useActiveStreams';
-import { formatBytesPerSecond, parseClientLabel, isLikelyProbeRequest, formatModeLabel } from '../utils';
+import {
+  formatBytesPerSecond,
+  parseClientLabel,
+  isLikelyProbeRequest,
+  formatModeLabel,
+  formatModeChipLabel,
+  modeChipColor,
+  ACTUAL_FILE_MODES,
+} from '../utils';
 import { useStreamRowActions } from '../hooks/useStreamRowActions';
 import { formatDetail, STATE_CHIP_COLOR } from './StreamsTable';
 import { SegmentActivityStrip } from './SegmentActivityGrid';
@@ -26,8 +34,15 @@ function StreamCard({ stream, token, onStopped, onOpenSegments }: StreamCardProp
       title={stream.title || stream.youtubeId}
       headerChips={
         <>
-          <Chip size="small" label={formatModeLabel(stream.mode)} variant="filled" />
+          <Tooltip title={formatModeLabel(stream.mode)}>
+            <Chip size="small" label={formatModeChipLabel(stream.mode)} color={modeChipColor(stream.mode)} variant="filled" />
+          </Tooltip>
           <Chip size="small" label={stream.state} color={STATE_CHIP_COLOR[stream.state]} variant="filled" />
+          {ACTUAL_FILE_MODES.has(stream.mode) && (
+            <Tooltip title="Serving the real, already-downloaded file directly - this is that file's own actual quality/container, not a requested or configured value">
+              <Chip size="small" variant="outlined" color="success" label="Cached" />
+            </Tooltip>
+          )}
         </>
       }
     >

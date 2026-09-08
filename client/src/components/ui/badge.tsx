@@ -51,7 +51,7 @@ const Badge = React.forwardRef<HTMLSpanElement, BadgeProps>(
         {!isHidden && (
           <span
             className={cn(
-              'absolute -top-1 -right-1 z-10 flex items-center justify-center font-sans font-medium leading-none',
+              'absolute top-0 right-0 z-10 flex -translate-y-1/2 translate-x-1/2 items-center justify-center font-sans font-medium leading-none',
               badgeColorMap[color] ?? badgeColorMap.default,
               variant === 'dot'
                 ? 'h-2 w-2 rounded-full p-0'

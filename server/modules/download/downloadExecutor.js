@@ -205,6 +205,22 @@ class DownloadExecutor {
       return;
     }
 
+    // Debugging aid: the exact argv used, so a later "why did this job pick
+    // that format/codec" question can be answered from Job history alone,
+    // without needing to have had debug logging on at the time. Set directly
+    // on the in-memory job object (same live reference `ownerJob` above
+    // reads from) rather than via jobModule.updateJob - that method's
+    // side effects (WebSocket broadcasts, completion-status branching, a
+    // synchronous DB write for a terminal status) are irrelevant here and
+    // its call ordering is depended on elsewhere (tests assert on the Nth
+    // call). This field rides along for free whenever the job's own normal
+    // completion save (jobModule.updateJob's isCompletedJob branch) or
+    // periodic autosave next persists it - see saveJobOnly's `{...jobDataOriginal}`
+    // spread, which picks up any field set on the in-memory object.
+    if (ownerJob) {
+      ownerJob.ytdlpCommand = args.join(' ');
+    }
+
     return new Promise((resolve, reject) => {
       logger.info({ jobType, args, subfolderOverride }, 'Running yt-dlp');
       const procEnv = buildYtdlpEnv({

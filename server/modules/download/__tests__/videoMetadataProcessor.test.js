@@ -149,7 +149,12 @@ describe('VideoMetadataProcessor', () => {
         audioFilePath: null,
         audioFileSize: null,
         removed: false,
-        video_resolution: null
+        video_resolution: null,
+        is_strm: false,
+        season: null,
+        episode: null,
+        downloadDurationSeconds: null,
+        avgDownloadMBps: null,
       });
 
       expect(fs.existsSync).toHaveBeenCalledWith(
@@ -403,7 +408,11 @@ describe('VideoMetadataProcessor', () => {
         audioFilePath: null,
         audioFileSize: null,
         removed: false,
-        video_resolution: null
+        video_resolution: null,
+        season: null,
+        episode: null,
+        downloadDurationSeconds: null,
+        avgDownloadMBps: null,
       });
     });
 

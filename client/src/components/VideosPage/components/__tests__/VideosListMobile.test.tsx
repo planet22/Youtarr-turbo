@@ -41,8 +41,11 @@ const renderList = (overrides: Partial<React.ComponentProps<typeof VideosListMob
     onToggleSelect: jest.fn(),
     onOpenModal: jest.fn(),
     onToggleProtection: jest.fn(),
+    onDeleteSingle: jest.fn(),
     onImageError: jest.fn(),
     onAddChannel: jest.fn(),
+    onOpenCacheDetail: jest.fn(),
+    onClearCachedRow: jest.fn(),
   };
   render(
     <MemoryRouter>
@@ -51,6 +54,7 @@ const renderList = (overrides: Partial<React.ComponentProps<typeof VideosListMob
         selectedVideos={[]}
         enabledChannels={enabledChannels}
         imageErrors={{}}
+        deleteDisabled={false}
         {...handlers}
         {...overrides}
       />
@@ -113,6 +117,18 @@ describe('VideosListMobile', () => {
   test('does not render a Watched chip when watchedBy is absent', () => {
     renderList();
     expect(screen.queryByText('Watched')).not.toBeInTheDocument();
+  });
+
+  test('renders cache icons and delete button, matching the grid/table views', () => {
+    const { onOpenCacheDetail, onDeleteSingle } = renderList({
+      videos: [{ ...sampleVideo, hasCachedMetadata: true, hasCachedVideo: true }],
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Cached metadata' }));
+    expect(onOpenCacheDetail).toHaveBeenCalledWith('abc', 'metadata');
+    fireEvent.click(screen.getByRole('button', { name: 'Cached video' }));
+    expect(onOpenCacheDetail).toHaveBeenCalledWith('abc', 'video');
+    fireEvent.click(screen.getByTestId('DeleteIcon'));
+    expect(onDeleteSingle).toHaveBeenCalledWith(1);
   });
 
   test('unsubscribed channel name opens the add-channel affordance without selecting the row', () => {

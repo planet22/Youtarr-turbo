@@ -263,6 +263,7 @@ function DownloadAllVideosDialog({
         defaultResolutionSource={defaultResolutionSource}
         defaultAudioFormat={defaultAudioFormat}
         defaultAudioFormatSource={defaultAudioFormatSource}
+        defaultMediaMode={defaultMediaMode}
         mode="manual"
         token={token}
         hideRedownloadOption

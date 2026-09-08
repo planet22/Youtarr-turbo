@@ -359,6 +359,7 @@ const ManualDownload: React.FC<ManualDownloadProps> = ({ onStartDownload, token,
         mode="manual"
         defaultResolutionSource="global"
         token={token}
+        previewVideos={validatedVideos.map((v) => ({ id: v.youtubeId, title: v.videoTitle }))}
       />
 
       <BulkImportDialog

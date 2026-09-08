@@ -16,6 +16,11 @@ export interface MetadataCacheDetail {
   resolution: string | null;
   fps: number | null;
   uploadDate: string | null;
+  // False for a duration-only row - this video has only ever gone through
+  // the cheap calculatedLength duration probe, never a full yt-dlp
+  // extraction (streaming/download/STRM). See ytstream.js's metadata-cache
+  // detail route.
+  hasRawInfoJson: boolean;
   rawInfoJson?: unknown;
 }
 

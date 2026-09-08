@@ -55,9 +55,7 @@ export function isLikelyProbeRequest(userAgent: string | null | undefined): bool
 export const MODE_LABELS: Record<string, string> = {
   hls: 'HLS',
   'hls-buffer': 'HLS + Buffered Download',
-  ffmpeg: 'FFmpeg',
   direct: 'Direct',
-  'direct-pipe': 'Direct (piped)',
   'direct-redirect': 'Direct (redirect)',
   'cached-file': 'Cached file',
   'probe-cache-hit': 'Probe (cached)',
@@ -70,6 +68,49 @@ export function formatModeLabel(mode: string): string {
 
 /** Shared with StreamHistoryPage's Mode filter dropdown, so its option list always matches this labeling. */
 export const STREAM_MODE_OPTIONS = Object.keys(MODE_LABELS);
+
+/**
+ * Short labels for the Mode chip in StreamsTable/StreamHistoryTable -
+ * MODE_LABELS's full text (e.g. "HLS + Buffered Download") reads fine as a
+ * filter dropdown option, but forces the Mode column wide enough to push the
+ * whole table into horizontal scroll. The chip shows this instead and keeps
+ * the full label in its tooltip.
+ */
+const MODE_CHIP_LABELS: Record<string, string> = {
+  'hls-buffer': 'HLS+Buf',
+  'direct-redirect': 'Direct (redir)',
+  'cached-file': 'Cached',
+  'probe-cache-hit': 'Probe',
+};
+
+export function formatModeChipLabel(mode: string): string {
+  return MODE_CHIP_LABELS[mode] || formatModeLabel(mode);
+}
+
+export type ChipColor = 'default' | 'primary' | 'secondary' | 'error' | 'warning' | 'success' | 'info';
+
+/**
+ * Modes that skip the whole quality/transcode pipeline and hand back an
+ * already-downloaded file byte-for-byte (see resolveActualServedFileInfo in
+ * server/routes/ytstream.js) - their Format chip shows that file's own real
+ * quality/container, not a requested/configured value, so both get an
+ * "Actual" chip to make the distinction visible.
+ */
+export const ACTUAL_FILE_MODES = new Set(['probe-cache-hit', 'cached-file']);
+
+/** Color-codes the Mode chip so the shortcut/passthrough modes stand out from the modes that run a live encode. */
+export function modeChipColor(mode: string): ChipColor {
+  if (ACTUAL_FILE_MODES.has(mode)) return 'success';
+  if (mode === 'hls' || mode === 'hls-buffer') return 'info';
+  return 'default';
+}
+
+/** Color-codes the Format chip by how expensive the transcode is - copy is free, hardware h264 is cheap, software h264 is the most CPU-intensive case and worth calling out. */
+export function formatChipColor(transcode: string | null | undefined, hardwareMode: string | null | undefined): ChipColor {
+  if (!transcode || transcode === 'copy') return 'default';
+  if (transcode === 'h264') return hardwareMode && hardwareMode !== 'none' ? 'success' : 'warning';
+  return 'info';
+}
 
 export function formatElapsed(startedAt: number, now: number = Date.now()): string {
   const totalSeconds = Math.max(0, Math.floor((now - startedAt) / 1000));

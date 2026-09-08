@@ -71,6 +71,10 @@ async function _enqueueCacheDownload(youtubeId) {
   });
   // Already a real download (also covers mediaMode:'both' rows) - nothing to do.
   if (!video || video.is_strm !== true || !video.filePath) {
+    logger.debug(
+      { youtubeId, videoFound: !!video, isStrm: video ? video.is_strm : null, hasFilePath: video ? !!video.filePath : null },
+      'STRM cache-on-play: skipped, video is not currently a STRM row (already downloaded, or no Video row at all)'
+    );
     return { queued: false, reason: 'not-strm' };
   }
   if (hasActiveCacheJob(youtubeId)) return { queued: false, reason: 'already-queued' };
@@ -138,7 +142,10 @@ async function maybeEnqueueCacheDownload(youtubeId, opts = {}) {
   const config = configModule.getConfig();
   if (!isFeatureEnabled(config)) return;
   if (opts.skip) return;
-  if (hasActiveCacheJob(youtubeId)) return;
+  if (hasActiveCacheJob(youtubeId)) {
+    logger.debug({ youtubeId }, 'STRM cache-on-play: skipped, a cache job for this video is already Pending/In Progress');
+    return;
+  }
 
   pendingEnqueue.add(youtubeId);
   try {

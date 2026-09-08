@@ -122,9 +122,9 @@ function registerRoutes(app, deps) {
 
 /*
  * GET /api/ytstream/:youtubeId is public (no token) so media servers/players
- * can play STRM sidecar files. mode=direct redirects to a resolved upstream
- * URL, mode=ffmpeg re-streams through a local ffmpeg process, mode=hls
- * serves a real segmented playlist. See docs/YTSTREAM.md.
+ * can play STRM sidecar files. mode=direct proxies a resolved upstream URL,
+ * mode=hls/hls-buffer re-stream through a local ffmpeg process into a real
+ * segmented playlist. See docs/YTSTREAM.md.
  */
   app.use(createYtStreamRoutes({ verifyToken, getClientAddress, models }));
 

@@ -107,6 +107,7 @@ function CacheDetailDialog({ open, onClose, video, kind, token, onClear, clearin
 
   const handleExpandRaw = async (expanded: boolean) => {
     if (!expanded || rawJson !== null) return;
+    if (metadataDetail?.hasRawInfoJson === false) return;
     setLoadingRaw(true);
     const detail = await fetchMetadataDetail(video.youtubeId, true);
     setRawJson(detail?.rawInfoJson ? JSON.stringify(detail.rawInfoJson, null, 2) : 'No data');
@@ -145,6 +146,11 @@ function CacheDetailDialog({ open, onClose, video, kind, token, onClear, clearin
               <AccordionDetails>
                 {loadingRaw ? (
                   <Typography variant="body2" color="text.secondary">Loading…</Typography>
+                ) : metadataDetail?.hasRawInfoJson === false ? (
+                  <Typography variant="body2" color="text.secondary">
+                    Duration only — this video hasn&apos;t been streamed, downloaded, or materialized yet, so no full
+                    metadata has been fetched. It will be filled in automatically the next time it plays.
+                  </Typography>
                 ) : (
                   <pre style={{ maxHeight: 300, overflow: 'auto', fontSize: 12, margin: 0 }}>{rawJson}</pre>
                 )}

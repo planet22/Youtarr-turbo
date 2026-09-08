@@ -10,7 +10,7 @@ import {
 } from '../../ui';
 import {
   Search as SearchIcon,
-  ListFilter as FilterListIcon,
+  Filter as FilterListIcon,
   ArrowUpward as ArrowUpIcon,
   ArrowDownward as ArrowDownIcon,
   Check as CheckIcon,

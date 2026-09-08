@@ -17,7 +17,14 @@ import {
 import { formatFileSize } from '../../../utils/formatters';
 import { StreamHistoryRow } from '../../../hooks/useStreamHistory';
 import { YOUTUBE_URL_BASE } from '../../shared/VideoModal/constants';
-import { parseClientLabel, formatModeLabel } from '../utils';
+import {
+  parseClientLabel,
+  formatModeLabel,
+  formatModeChipLabel,
+  modeChipColor,
+  formatChipColor,
+  ACTUAL_FILE_MODES,
+} from '../utils';
 
 export interface StreamHistoryTableProps {
   rows: StreamHistoryRow[];
@@ -29,9 +36,8 @@ export interface StreamHistoryTableProps {
 type ResultChip = { label: string; color: 'default' | 'success' | 'warning' | 'error' | 'info' };
 
 // end_reason values are the exact strings passed to untrackStream throughout
-// ytstream.js (destroyHlsSession's `reason` param, streamViaFfmpeg's
-// handleFailure/onClientGone/ff.on('close')) plus 'server-restart' from this
-// module's own startup orphan-cleanup - see server/routes/ytstream.js.
+// ytstream.js (destroyHlsSession's `reason` param) plus 'server-restart'
+// from this module's own startup orphan-cleanup - see server/routes/ytstream.js.
 export const RESULT_CHIPS: Record<string, ResultChip> = {
   completed: { label: 'Completed', color: 'success' },
   redirected: { label: 'Redirected', color: 'success' },
@@ -146,14 +152,26 @@ function StreamHistoryRowView({
         </Box>
       </TableCell>
       <TableCell>
-        <Chip size="small" label={formatModeLabel(row.mode)} variant="filled" />
+        <Tooltip title={formatModeLabel(row.mode)}>
+          <Chip size="small" label={formatModeChipLabel(row.mode)} color={modeChipColor(row.mode)} variant="filled" />
+        </Tooltip>
       </TableCell>
       <TableCell>
-        <Tooltip title={`hardware: ${row.hardwareMode || 'none'}`}>
-          <Typography variant="body2" style={{ whiteSpace: 'nowrap' }}>
-            {formatDetail(row)}
-          </Typography>
-        </Tooltip>
+        <Box style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
+          <Tooltip title={`hardware: ${row.hardwareMode || 'none'}`}>
+            <Chip
+              size="small"
+              variant="outlined"
+              color={formatChipColor(row.transcode, row.hardwareMode)}
+              label={formatDetail(row) || '—'}
+            />
+          </Tooltip>
+          {ACTUAL_FILE_MODES.has(row.mode) && (
+            <Tooltip title="Serving the real, already-downloaded file directly - this is that file's own actual quality/container, not a requested or configured value">
+              <Chip size="small" variant="outlined" color="success" label="Cached" />
+            </Tooltip>
+          )}
+        </Box>
       </TableCell>
       <TableCell>
         <Tooltip title={row.userAgent || 'No user-agent reported'}>
@@ -198,13 +216,13 @@ function StreamHistoryTable({ rows, selectedIds, onToggleSelect, onSelectAll }: 
                 />
               </TableCell>
               <TableCell component="th">Video</TableCell>
-              <TableCell component="th" style={{ width: 90 }}>Mode</TableCell>
-              <TableCell component="th" style={{ width: 160 }}>Format</TableCell>
-              <TableCell component="th" style={{ width: 200 }}>Client</TableCell>
-              <TableCell component="th" style={{ width: 150 }}>Started</TableCell>
-              <TableCell component="th" style={{ width: 90 }}>Duration</TableCell>
-              <TableCell component="th" style={{ width: 100 }}>Total</TableCell>
-              <TableCell component="th" style={{ width: 140 }}>Result</TableCell>
+              <TableCell component="th" style={{ width: 76 }}>Mode</TableCell>
+              <TableCell component="th" style={{ width: 150 }}>Format</TableCell>
+              <TableCell component="th" style={{ width: 180 }}>Client</TableCell>
+              <TableCell component="th" style={{ width: 140 }}>Started</TableCell>
+              <TableCell component="th" style={{ width: 80 }}>Duration</TableCell>
+              <TableCell component="th" style={{ width: 90 }}>Total</TableCell>
+              <TableCell component="th" style={{ width: 120 }}>Result</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>

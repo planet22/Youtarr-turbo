@@ -29,7 +29,7 @@ class StrmGenerator {
    * @param {object} [opts]
    * @param {'youtube'|'ytstream'} [opts.target]
    * @param {string} [opts.proxyBaseUrl]
-   * @param {'direct'|'ffmpeg'|'hls'} [opts.ytstreamMode] - overrides ytstream.defaultMode
+   * @param {'direct'|'direct-redirect'|'hls'|'hls-buffer'} [opts.ytstreamMode] - overrides ytstream.defaultMode
    * @param {'mp4'|'ts'} [opts.ytstreamContainer] - overrides ytstream.container
    * @param {'copy'|'h264'} [opts.ytstreamTranscode] - overrides ytstream.transcode
    * @param {boolean} [opts.ytstreamFakeLength] - overrides ytstream.calculatedLength

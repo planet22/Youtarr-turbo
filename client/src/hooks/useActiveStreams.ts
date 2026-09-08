@@ -28,7 +28,7 @@ export interface StreamSegmentStatus {
 
 export interface StreamSnapshot {
   streamId: string;
-  mode: 'ffmpeg' | 'hls' | 'hls-buffer' | 'direct' | 'direct-pipe' | 'direct-redirect';
+  mode: 'hls' | 'hls-buffer' | 'direct' | 'direct-redirect';
   youtubeId: string;
   title: string | null;
   quality: string;

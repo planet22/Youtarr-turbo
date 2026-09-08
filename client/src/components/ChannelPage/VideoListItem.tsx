@@ -8,12 +8,13 @@ import {
   Tooltip,
   Checkbox,
 } from '../ui';
-import { CalendarToday as CalendarTodayIcon, Block as BlockIcon, CheckCircleOutline as CheckCircleOutlineIcon, Delete as DeleteIcon } from '../../lib/icons';
+import { CalendarToday as CalendarTodayIcon, Block as BlockIcon, CheckCircleOutline as CheckCircleOutlineIcon, Delete as DeleteIcon, CheckCircle as FilterPassIcon, XCircle as FilterFailIcon } from '../../lib/icons';
 import { formatDuration } from '../../utils';
 import { ChannelVideo } from '../../types/ChannelVideo';
 import { decodeHtml, formatAddedDate } from '../../utils/formatters';
 import { SHARED_STATUS_CHIP_SMALL_STYLE, SHARED_THEMED_CHIP_SMALL_STYLE } from '../shared/chipStyles';
 import { getPublishedDateDisplay } from './publishedDateDisplay';
+import { formatSeasonEpisode, buildChannelFilterPreviewTooltip } from './channelFilterPreviewDisplay';
 import { getVideoStatus, getStatusColor, getStatusIcon, getStatusLabel, getMediaTypeInfo, getStatusChipVariant, getStatusChipStyle } from '../../utils/videoStatus';
 import StillLiveDot from './StillLiveDot';
 import DownloadFormatIndicator from '../shared/DownloadFormatIndicator';
@@ -382,6 +383,24 @@ function VideoListItem({
                 ...getStatusChipStyle(status),
               }}
             />
+            {video.channelFilterPreview && (
+              <Tooltip title={buildChannelFilterPreviewTooltip(video.channelFilterPreview)}>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
+                  {video.channelFilterPreview.wouldDownload ? (
+                    <FilterPassIcon size={16} style={{ color: 'var(--success)' }} />
+                  ) : (
+                    <FilterFailIcon size={16} style={{ color: 'var(--destructive)' }} />
+                  )}
+                  {video.channelFilterPreview.isSeriesMode &&
+                    video.channelFilterPreview.wouldDownload &&
+                    video.channelFilterPreview.season != null && (
+                    <Typography variant="caption" style={{ fontSize: '0.65rem', whiteSpace: 'nowrap' }}>
+                      {formatSeasonEpisode(video.channelFilterPreview.season, video.channelFilterPreview.episode)}
+                    </Typography>
+                  )}
+                </span>
+              </Tooltip>
+            )}
           </div>
         </CardContent>
       </Card>

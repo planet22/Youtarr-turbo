@@ -32,10 +32,10 @@ const dark: StreamingPalette = {
 };
 
 const light: StreamingPalette = {
-  background: '0 0% 100%',
+  background: '357 40% 98%', // faint Netflix-red-tinted white
   foreground: '0 0% 8%', // #141414
   foregroundHex: '#141414',
-  card: '0 0% 96%', // #F5F5F5
+  card: '357 25% 95%', // tinted card, one step deeper than background
   cardForeground: '0 0% 8%',
   primary: '357 92% 47%',
   primaryForeground: '0 0% 100%',
@@ -55,7 +55,7 @@ const light: StreamingPalette = {
   infoForeground: '0 0% 100%',
   border: '0 0% 88%',
   borderStrong: '0 0% 8%',
-  input: '0 0% 96%',
+  input: '357 25% 95%',
   navItemBgSelectedHex: '#E50914',
   navItemTextSelectedHex: '#FFFFFF',
   navItemBgHoverRgba: 'rgba(0, 0, 0, 0.06)',

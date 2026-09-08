@@ -160,7 +160,7 @@ describe('videoPersistence', () => {
         youtubeId: 'abc123',
       });
 
-      expect(VideoMetadataProcessor.processVideoMetadata).toHaveBeenCalledWith(['youtu.be/abc123']);
+      expect(VideoMetadataProcessor.processVideoMetadata).toHaveBeenCalledWith(['youtu.be/abc123'], { jobId: 'job1' });
       expect(upsertVideoSpy).toHaveBeenCalledWith(metadata, { id: 'job1' });
       expect(upsertChannelSpy).toHaveBeenCalledWith(
         expect.objectContaining({

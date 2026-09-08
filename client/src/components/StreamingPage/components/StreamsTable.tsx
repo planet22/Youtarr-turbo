@@ -17,7 +17,16 @@ import { Stop as StopIcon, Search as ProbeIcon } from '../../../lib/icons';
 import { formatFileSize } from '../../../utils/formatters';
 import { StreamSnapshot } from '../../../hooks/useActiveStreams';
 import { YOUTUBE_URL_BASE } from '../../shared/VideoModal/constants';
-import { formatBytesPerSecond, parseClientLabel, isLikelyProbeRequest, formatModeLabel } from '../utils';
+import {
+  formatBytesPerSecond,
+  parseClientLabel,
+  isLikelyProbeRequest,
+  formatModeLabel,
+  formatModeChipLabel,
+  modeChipColor,
+  formatChipColor,
+  ACTUAL_FILE_MODES,
+} from '../utils';
 import { useStreamRowActions } from '../hooks/useStreamRowActions';
 import { SegmentActivityStrip } from './SegmentActivityGrid';
 
@@ -90,14 +99,26 @@ function StreamRow({
         </Box>
       </TableCell>
       <TableCell>
-        <Chip size="small" label={formatModeLabel(stream.mode)} variant="filled" />
+        <Tooltip title={formatModeLabel(stream.mode)}>
+          <Chip size="small" label={formatModeChipLabel(stream.mode)} color={modeChipColor(stream.mode)} variant="filled" />
+        </Tooltip>
       </TableCell>
       <TableCell>
-        <Tooltip title={`hardware: ${stream.hardwareMode}`}>
-          <Typography variant="body2" style={{ whiteSpace: 'nowrap' }}>
-            {formatDetail(stream)}
-          </Typography>
-        </Tooltip>
+        <Box style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
+          <Tooltip title={`hardware: ${stream.hardwareMode}`}>
+            <Chip
+              size="small"
+              variant="outlined"
+              color={formatChipColor(stream.transcode, stream.hardwareMode)}
+              label={formatDetail(stream) || '—'}
+            />
+          </Tooltip>
+          {ACTUAL_FILE_MODES.has(stream.mode) && (
+            <Tooltip title="Serving the real, already-downloaded file directly - this is that file's own actual quality/container, not a requested or configured value">
+              <Chip size="small" variant="outlined" color="success" label="Cached" />
+            </Tooltip>
+          )}
+        </Box>
       </TableCell>
       <TableCell>
         <Tooltip title={stream.userAgent || 'No user-agent reported'}>
@@ -151,14 +172,14 @@ function StreamsTable({ streams, token, onStopped, onOpenSegments }: StreamsTabl
           <TableHead>
             <TableRow>
               <TableCell component="th">Video</TableCell>
-              <TableCell component="th" style={{ width: 90 }}>Mode</TableCell>
-              <TableCell component="th" style={{ width: 160 }}>Format</TableCell>
-              <TableCell component="th" style={{ width: 200 }}>Client</TableCell>
-              <TableCell component="th" style={{ width: 90 }}>Duration</TableCell>
-              <TableCell component="th" style={{ width: 100 }}>Throughput</TableCell>
-              <TableCell component="th" style={{ width: 100 }}>Total</TableCell>
+              <TableCell component="th" style={{ width: 76 }}>Mode</TableCell>
+              <TableCell component="th" style={{ width: 150 }}>Format</TableCell>
+              <TableCell component="th" style={{ width: 180 }}>Client</TableCell>
+              <TableCell component="th" style={{ width: 80 }}>Duration</TableCell>
+              <TableCell component="th" style={{ width: 90 }}>Throughput</TableCell>
+              <TableCell component="th" style={{ width: 90 }}>Total</TableCell>
               <TableCell component="th" style={{ width: 100 }}>Segments</TableCell>
-              <TableCell component="th" style={{ width: 100 }}>State</TableCell>
+              <TableCell component="th" style={{ width: 90 }}>State</TableCell>
               <TableCell component="th" style={{ width: 60 }}>Stop</TableCell>
             </TableRow>
           </TableHead>

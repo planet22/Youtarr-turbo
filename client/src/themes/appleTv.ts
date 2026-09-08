@@ -36,10 +36,10 @@ const dark: StreamingPalette = {
 };
 
 const light: StreamingPalette = {
-  background: '0 0% 100%',
+  background: '210 20% 98%', // subtle cool-gray tint, keeps the monochrome identity
   foreground: '0 0% 4%', // #0A0A0A
   foregroundHex: '#0A0A0A',
-  card: '0 0% 97%', // #F7F7F7
+  card: '210 12% 96%', // tinted card, one step deeper than background
   cardForeground: '0 0% 4%',
   primary: '0 0% 7%', // #121212 monochrome inverted pill
   primaryForeground: '0 0% 100%',
@@ -59,7 +59,7 @@ const light: StreamingPalette = {
   infoForeground: '0 0% 100%',
   border: '0 0% 88%',
   borderStrong: '0 0% 4%',
-  input: '0 0% 97%',
+  input: '210 12% 96%',
   navItemBgSelectedHex: 'rgba(0, 0, 0, 0.08)',
   navItemTextSelectedHex: '#0A0A0A',
   navItemBgHoverRgba: 'rgba(0, 0, 0, 0.05)',

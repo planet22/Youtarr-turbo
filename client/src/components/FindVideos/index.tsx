@@ -246,6 +246,9 @@ export default function FindVideos({ token }: FindVideosProps) {
         defaultResolutionSource="global"
         mode="manual"
         token={token}
+        previewVideos={results
+          .filter((r) => selection.selectedIds.includes(r.youtubeId))
+          .map((r) => ({ id: r.youtubeId, title: r.title }))}
       />
       {modalVideo && (
         <VideoModal

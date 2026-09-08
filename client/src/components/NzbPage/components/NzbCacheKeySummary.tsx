@@ -1,6 +1,6 @@
 import React from 'react';
 import { Terminal, Cloud, Cookie, Globe, Network, Code2 } from 'lucide-react';
-import { Paper, Box, Typography, Chip } from '../../ui';
+import { Box, Chip } from '../../ui';
 import { NzbSearchSettings } from '../../../hooks/useNzbStats';
 
 interface NzbCacheKeySummaryProps {
@@ -39,21 +39,11 @@ function NzbCacheKeySummary({ settings }: NzbCacheKeySummaryProps) {
   }
 
   return (
-    <Paper variant="outlined" className="p-4">
-      <Typography variant="subtitle1" className="mb-2">
-        What determines a cache match right now
-      </Typography>
-      <Typography variant="body2" color="textSecondary" className="mb-3">
-        A repeat search only reuses a cached result if it was cached under these exact same settings, plus the
-        same search text. The icon column on the tables below shows a snapshot of these same settings from when
-        each row was recorded - compare it against this to spot what changed.
-      </Typography>
-      <Box className="flex flex-wrap gap-2">
-        {rows.map((row) => (
-          <Chip key={row.label} size="small" variant="outlined" icon={row.icon} label={`${row.label}: ${row.value}`} />
-        ))}
-      </Box>
-    </Paper>
+    <Box className="flex flex-wrap gap-2">
+      {rows.map((row) => (
+        <Chip key={row.label} size="small" variant="outlined" icon={row.icon} label={`${row.label}: ${row.value}`} />
+      ))}
+    </Box>
   );
 }
 

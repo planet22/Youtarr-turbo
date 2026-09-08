@@ -32,7 +32,7 @@ const dark: StreamingPalette = {
 };
 
 const light: StreamingPalette = {
-  background: '0 0% 100%',
+  background: '271 35% 98%', // faint HBO-Max-purple-tinted white
   foreground: '273 100% 4%', // #0B0014
   foregroundHex: '#0B0014',
   card: '270 30% 97%', // #F6F3FA

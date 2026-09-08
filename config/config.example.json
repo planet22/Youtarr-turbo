@@ -122,7 +122,6 @@
         "calculatedLength": false,
         "hotSwapToCache": false,
         "serveCachedFile": false,
-        "instantStart": false,
         "probeShortcut": false,
         "forceServerSettings": false,
         "historyRetentionDays": 90,

@@ -33,6 +33,17 @@ export const formatByteSize = (bytes: number): string => {
   return `${bytes} B`;
 };
 
+// video.avgDownloadMBps (Videos.avgDownloadMBps) - '' for null/undefined/0
+// (0 only ever means "never computed", e.g. a pre-existing row or a video
+// with no verified file - not a real zero-throughput download), matching
+// formatFileSize's own falsy-input convention above.
+export const formatDownloadSpeed = (mbps: number | null | undefined): string => {
+  if (!mbps) {
+    return '';
+  }
+  return `${mbps.toFixed(1)} MB/s`;
+};
+
 export const decodeHtml = (html: string): string => {
   const txt = document.createElement('textarea');
   txt.innerHTML = html;

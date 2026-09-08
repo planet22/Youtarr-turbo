@@ -1,6 +1,7 @@
 import React, { useContext, useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   Alert,
+  Badge,
   Button,
   CardHeader,
   CircularProgress,
@@ -24,12 +25,10 @@ import {
 } from './ui';
 import {
   HelpOutline as HelpOutlineIcon,
-  FilterAlt as FilterAltIcon,
+  Filter as FilterListIcon,
   SortByAlpha as SortByAlphaIcon,
   ArrowUpward as ArrowUpwardIcon,
   ArrowDownward as ArrowDownwardIcon,
-  TableChart as TableChartIcon,
-  ViewList as ViewListIcon,
   Save as SaveIcon,
   MoreVert as MoreVertIcon,
 } from '../lib/icons';
@@ -56,8 +55,10 @@ import PendingSaveBanner from './Subscriptions/components/PendingSaveBanner';
 import {
   INFINITE_SCROLL_FETCH_SIZE,
   VideoListPaginationBar,
+  VideoListViewToggle,
   useListPageSize,
   type PageSize,
+  type VideoListViewMode,
 } from './shared/VideoList';
 import ActiveImportBanner from './Subscriptions/components/ActiveImportBanner';
 import SubscriptionsFilter, { SubscriptionsFilterValue } from './Subscriptions/components/SubscriptionsFilter';
@@ -409,10 +410,8 @@ const Subscriptions: React.FC<SubscriptionsProps> = ({ token }) => {
     setMobileFilterOpen(false);
   };
 
-  const handleViewChange = (_: React.MouseEvent<HTMLElement>, next: ViewMode | null) => {
-    if (next) {
-      setViewMode(next);
-    }
+  const handleViewChange = (next: VideoListViewMode) => {
+    setViewMode(next === 'table' ? 'list' : 'grid');
   };
 
   const handleSortToggle = () => {
@@ -507,37 +506,26 @@ const Subscriptions: React.FC<SubscriptionsProps> = ({ token }) => {
           {/* ── Mobile toolbar: view toggle + filter + actions (channels only) ── */}
           {isMobile && typeFilter === 'channels' && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-              {/* Grid / List view toggle */}
-              <div style={{ display: 'flex', border: '1px solid var(--border)', borderRadius: 'var(--radius-ui)', overflow: 'hidden', flexShrink: 0 }}>
-                <Button
-                  variant={viewMode === 'list' ? 'contained' : 'ghost'}
-                  size="sm"
-                  aria-label="List view"
-                  style={{ borderRadius: 0, borderRight: '1px solid var(--border)', padding: '5px 10px' }}
-                  onClick={() => handleViewChange(null as any, 'list')}
-                >
-                  <ViewListIcon size={18} />
-                </Button>
-                <Button
-                  variant={viewMode === 'grid' ? 'contained' : 'ghost'}
-                  size="sm"
-                  aria-label="Grid view"
-                  style={{ borderRadius: 0, padding: '5px 10px' }}
-                  onClick={() => handleViewChange(null as any, 'grid')}
-                >
-                  <TableChartIcon size={18} />
-                </Button>
-              </div>
+              {/* Grid / Table view toggle */}
+              <VideoListViewToggle
+                value={viewMode === 'grid' ? 'grid' : 'table'}
+                modes={['grid', 'table']}
+                onChange={handleViewChange}
+              />
 
               {/* Filter button */}
               <Button
                 variant={filterValue ? 'contained' : 'outlined'}
                 size="sm"
-                startIcon={<FilterAltIcon size={16} />}
+                startIcon={
+                  <Badge variant="dot" color="primary" invisible={!filterValue}>
+                    <FilterListIcon size={16} />
+                  </Badge>
+                }
                 onClick={handleFilterIconClick}
                 className="intent-base"
               >
-                Filters{filterValue ? ' •' : ''}
+                Filters
               </Button>
 
               {/* Actions button */}
@@ -591,24 +579,11 @@ const Subscriptions: React.FC<SubscriptionsProps> = ({ token }) => {
             style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <div style={{ display: 'flex', border: '1px solid var(--border)', borderRadius: 4, overflow: 'hidden' }}>
-                <button
-                  type="button"
-                  onClick={() => handleViewChange(null as any, 'list')}
-                  aria-label="List view"
-                  style={{ background: viewMode === 'list' ? 'var(--primary)' : 'transparent', color: viewMode === 'list' ? 'var(--primary-foreground)' : 'inherit', border: 'none', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', padding: '4px 8px' }}
-                >
-                  <ViewListIcon size={18} />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleViewChange(null as any, 'grid')}
-                  aria-label="Grid view"
-                  style={{ background: viewMode === 'grid' ? 'var(--primary)' : 'transparent', color: viewMode === 'grid' ? 'var(--primary-foreground)' : 'inherit', border: 'none', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', padding: '4px 8px' }}
-                >
-                  <TableChartIcon size={18} />
-                </button>
-              </div>
+              <VideoListViewToggle
+                value={viewMode === 'grid' ? 'grid' : 'table'}
+                modes={['grid', 'table']}
+                onChange={handleViewChange}
+              />
 
               <Tooltip title={`Sort alphabetically (${sortOrder === 'asc' ? 'A → Z' : 'Z → A'})`}>
                 <button aria-label={`Sort alphabetically (${sortOrder === 'asc' ? 'A → Z' : 'Z → A'})`} className="icon-btn" type="button" onClick={handleSortToggle} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--primary)', display: 'inline-flex', alignItems: 'center', padding: 4, borderRadius: 4 }}>
@@ -629,7 +604,9 @@ const Subscriptions: React.FC<SubscriptionsProps> = ({ token }) => {
                   onClick={handleFilterIconClick}
                   style={{ background: 'none', border: 'none', cursor: 'pointer', color: filterValue ? 'var(--primary)' : 'inherit', display: 'inline-flex', alignItems: 'center', padding: 4, borderRadius: 4 }}
                 >
-                  <FilterAltIcon size={18} />
+                  <Badge variant="dot" color="primary" invisible={!filterValue}>
+                    <FilterListIcon size={18} />
+                  </Badge>
                 </button>
               </Tooltip>
 

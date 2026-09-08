@@ -491,6 +491,13 @@ function PlaylistPage({ token }: PlaylistPageProps) {
         defaultAudioFormat={playlist.audio_format}
         defaultAudioFormatSource="playlist"
         defaultMediaMode={playlist.media_mode || config.mediaMode || 'download'}
+        previewVideos={
+          pendingDownload.mode === 'selected'
+            ? videos
+                .filter((v) => pendingDownload.ids.includes(v.youtube_id))
+                .map((v) => ({ id: v.youtube_id, title: v.title || v.youtube_id }))
+            : undefined
+        }
       />
 
       <Dialog

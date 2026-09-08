@@ -443,6 +443,11 @@ code {
 
 html {
   scroll-behavior: smooth;
+  /* Reserves the vertical scrollbar's width permanently so content-height
+     changes (e.g. an accordion/Collapse expanding) never toggle the
+     scrollbar on/off mid-animation - that toggle shifts all page content
+     sideways and reads as a "flash" while the animation is running. */
+  scrollbar-gutter: stable;
 }
 
 /* Changelog markdown styles */

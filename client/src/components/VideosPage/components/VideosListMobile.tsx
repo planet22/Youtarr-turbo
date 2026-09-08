@@ -1,6 +1,7 @@
 import React from 'react';
-import { Box, Typography, Chip, Checkbox, Stack } from '../../ui';
-import { AlertCircle as ErrorOutlineIcon } from 'lucide-react';
+import { Box, Typography, Chip, Checkbox, Stack, IconButton, Tooltip } from '../../ui';
+import { AlertCircle as ErrorOutlineIcon, Trash2 as DeleteIcon } from 'lucide-react';
+import { Database as MetadataCacheIcon, Storage as CachedVideoIcon, ClearCache as ClearCacheIcon } from '../../../lib/icons';
 import { formatDuration, formatYTDate } from '../../../utils';
 import { formatAddedDateTime, formatFileSize } from '../../../utils/formatters';
 import { getDisplayPath } from '../../../utils/paths';
@@ -21,11 +22,18 @@ export interface VideosListMobileProps {
   selectedVideos: string[];
   enabledChannels: EnabledChannel[];
   imageErrors: Record<string, boolean>;
+  deleteDisabled: boolean;
   onToggleSelect: (youtubeId: string) => void;
   onOpenModal: (video: VideoData) => void;
   onToggleProtection: (videoId: number) => void;
+  onDeleteSingle: (videoId: number) => void;
   onImageError: (youtubeId: string) => void;
   onAddChannel: (channelName: string, channelUrl: string) => void;
+  onOpenCacheDetail: (youtubeId: string, kind: 'metadata' | 'video') => void;
+  // Single-click "delete" for an untracked row - clears both its cached
+  // metadata and cached video after a confirm dialog. Optional since not
+  // every VideosListMobile call site wires up the confirm dialog (yet).
+  onClearCachedRow?: (video: VideoData) => void;
   // Reveals the file path(s) as a small full-width line under each row - a
   // page-level toggle, see VideosTable's matching prop.
   showFilePath?: boolean;
@@ -50,11 +58,15 @@ function VideosListMobile({
   selectedVideos,
   enabledChannels,
   imageErrors,
+  deleteDisabled,
   onToggleSelect,
   onOpenModal,
   onToggleProtection,
+  onDeleteSingle,
   onImageError,
   onAddChannel,
+  onOpenCacheDetail,
+  onClearCachedRow,
   showFilePath = false,
 }: VideosListMobileProps) {
   return (
@@ -335,17 +347,81 @@ function VideosListMobile({
                   <AvailabilityChip isAvailable={true} compact />
                 ) : null)}
                 <WatchedChip watchedBy={video.watchedBy || []} compact />
+                {video.hasCachedMetadata && (
+                  <Tooltip title="Cached metadata — click for details">
+                    <IconButton
+                      size="small"
+                      aria-label="Cached metadata"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onOpenCacheDetail(video.youtubeId, 'metadata');
+                      }}
+                      style={{ padding: 2 }}
+                    >
+                      <MetadataCacheIcon size={14} />
+                    </IconButton>
+                  </Tooltip>
+                )}
+                {video.hasCachedVideo && (
+                  <Tooltip title="Cached video — click for details">
+                    <IconButton
+                      size="small"
+                      aria-label="Cached video"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onOpenCacheDetail(video.youtubeId, 'video');
+                      }}
+                      style={{ padding: 2 }}
+                    >
+                      <CachedVideoIcon size={14} />
+                    </IconButton>
+                  </Tooltip>
+                )}
               </Stack>
-              <Typography
-                variant="caption"
-                color="text.secondary"
-                style={{ fontSize: '0.65rem', lineHeight: 1.3 }}
-              >
-                Downloaded: {formatAddedDateTime(video.timeCreated)}
-                {fileSizeNumber && !(video.filePath || video.audioFilePath)
-                  ? ` • ${formatFileSize(fileSizeNumber)}`
-                  : ''}
-              </Typography>
+              <Box style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 4 }}>
+                <Typography
+                  variant="caption"
+                  color="text.secondary"
+                  style={{ fontSize: '0.65rem', lineHeight: 1.3 }}
+                >
+                  Downloaded: {formatAddedDateTime(video.timeCreated)}
+                  {fileSizeNumber && !(video.filePath || video.audioFilePath)
+                    ? ` • ${formatFileSize(fileSizeNumber)}`
+                    : ''}
+                </Typography>
+                {isTracked && video.id !== null && !video.removed && (
+                  <Tooltip title="Delete video from disk">
+                    <span onClick={(e) => e.stopPropagation()}>
+                      <IconButton
+                        color="error"
+                        size="small"
+                        data-testid="DeleteIcon"
+                        aria-label="Delete video from disk"
+                        onClick={() => onDeleteSingle(video.id as number)}
+                        disabled={deleteDisabled}
+                        style={{ padding: 2, flexShrink: 0 }}
+                      >
+                        <DeleteIcon size={16} />
+                      </IconButton>
+                    </span>
+                  </Tooltip>
+                )}
+                {!isTracked && (video.hasCachedMetadata || video.hasCachedVideo) && onClearCachedRow && (
+                  <Tooltip title="Clear cached metadata and video">
+                    <span onClick={(e) => e.stopPropagation()}>
+                      <IconButton
+                        color="error"
+                        size="small"
+                        aria-label="Clear cached metadata and video"
+                        onClick={() => onClearCachedRow(video)}
+                        style={{ padding: 2, flexShrink: 0 }}
+                      >
+                        <ClearCacheIcon size={16} />
+                      </IconButton>
+                    </span>
+                  </Tooltip>
+                )}
+              </Box>
             </Box>
           </Box>
           {showPathLine && (

@@ -15,8 +15,12 @@ StreamHistory.init(
     hardware_mode: { type: DataTypes.STRING, allowNull: true },
     client_ip: { type: DataTypes.STRING, allowNull: true },
     user_agent: { type: DataTypes.STRING(512), allowNull: true },
-    started_at: { type: DataTypes.DATE, allowNull: false },
-    ended_at: { type: DataTypes.DATE, allowNull: true },
+    // DATE(3) = millisecond precision, matched by the
+    // stream-history-millisecond-precision migration - needed so
+    // StreamHistoryTable's "Started"/"Duration" columns (which render down
+    // to the millisecond) can actually tell closely-spaced sessions apart.
+    started_at: { type: DataTypes.DATE(3), allowNull: false },
+    ended_at: { type: DataTypes.DATE(3), allowNull: true },
     bytes_transferred: { type: DataTypes.BIGINT, allowNull: false, defaultValue: 0 },
     end_reason: { type: DataTypes.STRING, allowNull: true },
     error_message: { type: DataTypes.TEXT, allowNull: true },

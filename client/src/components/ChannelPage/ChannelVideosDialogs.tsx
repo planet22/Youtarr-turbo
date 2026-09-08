@@ -30,6 +30,7 @@ export interface ChannelVideosDialogsProps {
   defaultAudioFormat?: string | null;
   defaultAudioFormatSource?: 'channel' | 'global';
   defaultMediaMode?: string;
+  previewVideos?: { id: string; title: string }[];
   selectedTab: string;
   tabLabel: string;
   onDownloadDialogClose: () => void;
@@ -61,6 +62,7 @@ function ChannelVideosDialogs({
   defaultAudioFormat,
   defaultAudioFormatSource,
   defaultMediaMode,
+  previewVideos,
   selectedTab,
   tabLabel,
   onDownloadDialogClose,
@@ -90,6 +92,7 @@ function ChannelVideosDialogs({
         defaultMediaMode={defaultMediaMode}
         mode="manual"
         token={token}
+        previewVideos={previewVideos}
       />
 
       {/* Load More Confirmation Dialog */}

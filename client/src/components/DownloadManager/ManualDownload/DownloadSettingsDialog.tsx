@@ -16,14 +16,22 @@ import {
   Collapse,
   Alert,
   Paper,
-  SelectChangeEvent
+  SelectChangeEvent,
+  Table,
+  TableHead,
+  TableBody,
+  TableRow,
+  TableCell,
+  TableContainer,
 } from '../../ui';
 import {
   Download as DownloadIcon,
   Settings as SettingsIcon,
   FolderOpen as FolderIcon,
   Gauge as QualityIcon,
-  Video as VideocamIcon
+  Video as VideocamIcon,
+  Eye as PreviewIcon,
+  CheckCircle as CheckCircleIcon,
 } from '../../../lib/icons';
 import { DownloadSettings } from './types';
 import { SubfolderAutocomplete } from '../../shared/SubfolderAutocomplete';
@@ -72,6 +80,11 @@ interface DownloadSettingsDialogProps {
   // Hides the "Allow re-downloading" switch and guarantees allowRedownload is
   // never emitted.
   hideRedownloadOption?: boolean;
+  // The concrete list of videos this download will act on, when the calling
+  // page already has titles on hand. Powers the optional "Preview" popup -
+  // omitted where only a count is available (e.g. whole-channel "Download
+  // All", which only knows a server-computed count).
+  previewVideos?: { id: string; title: string }[];
 }
 
 const DownloadSettingsDialog: React.FC<DownloadSettingsDialogProps> = ({
@@ -90,10 +103,12 @@ const DownloadSettingsDialog: React.FC<DownloadSettingsDialogProps> = ({
   defaultAudioFormatSource = 'global',
   defaultMediaMode,
   token = null,
-  hideRedownloadOption = false
+  hideRedownloadOption = false,
+  previewVideos,
 }) => {
   const isStrmOnly = defaultMediaMode === 'strm';
   const [useCustomSettings, setUseCustomSettings] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
   // Override controls default to "no override" (null) so that simply opening
   // the custom settings section never emits overrides the user didn't choose.
   const [resolution, setResolution] = useState<string | null>(null);
@@ -258,6 +273,7 @@ const DownloadSettingsDialog: React.FC<DownloadSettingsDialogProps> = ({
   };
 
   return (
+    <>
     <Dialog
       open={open}
       onClose={handleCancel}
@@ -276,13 +292,31 @@ const DownloadSettingsDialog: React.FC<DownloadSettingsDialogProps> = ({
         <Box className="pt-2">
           {/* Info Alert */}
           <Alert severity="info" className="mb-4">
-            <Typography variant="body2">
-              {mode === 'channel'
-                ? 'Downloading new videos from auto-download enabled channels/tabs and playlists. Channel and playlist settings and filters will be applied per channel/playlist.'
-                : videoCount === 1
-                ? 'You are about to download 1 video.'
-                : `You are about to download ${videoCount} videos.`}
-            </Typography>
+            <Box className="flex items-start justify-between gap-2">
+              <Typography variant="body2">
+                {mode === 'channel'
+                  ? 'Downloading new videos from auto-download enabled channels/tabs and playlists. Channel and playlist settings and filters will be applied per channel/playlist.'
+                  : isStrmOnly
+                  ? videoCount === 1
+                    ? 'You are about to create 1 STRM pointer file (no video will be downloaded).'
+                    : `You are about to create ${videoCount} STRM pointer files (no videos will be downloaded).`
+                  : videoCount === 1
+                  ? 'You are about to download 1 video.'
+                  : `You are about to download ${videoCount} videos.`}
+              </Typography>
+              {previewVideos && previewVideos.length > 0 && (
+                <Button
+                  size="small"
+                  variant="outlined"
+                  color="inherit"
+                  onClick={() => setPreviewOpen(true)}
+                  startIcon={<PreviewIcon size={14} />}
+                  className="shrink-0 whitespace-nowrap"
+                >
+                  Preview
+                </Button>
+              )}
+            </Box>
           </Alert>
 
           {typeof videoCount === 'number' && videoCount > LARGE_DOWNLOAD_WARNING_THRESHOLD && (
@@ -589,6 +623,49 @@ const DownloadSettingsDialog: React.FC<DownloadSettingsDialogProps> = ({
         </Button>
       </DialogActions>
     </Dialog>
+
+      {previewVideos && (
+        <Dialog open={previewOpen} onClose={() => setPreviewOpen(false)} maxWidth="sm" fullWidth>
+          <DialogTitle>
+            <span className="flex items-center gap-2">
+              <PreviewIcon size={20} />
+              Files to Download ({previewVideos.length})
+            </span>
+          </DialogTitle>
+          <DialogContent>
+            <Typography variant="caption" color="text.secondary" className="block mb-2">
+              These videos have already been filtered against your selection and settings, so all
+              of them are expected to download.
+            </Typography>
+            <TableContainer className="max-h-[400px] overflow-y-auto border border-border rounded-[var(--radius-ui)]">
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell style={{ width: 32 }} />
+                    <TableCell>Title</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {previewVideos.map((video) => (
+                    <TableRow key={video.id} hover>
+                      <TableCell>
+                        <CheckCircleIcon size={16} style={{ color: 'var(--success)' }} />
+                      </TableCell>
+                      <TableCell className="break-all">{video.title}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setPreviewOpen(false)} color="inherit">
+              Close
+            </Button>
+          </DialogActions>
+        </Dialog>
+      )}
+    </>
   );
 };
 

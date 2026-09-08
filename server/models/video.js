@@ -136,6 +136,18 @@ Video.init(
       defaultValue: null,
       comment: 'TV Series library mode: episode number within its season. Frozen once assigned (append-only).',
     },
+    downloadDurationSeconds: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      defaultValue: null,
+      comment: 'Wall-clock time from this video\'s download starting to its file being verified on disk (includes yt-dlp post-processing, e.g. remux/embed-metadata) - see videoMetadataProcessor.js.',
+    },
+    avgDownloadMBps: {
+      type: DataTypes.FLOAT,
+      allowNull: true,
+      defaultValue: null,
+      comment: 'fileSize / downloadDurationSeconds in MB/s, computed once alongside it.',
+    },
   },
   {
     sequelize,

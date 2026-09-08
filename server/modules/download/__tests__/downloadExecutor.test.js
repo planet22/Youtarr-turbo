@@ -721,7 +721,8 @@ describe('DownloadExecutor', () => {
       await executor.doDownload(mockArgs, mockJobId, 'Manually Added Urls', 1, originalUrls);
 
       expect(VideoMetadataProcessor.processVideoMetadata).toHaveBeenCalledWith(
-        expect.arrayContaining(['https://youtu.be/abc123XYZ_d'])
+        expect.arrayContaining(['https://youtu.be/abc123XYZ_d']),
+        expect.objectContaining({ jobId: mockJobId })
       );
     });
 

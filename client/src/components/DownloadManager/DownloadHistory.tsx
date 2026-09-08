@@ -13,9 +13,10 @@ import {
   Collapse,
   Link,
 } from '../ui';
-import { ChevronDown as ExpandMoreIcon, ChevronUp as ExpandLessIcon, Eye as ShowEmptyIcon } from 'lucide-react';
+import { ChevronDown, Eye as ShowEmptyIcon } from 'lucide-react';
 import { Job, FailedVideo } from '../../types/Job';
 import { VideoData } from '../../types/VideoData';
+import { formatDownloadSpeed } from '../../utils/formatters';
 import { useSwipeable } from 'react-swipeable';
 import { useConfig } from '../../hooks/useConfig';
 import VideoModal from '../shared/VideoModal';
@@ -54,6 +55,8 @@ function cleanJobTypeLabel(jobType: string): string {
     const match = jobType.match(/^Sonarr\/Radarr: (.+?) \[(.+)\]$/);
     return match ? `NZB grab (${match[1]}): ${match[2]}` : 'NZB grab';
   }
+  if (jobType.startsWith('STRM Cache: ')) return 'STRM Cache-on-play';
+  if (jobType.startsWith('HLS Buffer Cache: ')) return 'HLS Buffer Cache';
   return jobType;
 }
 
@@ -71,6 +74,8 @@ function getJobSourceLabel(jobType: string): string {
     const categoryMatch = jobType.match(/^Sonarr\/Radarr: (.+?) \[/);
     return categoryMatch ? `NZB (${categoryMatch[1]})` : 'NZB';
   }
+  if (jobType.startsWith('STRM Cache: ')) return 'STRM Cache-on-play';
+  if (jobType.startsWith('HLS Buffer Cache: ')) return 'HLS Buffer Cache';
   return 'Other';
 }
 
@@ -96,6 +101,17 @@ function nzbFallbackVideo(job: Job): VideoData | null {
     description: null,
   };
 }
+
+// Rotates a single chevron rather than swapping two icon components, so the
+// toggle reads as one continuous motion instead of a hard cut.
+const ExpandChevron: React.FC<{ expanded: boolean }> = ({ expanded }) => (
+  <ChevronDown
+    style={{
+      transform: expanded ? 'rotate(180deg)' : 'rotate(0deg)',
+      transition: 'transform 300ms var(--transition-bouncy, cubic-bezier(0.34,1.56,0.64,1))',
+    }}
+  />
+);
 
 function fileNameOf(filePath?: string | null): string | null {
   if (!filePath) return null;
@@ -446,7 +462,7 @@ const DownloadHistory: React.FC<DownloadHistoryProps> = ({
                 </Box>
                 {hasExpandable && (
                   <IconButton size="small" onClick={() => handleExpandCell(job.id)}>
-                    {isExpanded ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+                    <ExpandChevron expanded={isExpanded} />
                   </IconButton>
                 )}
               </Box>
@@ -517,12 +533,17 @@ const DownloadHistory: React.FC<DownloadHistoryProps> = ({
                     <Typography variant="caption" color="secondary">
                       Status: {durationString}
                     </Typography>
+                    {singleVideo && formatDownloadSpeed(singleVideo.avgDownloadMBps) && (
+                      <Typography variant="caption" color="secondary">
+                        Speed: {formatDownloadSpeed(singleVideo.avgDownloadMBps)}
+                      </Typography>
+                    )}
                   </Box>
                 )}
               </Box>
 
               {hasExpandable && (
-                <Collapse in={isExpanded} timeout="auto" unmountOnExit>
+                <Collapse in={isExpanded} timeout="auto" unmountOnExit fancy>
                   <Box className="mt-1.5 flex flex-col gap-1.5">
                     {videos.map((video: VideoData) => (
                       <Box key={video.youtubeId} className="flex flex-col">
@@ -538,6 +559,11 @@ const DownloadHistory: React.FC<DownloadHistoryProps> = ({
                           <Typography variant="caption" color="secondary">
                             {video.youTubeChannelName}
                           </Typography>
+                          {formatDownloadSpeed(video.avgDownloadMBps) && (
+                            <Typography variant="caption" color="secondary">
+                              {formatDownloadSpeed(video.avgDownloadMBps)}
+                            </Typography>
+                          )}
                           {video.removed && <MissingVideoChip />}
                         </Box>
                       </Box>
@@ -570,6 +596,7 @@ const DownloadHistory: React.FC<DownloadHistoryProps> = ({
               <TableCell>Title</TableCell>
               <TableCell>Source</TableCell>
               <TableCell>Status</TableCell>
+              <TableCell>Speed</TableCell>
               <TableCell align="right" />
             </TableRow>
           </TableHead>
@@ -649,16 +676,20 @@ const DownloadHistory: React.FC<DownloadHistoryProps> = ({
                       </TableCell>
                       <TableCell>{formattedJobType}</TableCell>
                       <TableCell>{durationString}</TableCell>
+                      {/* Blank at the summary-row level - this rolls up multiple
+                          videos, each with its own speed; see the per-video Speed
+                          cell in the expanded sub-table below instead. */}
+                      <TableCell />
                       <TableCell align="right">
                         <Box style={{ display: 'inline-flex', alignItems: 'center', color: 'var(--foreground)' }}>
-                          {isExpanded ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+                          <ExpandChevron expanded={isExpanded} />
                         </Box>
                       </TableCell>
                     </TableRow>
 
                     <TableRow>
-                      <TableCell colSpan={5} style={{ padding: 0, border: 'none' }}>
-                        <Collapse in={isExpanded} timeout="auto" unmountOnExit>
+                      <TableCell colSpan={6} style={{ padding: 0, border: 'none' }}>
+                        <Collapse in={isExpanded} timeout="auto" unmountOnExit fancy>
                           <Box className="p-2">
                             {videos.length > 0 && (
                             <Table size="small">
@@ -682,6 +713,7 @@ const DownloadHistory: React.FC<DownloadHistoryProps> = ({
                                     </TableCell>
                                     <TableCell>{formattedJobType}</TableCell>
                                     <TableCell>{job.status}</TableCell>
+                                    <TableCell>{formatDownloadSpeed(video.avgDownloadMBps)}</TableCell>
                                     <TableCell />
                                   </TableRow>
                                 ))}
@@ -766,6 +798,7 @@ const DownloadHistory: React.FC<DownloadHistoryProps> = ({
                   </TableCell>
                   <TableCell>{formattedJobType || '---'}</TableCell>
                   <TableCell>{durationString}</TableCell>
+                  <TableCell>{singleVideo ? formatDownloadSpeed(singleVideo.avgDownloadMBps) : ''}</TableCell>
                   <TableCell align="right" />
                 </TableRow>
               );

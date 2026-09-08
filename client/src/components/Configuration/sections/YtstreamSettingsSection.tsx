@@ -30,12 +30,14 @@ import { ConfigState } from '../types';
 import { formatFileSize } from '../../../utils/formatters';
 import { useHardwareCapabilities } from '../hooks/useHardwareCapabilities';
 import { useTuningBenchmark } from '../hooks/useTuningBenchmark';
+import { useNetworkTuningBenchmark } from '../hooks/useNetworkTuningBenchmark';
 import { useYtstreamModeCompatibility } from '../hooks/useYtstreamModeCompatibility';
 import { useUntrackedCache } from '../hooks/useUntrackedCache';
 import { useMetadataCache } from '../hooks/useMetadataCache';
 import { useSegmentTimingTest } from '../hooks/useSegmentTimingTest';
 import { HardwareTestingAccordion } from './components/HardwareTestingAccordion';
 import { TuningBenchmarkTable } from './components/TuningBenchmarkTable';
+import { NetworkTuningBenchmarkTable } from './components/NetworkTuningBenchmarkTable';
 import { TuningHistoryTable } from './components/TuningHistoryTable';
 import { SegmentTimingTestButton } from './components/SegmentTimingTestButton';
 
@@ -61,10 +63,13 @@ export const DEFAULT_YTSTREAM: YtstreamConfig = {
   tuning: 'fast',
   vaapiQuality: null,
   playerClient: '',
+  httpChunkSizeMiB: 0,
+  concurrentFragments: 0,
+  throttledRateKBps: 0,
+  socketTimeoutSeconds: 0,
   calculatedLength: false,
   hotSwapToCache: false,
   serveCachedFile: false,
-  instantStart: false,
   probeShortcut: false,
   forceServerSettings: false,
   historyRetentionDays: 90,
@@ -75,16 +80,12 @@ export const DEFAULT_YTSTREAM: YtstreamConfig = {
   forceKeyframesByHardwareMode: {},
 };
 
-// Each mode's real limitation, stated plainly - see resolvePlaybackPlan's
-// execution steps (server/routes/ytstream.js) for the same information in
-// dry-run form. No mode falls back to a different mode's behavior; each
-// either works as described or fails outright (502).
+// Mirrors resolvePlaybackPlan's dry-run steps (server/routes/ytstream.js).
+// No mode falls back to another - each works as described or fails (502).
 const MODE_TOOLTIPS: Record<string, string> = {
   direct: 'Resolves a playback URL via yt-dlp and proxies it directly: no ffmpeg, no re-encode. Progressive-only (~360p regardless of Stream quality). A rejected URL fails with no automatic retry beyond the same-request extraction-error retry.',
-  'direct-pipe': 'Same ~360p progressive-only ceiling as Direct, fetched through yt-dlp\'s own process, so it survives the session-bound-URL failure Direct can\'t. No Range/seek support: a seek restarts playback from 0.',
   'direct-redirect': 'Resolves a playback URL and sends the player a 302 straight to it. Youtarr-Turbo never touches the bytes: lightest mode on resources. No cookies/Referer travel with the redirect (age-restricted/members-only videos fail); anything after the redirect is invisible to Youtarr-Turbo\'s logs.',
-  ffmpeg: 'Re-streams through a live ffmpeg pipe fed by yt-dlp\'s DASH formats: quality beyond progressive\'s ceiling. Requires a working ffmpeg on the host; fails outright (502) if unavailable, no fallback to Direct.',
-  hls: 'Same DASH-based quality as Enhanced, but writes real HLS segment files to disk instead of a live pipe: fixes players (Jellyfin included) that won\'t tolerate the live pipe\'s startup wait. Costs local disk space per active stream. Backfill missing segments (below) can apply once Hot-swap to cached file gives it a local source.',
+  hls: 'Re-streams through yt-dlp\'s DASH formats + ffmpeg, quality beyond progressive\'s ceiling, writing real HLS segment files to disk instead of a live pipe: fixes players (Jellyfin included) that won\'t tolerate a live pipe\'s startup wait. Requires a working ffmpeg on the host; fails outright (502) if unavailable, no fallback to Direct. Costs local disk space per active stream. Backfill missing segments (below) can apply once Hot-swap to cached file gives it a local source.',
   'hls-buffer': 'Same as Enhanced HLS, but an independent fetch starts immediately and pulls the whole video once, unthrottled, into a local MPEG-TS buffer file that becomes the permanent download; continues even if playback seeks early or stops. Calculated length is always on for this mode. Backfill and Finalize .ts to .mp4 (below) can both apply once buffered.',
 };
 
@@ -119,6 +120,15 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
     runBenchmark: runTuningBenchmark,
   } = useTuningBenchmark(token);
   const {
+    testing: testingNetworkTuning,
+    progress: networkTuningProgress,
+    results: networkTuningResults,
+    recommended: networkTuningRecommended,
+    presets: networkTuningPresets,
+    error: networkTuningError,
+    runBenchmark: runNetworkTuningBenchmark,
+  } = useNetworkTuningBenchmark(token);
+  const {
     fileCount: untrackedCacheFileCount,
     totalBytes: untrackedCacheTotalBytes,
     clearing: clearingUntrackedCache,
@@ -144,13 +154,9 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
     onConfigChange({ ytstream: { ...ytstream, ...patch } });
   };
 
-  // Cache on play / Hot-swap / Revert-to-STRM are strm.* (not ytstream.*)
-  // config, but live here now (moved from StrmSettingsSection's own "File
-  // Output" section) so every field whose visibility depends on Playback
-  // mode - Instant start/Hot-swap via modeCompat, Cache on play/Revert-hours
-  // by association since Hot-swap and Revert-hours both only matter once
-  // Cache on play is on - changes in exactly one place on the page instead
-  // of two disconnected ones.
+  // Cache on play / Revert-to-STRM are strm.* (not ytstream.*) config, but
+  // live here (moved from StrmSettingsSection) so mode-dependent fields
+  // stay in one place.
   const cacheOnPlay = config.strm?.cacheOnPlay === true;
   const setStrm = (patch: Partial<ConfigState['strm']>) => {
     onConfigChange({ strm: { ...config.strm, ...patch } });
@@ -158,26 +164,14 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
 
   const mode = ytstream.defaultMode || 'direct';
   const forceH264 = ytstream.transcode === 'h264';
-  // Single source of truth for every mode-gated field below - see
-  // getModeFieldCompatibility's own doc comment in server/routes/ytstream.js
-  // and useYtstreamModeCompatibility's. Nothing here is computed locally
-  // anymore (no more hand-maintained enhancedMode/calculatedLengthRequired/
-  // probeShortcutRequired-style booleans, one per discovery, each needing
-  // its own reasoning duplicated into a tooltip) - nine of these once did,
-  // found and fixed one at a time over the course of 2026-09-02, which is
-  // exactly the pattern this consolidates away. A field's disabled state
-  // (`!== 'optional'`) fails closed (disabled) for the brief window before
-  // this has loaded, same as `modeCompat.x` being undefined - never a false
-  // "looks enabled" flash. 'ignored' fields render nothing at all (not just
-  // disabled) - a setting with zero effect for this mode shouldn't be shown;
-  // 'forced' fields stay visible, disabled, and reflect the pinned value.
+  // Single source of truth for every mode-gated field - see
+  // getModeFieldCompatibility (server/routes/ytstream.js). Disabled state
+  // fails closed until loaded. Fields are always rendered now (never
+  // hidden), just disabled when 'ignored' or 'forced'.
   const modeCompat = useYtstreamModeCompatibility(mode, ytstream.transcode || '', token, ytstream.container || '');
-  // enhancedMode is still used below for the tuning-benchmark's own
-  // disabled-reason messaging (a UI affordance unrelated to any one
-  // field's forced/ignored status) and by Encoding tuning's Recommended
-  // badge - not a duplicate of modeCompat, a different, narrower question
-  // ("does this mode run an ffmpeg encode at all").
-  const enhancedMode = mode === 'ffmpeg' || mode === 'hls' || mode === 'hls-buffer';
+  // Distinct from modeCompat: "does this mode run an ffmpeg encode at all"
+  // - used for tuning-benchmark messaging and the Recommended badge.
+  const enhancedMode = mode === 'hls' || mode === 'hls-buffer';
 
   useEffect(() => {
     if (modeCompat.calculatedLength?.status === 'forced' && ytstream.calculatedLength !== true) {
@@ -187,11 +181,9 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
   }, [modeCompat.calculatedLength?.status, ytstream.calculatedLength]);
 
   const currentHardwareMode = ytstream.hardwareMode || 'none';
-  // Maps the "Stream quality" dropdown's value onto the resolution keys the
-  // tuning benchmark matrix uses (480/720/1080/1440/2160) - '' (Auto) falls
-  // back to 720 (this route's own default - see resolveQualityHeight in
-  // ytstream.js), and 'best' has no fixed height for the benchmark to key
-  // on, so no recommendation applies there.
+  // Maps Stream quality to the tuning matrix's resolution keys (480-2160).
+  // '' (Auto) falls back to 720 (resolveQualityHeight's default); 'best'
+  // has no fixed height, so no recommendation applies.
   const qualityHeightForTuning = !ytstream.quality ? '720' : ytstream.quality === 'best' ? null : ytstream.quality;
   // Only trust tuningRecommended when it was actually measured for the
   // encoder currently selected - switching Hardware encoder after running
@@ -200,9 +192,9 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
     ? tuningRecommended?.[qualityHeightForTuning]
     : undefined;
   // The tuning benchmark (and its "Recommended" badges above) only means
-  // anything once H.264 re-encoding via Enhanced mode is actually in play.
+  // anything once H.264 re-encoding via Enhanced HLS is actually in play.
   const tuningTestDisabledReason = !enhancedMode
-    ? 'Set Playback mode to Enhanced (ffmpeg) or Enhanced HLS to test tuning.'
+    ? 'Set Playback mode to Enhanced HLS or Enhanced HLS + Buffered to test tuning.'
     : !forceH264
       ? 'Set Transcode to "Force re-encode (H.264/AAC)" to test tuning.'
       : null;
@@ -211,11 +203,9 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
   // an already-written .strm file) are ignored server-side. Highlighted so
   // it's clear which settings that guarantee applies to.
   const forced = ytstream.forceServerSettings === true;
-  // padding/margin are equal-and-opposite (self-cancelling) so the highlight
-  // grows outward from each field without shifting layout when `forced`
-  // toggles on/off. Kept small (3px, not the field's full Grid gutter of
-  // 8px/side at spacing={2}) so adjacent highlighted fields still have
-  // visible breathing room between their boxes instead of nearly touching.
+  // padding/margin are equal-and-opposite so the highlight grows outward
+  // without shifting layout when `forced` toggles. 3px, not the Grid's
+  // full 8px gutter, so adjacent fields keep visible breathing room.
   const forcedFieldStyle: React.CSSProperties = {
     borderRadius: 'var(--radius-ui)',
     boxShadow: '0 0 0 1px var(--warning)',
@@ -264,16 +254,16 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
               value={mode}
               label="Playback mode"
               onChange={(e: SelectChangeEvent<string>) =>
-                setYtstream({ defaultMode: e.target.value as 'direct' | 'direct-pipe' | 'direct-redirect' | 'ffmpeg' | 'hls' | 'hls-buffer' })
+                setYtstream({ defaultMode: e.target.value as 'direct' | 'direct-redirect' | 'hls' | 'hls-buffer' })
               }
               className="flex-1 min-w-0"
               disabled={disabled}
             >
               <MenuItem value="direct">Direct</MenuItem>
-              <MenuItem value="direct-pipe">Direct (piped)</MenuItem>
               <MenuItem value="direct-redirect">Direct (redirect)</MenuItem>
-              <MenuItem value="ffmpeg">Enhanced</MenuItem>
-              <MenuItem value="hls">Enhanced HLS</MenuItem>
+              {/* mode=hls hidden: no untracked-video caching path, and
+                  hls-buffer is a strict superset. Code untouched, just
+                  removed from this picker. */}
               <MenuItem value="hls-buffer">Enhanced HLS + Buffered</MenuItem>
             </Select>
             <InfoTooltip
@@ -284,39 +274,38 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
         </FormControl>
       </Grid>
 
-      {modeCompat.container?.status !== 'ignored' && (
-        <Grid item xs={12} sm={6} md={3}>
-          <FormControl fullWidth style={forced ? forcedFieldStyle : undefined}>
-            <InputLabel>Container</InputLabel>
-            <Box className="flex items-center gap-1">
-              <Select
-                value={ytstream.container || 'mp4'}
-                label="Container"
-                onChange={(e: SelectChangeEvent<string>) =>
-                  setYtstream({ container: e.target.value as 'mp4' | 'ts' | 'mkv' })
-                }
-                className="flex-1 min-w-0"
-                disabled={disabled || modeCompat.container?.status !== 'optional'}
-              >
-                <MenuItem value="mp4">MP4</MenuItem>
-                <MenuItem value="ts">MPEG-TS</MenuItem>
-                {mode !== 'hls' && mode !== 'hls-buffer' && (
-                  <MenuItem value="mkv">Matroska</MenuItem>
-                )}
-              </Select>
-              <InfoTooltip
-                text={
-                  'Matroska (mkv, Enhanced-only) accepts any video/audio codec pair: useful for Copy when the source isn\'t H.264.'
-                  + (mode === 'hls-buffer'
-                    ? ' For Enhanced HLS + Buffered: this only picks the live segment format; the permanent download is always MPEG-TS.'
-                    : '')
-                }
-                onMobileClick={onMobileTooltipClick}
-              />
-            </Box>
-          </FormControl>
-        </Grid>
-      )}
+      <Grid item xs={12} sm={6} md={3}>
+        <FormControl fullWidth style={forced ? forcedFieldStyle : undefined}>
+          <InputLabel>Container</InputLabel>
+          <Box className="flex items-center gap-1">
+            <Select
+              value={ytstream.container || 'mp4'}
+              label="Container"
+              onChange={(e: SelectChangeEvent<string>) =>
+                setYtstream({ container: e.target.value as 'mp4' | 'ts' | 'mkv' })
+              }
+              className="flex-1 min-w-0"
+              disabled={disabled || modeCompat.container?.status !== 'optional'}
+            >
+              <MenuItem value="mp4">MP4</MenuItem>
+              <MenuItem value="ts">MPEG-TS</MenuItem>
+              {mode !== 'hls' && mode !== 'hls-buffer' && (
+                <MenuItem value="mkv">Matroska</MenuItem>
+              )}
+            </Select>
+            <InfoTooltip
+              text={
+                'Matroska (mkv, Enhanced-only) accepts any video/audio codec pair: useful for Copy when the source isn\'t H.264.'
+                + (mode === 'hls-buffer'
+                  ? ' For Enhanced HLS + Buffered: this only picks the live segment format; the permanent download is always MPEG-TS.'
+                  : '')
+                + (modeCompat.container?.status === 'ignored' && modeCompat.container?.reason ? ` For the current Playback mode (${mode}): ${modeCompat.container.reason}` : '')
+              }
+              onMobileClick={onMobileTooltipClick}
+            />
+          </Box>
+        </FormControl>
+      </Grid>
 
       <Grid item xs={12} sm={6} md={3}>
         <FormControl fullWidth style={forced ? forcedFieldStyle : undefined}>
@@ -350,12 +339,41 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
       </Grid>
 
       <Grid item xs={12} sm={6} md={3}>
-        {/* No forcedFieldStyle here (unlike Playback mode/Container/Stream
-            quality/Transcode above): strmGenerator.js never writes
-            qualityStrictness into a .strm's URL at all, so Settings is
-            always the only source for this regardless of Force these
-            settings - there's no URL value for that toggle to actually
-            override. */}
+        <FormControl fullWidth style={forced ? forcedFieldStyle : undefined}>
+          <InputLabel>Transcode</InputLabel>
+          <Box className="flex items-center gap-1">
+            <Select
+              value={ytstream.transcode || ''}
+              label="Transcode"
+              onChange={(e: SelectChangeEvent<string>) =>
+                setYtstream({ transcode: e.target.value as '' | 'copy' | 'h264' })
+              }
+              className="flex-1 min-w-0"
+              disabled={disabled || modeCompat.transcode?.status !== 'optional'}
+            >
+              <MenuItem value="">Auto (match download codec setting)</MenuItem>
+              <MenuItem value="copy">Always remux (copy, no re-encode)</MenuItem>
+              <MenuItem value="h264">Force re-encode (H.264/AAC)</MenuItem>
+            </Select>
+            <InfoTooltip
+              text={
+                'Auto follows the download Video codec setting above (H.264/H.265 forces re-encode, otherwise behaves like Copy). Copy never re-encodes: fast, but the source codec isn\'t guaranteed compatible. H.264 always re-encodes for compatibility and is required for hardware acceleration below.'
+                + (modeCompat.transcode?.status === 'ignored' && modeCompat.transcode?.reason ? ` For the current Playback mode (${mode}): ${modeCompat.transcode.reason}` : '')
+              }
+              onMobileClick={onMobileTooltipClick}
+            />
+          </Box>
+        </FormControl>
+      </Grid>
+
+      {/* Row 1b: Quality strictness, aligned under Stream quality via two
+          spacers. xs={0} spacers collapse on mobile (already single-column). */}
+      <Grid item xs={0} sm={6} md={3} />
+      <Grid item xs={0} sm={6} md={3} />
+      <Grid item xs={12} sm={6} md={3}>
+        {/* No forcedFieldStyle: strmGenerator.js never writes
+            qualityStrictness into a .strm's URL, so there's nothing for
+            Force these settings to override. */}
         <FormControl fullWidth>
           <InputLabel>Quality strictness</InputLabel>
           <Box className="flex items-center gap-1">
@@ -380,68 +398,9 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
         </FormControl>
       </Grid>
 
-      {/* Row 2 - transcode method and calculated-length's seek/duration
-          behavior. Hardware encoder/decode and Encoding tuning live down in
-          Performance Optimizations below, alongside VAAPI compression
-          level - one place for every hardware-related dial. */}
-      {modeCompat.transcode?.status !== 'ignored' && (
-        <Grid item xs={12} sm={6} md={3}>
-          <FormControl fullWidth style={forced ? forcedFieldStyle : undefined}>
-            <InputLabel>Transcode</InputLabel>
-            <Box className="flex items-center gap-1">
-              <Select
-                value={ytstream.transcode || ''}
-                label="Transcode"
-                onChange={(e: SelectChangeEvent<string>) =>
-                  setYtstream({ transcode: e.target.value as '' | 'copy' | 'h264' })
-                }
-                className="flex-1 min-w-0"
-                disabled={disabled || modeCompat.transcode?.status !== 'optional'}
-              >
-                <MenuItem value="">Auto (match download codec setting)</MenuItem>
-                <MenuItem value="copy">Always remux (copy, no re-encode)</MenuItem>
-                <MenuItem value="h264">Force re-encode (H.264/AAC)</MenuItem>
-              </Select>
-              <InfoTooltip
-                text="Auto follows the download Video codec setting above (H.264/H.265 forces re-encode, otherwise behaves like Copy). Copy never re-encodes: fast, but the source codec isn't guaranteed compatible. H.264 always re-encodes for compatibility and is required for hardware acceleration below."
-                onMobileClick={onMobileTooltipClick}
-              />
-            </Box>
-          </FormControl>
-        </Grid>
-      )}
-
-      {modeCompat.calculatedLength?.status !== 'ignored' && (
-        <Grid item xs={12} sm={6} md={3}>
-          <FormControl fullWidth style={forced || modeCompat.calculatedLength?.status === 'forced' ? forcedFieldStyle : undefined}>
-            <InputLabel>Calculated length</InputLabel>
-            <Box className="flex items-center gap-1">
-              <Select
-                value={modeCompat.calculatedLength?.status === 'forced' || ytstream.calculatedLength ? 'on' : 'off'}
-                label="Calculated length"
-                onChange={(e: SelectChangeEvent<string>) =>
-                  setYtstream({ calculatedLength: e.target.value === 'on' })
-                }
-                className="flex-1 min-w-0"
-                disabled={disabled || modeCompat.calculatedLength?.status !== 'optional'}
-              >
-                <MenuItem value="off">Off</MenuItem>
-                <MenuItem value="on">On</MenuItem>
-              </Select>
-              {modeCompat.calculatedLength?.status === 'forced' && (
-                <Chip label="Forced" size="small" color="warning" />
-              )}
-              <InfoTooltip
-                text={
-                  'Reports an estimated size/duration upfront and answers seeks faster (approximately) by restarting at the estimated timestamp, instead of the response only growing until the real end is known.'
-                  + (modeCompat.calculatedLength?.reason ? ` For the current Playback mode (${mode}): ${modeCompat.calculatedLength.reason}` : '')
-                }
-                onMobileClick={onMobileTooltipClick}
-              />
-            </Box>
-          </FormControl>
-        </Grid>
-      )}
+      {/* Calculated length's dropdown was removed: every reachable mode now
+          has a fixed status (forced for +Buffered, ignored otherwise) -
+          no 'optional' case was left to choose. Server-side unchanged. */}
 
       <Grid item xs={12}>
         <Alert severity='warning' style={{ marginBottom: 8 }}>
@@ -480,123 +439,111 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
         </Typography>
       </Grid>
 
-      {/* Calculated length lives up in the forced-settings grid above,
-          alongside Transcode - part of the same "how the encode pipeline
-          behaves" group, not a performance optimization proper. Hardware
-          encoder/decode, Encoding tuning, and VAAPI compression level all
-          live here together - one place for every hardware-related dial,
-          none of which are ever written into a .strm's URL (so none get
-          forcedFieldStyle - Settings always decides these regardless of
-          Force these settings). Instant start / Cache on play / Hot-swap to
-          cached file / Revert-to-STRM also live here (moved from
-          StrmSettingsSection's own "File Output" section) so every
-          mode-gated field's visibility changes in one place on the page
-          instead of two disconnected ones - see modeCompat's own comment
-          above for why. */}
+      {/* Hardware encoder/decode, Encoding tuning, VAAPI level: one 4-wide
+          row, never forcedFieldStyle (not written into .strm URLs). Cache
+          on play/Hot-swap/Probe shortcut follow below (moved from
+          StrmSettingsSection). Revert-to-STRM moved to History instead. */}
 
-      {modeCompat.hardwareMode?.status !== 'ignored' && (
-        <Grid item xs={12} sm={6} md={4}>
-          <FormControl fullWidth>
-            <InputLabel>Hardware encoder</InputLabel>
-            <Box className="flex items-center gap-1">
-              <Select
-                value={ytstream.hardwareMode || 'none'}
-                label="Hardware encoder"
-                onChange={(e: SelectChangeEvent<string>) =>
-                  setYtstream({
-                    hardwareMode: e.target.value as 'none' | 'qsv' | 'nvenc' | 'vaapi' | 'amf',
-                  })
-                }
-                className="flex-1 min-w-0"
-                disabled={disabled || modeCompat.hardwareMode?.status !== 'optional'}
-              >
-                <MenuItem value="none">Software (libx264)</MenuItem>
-                <MenuItem value="qsv">Intel Quick Sync (h264_qsv)</MenuItem>
-                <MenuItem value="nvenc">NVIDIA NVENC (h264_nvenc)</MenuItem>
-                <MenuItem value="vaapi">VAAPI (h264_vaapi)</MenuItem>
-                <MenuItem value="amf">AMD AMF (h264_amf)</MenuItem>
-              </Select>
-              <InfoTooltip
-                text="Used only when Playback mode is Enhanced and Transcode is H.264. Requires a matching ffmpeg build and GPU drivers on the Youtarr-Turbo host, and device passthrough in Docker."
-                onMobileClick={onMobileTooltipClick}
-              />
-            </Box>
-          </FormControl>
-        </Grid>
-      )}
+      <Grid item xs={12} sm={6} md={3}>
+        <FormControl fullWidth>
+          <InputLabel>Hardware encoder</InputLabel>
+          <Box className="flex items-center gap-1">
+            <Select
+              value={ytstream.hardwareMode || 'none'}
+              label="Hardware encoder"
+              onChange={(e: SelectChangeEvent<string>) =>
+                setYtstream({
+                  hardwareMode: e.target.value as 'none' | 'qsv' | 'nvenc' | 'vaapi' | 'amf',
+                })
+              }
+              className="flex-1 min-w-0"
+              disabled={disabled || modeCompat.hardwareMode?.status !== 'optional'}
+            >
+              <MenuItem value="none">Software (libx264)</MenuItem>
+              <MenuItem value="qsv">Intel Quick Sync (h264_qsv)</MenuItem>
+              <MenuItem value="nvenc">NVIDIA NVENC (h264_nvenc)</MenuItem>
+              <MenuItem value="vaapi">VAAPI (h264_vaapi)</MenuItem>
+              <MenuItem value="amf">AMD AMF (h264_amf)</MenuItem>
+            </Select>
+            <InfoTooltip
+              text="Used only when Playback mode is Enhanced HLS / Enhanced HLS + Buffered and Transcode is H.264. Requires a matching ffmpeg build and GPU drivers on the Youtarr-Turbo host, and device passthrough in Docker."
+              onMobileClick={onMobileTooltipClick}
+            />
+          </Box>
+        </FormControl>
+      </Grid>
 
-      {modeCompat.hardwareMode?.status !== 'ignored' && (
-        <Grid item xs={12} sm={6} md={4}>
-          <FormControl fullWidth>
-            <InputLabel>Hardware decode *(not used in streaming)</InputLabel>
-            <Box className="flex items-center gap-1">
-              <Select
-                value={ytstream.hardwareDecodeMode || 'none'}
-                label="Hardware decode"
-                onChange={(e: SelectChangeEvent<string>) =>
-                  setYtstream({
-                    hardwareDecodeMode: e.target.value as 'none' | 'qsv' | 'nvenc' | 'vaapi',
-                  })
-                }
-                className="flex-1 min-w-0"
-                disabled={disabled}
-              >
-                <MenuItem value="none">Software</MenuItem>
-                <MenuItem value="qsv">Intel Quick Sync</MenuItem>
-                <MenuItem value="nvenc">NVIDIA NVDEC</MenuItem>
-                <MenuItem value="vaapi">VAAPI</MenuItem>
-              </Select>
-              <InfoTooltip
-                text="Independent of Hardware encoder above; any combination is valid (e.g. software encode + hardware decode). Decodes the source video (often VP9/AV1 from YouTube) on the GPU instead of the CPU; scaling/encoding proceed as before. No 'AMD AMF' option: AMD decode acceleration on this app's Linux runtime goes through VAAPI. Use 'Test real-time tuning' below (Simulate source codec) to measure decode+encode timing on this host."
-                onMobileClick={onMobileTooltipClick}
-              />
-            </Box>
-          </FormControl>
-        </Grid>
-      )}
+      {/* Not gated by modeCompat.hardwareMode: per its own label, this
+          setting isn't used by the streaming pipeline at all. */}
+      <Grid item xs={12} sm={6} md={3}>
+        <FormControl fullWidth>
+          <InputLabel>Hardware decode *(not used in streaming)</InputLabel>
+          <Box className="flex items-center gap-1">
+            <Select
+              value={ytstream.hardwareDecodeMode || 'none'}
+              label="Hardware decode"
+              onChange={(e: SelectChangeEvent<string>) =>
+                setYtstream({
+                  hardwareDecodeMode: e.target.value as 'none' | 'qsv' | 'nvenc' | 'vaapi',
+                })
+              }
+              className="flex-1 min-w-0"
+              disabled={disabled}
+            >
+              <MenuItem value="none">Software</MenuItem>
+              <MenuItem value="qsv">Intel Quick Sync</MenuItem>
+              <MenuItem value="nvenc">NVIDIA NVDEC</MenuItem>
+              <MenuItem value="vaapi">VAAPI</MenuItem>
+            </Select>
+            <InfoTooltip
+              text="Independent of Hardware encoder above; any combination is valid (e.g. software encode + hardware decode). Decodes the source video (often VP9/AV1 from YouTube) on the GPU instead of the CPU; scaling/encoding proceed as before. No 'AMD AMF' option: AMD decode acceleration on this app's Linux runtime goes through VAAPI. Use 'Test real-time tuning' below (Simulate source codec) to measure decode+encode timing on this host."
+              onMobileClick={onMobileTooltipClick}
+            />
+          </Box>
+        </FormControl>
+      </Grid>
 
-      {modeCompat.tuning?.status !== 'ignored' && (
-        <Grid item xs={12} sm={6} md={4}>
-          <FormControl fullWidth>
-            <InputLabel>Encoding tuning</InputLabel>
-            <Box className="flex items-center gap-1">
-              <Select
-                value={ytstream.tuning || 'fast'}
-                label="Encoding tuning"
-                onChange={(e: SelectChangeEvent<string>) =>
-                  setYtstream({ tuning: e.target.value as 'fast' | 'balanced' | 'quality' })
-                }
-                className="flex-1 min-w-0"
-                disabled={disabled || modeCompat.tuning?.status !== 'optional'}
-              >
-                {[
-                  { value: 'fast', label: 'Fast (real-time safe)' },
-                  { value: 'balanced', label: 'Balanced' },
-                  { value: 'quality', label: 'Quality' },
-                ].map((opt) => (
-                  <MenuItem key={opt.value} value={opt.value}>
-                    <Box className="flex items-center gap-1 justify-between w-full">
-                      <span>{opt.label}</span>
-                      {recommendedTierForCurrentQuality === opt.value && (
-                        <Chip label="Recommended" size="small" color="success" />
-                      )}
-                    </Box>
-                  </MenuItem>
-                ))}
-              </Select>
-              <InfoTooltip
-                text="Trades encode speed for picture quality at a given resolution/hardware encoder. 'Fast' is safest for real-time streaming; 'Balanced'/'Quality' can fall behind on weaker hardware at higher resolutions. Run 'Test real-time tuning' below to see which tier is safe on this host."
-                onMobileClick={onMobileTooltipClick}
-              />
-            </Box>
-          </FormControl>
-        </Grid>
-      )}
+      <Grid item xs={12} sm={6} md={3}>
+        <FormControl fullWidth>
+          <InputLabel>Encoding tuning</InputLabel>
+          <Box className="flex items-center gap-1">
+            <Select
+              value={ytstream.tuning || 'fast'}
+              label="Encoding tuning"
+              onChange={(e: SelectChangeEvent<string>) =>
+                setYtstream({ tuning: e.target.value as 'fast' | 'balanced' | 'quality' })
+              }
+              className="flex-1 min-w-0"
+              disabled={disabled || modeCompat.tuning?.status !== 'optional'}
+            >
+              {[
+                { value: 'fast', label: 'Fast (real-time safe)' },
+                { value: 'balanced', label: 'Balanced' },
+                { value: 'quality', label: 'Quality' },
+              ].map((opt) => (
+                <MenuItem key={opt.value} value={opt.value}>
+                  <Box className="flex items-center gap-1 justify-between w-full">
+                    <span>{opt.label}</span>
+                    {recommendedTierForCurrentQuality === opt.value && (
+                      <Chip label="Recommended" size="small" color="success" />
+                    )}
+                  </Box>
+                </MenuItem>
+              ))}
+            </Select>
+            <InfoTooltip
+              text="Trades encode speed for picture quality at a given resolution/hardware encoder. 'Fast' is safest for real-time streaming; 'Balanced'/'Quality' can fall behind on weaker hardware at higher resolutions. Run 'Test real-time tuning' below to see which tier is safe on this host."
+              onMobileClick={onMobileTooltipClick}
+            />
+          </Box>
+        </FormControl>
+      </Grid>
 
       {currentHardwareMode === 'vaapi' && (
-        <Grid item xs={12} sm={6} md={4}>
-          {/* No forcedFieldStyle: vaapiQuality is never written into a
-              .strm's URL - same reasoning as Hardware encoder above. */}
+        <Grid item xs={12} sm={6} md={3}>
+          {/* No forcedFieldStyle: vaapiQuality is never written into a .strm
+              URL. Visibility gated on "is vaapi selected"; disabled (not
+              hidden) whenever Hardware encoder itself isn't applicable. */}
           <FormControl fullWidth>
             <InputLabel>VAAPI compression level</InputLabel>
             <Box className="flex items-center gap-1">
@@ -607,7 +554,7 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
                   setYtstream({ vaapiQuality: e.target.value === '' ? null : Number(e.target.value) })
                 }
                 className="flex-1 min-w-0"
-                disabled={disabled}
+                disabled={disabled || modeCompat.hardwareMode?.status !== 'optional'}
               >
                 <MenuItem value="">Auto (follows Encoding tuning: 7/4/1)</MenuItem>
                 {[1, 2, 3, 4, 5, 6, 7].map((level) => (
@@ -625,138 +572,79 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
         </Grid>
       )}
 
-      {modeCompat.instantStart?.status !== 'ignored' && (
-        <Grid item xs={12} md={4}>
-          <Box className="flex items-center gap-1">
-            <FormControlLabel
-              control={
-                <Switch
-                  checked={ytstream.instantStart ?? false}
-                  onChange={(e) => setYtstream({ instantStart: e.target.checked })}
-                  disabled={disabled || modeCompat.instantStart?.status !== 'optional'}
-                />
-              }
-              label="Instant start"
-            />
-            <InfoTooltip
-              text={
-                'By default the first response blocks until the real encode produces its first segment (10-25s typical). When applicable, serves a placeholder clip as segment 0 instead: the video\'s own thumbnail with a \'Loading...\' overlay if cached, otherwise a generic pattern; playback starts instantly while the real encode catches up.'
-                + (modeCompat.instantStart?.reason ? ` For the current Playback mode (${mode}): ${modeCompat.instantStart.reason}` : '')
-              }
-              onMobileClick={onMobileTooltipClick}
-            />
-          </Box>
-        </Grid>
-      )}
+      {/* Cache on play / Hot-swap / Probe shortcut: grouped as their own
+          Switch row, not intermingled with the Select dropdowns above. */}
+      <Grid item xs={12} md={4}>
+        <Box className="flex items-center gap-1">
+          <FormControlLabel
+            control={
+              <Switch
+                checked={cacheOnPlay}
+                onChange={(e) => setStrm({ cacheOnPlay: e.target.checked })}
+                disabled={disabled || modeCompat.cacheOnPlay?.status !== 'optional'}
+              />
+            }
+            label="Cache on play"
+          />
+          <InfoTooltip
+            text={
+              'When a STRM item is played, enqueues a background download so later plays use a cached file instead of live proxying. Pairs with Automatic Video Removal, which can revert a cached video back to STRM instead of deleting it.'
+              + (modeCompat.cacheOnPlay?.reason ? ` For the current Playback mode (${mode}): ${modeCompat.cacheOnPlay.reason}` : '')
+            }
+            onMobileClick={onMobileTooltipClick}
+          />
+        </Box>
+      </Grid>
 
-      {modeCompat.cacheOnPlay?.status !== 'ignored' && (
-        <Grid item xs={12} md={4}>
-          <Box className="flex items-center gap-1">
-            <FormControlLabel
-              control={
-                <Switch
-                  checked={cacheOnPlay}
-                  onChange={(e) => setStrm({ cacheOnPlay: e.target.checked })}
-                  disabled={disabled}
-                />
-              }
-              label="Cache on play"
-            />
-            <InfoTooltip
-              text={
-                'When a STRM item is played, enqueues a background download so later plays use a cached file instead of live proxying. Pairs with Automatic Video Removal, which can revert a cached video back to STRM instead of deleting it.'
-                + (modeCompat.cacheOnPlay?.reason ? ` For the current Playback mode (${mode}): ${modeCompat.cacheOnPlay.reason}` : '')
-              }
-              onMobileClick={onMobileTooltipClick}
-            />
-          </Box>
-        </Grid>
-      )}
+      {/* Always disabled currently: its only 'optional' case is mode=hls,
+          hidden from the picker above. Kept visible, not hidden - live
+          again the moment hls returns, no further wiring needed. */}
+      <Grid item xs={12} md={4}>
+        <Box className="flex items-center gap-1">
+          <FormControlLabel
+            control={
+              <Switch
+                checked={ytstream.hotSwapToCache ?? false}
+                onChange={(e) => setYtstream({ hotSwapToCache: e.target.checked })}
+                disabled={disabled || modeCompat.hotSwapToCache?.status !== 'optional'}
+              />
+            }
+            label="Hot-swap to cached file"
+          />
+          <InfoTooltip
+            text={
+              'If the Cache on play download finishes while this video is still playing, the session switches to producing the rest from the local file instead of the network: same picture, no restart, faster. No effect unless Cache on play is also enabled.'
+              + (modeCompat.hotSwapToCache?.reason ? ` For the current Playback mode (${mode}): ${modeCompat.hotSwapToCache.reason}` : '')
+            }
+            onMobileClick={onMobileTooltipClick}
+          />
+        </Box>
+      </Grid>
 
-      {modeCompat.hotSwapToCache?.status !== 'ignored' && (
-        <Grid item xs={12} md={4}>
-          <Box className="flex items-center gap-1">
-            <FormControlLabel
-              control={
-                <Switch
-                  checked={ytstream.hotSwapToCache ?? false}
-                  onChange={(e) => setYtstream({ hotSwapToCache: e.target.checked })}
-                  disabled={disabled || modeCompat.hotSwapToCache?.status !== 'optional'}
-                />
-              }
-              label="Hot-swap to cached file"
-            />
-            <InfoTooltip
-              text={
-                'If the Cache on play download finishes while this video is still playing, the session switches to producing the rest from the local file instead of the network: same picture, no restart, faster. No effect unless Cache on play is also enabled.'
-                + (modeCompat.hotSwapToCache?.reason ? ` For the current Playback mode (${mode}): ${modeCompat.hotSwapToCache.reason}` : '')
-              }
-              onMobileClick={onMobileTooltipClick}
-            />
-          </Box>
-        </Grid>
-      )}
-
-      {((modeCompat.cacheOnPlay?.status !== 'ignored' && cacheOnPlay) || mode === 'hls-buffer') && (
-        <Grid item xs={12} md={4}>
-          <Box className="flex items-center gap-1">
-            <TextField
-              fullWidth
-              type="number"
-              label="Revert to STRM after (hours)"
-              name="cacheOnPlayExpiryHours"
-              value={config.strm?.cacheOnPlayExpiryHours ?? ''}
-              onChange={(e) => {
-                const raw = e.target.value;
-                if (raw === '') {
-                  setStrm({ cacheOnPlayExpiryHours: null });
-                  return;
-                }
-                const parsed = Number.parseInt(raw, 10);
-                setStrm({ cacheOnPlayExpiryHours: Number.isFinite(parsed) && parsed > 0 ? parsed : null });
-              }}
-              disabled={disabled}
-              placeholder="Never"
-              helperText="Blank = never auto-expire. A nightly sweep (2:10 AM) removes cache-on-play downloads and Enhanced HLS + Buffered untracked-video cache files older than this."
-              inputProps={{ min: 1 }}
-            />
-            <InfoTooltip
-              text="How long a cache-on-play download stays a real file before Youtarr-Turbo auto-reverts it to STRM (never touches a genuine/forced download, regardless of age). Also governs how long Enhanced HLS + Buffered's untracked-video cache files (no library entry to revert, so just deleted) are kept before the same nightly sweep removes them. One setting governs both."
-              onMobileClick={onMobileTooltipClick}
-            />
-          </Box>
-        </Grid>
-      )}
-
-      {modeCompat.probeShortcut?.status !== 'ignored' && (
-        <Grid item xs={12} md={4}>
-          {/* No forcedFieldStyle: probeShortcut is read straight from config
-              with no query-string override path at all (see
-              evaluateProbeShortcut) and is never written into a .strm's
-              URL - Settings has always been the only source for this. */}
-          <Box className="flex items-center gap-1">
-            <FormControlLabel
-              control={
-                <Switch
-                  checked={ytstream.probeShortcut ?? false}
-                  onChange={(e) => setYtstream({ probeShortcut: e.target.checked })}
-                  disabled={disabled || modeCompat.probeShortcut?.status !== 'optional'}
-                />
-              }
-              label="Probe shortcut"
-            />
-            <InfoTooltip
-              text={
-                'A media server\'s metadata probe (Jellyfin\'s ffprobe, etc.) hitting a .strm can trigger real work against YouTube just to read codec info. Every .strm this app writes carries a marker that lets the server detect a probe regardless of this setting; the toggle controls only what happens once one is detected: on serves a tiny cached clip instead, off treats it like any other request.'
-                + (modeCompat.probeShortcut?.reason ? ` For the current Playback mode (${mode}): ${modeCompat.probeShortcut.reason}` : '')
-                + ' Existing .strm files need to be rewritten (re-download, or a channel resync) to pick up the marker.'
-              }
-              onMobileClick={onMobileTooltipClick}
-            />
-          </Box>
-        </Grid>
-      )}
-
+      <Grid item xs={12} md={4}>
+        {/* No forcedFieldStyle: probeShortcut has no query-string override
+            path (see evaluateProbeShortcut) and is never in a .strm URL. */}
+        <Box className="flex items-center gap-1">
+          <FormControlLabel
+            control={
+              <Switch
+                checked={ytstream.probeShortcut ?? false}
+                onChange={(e) => setYtstream({ probeShortcut: e.target.checked })}
+                disabled={disabled || modeCompat.probeShortcut?.status !== 'optional'}
+              />
+            }
+            label="Probe shortcut"
+          />
+          <InfoTooltip
+            text={
+              'A media server\'s metadata probe (Jellyfin\'s ffprobe, etc.) hitting a .strm can trigger real work against YouTube just to read codec info. Every .strm this app writes carries a marker that lets the server detect a probe regardless of this setting; the toggle controls only what happens once one is detected: on serves a tiny cached clip instead, off treats it like any other request.'
+              + (modeCompat.probeShortcut?.reason ? ` For the current Playback mode (${mode}): ${modeCompat.probeShortcut.reason}` : '')
+              + ' Existing .strm files need to be rewritten (re-download, or a channel resync) to pick up the marker.'
+            }
+            onMobileClick={onMobileTooltipClick}
+          />
+        </Box>
+      </Grid>
 
       {enhancedMode && forceH264 && (ytstream.hardwareMode || 'none') !== 'none' && (
         <Grid item xs={12}>
@@ -828,13 +716,159 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
       </Grid>
 
       <Grid item xs={12}>
+        <Accordion style={{ border: 'var(--border-weight) solid var(--border)', borderRadius: 'var(--radius-ui)' }}>
+          <AccordionSummary>
+            <Typography variant="subtitle2" style={{ fontWeight: 700 }}>
+              Network Tuning
+            </Typography>
+          </AccordionSummary>
+          <AccordionDetails>
+            <Grid container spacing={2}>
+              <Grid item xs={12}>
+                <Alert severity="warning" style={{ marginBottom: 8 }}>
+                  <AlertTitle>Power user feature</AlertTitle>
+                  <Typography variant="body2">
+                    Tunes yt-dlp&apos;s own network behavior for live playback (server/routes/ytstream.js&apos;s buildBaseArgs). Leave everything at 0 (disabled) unless streams are slow or throttled; the benchmark below measures real throughput to help pick values instead of guessing.
+                  </Typography>
+                </Alert>
+              </Grid>
+
+              {/* httpChunkSizeMiB/concurrentFragments only affect yt-dlp calls
+                  that actually stream media bytes (hls/hls-buffer) -
+                  direct/direct-redirect only ever resolve a URL via -g, so
+                  those two are disabled outside Enhanced HLS.
+                  throttledRateKBps/socketTimeoutSeconds apply to every mode's
+                  yt-dlp calls (including the -g resolve), so they stay
+                  enabled regardless of mode. 0 = "don't pass the flag" for
+                  every field here. */}
+              {(() => {
+                const chunkFragmentApplicable = mode === 'hls' || mode === 'hls-buffer';
+                const numericFieldProps = (
+                  field: 'httpChunkSizeMiB' | 'concurrentFragments' | 'throttledRateKBps' | 'socketTimeoutSeconds',
+                  fallback: number
+                ) => ({
+                  value: String(ytstream[field] ?? fallback),
+                  onChange: (e: React.ChangeEvent<HTMLInputElement>) => {
+                    const parsed = Number.parseInt(e.target.value, 10);
+                    setYtstream({ [field]: Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback } as Partial<YtstreamConfig>);
+                  },
+                });
+                return (
+                  <>
+                    <Grid item xs={12} sm={6} md={3}>
+                      <Box className="flex items-center gap-1">
+                        <TextField
+                          fullWidth
+                          type="number"
+                          label="HTTP chunk size (MiB)"
+                          name="ytstreamHttpChunkSizeMiB"
+                          {...numericFieldProps('httpChunkSizeMiB', 0)}
+                          disabled={disabled || !chunkFragmentApplicable}
+                          placeholder="0 = disabled"
+                          helperText="0 = disabled"
+                          inputProps={{ min: 0 }}
+                        />
+                        <InfoTooltip
+                          text="yt-dlp --http-chunk-size, in MiB. Splits the video fetch into ranged HTTP requests instead of one long connection - yt-dlp's documented fix for YouTube's mid-download bandwidth throttling. Only applies to Enhanced HLS modes, where yt-dlp itself streams the media; no effect on Direct/Direct (redirect). 0 leaves the flag unset (yt-dlp's own default)."
+                          onMobileClick={onMobileTooltipClick}
+                        />
+                      </Box>
+                    </Grid>
+
+                    <Grid item xs={12} sm={6} md={3}>
+                      <Box className="flex items-center gap-1">
+                        <TextField
+                          fullWidth
+                          type="number"
+                          label="Concurrent fragments"
+                          name="ytstreamConcurrentFragments"
+                          {...numericFieldProps('concurrentFragments', 0)}
+                          disabled={disabled || !chunkFragmentApplicable}
+                          placeholder="0 = disabled"
+                          helperText="0 or 1 = disabled"
+                          inputProps={{ min: 0 }}
+                        />
+                        <InfoTooltip
+                          text="yt-dlp -N/--concurrent-fragments. Fetches HTTP chunks (see HTTP chunk size above) concurrently, increasing sustained throughput. Values of 0 or 1 leave yt-dlp's own single-fetch default in place. Only applies to Enhanced HLS modes; no effect on Direct/Direct (redirect)."
+                          onMobileClick={onMobileTooltipClick}
+                        />
+                      </Box>
+                    </Grid>
+
+                    <Grid item xs={12} sm={6} md={3}>
+                      <Box className="flex items-center gap-1">
+                        <TextField
+                          fullWidth
+                          type="number"
+                          label="Throttled rate (KB/s)"
+                          name="ytstreamThrottledRateKBps"
+                          {...numericFieldProps('throttledRateKBps', 0)}
+                          disabled={disabled}
+                          placeholder="0 = disabled"
+                          helperText="0 = disabled"
+                          inputProps={{ min: 0 }}
+                        />
+                        <InfoTooltip
+                          text="yt-dlp --throttled-rate. If the measured download rate drops below this, yt-dlp assumes YouTube is throttling the connection and re-extracts a fresh URL. Applies to every Playback mode's yt-dlp calls, though it only measures anything meaningful on modes that actually stream data (Enhanced HLS). 0 leaves the flag unset."
+                          onMobileClick={onMobileTooltipClick}
+                        />
+                      </Box>
+                    </Grid>
+
+                    <Grid item xs={12} sm={6} md={3}>
+                      <Box className="flex items-center gap-1">
+                        <TextField
+                          fullWidth
+                          type="number"
+                          label="Socket timeout (seconds)"
+                          name="ytstreamSocketTimeoutSeconds"
+                          {...numericFieldProps('socketTimeoutSeconds', 0)}
+                          disabled={disabled}
+                          placeholder="0 = disabled"
+                          helperText="0 = disabled"
+                          inputProps={{ min: 0 }}
+                        />
+                        <InfoTooltip
+                          text="yt-dlp --socket-timeout. How long yt-dlp waits on a stalled connection before giving up. Applies to every Playback mode's yt-dlp calls (including Direct/Direct (redirect)'s URL-resolve step), so a stall reaches this app's own retry/fallback logic sooner instead of hanging on yt-dlp's much longer built-in default. 0 leaves the flag unset."
+                          onMobileClick={onMobileTooltipClick}
+                        />
+                      </Box>
+                    </Grid>
+
+                    <Grid item xs={12}>
+                      <Divider className="my-1" />
+                      <NetworkTuningBenchmarkTable
+                        results={networkTuningResults}
+                        recommended={networkTuningRecommended}
+                        presets={networkTuningPresets}
+                        progress={networkTuningProgress}
+                        testing={testingNetworkTuning}
+                        error={networkTuningError}
+                        onRunTest={runNetworkTuningBenchmark}
+                        onApplyRecommended={(preset) => setYtstream({
+                          httpChunkSizeMiB: preset.httpChunkSizeMiB,
+                          concurrentFragments: preset.concurrentFragments,
+                        })}
+                        applyDisabledReason={!chunkFragmentApplicable ? 'Set Playback mode to Enhanced HLS or Enhanced HLS + Buffered for these to take effect.' : null}
+                        onMobileTooltipClick={onMobileTooltipClick}
+                      />
+                    </Grid>
+                  </>
+                );
+              })()}
+            </Grid>
+          </AccordionDetails>
+        </Accordion>
+      </Grid>
+
+      <Grid item xs={12}>
         <Divider className="my-2" />
         <Typography variant="subtitle2" color="textSecondary" className="mb-1">
           Storage &amp; background processing
         </Typography>
       </Grid>
 
-      <Grid item xs={12} md={4}>
+      <Grid item xs={12} sm={6} md={3}>
         <Box className="flex items-center gap-1">
           <FormControl fullWidth disabled={disabled}>
             <InputLabel>HLS segment storage</InputLabel>
@@ -846,7 +880,7 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
               }
             >
               <MenuItem value="tmp">OS temp directory (default)</MenuItem>
-              <MenuItem value="cache">Youtarr-Turbo's persistent cache folder</MenuItem>
+              <MenuItem value="cache">App persistent cache folder</MenuItem>
             </Select>
           </FormControl>
           <InfoTooltip
@@ -856,53 +890,49 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
         </Box>
       </Grid>
 
-      {modeCompat.backfillMissingSegments?.status !== 'ignored' && (
-        <Grid item xs={12} md={4}>
-          <Box className="flex items-center gap-1 md:mt-5 md:min-h-[48px]">
-            <FormControlLabel
-              control={
-                <Switch
-                  checked={ytstream.backfillMissingSegments ?? false}
-                  onChange={(e) => setYtstream({ backfillMissingSegments: e.target.checked })}
-                  disabled={disabled || modeCompat.backfillMissingSegments?.status !== 'optional'}
-                />
-              }
-              label="Backfill missing segments"
-            />
-            <InfoTooltip
-              text={
-                'A forward seek permanently skips the segments in between. When on, once encoding reaches the real end, a background pass (local source only) fills those gaps so the rest of the session can seek anywhere instantly. Never affects live playback itself.'
-                + (modeCompat.backfillMissingSegments?.reason ? ` For the current Playback mode (${mode}): ${modeCompat.backfillMissingSegments.reason}` : '')
-              }
-              onMobileClick={onMobileTooltipClick}
-            />
-          </Box>
-        </Grid>
-      )}
+      <Grid item xs={12} sm={6} md={3}>
+        <Box className="flex items-center gap-1 md:mt-5 md:min-h-[48px]">
+          <FormControlLabel
+            control={
+              <Switch
+                checked={ytstream.backfillMissingSegments ?? false}
+                onChange={(e) => setYtstream({ backfillMissingSegments: e.target.checked })}
+                disabled={disabled || modeCompat.backfillMissingSegments?.status !== 'optional'}
+              />
+            }
+            label="Backfill missing segments"
+          />
+          <InfoTooltip
+            text={
+              'A forward seek permanently skips the segments in between. When on, once encoding reaches the real end, a background pass (local source only) fills those gaps so the rest of the session can seek anywhere instantly. Never affects live playback itself.'
+              + (modeCompat.backfillMissingSegments?.reason ? ` For the current Playback mode (${mode}): ${modeCompat.backfillMissingSegments.reason}` : '')
+            }
+            onMobileClick={onMobileTooltipClick}
+          />
+        </Box>
+      </Grid>
 
-      {modeCompat.finalizeToMp4?.status !== 'ignored' && (
-        <Grid item xs={12} md={4}>
-          <Box className="flex items-center gap-1 md:mt-5 md:min-h-[48px]">
-            <FormControlLabel
-              control={
-                <Switch
-                  checked={ytstream.finalizeToMp4 ?? false}
-                  onChange={(e) => setYtstream({ finalizeToMp4: e.target.checked })}
-                  disabled={disabled || modeCompat.finalizeToMp4?.status !== 'optional'}
-                />
-              }
-              label="Finalize .ts to .mp4"
-            />
-            <InfoTooltip
-              text={
-                'Browsers and some players (Jellyfin included) can\'t direct-play raw .ts. When on, once this mode\'s permanent .ts is fully finalized, a background pass remuxes it (no re-encode) into a sibling .mp4; playback prefers that .mp4 automatically once it exists.'
-                + (modeCompat.finalizeToMp4?.reason ? ` For the current Playback mode (${mode}): ${modeCompat.finalizeToMp4.reason}` : '')
-              }
-              onMobileClick={onMobileTooltipClick}
-            />
-          </Box>
-        </Grid>
-      )}
+      <Grid item xs={12} sm={6} md={3}>
+        <Box className="flex items-center gap-1 md:mt-5 md:min-h-[48px]">
+          <FormControlLabel
+            control={
+              <Switch
+                checked={ytstream.finalizeToMp4 ?? false}
+                onChange={(e) => setYtstream({ finalizeToMp4: e.target.checked })}
+                disabled={disabled || modeCompat.finalizeToMp4?.status !== 'optional'}
+              />
+            }
+            label="Finalize .ts to .mp4"
+          />
+          <InfoTooltip
+            text={
+              'Browsers and some players (Jellyfin included) can\'t direct-play raw .ts. When on, once this mode\'s permanent .ts is fully finalized, a background pass remuxes it (no re-encode) into a sibling .mp4; playback prefers that .mp4 automatically once it exists.'
+              + (modeCompat.finalizeToMp4?.reason ? ` For the current Playback mode (${mode}): ${modeCompat.finalizeToMp4.reason}` : '')
+            }
+            onMobileClick={onMobileTooltipClick}
+          />
+        </Box>
+      </Grid>
 
       <Grid item xs={12}>
         <Divider className="my-2" />
@@ -911,7 +941,7 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
         </Typography>
       </Grid>
 
-      <Grid item xs={12} md={4}>
+      <Grid item xs={12} sm={6} md={3}>
         <Box className="flex items-center gap-1">
           <TextField
             fullWidth
@@ -934,7 +964,41 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
         </Box>
       </Grid>
 
-      <Grid item xs={12} md={4}>
+      {/* Relevant whenever a permanent file might actually get created that
+          this expiry applies to: cache-on-play (applicable to this mode and
+          switched on) or Enhanced HLS + Buffered (always produces one,
+          regardless of the cache-on-play setting). Disabled, not hidden,
+          otherwise. */}
+      <Grid item xs={12} sm={6} md={3}>
+        <Box className="flex items-center gap-1">
+          <TextField
+            fullWidth
+            type="number"
+            label="Revert to STRM after (hours)"
+            name="cacheOnPlayExpiryHours"
+            value={config.strm?.cacheOnPlayExpiryHours ?? ''}
+            onChange={(e) => {
+              const raw = e.target.value;
+              if (raw === '') {
+                setStrm({ cacheOnPlayExpiryHours: null });
+                return;
+              }
+              const parsed = Number.parseInt(raw, 10);
+              setStrm({ cacheOnPlayExpiryHours: Number.isFinite(parsed) && parsed > 0 ? parsed : null });
+            }}
+            disabled={disabled || !((modeCompat.cacheOnPlay?.status !== 'ignored' && cacheOnPlay) || mode === 'hls-buffer')}
+            placeholder="Never"
+            helperText="Blank = never auto-expire. A nightly sweep (2:10 AM) removes cache-on-play downloads and Enhanced HLS + Buffered untracked-video cache files older than this."
+            inputProps={{ min: 1 }}
+          />
+          <InfoTooltip
+            text="How long a cache-on-play download stays a real file before Youtarr-Turbo auto-reverts it to STRM (never touches a genuine/forced download, regardless of age). Also governs how long Enhanced HLS + Buffered's untracked-video cache files (no library entry to revert, so just deleted) are kept before the same nightly sweep removes them. One setting governs both."
+            onMobileClick={onMobileTooltipClick}
+          />
+        </Box>
+      </Grid>
+
+      <Grid item xs={12} sm={6} md={3}>
         <Box className="flex items-center gap-1 md:mt-5 md:min-h-[48px]">
           <Typography variant="body2">
             Untracked buffer cache: {untrackedCacheFileCount === null ? '…' : `${untrackedCacheFileCount} file${untrackedCacheFileCount === 1 ? '' : 's'}, ${formatFileSize(untrackedCacheTotalBytes ?? 0) || '0MB'}`}
@@ -959,7 +1023,7 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
         )}
       </Grid>
 
-      <Grid item xs={12} md={4}>
+      <Grid item xs={12} sm={6} md={3}>
         <Box className="flex items-center gap-1 md:mt-5 md:min-h-[48px]">
           <Typography variant="body2">
             Cached video metadata: {metadataCacheCount === null ? '…' : `${metadataCacheCount} video${metadataCacheCount === 1 ? '' : 's'}`}

@@ -12,6 +12,7 @@ import {
   TableContainer,
   TableHead,
   TableRow,
+  TableSortLabel,
   Chip,
   Typography,
   Box,
@@ -92,7 +93,17 @@ function reasonMessage(item: NzbSearchTraceItem, trace: NzbSearchTrace): string 
   }
 }
 
+type StatusSort = 'original' | 'kept' | 'rejected';
+
+const STATUS_SORT_CYCLE: Record<StatusSort, StatusSort> = {
+  original: 'kept',
+  kept: 'rejected',
+  rejected: 'original',
+};
+
 function NzbSearchTraceDialog({ trace, onClose }: NzbSearchTraceDialogProps) {
+  const [statusSort, setStatusSort] = React.useState<StatusSort>('original');
+
   if (!trace) return null;
 
   const keptCount = trace.items.filter((i) => i.kept).length;
@@ -104,6 +115,15 @@ function NzbSearchTraceDialog({ trace, onClose }: NzbSearchTraceDialogProps) {
   // appended for a tvsearch) - query alone is what Sonarr/Radarr originally
   // asked for, which can differ from what was actually used to search.
   const effectiveQuery = trace.newquery || trace.query;
+
+  const sortedItems = trace.items.map((item, index) => ({ item, index }));
+  if (statusSort !== 'original') {
+    const first = statusSort === 'kept';
+    sortedItems.sort((a, b) => {
+      if (a.item.kept === b.item.kept) return a.index - b.index;
+      return a.item.kept === first ? -1 : 1;
+    });
+  }
 
   return (
     <Dialog open={Boolean(trace)} onClose={onClose} maxWidth="xl" fullWidth>
@@ -147,12 +167,20 @@ function NzbSearchTraceDialog({ trace, onClose }: NzbSearchTraceDialogProps) {
             <TableHead style={{ position: 'sticky', top: 0, zIndex: 1, backgroundColor: 'var(--card)' }}>
               <TableRow>
                 <TableCell component="th">Title</TableCell>
-                <TableCell component="th" style={{ width: 90 }}>Status</TableCell>
+                <TableCell component="th" style={{ width: 90 }}>
+                  <TableSortLabel
+                    active={statusSort !== 'original'}
+                    direction={statusSort === 'rejected' ? 'desc' : 'asc'}
+                    onClick={() => setStatusSort((s) => STATUS_SORT_CYCLE[s])}
+                  >
+                    Status
+                  </TableSortLabel>
+                </TableCell>
                 <TableCell component="th" style={{ width: 130 }}>Reason</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
-              {trace.items.map((item, index) => (
+              {sortedItems.map(({ item, index }) => (
                 <TableRow hover key={`${item.youtubeId}-${index}`}>
                   <TableCell style={{ maxWidth: 360 }}>
                     <HighlightedTitle

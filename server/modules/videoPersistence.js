@@ -6,6 +6,12 @@ const channelVideoReanchor = require('./channelVideoReanchor');
 const { PUBLISHED_AT_SOURCE } = require('./constants/publishedAtSource');
 const VideoMetadataProcessor = require('./download/videoMetadataProcessor');
 const { STRM_CACHE_LABEL_PREFIX } = require('./strmCacheOnPlay');
+
+// Mirrors ytstreamTapFinalizer.js's own HLS_BUFFER_CACHE_LABEL_PREFIX -
+// duplicated as a literal rather than imported, since that module already
+// requires this one (for upsertVideoForJob itself); importing it back would
+// create a require cycle for the sake of one constant.
+const HLS_BUFFER_CACHE_LABEL_PREFIX = 'HLS Buffer Cache: ';
 const logger = require('../logger');
 
 /**
@@ -42,6 +48,12 @@ class VideoPersistence {
       delete data.filePath;
       delete data.fileSize;
       delete data.video_resolution;
+      // Tied to the same "was a video file actually verified this call"
+      // check as fileSize above - a metadata-only reprocessing pass (no
+      // fresh file check) must not wipe out timing/throughput a previous
+      // successful download already recorded.
+      delete data.downloadDurationSeconds;
+      delete data.avgDownloadMBps;
     }
     if (!hasVerifiedAudioFile && !isNewVideo) {
       delete data.audioFilePath;
@@ -97,14 +109,15 @@ class VideoPersistence {
       // to ensure file metadata and last_downloaded_at are set
       const updateData = this.prepareVideoDataForSave(video, alwaysCreateJobVideo);
 
-      // cached_at: only for the exact STRM-cache-on-play transition (this
-      // job's own type carries strmCacheOnPlay's label prefix), never for a
-      // genuine/forced download - see the migration adding this column and
+      // cached_at: only for an opportunistic-background-cache transition
+      // (this job's own type carries either strmCacheOnPlay's or
+      // ytstreamTapFinalizer's label prefix), never for a genuine/forced
+      // download - see the migration adding this column and
       // videoDeletionModule.sweepExpiredCachedVideos for what reads it. Set
       // alongside the same update below rather than a second write.
-      const isStrmCacheJob = typeof jobInstance?.jobType === 'string'
-        && jobInstance.jobType.startsWith(STRM_CACHE_LABEL_PREFIX);
-      if (previousStrmFilePath && updateData.is_strm === false && isStrmCacheJob) {
+      const isCacheUpgradeJob = typeof jobInstance?.jobType === 'string'
+        && (jobInstance.jobType.startsWith(STRM_CACHE_LABEL_PREFIX) || jobInstance.jobType.startsWith(HLS_BUFFER_CACHE_LABEL_PREFIX));
+      if (previousStrmFilePath && updateData.is_strm === false && isCacheUpgradeJob) {
         updateData.cached_at = new Date();
       }
 
@@ -289,7 +302,7 @@ class VideoPersistence {
       return null;
     }
 
-    const [metadata] = await VideoMetadataProcessor.processVideoMetadata([`youtu.be/${youtubeId}`]);
+    const [metadata] = await VideoMetadataProcessor.processVideoMetadata([`youtu.be/${youtubeId}`], { jobId });
     // Skip until a real media file was resolved; the end-of-batch save still runs.
     if (!metadata || (!metadata.filePath && !metadata.audioFilePath)) {
       return null;

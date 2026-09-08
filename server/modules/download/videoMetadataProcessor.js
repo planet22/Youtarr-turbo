@@ -145,7 +145,54 @@ class VideoMetadataProcessor {
     return null;
   }
 
-  static async processVideoMetadata(newVideoUrls) {
+  /**
+   * Looks up how long this specific video's download took, using
+   * JobVideoDownload.created_at (stamped by YtdlpOutputRouter the moment
+   * yt-dlp's "[download] Destination:" line is first seen for it - see that
+   * file) as the start time and "now" as the end. This necessarily includes
+   * yt-dlp's own post-processing (remux, embed-metadata, thumbnail
+   * conversion, etc.), not just the raw network transfer - a deliberate
+   * simplification: it answers "how long did this video take to become a
+   * usable file", which is what actually shows up as an ETA in the Download
+   * History UI, rather than requiring separate progress-stream
+   * instrumentation just to isolate network time.
+   * @param {string|null} jobId
+   * @param {string} youtubeId
+   * @param {number} fileSizeBytes
+   * @returns {Promise<{downloadDurationSeconds: number, avgDownloadMBps: number}|null>}
+   */
+  static async computeDownloadTiming(jobId, youtubeId, fileSizeBytes) {
+    if (!jobId || !fileSizeBytes) return null;
+    try {
+      const JobVideoDownload = require('../../models/jobvideodownload');
+      const jvd = await JobVideoDownload.findOne({
+        where: { job_id: jobId, youtube_id: youtubeId },
+        attributes: ['created_at'],
+      });
+      if (!jvd || !jvd.created_at) return null;
+
+      const elapsedSeconds = (Date.now() - new Date(jvd.created_at).getTime()) / 1000;
+      if (!(elapsedSeconds > 0)) return null;
+
+      return {
+        downloadDurationSeconds: Math.round(elapsedSeconds),
+        avgDownloadMBps: (fileSizeBytes / 1024 / 1024) / elapsedSeconds,
+      };
+    } catch (err) {
+      logger.debug({ err, jobId, youtubeId }, 'Failed to compute download timing; leaving it unset');
+      return null;
+    }
+  }
+
+  /**
+   * @param {string[]} newVideoUrls
+   * @param {{jobId?: string|null}} [options] - jobId enables per-video
+   *   download timing/throughput (see computeDownloadTiming); omitted by
+   *   callers that don't have one (there are none today, but this keeps the
+   *   method usable without it, same as before this option existed).
+   */
+  static async processVideoMetadata(newVideoUrls, options = {}) {
+    const { jobId = null } = options;
     const processedVideos = [];
 
     for (const url of newVideoUrls) {
@@ -198,6 +245,8 @@ class VideoMetadataProcessor {
           audioFileSize: null,
           removed: false,
           video_resolution: null,
+          downloadDurationSeconds: null,
+          avgDownloadMBps: null,
         };
 
         // Get file paths from JSON (supports dual-format downloads)
@@ -248,6 +297,12 @@ class VideoMetadataProcessor {
             // switching from strm/both mode to download mode).
             videoMetadata.is_strm = false;
             logger.info({ filepath: videoFilePath, fileSize: videoStats.size, videoId: id }, 'Found video file');
+
+            const timing = await this.computeDownloadTiming(jobId, id, videoStats.size);
+            if (timing) {
+              videoMetadata.downloadDurationSeconds = timing.downloadDurationSeconds;
+              videoMetadata.avgDownloadMBps = timing.avgDownloadMBps;
+            }
           } else {
             videoMetadata.filePath = videoFilePath; // Store expected path anyway
             logger.warn({ videoId: id, expectedPath: videoFilePath }, 'Video file not found after retries');

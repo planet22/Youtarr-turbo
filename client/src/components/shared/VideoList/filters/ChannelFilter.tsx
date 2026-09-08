@@ -11,7 +11,7 @@ import {
 import {
   Check as CheckIcon,
   Search as SearchIcon,
-  ListFilter as FilterListIcon,
+  Filter as FilterListIcon,
 } from '../../../../lib/icons';
 
 export interface ChannelFilterProps {

@@ -1123,7 +1123,25 @@ class JobModule {
       }
     }
 
-    if (videoIds.size === 0 && nzbYoutubeIdsNeedingBackfill.size === 0) {
+    // ytstreamTapFinalizer.js's mode=hls-buffer fetch against an untracked
+    // video (no Video row - see its skipVideoUpsert doc comment) stashes its
+    // per-fetch facts (fileSize/timing/filePath) on the job's own aux_data
+    // under `hlsBufferCacheInfo`, since there's no Video row to attach them
+    // to. Build a display-only video object for these the same way the NZB
+    // backfill above does, combined with whatever youtube_metadata_cache
+    // already knows (title/channel/duration, if this video has ever been
+    // streamed/viewed) - mirrors videosModule.js's own "Show untracked"
+    // Library rows (id: null, isTracked: false).
+    const hlsBufferInfoNeedingBackfill = new Map(); // youtubeId -> hlsBufferCacheInfo
+    for (const job of jobs) {
+      const hasVideos = Array.isArray(job.data?.videos) && job.data.videos.length > 0;
+      const info = job.data?.hlsBufferCacheInfo;
+      if (!hasVideos && info?.youtubeId) {
+        hlsBufferInfoNeedingBackfill.set(info.youtubeId, info);
+      }
+    }
+
+    if (videoIds.size === 0 && nzbYoutubeIdsNeedingBackfill.size === 0 && hlsBufferInfoNeedingBackfill.size === 0) {
       return jobs;
     }
 
@@ -1142,10 +1160,31 @@ class JobModule {
       }
     }
 
+    const hlsBufferMetadataByYoutubeId = new Map();
+    if (hlsBufferInfoNeedingBackfill.size > 0) {
+      // Lazy require (like youtubeMetadataCache.js's own getModel): this
+      // model/its ../db dependency shouldn't load eagerly for every jobModule
+      // consumer, only the rare read path that actually needs it.
+      const YoutubeMetadataCache = require('../models/youtubemetadatacache');
+      const metaRows = await YoutubeMetadataCache.findAll({
+        where: { youtube_id: Array.from(hlsBufferInfoNeedingBackfill.keys()) },
+      });
+      for (const row of metaRows) {
+        let info = null;
+        try {
+          info = row.raw_info_json ? JSON.parse(row.raw_info_json) : null;
+        } catch (err) {
+          logger.warn({ err, youtubeId: row.youtube_id }, 'getRunningJobsWithFreshVideos: failed to parse cached raw_info_json for HLS Buffer Cache backfill');
+        }
+        hlsBufferMetadataByYoutubeId.set(row.youtube_id, info);
+      }
+    }
+
     return jobs.map(job => {
       const videos = job.data?.videos;
       const hasVideos = Array.isArray(videos) && videos.length > 0;
       const nzbYoutubeId = job.data?.nzb?.youtubeId;
+      const hlsBufferInfo = job.data?.hlsBufferCacheInfo;
 
       if (!hasVideos && nzbYoutubeId && backfillByYoutubeId.has(nzbYoutubeId)) {
         return {
@@ -1153,6 +1192,30 @@ class JobModule {
           data: {
             ...job.data,
             videos: [backfillByYoutubeId.get(nzbYoutubeId)],
+          },
+        };
+      }
+
+      if (!hasVideos && hlsBufferInfo?.youtubeId) {
+        const info = hlsBufferMetadataByYoutubeId.get(hlsBufferInfo.youtubeId) || null;
+        return {
+          ...job,
+          data: {
+            ...job.data,
+            videos: [{
+              id: null,
+              youtubeId: hlsBufferInfo.youtubeId,
+              youTubeChannelName: info?.uploader ?? info?.channel ?? '',
+              youTubeVideoName: info?.title ?? hlsBufferInfo.youtubeId,
+              duration: info?.duration ?? null,
+              filePath: hlsBufferInfo.filePath ?? null,
+              fileSize: hlsBufferInfo.fileSize ?? null,
+              downloadDurationSeconds: hlsBufferInfo.downloadDurationSeconds ?? null,
+              avgDownloadMBps: hlsBufferInfo.avgDownloadMBps ?? null,
+              is_strm: false,
+              removed: false,
+              isTracked: false,
+            }],
           },
         };
       }

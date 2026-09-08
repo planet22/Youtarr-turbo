@@ -11,6 +11,9 @@ export {
   // (Trash2, removes a real downloaded video) - "clear cache" only drops a
   // cheap, re-derivable copy (cached metadata / an untracked buffer file).
   Trash as ClearCache,
+  // Combined delete + purge + clear-cache bulk action - deliberately more
+  // alarming than Purge/ClearCache since it does all three at once.
+  Bomb as Obliterate,
   Settings,
   Ban as Block,
   Info,

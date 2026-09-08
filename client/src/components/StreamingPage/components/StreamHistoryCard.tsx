@@ -2,7 +2,7 @@ import React from 'react';
 import { Chip, Tooltip, Box, Typography, Checkbox } from '../../ui';
 import { formatFileSize } from '../../../utils/formatters';
 import { StreamHistoryRow } from '../../../hooks/useStreamHistory';
-import { parseClientLabel, formatModeLabel } from '../utils';
+import { parseClientLabel, formatModeLabel, formatModeChipLabel, modeChipColor, ACTUAL_FILE_MODES } from '../utils';
 import { resultChipFor, formatDetail, formatStarted, formatDuration } from './StreamHistoryTable';
 import StreamCardLayout, { StreamCardStat } from './StreamCardLayout';
 
@@ -38,8 +38,15 @@ function StreamHistoryCard({ row, isSelected, onToggleSelect }: StreamHistoryCar
       }
       headerChips={
         <>
-          <Chip size="small" label={formatModeLabel(row.mode)} variant="filled" />
+          <Tooltip title={formatModeLabel(row.mode)}>
+            <Chip size="small" label={formatModeChipLabel(row.mode)} color={modeChipColor(row.mode)} variant="filled" />
+          </Tooltip>
           {row.errorMessage ? <Tooltip title={row.errorMessage}>{chipElement}</Tooltip> : chipElement}
+          {ACTUAL_FILE_MODES.has(row.mode) && (
+            <Tooltip title="Serving the real, already-downloaded file directly - this is that file's own actual quality/container, not a requested or configured value">
+              <Chip size="small" variant="outlined" color="success" label="Cached" />
+            </Tooltip>
+          )}
         </>
       }
     >

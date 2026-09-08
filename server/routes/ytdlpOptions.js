@@ -4,6 +4,7 @@ const ytdlpValidator = require('../modules/download/ytdlpValidator');
 const hardwareCapabilityTester = require('../modules/hardwareCapabilityTester');
 const streamTuningBenchmark = require('../modules/streamTuningBenchmark');
 const streamEncoderTuning = require('../modules/streamEncoderTuning');
+const networkTuningBenchmark = require('../modules/networkTuningBenchmark');
 const hardwareDecodeModule = require('../modules/hardwareDecodeModule');
 const configModule = require('../modules/configModule');
 const logger = require('../logger');
@@ -315,6 +316,66 @@ function createYtdlpOptionsRoutes({ verifyToken, ytdlpValidationRateLimiter }) {
       } catch (err) {
         logger.error({ err, hardwareMode }, 'ytdlp: HLS segment timing test failed');
         res.status(500).json({ ok: false, error: err.message || 'HLS segment timing test failed' });
+      }
+    }
+  );
+
+  /**
+   * @swagger
+   * /api/ytdlp/test-network-tuning:
+   *   post:
+   *     summary: Benchmark real yt-dlp download throughput across a few --http-chunk-size/--concurrent-fragments presets
+   *     description: Against a user-supplied YouTube URL/video ID, sequentially runs 4 presets (off, conservative, aggressive, max), each fetching video-only bytes (discarded, no ffmpeg/disk write involved) for up to 15s or 150MB, and reports measured MB/s per preset plus which one measured fastest. Broadcasts networkTuningBenchmarkProgress WebSocket messages as it goes. Sequential (concurrent presets would contend for the same bandwidth), so a full run takes up to roughly a minute.
+   *     tags: [Configuration]
+   *     security:
+   *       - bearerAuth: []
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             required: [url]
+   *             properties:
+   *               url:
+   *                 type: string
+   *                 description: Full YouTube URL or bare 11-character video ID.
+   *     responses:
+   *       200:
+   *         description: '{ results: { [presetId]: { ok, bytes?, elapsedSeconds?, throughputMBps?, error? } }, recommended: presetId|null, presets: [{ id, label, httpChunkSizeMiB, concurrentFragments }] }'
+   *       400:
+   *         description: Missing/invalid url.
+   *       401:
+   *         description: Missing or invalid auth token.
+   *       409:
+   *         description: A network tuning benchmark is already running.
+   *       429:
+   *         description: Rate limit exceeded.
+   */
+  router.post(
+    '/api/ytdlp/test-network-tuning',
+    verifyToken,
+    ytdlpValidationRateLimiter,
+    async (req, res) => {
+      const { url } = req.body || {};
+      if (typeof url !== 'string' || !url.trim()) {
+        return res.status(400).json({ ok: false, error: 'url must be a non-empty string' });
+      }
+      if (url.length > 500) {
+        return res.status(400).json({ ok: false, error: 'url exceeds 500 character limit' });
+      }
+      if (networkTuningBenchmark.isBenchmarkRunning()) {
+        return res.status(409).json({ ok: false, error: 'A network tuning benchmark is already running' });
+      }
+      try {
+        const result = await networkTuningBenchmark.runBenchmark(url.trim());
+        res.json({ ok: true, results: result.results, recommended: result.recommended, presets: result.presets });
+      } catch (err) {
+        logger.error({ err, url }, 'ytdlp: network tuning benchmark failed');
+        res.status(err.message && err.message.includes('already running') ? 409 : 400).json({
+          ok: false,
+          error: err.message || 'Network tuning benchmark failed',
+        });
       }
     }
   );

@@ -143,7 +143,7 @@ export const NavHeaderActions: React.FC<NavHeaderActionsProps> = ({
         </Tooltip>
       )}
 
-      <ColorModeToggle />
+      {!isMobile && <ColorModeToggle />}
 
       <DownloadActivityIndicator token={token} />
 

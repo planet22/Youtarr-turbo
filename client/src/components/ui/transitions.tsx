@@ -160,6 +160,11 @@ export interface CollapseProps {
   unmountOnExit?: boolean;
   className?: string;
   overflowVisible?: boolean;
+  /** Fades and slides the revealed content in/out instead of a flat height
+   * clip, and eases the height with the app's bouncy timing function. Off by
+   * default so existing Collapse call sites (dialogs, drawers, accordions)
+   * keep their current feel. */
+  fancy?: boolean;
 }
 
 const Collapse: React.FC<CollapseProps> = ({
@@ -169,10 +174,15 @@ const Collapse: React.FC<CollapseProps> = ({
   unmountOnExit = false,
   className,
   overflowVisible = false,
+  fancy = false,
 }) => {
   const duration = timeout === 'auto' ? 300 : timeout;
   const [mounted, setMounted] = React.useState(inProp);
   const [height, setHeight] = React.useState<number | 'auto'>(inProp ? 'auto' : 0);
+  // Fancy mode only: drives the inner content's fade/slide. Enters slightly
+  // after the height starts growing and exits immediately, so the reveal
+  // reads as "content settling in" rather than being clipped by the edge.
+  const [contentVisible, setContentVisible] = React.useState(inProp);
   const containerRef = React.useRef<HTMLDivElement>(null);
 
   React.useEffect(() => {
@@ -183,11 +193,16 @@ const Collapse: React.FC<CollapseProps> = ({
         // Already mounted in DOM — animate height immediately
         setHeight(el.scrollHeight);
         const id = setTimeout(() => setHeight('auto'), duration);
-        return () => clearTimeout(id);
+        const revealId = fancy ? requestAnimationFrame(() => setContentVisible(true)) : null;
+        return () => {
+          clearTimeout(id);
+          if (revealId !== null) cancelAnimationFrame(revealId);
+        };
       }
       // If el is null the component was previously unmounted (unmountOnExit=true).
       // The layout effect below will set the height once the DOM node exists.
     } else {
+      setContentVisible(false);
       if (containerRef.current) {
         setHeight(containerRef.current.scrollHeight);
         // Force reflow then collapse
@@ -200,7 +215,7 @@ const Collapse: React.FC<CollapseProps> = ({
         return () => clearTimeout(id);
       }
     }
-  }, [inProp, unmountOnExit, duration]);
+  }, [inProp, unmountOnExit, duration, fancy]);
 
   // After re-mounting from an unmounted state (unmountOnExit=true), the DOM node
   // becomes available but the useEffect above already ran with containerRef=null.
@@ -211,7 +226,11 @@ const Collapse: React.FC<CollapseProps> = ({
       const h = containerRef.current.scrollHeight;
       setHeight(h);
       const id = setTimeout(() => setHeight('auto'), duration);
-      return () => clearTimeout(id);
+      const revealId = fancy ? requestAnimationFrame(() => setContentVisible(true)) : null;
+      return () => {
+        clearTimeout(id);
+        if (revealId !== null) cancelAnimationFrame(revealId);
+      };
     }
   // Only fire when `mounted` flips to true — other deps are intentionally omitted
   // because they are stable within this transition window.
@@ -227,10 +246,27 @@ const Collapse: React.FC<CollapseProps> = ({
       style={{
         overflow: overflowVisible ? 'visible' : undefined,
         height: height === 'auto' ? 'auto' : `${height}px`,
+        // Height itself always eases with a plain curve - a bouncy/overshoot
+        // curve here would make the box briefly grow past its final size,
+        // which is exactly the kind of layout wobble this component exists
+        // to avoid. The "impressive" bounce lives in the inner content's
+        // transform below instead, which doesn't affect layout height.
         transition: height !== 'auto' ? `height ${duration}ms cubic-bezier(0.4,0,0.2,1)` : undefined,
       }}
     >
-      {children}
+      {fancy ? (
+        <div
+          style={{
+            opacity: contentVisible ? 1 : 0,
+            transform: contentVisible ? 'translateY(0)' : 'translateY(-6px)',
+            transition: `opacity ${duration}ms ease, transform ${Math.round(duration * 1.3)}ms var(--transition-bouncy, cubic-bezier(0.34,1.56,0.64,1))`,
+          }}
+        >
+          {children}
+        </div>
+      ) : (
+        children
+      )}
     </div>
   );
 };

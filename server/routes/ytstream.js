@@ -10,7 +10,7 @@
  * so age-restricted and members-only content works here too.
  *
  * Routes:
- *   GET /api/ytstream/:youtubeId            -> resolve + play (mode=direct|direct-pipe|ffmpeg|hls)
+ *   GET /api/ytstream/:youtubeId            -> resolve + play (mode=direct|ffmpeg|hls)
  *   GET /api/ytstream/history               -> paginated stream-history audit trail
  *   DELETE /api/ytstream/history            -> delete stream-history entries by streamId
  *   GET /api/ytstream/:youtubeId/formats     -> debug: list yt-dlp formats (auth required)
@@ -25,7 +25,7 @@ const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
 const { URL } = require('url');
-const { Transform } = require('stream');
+const { pipeline } = require('stream/promises');
 const { spawn, spawnSync } = require('child_process');
 const logger = require('../logger');
 const configModule = require('../modules/configModule');
@@ -98,7 +98,7 @@ function loadYoutubeCookieHeader(cookiePath) {
   }
 }
 
-const VALID_MODES = ['direct', 'direct-pipe', 'direct-redirect', 'ffmpeg', 'hls', 'hls-buffer'];
+const VALID_MODES = ['direct', 'direct-redirect', 'hls', 'hls-buffer'];
 // mkv is ffmpeg-mode only; HLS segments must be fmp4/mpegts, so
 // getHlsContainerInfo falls through to its fmp4 default for 'mkv' too.
 const VALID_CONTAINERS = ['mp4', 'ts', 'mkv'];
@@ -215,14 +215,12 @@ function destroyHlsSession(session, reason) {
 }
 
 /**
- * Streaming-page stream tracking — surfaces active mode=ffmpeg/mode=hls playback
+ * Streaming-page stream tracking — surfaces active mode=hls/hls-buffer playback
  * (byte counters, client info, start/stop) via GET /api/ytstream/streams and
  * POST /api/ytstream/streams/:id/stop, broadcast over the same WebSocket
  * mechanism as download-job progress (messageEmitter.js). mode=direct is
- * stateless and excluded. Identity: an HLS "stream" is one shared encode
- * session (keyed by hlsSessions key); an ffmpeg "stream" is one HTTP request —
- * streamViaFfmpeg can retry before any byte reaches the client, so its
- * streamId is created once per request and threaded through every retry.
+ * stateless and excluded. Identity: a "stream" is one shared HLS encode
+ * session, keyed by its hlsSessions key.
  */
 const activeStreams = new Map(); // streamId -> entry
 let statsTickTimer = null;
@@ -271,6 +269,37 @@ async function persistStreamHistoryStart(entry) {
   }
 }
 
+/**
+ * Fills in `titleById` (in place) for any youtubeId still missing a title
+ * after the Video-table lookup, from youtube_metadata_cache's cached yt-dlp
+ * info blob - the fallback source for videos not (or no longer) in the
+ * library: an NZB-only grab that was only ever streamed/buffered, or a video
+ * whose Video row has since been removed (e.g. via Obliterate). Without this,
+ * those rows permanently showed the bare YouTube id instead of a title, even
+ * though the title was sitting right there in the metadata cache.
+ */
+async function fillMissingTitlesFromMetadataCache(youtubeIds, titleById, models) {
+  const missing = youtubeIds.filter((id) => !titleById[id]);
+  if (!missing.length || !models || !models.YoutubeMetadataCache) return;
+  try {
+    const rows = await models.YoutubeMetadataCache.findAll({
+      where: { youtube_id: missing },
+      attributes: ['youtube_id', 'raw_info_json'],
+    });
+    for (const row of rows) {
+      if (!row.raw_info_json) continue;
+      try {
+        const info = JSON.parse(row.raw_info_json);
+        if (info && info.title) titleById[row.youtube_id] = info.title;
+      } catch (err) {
+        logger.warn({ err, youtubeId: row.youtube_id }, 'ytstream: failed to parse cached raw_info_json for title fallback');
+      }
+    }
+  } catch (err) {
+    logger.warn({ err }, 'ytstream: failed to resolve fallback titles from metadata cache');
+  }
+}
+
 async function persistStreamHistoryEnd(entry, reason, errorMessage) {
   if (!ytstreamModels || !ytstreamModels.StreamHistory) return;
   try {
@@ -289,10 +318,9 @@ async function persistStreamHistoryEnd(entry, reason, errorMessage) {
 }
 
 // Only hls/hls-buffer produce discrete numbered segment files on disk at
-// all (mode=ffmpeg is one continuous live pipe, direct* modes never touch
-// ffmpeg) - snapshotStream below only computes/attaches this for those
-// two, so streamProgress's periodic broadcast never does the readdir for
-// a mode where it's meaningless.
+// all (direct* modes never touch ffmpeg) - snapshotStream below only
+// computes/attaches this for those two, so streamProgress's periodic
+// broadcast never does the readdir for a mode where it's meaningless.
 const SEGMENT_STATUS_MODES = new Set(['hls', 'hls-buffer']);
 
 /**
@@ -549,9 +577,8 @@ function isFfmpegAvailable() {
     ffmpegAvailableCache = true;
   } else {
     logger.warn(
-      'ffmpeg was not found on PATH. YouTube ffmpeg-enhanced streaming ' +
-        '(mode=ffmpeg) will automatically fall back to direct mode. ' +
-        'See docs/YTSTREAM.md for install instructions.'
+      'ffmpeg was not found on PATH. mode=hls/hls-buffer require it and will ' +
+        'fail outright until it is installed. See docs/YTSTREAM.md for install instructions.'
     );
   }
   return available;
@@ -590,11 +617,11 @@ function getDirectFormatSelector(quality, strictness = 'fallback') {
 }
 
 /**
- * Height cap for `mode=ffmpeg`'s DASH (video-only + audio-only) fetch.
- * Unlike `getDirectFormatSelector`, this doesn't need named-preset exact
- * strings — just the height ceiling — since resolution isn't limited to
- * whatever YouTube happens to serve progressively (see
- * getDashFormatSelectors below). Returns null for "no cap" (best).
+ * Height cap shared by every quality-resolving call site (direct-family's
+ * `getDirectFormatSelector` and hls/hls-buffer's `getDashFormatSelectors`
+ * below). The DASH selectors don't need named-preset exact strings — just
+ * the height ceiling — since resolution isn't limited to whatever YouTube
+ * happens to serve progressively. Returns null for "no cap" (best).
  */
 function resolveQualityHeight(quality) {
   const q = String(quality || '720').toLowerCase().trim();
@@ -606,10 +633,10 @@ function resolveQualityHeight(quality) {
 }
 
 /**
- * Video-only + audio-only selectors for `mode=ffmpeg`'s two-pipe pipeline
- * (see streamViaFfmpeg). YouTube only serves progressive (single-file,
- * already-muxed) formats up to 720p — DASH is required for 1080p+, which
- * is why this is a separate selector pair from getDirectFormatSelector.
+ * Video-only + audio-only selectors for hls/hls-buffer's yt-dlp+ffmpeg
+ * pipeline. YouTube only serves progressive (single-file, already-muxed)
+ * formats up to 720p — DASH is required for 1080p+, which is why this is
+ * a separate selector pair from getDirectFormatSelector.
  */
 function getDashFormatSelectors(quality, strictness = 'fallback') {
   const height = resolveQualityHeight(quality);
@@ -631,97 +658,6 @@ function isH264Codec(codec) {
   return /^(avc1|h264)/i.test(String(codec || ''));
 }
 
-/**
- * `ytstream.calculatedLength` (opt-in, `mode=ffmpeg` only): reports a synthetic
- * `Content-Length`/`Accept-Ranges` for the transcoded output so players
- * that refuse to treat a chunked, unknown-duration stream as directly
- * playable (Jellyfin's HLS-transcode fallback being the motivating case)
- * see something that looks like an ordinary seekable file. A `Range`
- * request is translated into a `-ss <seconds>` restart of the pipeline
- * at the estimated matching timestamp — see streamViaFfmpeg's
- * `responseShaping` handling for the actual wiring.
- *
- * None of this can be exact: the real encoded size is only known once
- * the transcode finishes, and CRF/VBR encoding means bitrate (and so the
- * byte<->time mapping) isn't constant either. It's a best-effort
- * approximation, not a real seekable file.
- */
-
-const AUDIO_BITRATE_KBPS = 192; // matches the AAC encode target / typical source audio
-// Under-estimating the total size truncates real content (the response
-// closes before all the promised bytes arrive — broken playback in any
-// strict client). Over-estimating just means streamViaFfmpegFakeLength's
-// length-capping transform pads the tail with zero bytes once ffmpeg's
-// real output ends, which players tolerate fine. So bias deliberately
-// high rather than trying to be precise.
-const CALCULATED_LENGTH_PADDING_FACTOR = 1.2;
-
-/**
- * @param {number|null} height - from resolveQualityHeight; null ("best") is
- *   treated as the top tier since the actual resolution yt-dlp picks isn't
- *   known ahead of time.
- * @returns {number} estimated encoded bytes/sec, padded high.
- *
- * Uses streamEncoderTuning's lookupResolutionTierKbps (same table the
- * encoder's own -maxrate/-bufsize is derived from — see
- * resolveEncoderBitrateCaps there) so this estimate and the real encoder
- * cap stay in sync off one shared table instead of drifting.
- */
-function estimateBitrateBytesPerSecond(height) {
-  const totalKbps = streamEncoderTuning.lookupResolutionTierKbps(height) + AUDIO_BITRATE_KBPS;
-  return Math.ceil(((totalKbps * 1000) / 8) * CALCULATED_LENGTH_PADDING_FACTOR);
-}
-
-/**
- * Truncates/pads a byte stream to exactly `targetLength` bytes so the
- * response body always matches whatever Content-Length/Content-Range was
- * already promised in headers — necessary because the real transcoded
- * size can only be estimated in advance, and closing the response short
- * of a declared Content-Length is what triggers content-length-mismatch
- * errors in strict HTTP clients. Overflow is defensively dropped (should
- * be rare given the deliberately-padded-high estimate); underflow is
- * zero-padded once ffmpeg's real output ends.
- */
-function createLengthCappingTransform(targetLength) {
-  let written = 0;
-  return new Transform({
-    transform(chunk, _enc, callback) {
-      const remaining = targetLength - written;
-      if (remaining <= 0) {
-        callback();
-        return;
-      }
-      const slice = chunk.length > remaining ? chunk.subarray(0, remaining) : chunk;
-      written += slice.length;
-      callback(null, slice);
-    },
-    flush(callback) {
-      const remaining = targetLength - written;
-      callback(null, remaining > 0 ? Buffer.alloc(remaining) : undefined);
-    },
-  });
-}
-
-/**
- * Parses a `Range: bytes=START-END` header against calculatedLength's synthetic
- * total length. Only the common `bytes=N-` / `bytes=N-M` forms (what
- * browsers/Jellyfin actually send for seeking) are handled — anything
- * else (suffix ranges, multi-range) returns `null`, which callers treat
- * as "serve the whole (estimated) body from the start".
- * @returns {null|{invalid: true}|{start: number, end: number}}
- */
-function parseByteRange(rangeHeader, totalLength) {
-  if (!rangeHeader) return null;
-  const match = /^bytes=(\d+)-(\d*)$/.exec(String(rangeHeader).trim());
-  if (!match) return null;
-  const start = Number.parseInt(match[1], 10);
-  const end = match[2] ? Number.parseInt(match[2], 10) : totalLength - 1;
-  if (!Number.isFinite(start) || start < 0 || start >= totalLength || end < start) {
-    return { invalid: true };
-  }
-  return { start, end: Math.min(end, totalLength - 1) };
-}
-
 // In-memory cache of video durations for calculatedLength's Content-Length
 // estimate. Durations don't change, so entries never expire.
 const durationCache = new Map();
@@ -734,9 +670,9 @@ const youtubeMetadataCache = require('../modules/youtubeMetadataCache');
 const { formatRelativeTimeAgo } = require('../modules/relativeTimeFormatter');
 
 // In-flight dedup for getVideoDurationSeconds's live yt-dlp fallback -
-// without it, the instant-start warm-up and the real calculatedLength
-// lookup moments later would each spawn their own yt-dlp process for the
-// same video for no benefit.
+// without it, an early warm-up call and the real calculatedLength lookup
+// moments later would each spawn their own yt-dlp process for the same
+// video for no benefit.
 const durationLookupPromises = new Map();
 
 // In-memory cache of resolved video codecs, for transcode=copy's
@@ -753,23 +689,27 @@ const maxAvailableHeightCache = new Map();
 
 /**
  * `mode=hls`: real segmented HLS output (playlist.m3u8 + segment files) on
- * disk, instead of `mode=ffmpeg`'s single live-piped connection.
+ * disk, instead of one single live-piped connection.
  *
  * A live pipe makes the *player* wait on our full pipeline startup latency
  * (two concurrent yt-dlp extractions + ffmpeg spin-up) on the same
  * connection it's reading from — some players/transcoders (Jellyfin's own
  * server-side ffmpeg being the motivating case) won't tolerate that and
- * just retry forever, producing an endless black-screen loop. Real
- * segmented HLS moves the wait to *our* side before we ever respond (see
+ * just retry forever, producing an endless black-screen loop (the removed
+ * mode=ffmpeg + calculatedLength combination hit exactly this, plus a
+ * second failure mode: a player's own mid-stream Range probe restarting
+ * the encode from a new timestamp mid-playback, discontinuous with
+ * whatever it had already started decoding). Real segmented HLS moves the
+ * wait to *our* side before we ever respond (see
  * waitForHlsSessionReady/getOrCreateHlsSession, modeled on the
  * readiness-gated approach in jellyfin-youtube-plugin's
  * ManagedTranscodeService.cs), and every segment served after that is an
  * ordinary complete static file — no unknown-length/non-seekable concerns,
- * no need for calculatedLength's estimation tricks.
+ * and a seek is just "fetch a different segment," never a discontinuous
+ * mid-stream restart.
  *
  * Tradeoff: writes real files to disk for the session's run (idle-reaped
- * after HLS_IDLE_TIMEOUT_MS), unlike mode=ffmpeg/calculatedLength's pure
- * in-memory pipes.
+ * after HLS_IDLE_TIMEOUT_MS), unlike a pure in-memory pipe.
  */
 const HLS_SEGMENT_DURATION_SECONDS = 4;
 // This nominal 4s is only exactly right for a 30fps source - the real
@@ -908,28 +848,14 @@ function buildHlsSessionKey({ youtubeId, quality, qualityStrictness, transcode, 
  * disk. A segment not yet on disk is treated as a seek and produced on
  * demand (restartHlsEncodePassAtSegment).
  *
- * `placeholder` (ytstream.instantStart) prepends one pre-made "loading"
- * segment ahead of the real ones, separated by #EXT-X-DISCONTINUITY (own
- * #EXT-X-MAP for fmp4) — never reuses a real segment index.
- *
- * DELIBERATELY always VOD+ENDLIST, even with a placeholder, listing the
- * full real segment range. Do NOT switch to an EVENT playlist without a
- * live Jellyfin test: two EVENT variants were tried and reverted — one made
- * the player treat the last (not-yet-on-disk) segment as the live edge and
- * skip straight to the next item; the other left playback stuck on the
- * placeholder because Jellyfin doesn't reliably re-poll an unchanged EVENT
- * playlist. Both were chasing a cosmetic scrubber/duration quirk not worth
- * trading working playback for.
- *
  * `segmentDurationSeconds` (always HLS_SEGMENT_DURATION_SECONDS today - see
  * its own comment) drives every #EXTINF entry here. Whatever value the
  * CALLER passes is what session.playlistSegmentDurationSeconds
  * gets frozen to for the rest of the session - effectiveSeek/targetSeconds
  * must keep using that same frozen value forever after, since this file is
- * never rewritten with a different one (see maybeStripPlaceholderFromPlaylist,
- * the one exception, which reuses the same frozen value for its rewrite too).
+ * never rewritten with a different one.
  */
-function buildFullHlsPlaylist({ totalSegments, durationSeconds, segmentExt, segmentType, placeholder, segmentDurationSeconds }) {
+function buildFullHlsPlaylist({ totalSegments, durationSeconds, segmentExt, segmentType, segmentDurationSeconds }) {
   const lines = [
     '#EXTM3U',
     '#EXT-X-VERSION:7',
@@ -937,14 +863,6 @@ function buildFullHlsPlaylist({ totalSegments, durationSeconds, segmentExt, segm
     '#EXT-X-PLAYLIST-TYPE:VOD',
     '#EXT-X-MEDIA-SEQUENCE:0',
   ];
-  if (placeholder) {
-    if (segmentType === 'fmp4' && placeholder.initFilename) {
-      lines.push(`#EXT-X-MAP:URI="${placeholder.initFilename}"`);
-    }
-    lines.push(`#EXTINF:${placeholder.durationSeconds.toFixed(3)},`);
-    lines.push(placeholder.filename);
-    lines.push('#EXT-X-DISCONTINUITY');
-  }
   if (segmentType === 'fmp4') {
     lines.push('#EXT-X-MAP:URI="init.mp4"');
   }
@@ -959,60 +877,6 @@ function buildFullHlsPlaylist({ totalSegments, durationSeconds, segmentExt, segm
   return lines.join('\n') + '\n';
 }
 
-/**
- * `ytstream.instantStart`'s placeholder is written into the playlist file
- * ONCE at session creation and nothing rewrites it afterward — so a second
- * request on an already-running session (double-GET, reload) would replay
- * the placeholder even after the real encode has caught up, visibly
- * "restarting into another loading screen".
- *
- * Called from both playlist-serving sites before the file is read; a no-op
- * (fs.existsSync check) except for the first request that notices real
- * segment0 exists, which rewrites the file in place so every later request
- * sees the placeholder-free version.
- */
-function maybeStripPlaceholderFromPlaylist(session) {
-  if (!session.hasPlaceholder || session.placeholderStripped) return;
-  const realFirstSegment = path.join(session.dir, `segment00000.${session.segmentExt}`);
-  if (!fs.existsSync(realFirstSegment)) return;
-  try {
-    const fullPlaylist = buildFullHlsPlaylist({
-      totalSegments: session.totalSegments,
-      durationSeconds: session.durationSeconds,
-      segmentExt: session.segmentExt,
-      segmentType: session.segmentType,
-      placeholder: null,
-      // Frozen value, not the live session.segmentDurationSeconds - this
-      // rewrite must stay consistent with whatever the first version of
-      // this same file already told the player (see effectiveSeek's
-      // comment in spawnHlsEncodePass).
-      segmentDurationSeconds: session.playlistSegmentDurationSeconds || HLS_SEGMENT_DURATION_SECONDS,
-    });
-    fs.writeFileSync(session.playlistPath, fullPlaylist);
-    session.placeholderStripped = true;
-    logger.info({ sessionKey: session.sessionKey }, 'ytstream: real first segment ready; stripped instant-start placeholder from playlist for future requests');
-  } catch (err) {
-    logger.warn({ err, sessionKey: session.sessionKey }, 'ytstream: failed to strip instant-start placeholder from playlist');
-  }
-}
-
-/**
- * `ytstream.instantStart` (opt-in, calculatedLength HLS sessions only — see
- * buildFullHlsPlaylist's `placeholder` param and createHlsSessionInternal).
- *
- * getOrCreateHlsSession normally blocks the first response on
- * waitForHlsSessionReady until the real pipeline produces its first segment
- * (cold start commonly 10-25s, up to HLS_READY_TIMEOUT_MS=45s). This drops a
- * tiny pre-generated "loading" segment into the session dir under a
- * filename that never collides with the real `segment00000.*`, so the first
- * disk poll finds *something* and returns immediately — playback starts in
- * milliseconds, and by the time the ~3s placeholder finishes the real
- * encode usually has a head start on segment 0.
- *
- * Scoped to `transcode=h264` only: its output codec is fixed regardless of
- * source video, so one cached placeholder fits every video; `transcode=copy`
- * passes through each source's own codec, so no single placeholder could match.
- */
 // Persistent (not os.tmpdir(), which most Docker setups wipe on restart) —
 // generation is a one-time cost per {signature, resolution}, and a
 // predictable path also lets a user drop in their own clip to be used as-is.
@@ -1031,7 +895,6 @@ function maybeStripPlaceholderFromPlaylist(session) {
 // persistent contents each time a job ran in the background.
 const YTSTREAM_CACHE_DIR = path.join(configModule.directoryPath, '.youtarr_ytstream_cache');
 const YTSTREAM_CLIPS_DIR = path.join(YTSTREAM_CACHE_DIR, 'ytstream-clips');
-const HLS_PLACEHOLDER_CACHE_DIR = path.join(YTSTREAM_CLIPS_DIR, 'hls-instant-start');
 // mode=hls-buffer against a video with no `Video` row (untracked NZB
 // `strm` grab, or later disowned via `importStrategy:'untracked'` — see
 // bufferEnabled in createHlsSessionInternal) still gets buffer-fetched, but
@@ -1137,21 +1000,11 @@ async function listUntrackedBufferCacheEntries() {
   return results;
 }
 
-const HLS_PLACEHOLDER_DURATION_SECONDS = 3; // must stay < HLS_SEGMENT_DURATION_SECONDS (the playlist's #EXT-X-TARGETDURATION)
 const HLS_PLACEHOLDER_FPS = 30;
 // Used only when a video's real resolution can't be resolved yet (see
 // resolveVideoTargetResolution) - a plain 16:9 fallback, not a target.
 const HLS_PLACEHOLDER_FALLBACK_WIDTH = 1280;
 const HLS_PLACEHOLDER_FALLBACK_HEIGHT = 720;
-
-/** In-flight generation promises, keyed by signature — two sessions racing
- * to create the same never-yet-cached placeholder share one ffmpeg run
- * instead of each spawning their own. */
-const placeholderGenerationPromises = new Map();
-
-function getPlaceholderSignature({ segmentType, hardwareMode, tuning, width, height }) {
-  return `${segmentType}-${normalizeHardwareMode(hardwareMode)}-${normalizeTuning(tuning)}-${width}x${height}`;
-}
 
 /**
  * Resolves the {width, height} the real encode would actually use for this
@@ -1220,6 +1073,21 @@ function capResolutionToHeight(width, height, heightCap) {
   return { width: Math.max(2, Math.round((width * scale) / 2) * 2), height: heightCap };
 }
 
+/**
+ * quality/container for a StreamHistory row that serves an already-downloaded
+ * file directly - the probe-shortcut's existingCachedFilePath branch and
+ * serveCachedFile's mode='cached-file' branch below, neither of which goes
+ * through resolvePlaybackPlan's requested-quality logic at all. Without this
+ * their Format column stayed completely blank even though the real served
+ * resolution/container is fully knowable from the source file itself (this
+ * is the actual file, not a requested/configured target).
+ */
+async function resolveActualServedFileInfo(youtubeId, filePath, models) {
+  const { height } = await resolveVideoTargetResolution(youtubeId, models);
+  const container = path.extname(filePath).replace(/^\./, '').toLowerCase() || null;
+  return { quality: height ? String(height) : null, container, transcode: 'copy' };
+}
+
 function runFfmpegOnce(args, { timeoutMs = 30000 } = {}) {
   return new Promise((resolve, reject) => {
     const proc = spawn('ffmpeg', args, { stdio: ['ignore', 'ignore', 'pipe'] });
@@ -1236,162 +1104,6 @@ function runFfmpegOnce(args, { timeoutMs = 30000 } = {}) {
       else reject(new Error(`ffmpeg exited ${code}: ${stderr.slice(-500)}`));
     });
   });
-}
-
-// drawtext's `fontfile=` bypasses fontconfig lookup - just needs this file
-// present (Dockerfile's `fonts-dejavu-core` package). Checked with
-// fs.existsSync first, so a missing package silently loses the text overlay
-// instead of failing placeholder generation outright.
-const PLACEHOLDER_FONT_PATH = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf';
-
-/**
- * Resolves the on-disk path to a video's cached UI thumbnail (written by
- * strmMaterializer._writeThumbnail for every video, not a live fetch), for
- * use as ensurePlaceholderSegment's background. Returns null (never throws)
- * if not cached yet — callers fall back to the generic test-pattern
- * placeholder, same as any other placeholder-generation failure.
- */
-function resolveLocalThumbnailPath(youtubeId) {
-  try {
-    const thumbPath = path.join(configModule.getImagePath(), `videothumb-${youtubeId}.jpg`);
-    return fs.existsSync(thumbPath) ? thumbPath : null;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Generates (or reuses a cached) tiny "loading" HLS segment matching a
- * `transcode=h264` session's actual encoder settings, so it splices cleanly
- * into the real encode's output. When `thumbnailPath` resolves, the segment
- * is this video's own thumbnail with a "Loading..." card drawn over it
- * (letterboxed to fit without distortion); otherwise falls back to a moving
- * lavfi test pattern + silence.
- *
- * Never throws — any failure logs a warning and returns null, and callers
- * fall back to the normal wait-for-the-real-segment behavior.
- * @param {string|null} [thumbnailPath] - background image; makes the segment
- *   video-specific, so it's cached per-video instead of shared.
- * @param {string} [youtubeId] - required with thumbnailPath, to keep this
- *   video's cache from colliding with another's.
- * @param {number} width - target resolution (see resolveVideoTargetResolution)
- * @param {number} height
- * @returns {Promise<{segmentPath: string, initPath: string|null}|null>}
- */
-async function ensurePlaceholderSegment({ youtubeId, thumbnailPath, segmentType, segmentExt, hardwareMode, tuning, width, height }) {
-  const signature = getPlaceholderSignature({ segmentType, hardwareMode, tuning, width, height });
-  // A thumbnail-backed placeholder is per-video content, not the shared
-  // generic pattern - keyed by youtubeId plus the thumbnail file's own
-  // size+mtime, so a later-replaced thumbnail (e.g. a metadata refresh
-  // finding a better maxresdefault) invalidates the cache instead of
-  // serving a stale image forever.
-  let cacheKey = signature;
-  if (thumbnailPath) {
-    try {
-      const stat = fs.statSync(thumbnailPath);
-      cacheKey = `${youtubeId}-${stat.size}-${Math.floor(stat.mtimeMs)}-${signature}`;
-    } catch {
-      thumbnailPath = null; // vanished between resolve and here - fall back to generic
-    }
-  }
-  const dir = path.join(HLS_PLACEHOLDER_CACHE_DIR, cacheKey);
-  const segmentPath = path.join(dir, `placeholder.${segmentExt}`);
-  const initPath = segmentType === 'fmp4' ? path.join(dir, 'placeholder-init.mp4') : null;
-
-  const isReady = () => fs.existsSync(segmentPath) && (!initPath || fs.existsSync(initPath));
-  if (isReady()) return { segmentPath, initPath };
-
-  if (placeholderGenerationPromises.has(cacheKey)) {
-    await placeholderGenerationPromises.get(cacheKey).catch(() => {});
-    return isReady() ? { segmentPath, initPath } : null;
-  }
-
-  const generate = (async () => {
-    fs.mkdirSync(dir, { recursive: true });
-    const vaapiQuality = (configModule.getConfig().ytstream || {}).vaapiQuality;
-    const encoder = buildVideoEncoderArgs(hardwareMode, height, tuning, vaapiQuality);
-    const args = ['-y', '-loglevel', 'error'];
-    if (encoder.preInputArgs && encoder.preInputArgs.length) {
-      args.push(...encoder.preInputArgs);
-    }
-    const videoFilters = [];
-    if (thumbnailPath) {
-      args.push('-loop', '1', '-framerate', String(HLS_PLACEHOLDER_FPS), '-i', thumbnailPath);
-      args.push('-f', 'lavfi', '-i', 'anullsrc=r=48000:cl=stereo');
-      args.push('-t', String(HLS_PLACEHOLDER_DURATION_SECONDS));
-      // One frame held for the full duration (1-frame-per-duration output
-      // framerate), not HLS_PLACEHOLDER_DURATION_SECONDS * FPS near-identical
-      // frames of an unchanging image - cheaper, and a single sample's
-      // presentation duration is exact by construction. The old multi-frame
-      // looped-image version had no intrinsic length (unlike testsrc2, which
-      // self-describes `duration=`), so `-t` cutting off an infinite loop
-      // left the segment not landing precisely on 3.000s and the scrubber
-      // stuck at 0.
-      args.push('-r', `1/${HLS_PLACEHOLDER_DURATION_SECONDS}`);
-      args.push('-frames:v', '1');
-      // scale-to-fit + letterbox, not a bare scale - a locally-cached
-      // thumbnail's aspect ratio (e.g. hqdefault.jpg's fixed 480x360) won't
-      // generally match the real video's target aspect, and a plain scale
-      // would visibly stretch/distort the image.
-      videoFilters.push(`scale=${width}:${height}:force_original_aspect_ratio=decrease`);
-      videoFilters.push(`pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=black`);
-      if (fs.existsSync(PLACEHOLDER_FONT_PATH)) {
-        const fontSize = Math.max(16, Math.round(height / 18));
-        videoFilters.push(
-          `drawtext=fontfile='${PLACEHOLDER_FONT_PATH}':text='Loading...':fontsize=${fontSize}:fontcolor=white:box=1:boxcolor=black@0.5:boxborderw=${Math.round(fontSize / 3)}:x=(w-text_w)/2:y=(h-text_h)/2`
-        );
-      }
-    } else {
-      args.push(
-        '-f', 'lavfi', '-i', `testsrc2=size=${width}x${height}:rate=${HLS_PLACEHOLDER_FPS}:duration=${HLS_PLACEHOLDER_DURATION_SECONDS}`,
-        '-f', 'lavfi', '-i', 'anullsrc=r=48000:cl=stereo',
-        '-t', String(HLS_PLACEHOLDER_DURATION_SECONDS),
-      );
-    }
-    if (encoder.videoFilters && encoder.videoFilters.length) {
-      videoFilters.push(...encoder.videoFilters);
-    }
-    if (videoFilters.length) {
-      args.push('-vf', videoFilters.join(','));
-    }
-    if (encoder.pixFmt) args.push('-pix_fmt', encoder.pixFmt);
-    args.push(...encoder.encoderArgs);
-    args.push('-c:a', 'aac', '-ac', '2', '-b:a', '192k', '-ar', '48000');
-    args.push(
-      '-f', 'hls',
-      '-hls_time', String(HLS_PLACEHOLDER_DURATION_SECONDS),
-      '-hls_list_size', '1',
-      '-hls_flags', 'independent_segments',
-      '-hls_segment_type', segmentType,
-    );
-    if (segmentType === 'fmp4') {
-      // Relative, like the real pass's -hls_fmp4_init_filename - ffmpeg
-      // resolves it against -hls_segment_filename's own directory.
-      args.push('-hls_fmp4_init_filename', 'placeholder-init.mp4');
-    }
-    const scratchPlaylist = path.join(dir, 'scratch.m3u8');
-    args.push('-hls_segment_filename', path.join(dir, `placeholder-raw%d.${segmentExt}`), scratchPlaylist);
-
-    logger.info({ cacheKey, thumbnailPath: thumbnailPath || null, args }, 'ytstream: generating HLS instant-start placeholder segment');
-    await runFfmpegOnce(args);
-
-    fs.renameSync(path.join(dir, `placeholder-raw0.${segmentExt}`), segmentPath);
-    if (segmentType === 'fmp4') {
-      fs.renameSync(path.join(dir, 'placeholder-init.mp4'), initPath);
-    }
-    try { fs.rmSync(scratchPlaylist, { force: true }); } catch { /* best-effort cleanup */ }
-  })();
-
-  placeholderGenerationPromises.set(cacheKey, generate);
-  try {
-    await generate;
-    return isReady() ? { segmentPath, initPath } : null;
-  } catch (err) {
-    logger.warn({ err, cacheKey }, 'ytstream: failed to generate HLS instant-start placeholder; falling back to normal session startup');
-    return null;
-  } finally {
-    placeholderGenerationPromises.delete(cacheKey);
-  }
 }
 
 /**
@@ -1470,14 +1182,14 @@ function evaluateProbeShortcut(req, config) {
   // Cheap mirror of the real route's mode resolution (same
   // forceServerSettings-aware precedence as resolvePlaybackPlan) - needed
   // because `transcode=h264` alone doesn't mean the real response IS h264:
-  // mode=direct/direct-pipe/direct-redirect never transcode, always
+  // mode=direct/direct-redirect never transcode, always
   // proxying the source's real codec as-is.
   // Without this check, a direct-family play with transcode=h264 left over
   // from switching modes got an h264 probe clip for its ffprobe, then a
   // real response in the source's actual codec (VP9/AV1/Opus) - Jellyfin
   // decoded based on the probe's wrong answer and playback never worked.
   const mode = String(probeQueryOverride('mode') || probeCfg.defaultMode || 'direct').toLowerCase();
-  const transcodeIsHonoredByMode = mode === 'ffmpeg' || mode === 'hls' || mode === 'hls-buffer';
+  const transcodeIsHonoredByMode = mode === 'hls' || mode === 'hls-buffer';
 
   if (probeCfg.probeShortcut !== true) {
     return { wouldFire: false, reason: 'probeShortcut is off', isMetadataProbe, transcode, mode };
@@ -1533,14 +1245,13 @@ function evaluateProbeShortcut(req, config) {
  * duplicated tooltip text, so the next discovery only needs updating here.
  *
  * `transcode` is needed alongside `mode` because a few fields' relevance
- * depends on both (hardwareMode/tuning/instantStart only matter for an
+ * depends on both (hardwareMode/tuning only matter for an
  * actual h264 encode; probeShortcut's fake-clip mechanism is h264-only too).
  * @param {{mode: string, transcode: string}} params
  * @returns {Record<string, {status: 'forced'|'ignored'|'optional', reason?: string}>}
  */
 function getModeFieldCompatibility({ mode, transcode }) {
   const isHlsFamily = mode === 'hls' || mode === 'hls-buffer';
-  const enhancedMode = mode === 'ffmpeg' || isHlsFamily;
   const forceH264 = transcode === 'h264';
   const fields = {};
 
@@ -1559,7 +1270,7 @@ function getModeFieldCompatibility({ mode, transcode }) {
         reason: 'A genuine trade-off: reports an estimated size/duration upfront and answers seeks faster (but only approximately) by restarting at the estimated timestamp.',
       };
 
-  fields.probeShortcut = !enhancedMode
+  fields.probeShortcut = !isHlsFamily
     ? {
       status: 'ignored',
       reason: 'This mode never transcodes, so the cached probe-shortcut clip (always H.264) could never stand in for its real output codec/container.',
@@ -1575,20 +1286,20 @@ function getModeFieldCompatibility({ mode, transcode }) {
       };
 
   const encodeFieldsIgnoredReason = 'This mode never runs an ffmpeg encode - there\'s nothing here for Container/Transcode/Hardware encoder/Encoding tuning to apply to.';
-  fields.container = !enhancedMode
+  fields.container = !isHlsFamily
     ? { status: 'ignored', reason: encodeFieldsIgnoredReason }
     : { status: 'optional' };
-  fields.transcode = !enhancedMode
+  fields.transcode = !isHlsFamily
     ? { status: 'ignored', reason: encodeFieldsIgnoredReason }
     : { status: 'optional' };
 
-  const hwIgnoredReason = !enhancedMode
+  const hwIgnoredReason = !isHlsFamily
     ? encodeFieldsIgnoredReason
     : 'Only applies when Transcode is set to Force re-encode (H.264/AAC) - Copy (or Auto resolving to copy) never touches an encoder at all.';
-  fields.hardwareMode = (!enhancedMode || !forceH264)
+  fields.hardwareMode = (!isHlsFamily || !forceH264)
     ? { status: 'ignored', reason: hwIgnoredReason }
     : { status: 'optional' };
-  fields.tuning = (!enhancedMode || !forceH264)
+  fields.tuning = (!isHlsFamily || !forceH264)
     ? { status: 'ignored', reason: hwIgnoredReason }
     : { status: 'optional' };
 
@@ -1617,18 +1328,6 @@ function getModeFieldCompatibility({ mode, transcode }) {
     : {
       status: 'optional',
       reason: 'Enqueues a real background download of this video on play, so later plays use the cached file instead of live-proxying it again.',
-    };
-
-  fields.instantStart = (isHlsFamily && forceH264)
-    ? {
-      status: 'optional',
-      reason: 'Serves a tiny pre-generated "loading" segment immediately while the real encode cold-starts, instead of the player waiting on the real first segment.',
-    }
-    : {
-      status: 'ignored',
-      reason: !isHlsFamily
-        ? 'Only Enhanced HLS / + Buffered have a cold-start placeholder segment to show at all.'
-        : 'Only applies when Transcode is set to Force re-encode (H.264/AAC) - the placeholder is generated to match a real h264 encode\'s settings.',
     };
 
   // Only hls/hls-buffer produce real numbered segment files at all
@@ -1665,7 +1364,7 @@ function getModeFieldCompatibility({ mode, transcode }) {
   return fields;
 }
 
-// Persistent, same reasoning as HLS_PLACEHOLDER_CACHE_DIR above.
+// Persistent, same reasoning as YTSTREAM_CACHE_DIR above.
 const PROBE_CLIP_CACHE_DIR = path.join(YTSTREAM_CLIPS_DIR, 'probe-shortcut');
 const PROBE_CLIP_DURATION_SECONDS = 2;
 const probeClipGenerationPromises = new Map();
@@ -1840,12 +1539,15 @@ async function tryServeProbeClip(req, res, { hardwareMode, tuning, width, height
     if (body) {
       res.end(body);
     } else {
-      await new Promise((resolve, reject) => {
-        const stream = fs.createReadStream(clip.filePath);
-        stream.on('error', reject);
-        stream.on('close', resolve);
-        stream.pipe(res);
-      });
+      // pipeline(), not a bare .pipe() + manual Promise - see
+      // tryServeCachedVideoFile's identical fix above for why: a client
+      // that disconnects before reading the whole clip otherwise leaves
+      // this await (and the whole request/response) hanging forever.
+      try {
+        await pipeline(fs.createReadStream(clip.filePath), res);
+      } catch (err) {
+        if (err.code !== 'ERR_STREAM_PREMATURE_CLOSE') throw err;
+      }
     }
     return true;
   } catch (err) {
@@ -1890,12 +1592,21 @@ async function tryServeCachedVideoFile(req, res, filePath) {
   if (!range) {
     res.set({ 'Content-Type': contentType, 'Content-Length': String(stat.size), 'Accept-Ranges': 'bytes', 'Cache-Control': 'no-store' });
     if (req.method === 'HEAD') { res.end(); return true; }
-    await new Promise((resolve, reject) => {
-      const stream = fs.createReadStream(filePath);
-      stream.on('error', reject);
-      stream.on('close', resolve);
-      stream.pipe(res);
-    });
+    // stream.pipeline (not a bare .pipe() + manual Promise) so a client that
+    // stops reading mid-transfer - e.g. a metadata-probe UA (Lavf/ffprobe)
+    // that only wants the header atoms and then drops the connection - gets
+    // detected: pipeline treats the response closing before the source ends
+    // as ERR_STREAM_PREMATURE_CLOSE, destroys the read stream, and settles.
+    // A bare .pipe() never observes the destination closing early, so the
+    // wrapping Promise (and this whole await, and the caller's history-end
+    // write) hung forever - see stream_history rows stuck "in progress".
+    try {
+      await pipeline(fs.createReadStream(filePath), res);
+    } catch (err) {
+      if (err.code !== 'ERR_STREAM_PREMATURE_CLOSE') {
+        logger.warn({ err, filePath }, 'ytstream: serveCachedFile stream failed');
+      }
+    }
     return true;
   }
 
@@ -1928,12 +1639,17 @@ async function tryServeCachedVideoFile(req, res, filePath) {
     'Cache-Control': 'no-store',
   });
   if (req.method === 'HEAD') { res.end(); return true; }
-  await new Promise((resolve, reject) => {
-    const stream = fs.createReadStream(filePath, { start, end });
-    stream.on('error', reject);
-    stream.on('close', resolve);
-    stream.pipe(res);
-  });
+  // See the no-range branch above for why this is pipeline() and not a bare
+  // .pipe(): without it, a probe that opens a range request and disconnects
+  // before reading the whole range leaves this await (and the caller's
+  // history-end write) hanging indefinitely.
+  try {
+    await pipeline(fs.createReadStream(filePath, { start, end }), res);
+  } catch (err) {
+    if (err.code !== 'ERR_STREAM_PREMATURE_CLOSE') {
+      logger.warn({ err, filePath }, 'ytstream: serveCachedFile ranged stream failed');
+    }
+  }
   return true;
 }
 
@@ -2164,6 +1880,33 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
     const ytCfg = config.ytstream || {};
     const playerClient = opts.playerClient || ytCfg.playerClient || DEFAULT_PLAYER_CLIENT;
     args.push('--extractor-args', `youtube:player_client=${playerClient}`);
+
+    // Power-user network tuning (Settings -> Streaming). 0/unset means
+    // "don't pass the flag" for every field here - yt-dlp's own default
+    // applies. httpChunkSizeMiB/concurrentFragments only matter for modes
+    // that actually stream media bytes through yt-dlp (hls/hls-buffer);
+    // harmless no-ops on direct/direct-redirect's one-shot -g resolve calls,
+    // which every buildBaseArgs caller (including those) shares this
+    // helper with.
+    const httpChunkSizeMiB = Number(ytCfg.httpChunkSizeMiB);
+    if (Number.isFinite(httpChunkSizeMiB) && httpChunkSizeMiB > 0) {
+      args.push('--http-chunk-size', `${httpChunkSizeMiB}M`);
+    }
+
+    const concurrentFragments = Number(ytCfg.concurrentFragments);
+    if (Number.isFinite(concurrentFragments) && concurrentFragments > 1) {
+      args.push('--concurrent-fragments', String(concurrentFragments));
+    }
+
+    const throttledRateKBps = Number(ytCfg.throttledRateKBps);
+    if (Number.isFinite(throttledRateKBps) && throttledRateKBps > 0) {
+      args.push('--throttled-rate', `${throttledRateKBps}K`);
+    }
+
+    const socketTimeoutSeconds = Number(ytCfg.socketTimeoutSeconds);
+    if (Number.isFinite(socketTimeoutSeconds) && socketTimeoutSeconds > 0) {
+      args.push('--socket-timeout', String(socketTimeoutSeconds));
+    }
 
     return args;
   }
@@ -2403,84 +2146,10 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
   }
 
   /**
-   * Seek-restart fix (docs/YTSTREAM_SEEK_FIX.md): resolves video-only and
-   * audio-only DASH URLs via a single `-g` call, for feeding ffmpeg as real
-   * HTTP inputs with input-side `-ss` — a true Range-based seek, unlike the
-   * pipe architecture's broken output-side `-ss`. NOT built on
-   * `resolveDirectUrl`: its progressive/muxed selector usually caps at
-   * 720p, which would silently cap every 1080p+/4K seek-restart too.
-   *
-   * Requests both formats in one call (`-f "video,audio"`) to avoid paying
-   * extraction twice. Classifies the two URLs by their own `mime=video`/
-   * `mime=audio` query param, not output order. Throws (no partial result)
-   * if that doesn't yield exactly one of each — callers fall back to the
-   * yt-dlp-pipe path rather than blocking a seek indefinitely.
-   */
-  async function resolveDashUrlsForSeek(youtubeId, config, quality, forcedPlayerClient, qualityStrictness) {
-    const { videoFormat, audioFormat } = getDashFormatSelectors(quality, qualityStrictness);
-    const runOnce = async (playerClient) => {
-      const args = [
-        ...buildBaseArgs(config, { playerClient }),
-        '-f', `${videoFormat},${audioFormat}`,
-        '-g',
-        '--no-playlist',
-        '--no-warnings',
-        `https://youtube.com/watch?v=${youtubeId}`,
-      ];
-      logger.info(
-        { youtubeId, videoFormat, audioFormat, quality, playerClient },
-        'ytstream: resolving direct DASH URLs for seek-restart via yt-dlp'
-      );
-      return ytDlpRunner.run(args, { timeoutMs: 20000 });
-    };
-
-    let stdout;
-    try {
-      stdout = await runOnce(forcedPlayerClient);
-    } catch (err) {
-      if (!forcedPlayerClient && isRetryableExtractionError(err.message)) {
-        logger.warn(
-          { youtubeId, err: err.message },
-          `ytstream: seek-restart DASH resolve hit a client/session error, retrying once with player_client=${RETRY_PLAYER_CLIENT}`
-        );
-        stdout = await runOnce(RETRY_PLAYER_CLIENT);
-      } else {
-        throw err;
-      }
-    }
-
-    const urls = String(stdout)
-      .trim()
-      .split(/\r?\n/)
-      .map((l) => l.trim())
-      .filter((l) => /^https?:\/\//i.test(l));
-
-    const classify = (url) => {
-      try {
-        const mime = new URL(url).searchParams.get('mime') || '';
-        if (mime.startsWith('video/')) return 'video';
-        if (mime.startsWith('audio/')) return 'audio';
-      } catch {
-        /* fall through to null below */
-      }
-      return null;
-    };
-
-    const videoUrl = urls.find((u) => classify(u) === 'video');
-    const audioUrl = urls.find((u) => classify(u) === 'audio');
-    if (!videoUrl || !audioUrl) {
-      throw new Error(
-        `resolveDashUrlsForSeek: expected one video + one audio URL, got ${urls.length} ` +
-        `(video=${!!videoUrl} audio=${!!audioUrl})`
-      );
-    }
-    return { videoUrl, audioUrl };
-  }
-
-  /**
    * `-headers` value for ffmpeg fetching a resolved googlevideo URL
-   * directly (seek-restart, mode=ffmpeg) — mirrors proxyDirectStream's
-   * headers. See docs/YTSTREAM_SEEK_FIX.md for vprv=1 URL caveats.
+   * directly (HLS's own direct-source seek-restart path) — mirrors
+   * proxyDirectStream's headers. See docs/YTSTREAM_SEEK_FIX.md for vprv=1
+   * URL caveats.
    */
   function buildFfmpegUpstreamHeaders(cookieHeader) {
     let headers = `User-Agent: ${UPSTREAM_USER_AGENT}\r\nReferer: https://youtube.com\r\nOrigin: https://youtube.com\r\n`;
@@ -2609,169 +2278,6 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
   }
 
   /**
-   * mode=direct-pipe: fetches the resolved format through yt-dlp's own
-   * process instead of resolving a URL (-g) and proxying it separately.
-   * Sidesteps googlevideo's vprv=1 session-bound URLs, which 403 when
-   * fetched by a different process than the one that resolved them —
-   * yt-dlp fetching within its own resolving process isn't subject to
-   * that (same reason the DASH pipe modes never hit it).
-   *
-   * A separate, explicitly-selected mode, not an automatic fallback inside
-   * mode=direct: plain direct's proxy fetch just fails on a 403; pick this
-   * mode for the more resilient (but Range-incapable) behavior instead.
-   * Not a retry with a different player_client either — android's format
-   * list doesn't include the legacy progressive itag (18/360p), so it can
-   * never satisfy a progressive-format request.
-   *
-   * Stays "direct" in spirit: one yt-dlp child process, zero ffmpeg. Trade-
-   * off: a live sequential pipe, not byte-range seekable, so a real
-   * mid-video seek forces a restart from 0.
-   *
-   * calculatedLength: a genuine `206` needs a real `Content-Range` with a
-   * concrete end byte, which this unbounded pipe doesn't have. It CAN
-   * honestly claim the opening request (no Range, or one starting at byte
-   * 0) since that's the same full-body response this always sends anyway —
-   * when calculatedLength is on, that case gets a real `Content-Length`
-   * (plus 206/Content-Range if asked) from the same duration x bitrate
-   * estimate mode=ffmpeg uses. A non-zero Range start (a real seek) isn't
-   * representable this way and falls through to the unbounded response.
-   */
-  async function pipeDirectStreamViaYtDlp(youtubeId, config, quality, qualityStrictness, playerClient, calculatedLength, req, res, streamId) {
-    let lengthEstimate = null;
-    if (calculatedLength) {
-      try {
-        const height = resolveQualityHeight(quality);
-        const durationSeconds = await getVideoDurationSeconds(youtubeId, config);
-        lengthEstimate = Math.ceil(durationSeconds * estimateBitrateBytesPerSecond(height));
-      } catch (err) {
-        logger.warn({ err, youtubeId }, 'ytstream: direct-pipe calculatedLength estimate failed; falling back to an unbounded response');
-      }
-    }
-
-    const rangeHeader = req.headers.range;
-    const range = lengthEstimate && rangeHeader ? parseByteRange(rangeHeader, lengthEstimate) : null;
-    // The only case an honest Content-Length/206 applies to - see doc
-    // comment. Anything else (no estimate, or a real non-zero-start seek)
-    // falls through to the plain unbounded response below unchanged.
-    const isOpeningRequest = !!lengthEstimate && (!rangeHeader || (range && !range.invalid && range.start === 0));
-
-    if (lengthEstimate && req.method === 'HEAD') {
-      res.set({ 'Accept-Ranges': 'bytes', 'Content-Length': String(lengthEstimate) });
-      res.status(200).end();
-      if (streamId) untrackStream(streamId, 'completed');
-      return;
-    }
-
-    return new Promise((resolve, reject) => {
-      const format = getDirectFormatSelector(quality, qualityStrictness);
-      const args = [
-        ...buildBaseArgs(config, { playerClient }),
-        '-f', format,
-        '-o', '-',
-        '--no-playlist',
-        '--no-warnings',
-        `https://youtube.com/watch?v=${youtubeId}`,
-      ];
-      logger.info(
-        { youtubeId, format, quality, playerClient, calculatedLength: !!lengthEstimate, isOpeningRequest },
-        'ytstream: piping direct stream via yt-dlp (mode=direct-pipe)'
-      );
-
-      const proc = spawn('yt-dlp', args, { stdio: ['ignore', 'pipe', 'pipe'] });
-      registerChildProcess(proc);
-
-      let stderr = '';
-      proc.stderr.on('data', (chunk) => {
-        stderr = (stderr + chunk.toString()).slice(-8000);
-      });
-
-      let settled = false;
-      let headersSent = false;
-
-      const onClientGone = () => {
-        if (settled) return;
-        settled = true;
-        killChildProcess(proc, 'client-disconnected');
-        if (streamId) untrackStream(streamId, 'client-disconnected');
-        resolve();
-      };
-      res.once('close', onClientGone);
-
-      // Wired up for the Streaming page's stop button - mirrors
-      // streamViaFfmpeg's own entry.stop wiring.
-      if (streamId) {
-        const entry = activeStreams.get(streamId);
-        if (entry) {
-          entry.stop = () => {
-            if (settled) return;
-            settled = true;
-            res.removeListener('close', onClientGone);
-            killChildProcess(proc, 'manual-stop');
-            untrackStream(streamId, 'manual-stop');
-            try { if (!res.writableEnded) res.end(); } catch { /* ignore */ }
-            resolve();
-          };
-        }
-      }
-
-      proc.stdout.once('data', () => {
-        if (!res.headersSent) {
-          headersSent = true;
-          if (streamId) {
-            const entry = activeStreams.get(streamId);
-            if (entry) entry.state = 'active';
-          }
-          if (isOpeningRequest) {
-            res.set({ 'Content-Type': 'video/mp4', 'Cache-Control': 'no-store', 'Accept-Ranges': 'bytes', 'Content-Length': String(lengthEstimate) });
-            if (rangeHeader) {
-              res.set('Content-Range', `bytes 0-${lengthEstimate - 1}/${lengthEstimate}`);
-              res.status(206);
-            } else {
-              res.status(200);
-            }
-          } else {
-            res.removeHeader('Accept-Ranges'); // no range/seek support on this path - see doc comment
-            res.set({ 'Content-Type': 'video/mp4', 'Cache-Control': 'no-store' });
-            res.status(200);
-          }
-        }
-      });
-      if (streamId) {
-        proc.stdout.on('data', (chunk) => {
-          const entry = activeStreams.get(streamId);
-          if (entry) {
-            entry.bytesTransferred += chunk.length;
-            entry.lastActivityAt = Date.now();
-          }
-        });
-      }
-      proc.stdout.pipe(res);
-
-      proc.once('error', (err) => {
-        if (settled) return;
-        settled = true;
-        res.removeListener('close', onClientGone);
-        if (streamId) untrackStream(streamId, 'error', err.message);
-        reject(err);
-      });
-
-      proc.once('exit', (code) => {
-        if (settled) return;
-        settled = true;
-        res.removeListener('close', onClientGone);
-        if (code === 0 || headersSent) {
-          if (streamId) untrackStream(streamId, 'completed');
-          resolve();
-        } else {
-          const message = stderr.trim() || `yt-dlp exited with code ${code}`;
-          if (streamId) untrackStream(streamId, 'error', message);
-          reject(new Error(message));
-        }
-      });
-    });
-  }
-
-  /**
    * mode=direct-redirect: resolves a playback URL via yt-dlp, same as
    * mode=direct, but sends the player a 302 straight to it instead of
    * Youtarr fetching/proxying the bytes - real bandwidth/CPU savings, at a
@@ -2819,8 +2325,7 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
   /**
    * Spawns one HLS encode pass (yt-dlp video + yt-dlp audio + ffmpeg),
    * writing segments from `startSegmentIndex` onward into `session.dir`
-   * instead of piping live (video/audio fetch mechanics mirror
-   * streamViaFfmpeg's live pipeline; only the ffmpeg output stage differs).
+   * instead of piping live.
    * Returns immediately with state 'starting' — callers go through
    * waitForHlsSessionReady before serving the playlist. Used for a
    * session's initial pass and, for calculatedLength sessions, to restart
@@ -3156,8 +2661,10 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
 
       const ffVideoIn = ff.stdio[3];
       const ffAudioIn = ff.stdio[4];
-      // Same write-after-close EPIPE hazard as streamViaFfmpeg's live pipe —
-      // see the comment there for why every stream needs a listener.
+      // Any of these pipe streams can see a write-after-close race during
+      // teardown - an unhandled 'error' on any of them is an uncaught
+      // exception that crashes the ENTIRE Node process, so every stream
+      // gets a listener.
       ytVideo.stdout.on('error', () => { /* pipe destination gone; pass is being torn down */ });
       ytAudio.stdout.on('error', () => { /* pipe destination gone; pass is being torn down */ });
       ffVideoIn.on('error', () => { /* upstream (yt-dlp video) already gone or being killed */ });
@@ -3429,6 +2936,11 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
       return;
     }
     markBufferFetchStarted(youtubeId);
+    // Wall-clock start of this fetch - threaded through to finalizeTapOutput
+    // below purely so a successful finish can record downloadDurationSeconds/
+    // avgDownloadMBps for Download History, same as any other download.
+    // Doesn't affect the fetch/pipeline itself in any way.
+    const fetchStartedAt = Date.now();
 
     const { videoFormat, audioFormat } = getDashFormatSelectors(quality, qualityStrictness);
     const watchUrl = `https://youtube.com/watch?v=${youtubeId}`;
@@ -3519,6 +3031,11 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
         finalPath: session.bufferFinalPath,
         sourceLabel: 'hls-buffer',
         skipVideoUpsert: session.bufferUntracked === true,
+        startedAt: fetchStartedAt,
+        // Video and audio pull the same watch URL/args, differing only in
+        // -f <format> - the video invocation is the more useful one to keep
+        // for debugging (it's what typically fails/gets throttled first).
+        ytdlpCommand: ytVideoArgs.join(' '),
       })
         .then((finalPath) => {
           if (finalPath) {
@@ -3606,10 +3123,10 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
    * same seek) into a single restart.
    *
    * Goes straight to spawnHlsEncodePass with no directUrls, skipping a
-   * direct-URL resolve+fetch attempt (still used by mode=ffmpeg's seek
-   * path) - googlevideo's vprv=1 URLs 403 when fetched by a bare ffmpeg
-   * HTTP client, so that attempt would only add a guaranteed-to-fail
-   * round trip before falling through to useSectionedPipe anyway.
+   * direct-URL resolve+fetch attempt entirely - googlevideo's vprv=1 URLs
+   * 403 when fetched by a bare ffmpeg HTTP client, so that attempt would
+   * only add a guaranteed-to-fail round trip before falling through to
+   * useSectionedPipe anyway.
    */
   async function restartHlsEncodePassAtSegment(session, segmentIndex) {
     const now = Date.now();
@@ -3979,12 +3496,6 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
       container,
       config,
       calculatedLength: !!calculatedLength,
-      // ytstream.instantStart - see maybeStripPlaceholderFromPlaylist. Set
-      // true only once the placeholder is actually staged into `dir` below;
-      // placeholderStripped flips true the first time a playlist re-fetch
-      // (after the real segment0 exists) rewrites it out.
-      hasPlaceholder: false,
-      placeholderStripped: false,
       passGeneration: 0,
       ytVideo: null,
       ytAudio: null,
@@ -4124,34 +3635,13 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
       // seekable timeline before almost any segment exists. Ignores
       // `seekSeconds`: segment 0 must always correspond to video time 0 for
       // the pre-declared absolute segment indices to stay correct.
-      //
-      // Duration and the instant-start placeholder are resolved
-      // CONCURRENTLY (Promise.all, not a straight-line await chain): a
-      // cache-miss duration lookup can take 6-7s via a live yt-dlp call,
-      // and used to fully block placeholder generation - defeating
-      // instant-start's whole purpose for exactly the videos where it
-      // mattered most.
-      const ytCfgForSession = config.ytstream || {};
-      const wantsPlaceholder = ytCfgForSession.instantStart === true && transcode === 'h264';
-
-      const [durationSeconds, generated] = await Promise.all([
-        getVideoDurationSeconds(youtubeId, config),
-        wantsPlaceholder
-          ? (async () => {
-            const sourceResolution = await resolveVideoTargetResolution(youtubeId, models);
-            const { width, height } = capResolutionToHeight(sourceResolution.width, sourceResolution.height, resolveQualityHeight(quality));
-            const thumbnailPath = resolveLocalThumbnailPath(youtubeId);
-            return ensurePlaceholderSegment({ youtubeId, thumbnailPath, segmentType, segmentExt, hardwareMode: hw, tuning: tier, width, height });
-          })()
-          : Promise.resolve(null),
-      ]);
+      const durationSeconds = await getVideoDurationSeconds(youtubeId, config);
       session.durationSeconds = durationSeconds;
       session.totalSegments = Math.max(1, Math.ceil(durationSeconds / HLS_SEGMENT_DURATION_SECONDS));
       // Diagnostic (temporary) - the resolved value was never actually
       // logged anywhere before, so "scrubber shows 0" reports had nothing
-      // to confirm/rule out against. instantStart is irrelevant to this -
-      // wantsPlaceholder only affects the second Promise.all branch above.
-      logger.info({ sessionKey, youtubeId, durationSeconds, totalSegments: session.totalSegments, instantStart: wantsPlaceholder }, 'ytstream: calculatedLength duration resolved for this session');
+      // to confirm/rule out against.
+      logger.info({ sessionKey, youtubeId, durationSeconds, totalSegments: session.totalSegments }, 'ytstream: calculatedLength duration resolved for this session');
 
       // Fire-and-forget - never delays playlist creation below. Fires the
       // SAME warmHlsInfoJsonCache this session needs anyway for seek-restart
@@ -4163,35 +3653,11 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
       // comment for why this session no longer tries to correct it.
       session.playlistSegmentDurationSeconds = session.segmentDurationSeconds;
 
-      // ytstream.instantStart - see ensurePlaceholderSegment's doc comment.
-      // Staged into session.dir under its own filename (never a real
-      // segment index), so nothing else in the HLS pipeline needs to know
-      // it exists - only the playlist's leading entries reference it.
-      let placeholder = null;
-      if (generated) {
-        try {
-          fs.copyFileSync(generated.segmentPath, path.join(dir, `placeholder.${segmentExt}`));
-          if (generated.initPath) {
-            fs.copyFileSync(generated.initPath, path.join(dir, 'placeholder-init.mp4'));
-          }
-          placeholder = {
-            filename: `placeholder.${segmentExt}`,
-            initFilename: generated.initPath ? 'placeholder-init.mp4' : null,
-            durationSeconds: HLS_PLACEHOLDER_DURATION_SECONDS,
-          };
-          session.hasPlaceholder = true;
-          logger.info({ sessionKey }, 'ytstream: HLS session starting with instant-start placeholder segment');
-        } catch (err) {
-          logger.warn({ err, sessionKey }, 'ytstream: failed to stage instant-start placeholder into session dir; falling back to normal startup');
-        }
-      }
-
       const fullPlaylist = buildFullHlsPlaylist({
         totalSegments: session.totalSegments,
         durationSeconds,
         segmentExt,
         segmentType,
-        placeholder,
         segmentDurationSeconds: session.playlistSegmentDurationSeconds,
       });
       fs.writeFileSync(playlistPath, fullPlaylist);
@@ -4281,8 +3747,8 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
   /**
    * Returns an existing ready/starting session for this key, or creates one
    * and waits for it to become ready (retrying once with the android player
-   * client on the same 403/extraction-error signature streamViaFfmpeg
-   * handles). Throws if it never becomes ready.
+   * client on a 403/extraction-error signature). Throws if it never becomes
+   * ready.
    */
   async function getOrCreateHlsSession(sessionKey, params) {
     const existing = hlsSessions.get(sessionKey);
@@ -4333,8 +3799,7 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
 
         // Nothing has reached a client yet - if this attempt used a
         // hardware encoder, retry once in software before giving up.
-        // Mirrors runPipeline's allowHwFallback for the DASH/direct-pipe
-        // path; a broken/missing QSV/VAAPI/NVENC/AMF device otherwise
+        // A broken/missing QSV/VAAPI/NVENC/AMF device otherwise
         // hard-failed every mode=hls request instead of falling back.
         const hw = normalizeHardwareMode(params.hardwareMode);
         if (hw !== 'none') {
@@ -4363,481 +3828,8 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
     }
   }
 
-  function streamViaFfmpeg({
-    youtubeId,
-    quality,
-    qualityStrictness,
-    container,
-    transcode,
-    hardwareMode,
-    tuning,
-    seekSeconds,
-    config,
-    res,
-    req,
-    // Optional — only set by the calculatedLength path (see the router handler
-    // below). { status, headers, targetLength }. Every other caller omits
-    // this, and every branch below that reads it is conditional on it
-    // being present, so the non-calculatedLength behavior is unchanged.
-    responseShaping,
-    // Streaming-page tracking entry id — created once per HTTP request by
-    // the router handler (see there for why), threaded through every
-    // runPipeline attempt/retry so they all update the same entry.
-    streamId,
-  }) {
-    const tier = normalizeTuning(tuning);
-    const sharedState = { retried: false, finalized: false, directFallbackDone: false };
-
-    function attempt(attemptNumber) {
-      // On the retry pass, force the "android" client — the "web"/"tv"
-      // client family (yt-dlp's default) returns visitor-private
-      // (vprv=1) googlevideo URLs tied to a PO token/session fingerprint
-      // that can fail even for yt-dlp's own downloader on some videos.
-      // "android" doesn't have that requirement.
-      const playerClient = attemptNumber > 1 ? RETRY_PLAYER_CLIENT : undefined;
-      return runPipeline(playerClient, normalizeHardwareMode(hardwareMode), {
-        allowHwFallback: true,
-        allowClientRetry: attemptNumber === 1,
-      });
-    }
-
-    /**
-     * Seek-restart fix: resolves direct DASH URLs for a nonzero-offset
-     * request — covers both the calculatedLength Range-restart path and,
-     * opportunistically, the cold-start `?t=` case. Returns null (never
-     * throws) on failure so callers unconditionally fall back to the
-     * yt-dlp-pipe path.
-     */
-    async function tryResolveDirectUrlsForSeek(playerClient) {
-      if (!seekSeconds) return null;
-      try {
-        const { videoUrl, audioUrl } = await resolveDashUrlsForSeek(youtubeId, config, quality, playerClient, qualityStrictness);
-        const cookiesPath = configModule.getCookiesPath && configModule.getCookiesPath();
-        return { videoUrl, audioUrl, cookieHeader: loadYoutubeCookieHeader(cookiesPath) };
-      } catch (err) {
-        logger.warn(
-          { youtubeId, err: err.message },
-          'ytstream: direct DASH URL resolution for seek-restart failed; falling back to yt-dlp pipe'
-        );
-        return null;
-      }
-    }
-
-    /**
-     * Spawns two `yt-dlp -o -` processes — video-only and audio-only DASH
-     * formats — each piped into its own extra ffmpeg fd (`pipe:3`/`pipe:4`),
-     * which muxes them. yt-dlp does the actual fetching from googlevideo;
-     * ffmpeg never makes an HTTP request itself.
-     *
-     * Two-pipe split, not one `-f bv*+ba -o -` process: yt-dlp can't stream
-     * a merged selector to stdout progressively — it downloads and muxes
-     * both tracks with its own ffmpeg first, which on a long video looks
-     * like the request hanging before any bytes arrive. Two independent
-     * streams sidestep that: each starts flowing as soon as its own track
-     * starts downloading, and *our* ffmpeg muxes as bytes arrive on both.
-     *
-     * Also avoids handing ffmpeg a bare `-g`-resolved googlevideo URL to
-     * fetch itself, which reliably 403s: many URLs are "visitor-private"
-     * (`vprv=1`) and rejected unless the request comes from the same
-     * client/session that resolved them — cookies alone don't satisfy that.
-     *
-     * If the requested hardware encoder fails to initialize (no working
-     * VAAPI/QSV driver, no GPU), ffmpeg exits non-zero before writing a
-     * byte. That used to be a hard 502 even when software encoding would
-     * have worked fine; now, as long as nothing has reached the client yet,
-     * it retries once in software before giving up.
-     */
-    async function runPipeline(playerClient, hw, { allowHwFallback, allowClientRetry, forcePipeMode = false }) {
-      // Resolved before building yt-dlp args or sending headers, so a
-      // failed resolution transparently falls through to the unchanged
-      // yt-dlp-pipe path. forcePipeMode skips this - set only by this
-      // function's own fallback re-invocation after a direct-URL attempt
-      // already failed once (see handleFailure below).
-      const directUrls = forcePipeMode ? null : await tryResolveDirectUrlsForSeek(playerClient);
-
-      let videoFormat = null;
-      let audioFormat = null;
-      let ytVideoArgs = null;
-      let ytAudioArgs = null;
-      if (!directUrls) {
-        ({ videoFormat, audioFormat } = getDashFormatSelectors(quality, qualityStrictness));
-        const watchUrl = `https://youtube.com/watch?v=${youtubeId}`;
-        const commonYtArgs = [...buildBaseArgs(config, { playerClient }), '-o', '-', '--no-playlist', '--no-warnings'];
-        ytVideoArgs = [...commonYtArgs, '-f', videoFormat, watchUrl];
-        ytAudioArgs = [...commonYtArgs, '-f', audioFormat, watchUrl];
-      }
-
-      // forceKeyframesByHardwareMode[hw] is only ever true once a user has
-      // explicitly run the "Test HLS segment timing" check for THIS hardware
-      // mode on THIS host and it passed (see streamTuningBenchmark.
-      // testSegmentTiming and its route) - never a blanket default, since some
-      // hardware encoders are known to sometimes mishandle a forced-keyframe
-      // expression.
-      const useForceKeyframes = ((config.ytstream || {}).forceKeyframesByHardwareMode || {})[hw] === true;
-      const encoder = transcode === 'h264' ? buildVideoEncoderArgs(hw, resolveQualityHeight(quality), tier, (config.ytstream || {}).vaapiQuality, 'h264', useForceKeyframes) : null;
-
-      const ffArgs = [
-        // 'warning' (not the usual 'error') for a direct-URL seek-restart
-        // attempt — see the matching comment in spawnHlsEncodePass for why.
-        '-loglevel', directUrls ? 'warning' : 'error',
-        '-fflags', '+genpts',
-        '-analyzeduration', '10M',
-        '-probesize', '5M',
-      ];
-
-      if (encoder && encoder.preInputArgs && encoder.preInputArgs.length) {
-        ffArgs.push(...encoder.preInputArgs);
-      }
-
-      if (directUrls) {
-        // ffmpeg fetches these DASH URLs itself over real HTTP, so -ss here
-        // is an INPUT seek (Range-based) instead of the pipe branch's
-        // broken output-side -ss on a non-seekable pipe - see the doc's
-        // "Spike results" for the empirical proof this is a true seek.
-        const headers = buildFfmpegUpstreamHeaders(directUrls.cookieHeader);
-        if (seekSeconds) ffArgs.push('-ss', String(seekSeconds));
-        ffArgs.push('-headers', headers, '-i', directUrls.videoUrl);
-        if (seekSeconds) ffArgs.push('-ss', String(seekSeconds));
-        ffArgs.push('-headers', headers, '-i', directUrls.audioUrl);
-      } else {
-        // -thread_queue_size: the video/audio pipes are two independent,
-        // asynchronously-filling sources (separate yt-dlp downloads) rather
-        // than one demuxed file — without headroom here ffmpeg's demuxer
-        // thread can block/drop when one pipe delivers data faster than
-        // the other gets consumed, unlike the single-pipe.0 case before.
-        if (seekSeconds) ffArgs.push('-ss', String(seekSeconds));
-        ffArgs.push('-thread_queue_size', '4096', '-i', 'pipe:3');
-        if (seekSeconds) ffArgs.push('-ss', String(seekSeconds));
-        ffArgs.push('-thread_queue_size', '4096', '-i', 'pipe:4');
-      }
-
-      // Two inputs now (0 = video, 1 = audio) instead of one.
-      ffArgs.push('-map', '0:v:0', '-map', '1:a:0?', '-sn', '-dn');
-      ffArgs.push('-max_muxing_queue_size', '4096');
-
-      if (encoder) {
-        if (encoder.videoFilters && encoder.videoFilters.length) {
-          ffArgs.push('-vf', encoder.videoFilters.join(','));
-        }
-        if (encoder.pixFmt) {
-          ffArgs.push('-pix_fmt', encoder.pixFmt);
-        }
-        ffArgs.push(...encoder.encoderArgs);
-        ffArgs.push('-c:a', 'aac', '-ac', '2', '-b:a', '192k', '-ar', '48000');
-      } else {
-        ffArgs.push('-c', 'copy');
-      }
-
-      if (container === 'ts') {
-        ffArgs.push('-f', 'mpegts');
-      } else if (container === 'mkv') {
-        // Matroska - unlike mp4/mpegts, accepts essentially any video/audio
-        // codec pair ffmpeg can produce without container-specific
-        // box-signaling concerns (same reasoning ensureProbeClip already
-        // relies on for its own probe-shortcut clips) - useful for
-        // transcode=copy when the source track isn't H.264.
-        ffArgs.push('-f', 'matroska');
-      } else {
-        ffArgs.push('-f', 'mp4', '-movflags', 'frag_keyframe+empty_moov+default_base_moof');
-      }
-      ffArgs.push('pipe:1');
-
-      logger.info(
-        { youtubeId, quality, playerClient, hardwareMode: hw, videoFormat, audioFormat, ffArgs: redactFfArgsForLogging(ffArgs), source: directUrls ? 'direct-url' : 'network' },
-        directUrls
-          ? 'ytstream: spawning ffmpeg pipeline from directly-resolved DASH URLs (seek-restart fix)'
-          : 'ytstream: spawning yt-dlp(video) + yt-dlp(audio) | ffmpeg pipeline'
-      );
-
-      ensureProcessExitHandlers();
-
-      return new Promise((resolvePipeline) => {
-        // calculatedLength: apply the synthetic status/Content-Length/Content-Range
-        // before any bytes flow. Absent for every other caller, so this is a
-        // no-op for the normal ffmpeg-mode path.
-        if (responseShaping && !res.headersSent) {
-          res.status(responseShaping.status);
-          res.set(responseShaping.headers);
-        }
-
-        const needsYtDlpChildren = !directUrls;
-        let ytVideo = null;
-        let ytAudio = null;
-        if (needsYtDlpChildren) {
-          ytVideo = spawn('yt-dlp', ytVideoArgs, { stdio: ['ignore', 'pipe', 'pipe'] });
-          ytAudio = spawn('yt-dlp', ytAudioArgs, { stdio: ['ignore', 'pipe', 'pipe'] });
-          registerChildProcess(ytVideo);
-          registerChildProcess(ytAudio);
-        }
-        // stdin ('ignore') is unused now — in pipe mode, video/audio arrive
-        // on the extra fds 3/4 instead of stdin/pipe:0; in direct-URL mode
-        // ffmpeg fetches both over HTTP itself, no extra fds needed at all.
-        const ff = spawn('ffmpeg', ffArgs, { stdio: needsYtDlpChildren ? ['ignore', 'pipe', 'pipe', 'pipe', 'pipe'] : ['ignore', 'pipe', 'pipe'] });
-        registerChildProcess(ff);
-
-        let ytVideoErr = '';
-        let ytAudioErr = '';
-        let ffErr = '';
-        const state = { cleaned: false };
-
-        if (needsYtDlpChildren) {
-          ytVideo.stderr.on('data', (c) => {
-            ytVideoErr = (ytVideoErr + c.toString()).slice(-4000);
-          });
-          ytAudio.stderr.on('data', (c) => {
-            ytAudioErr = (ytAudioErr + c.toString()).slice(-4000);
-          });
-        }
-        ff.stderr.on('data', (c) => {
-          ffErr = (ffErr + c.toString()).slice(-4000);
-        });
-
-        const ffVideoIn = needsYtDlpChildren ? ff.stdio[3] : null;
-        const ffAudioIn = needsYtDlpChildren ? ff.stdio[4] : null;
-
-        // Any of these pipe streams can see a write-after-close race
-        // during teardown - an unhandled 'error' on any of them is an
-        // uncaught exception that crashes the ENTIRE Node process, not
-        // just this request, so every stream gets a listener.
-        ff.stdout.on('error', () => { /* response already closing */ });
-        if (needsYtDlpChildren) {
-          ytVideo.stdout.on('error', () => { /* pipe destination gone; cleanup() is already tearing this down */ });
-          ytAudio.stdout.on('error', () => { /* pipe destination gone; cleanup() is already tearing this down */ });
-          ffVideoIn.on('error', () => { /* upstream (yt-dlp video) already gone or being killed */ });
-          ffAudioIn.on('error', () => { /* upstream (yt-dlp audio) already gone or being killed */ });
-
-          // yt-dlp's stdout feeds ffmpeg's extra fds directly — no
-          // googlevideo URL is ever handed to ffmpeg's own HTTP demuxer.
-          ytVideo.stdout.pipe(ffVideoIn);
-          ytAudio.stdout.pipe(ffAudioIn);
-        }
-
-        // calculatedLength routes ff.stdout through a length-capping/padding
-        // transform first so the body always matches the synthetic
-        // Content-Length already sent in headers; every other caller
-        // leaves this null and pipes ff.stdout to res exactly as before.
-        const cappingTransform = responseShaping
-          ? createLengthCappingTransform(responseShaping.targetLength)
-          : null;
-        if (cappingTransform) {
-          cappingTransform.on('error', () => { /* response already closing */ });
-          ff.stdout.pipe(cappingTransform);
-        }
-        const outputToClient = cappingTransform || ff.stdout;
-
-        // Streaming-page byte counter — counts exactly what the client
-        // receives (post-calculatedLength capping, if active). A plain listener
-        // alongside the existing .pipe() below; doesn't touch backpressure.
-        if (streamId) {
-          outputToClient.on('data', (chunk) => {
-            const entry = activeStreams.get(streamId);
-            if (entry) {
-              entry.bytesTransferred += chunk.length;
-              entry.lastActivityAt = Date.now();
-              if (entry.state === 'starting') entry.state = 'active';
-            }
-          });
-        }
-
-        // { end: false } is required: Readable.pipe() otherwise calls
-        // res.end() the instant ff.stdout closes, whether ffmpeg exited 0
-        // or not. Without it, a hardware encoder that fails instantly
-        // silently finalizes the response as "200 OK" empty-bodied before
-        // handleFailure runs, masking the failure and defeating the
-        // software fallback. res.end() is now only called explicitly.
-        outputToClient.pipe(res, { end: false });
-
-        const cleanup = (reason) => {
-          if (state.cleaned) return;
-          state.cleaned = true;
-          try { outputToClient.unpipe(res); } catch { /* ignore */ }
-          try { outputToClient.destroy(); } catch { /* ignore */ }
-          if (cappingTransform) {
-            try { ff.stdout.unpipe(cappingTransform); } catch { /* ignore */ }
-            try { ff.stdout.destroy(); } catch { /* ignore */ }
-          }
-          if (needsYtDlpChildren) {
-            try { ytVideo.stdout.unpipe(ffVideoIn); } catch { /* ignore */ }
-            try { ytAudio.stdout.unpipe(ffAudioIn); } catch { /* ignore */ }
-            // unpipe() only stops *future* writes; it doesn't cancel one
-            // already queued. Destroying the sources and ending the
-            // destinations closes the gap before killChildProcess's
-            // SIGTERM (which is async) gets a chance to.
-            try { ytVideo.stdout.destroy(); } catch { /* ignore */ }
-            try { ytAudio.stdout.destroy(); } catch { /* ignore */ }
-            try { ffVideoIn.end(); } catch { /* ignore */ }
-            try { ffAudioIn.end(); } catch { /* ignore */ }
-          }
-          killChildProcess(ytVideo, `ytdlp-video:${reason}`);
-          killChildProcess(ytAudio, `ytdlp-audio:${reason}`);
-          killChildProcess(ff, `ffmpeg:${reason}`);
-        };
-
-        // Wired up for the Streaming page's stop button. Guarded by
-        // sharedState.finalized so a manual stop can't race a retry that's
-        // already in flight — same guard handleFailure/onClientGone use.
-        if (streamId) {
-          const entry = activeStreams.get(streamId);
-          if (entry) {
-            entry.stop = () => {
-              if (sharedState.finalized) return;
-              sharedState.finalized = true;
-              cleanup('manual-stop');
-              untrackStream(streamId, 'manual-stop');
-              resolvePipeline();
-            };
-          }
-        }
-
-        function handleFailure(reason, message) {
-          if (sharedState.finalized) {
-            cleanup(reason);
-            resolvePipeline();
-            return;
-          }
-
-          // Seek-restart's direct-URL attempt failed (403, network blip,
-          // etc) - falls back to the yt-dlp-pipe path exactly once, ahead
-          // of the client/hw-fallback checks below (which don't apply
-          // here). Never let a seek regress below "eventually
-          // decode-and-discards" just because the faster path didn't pan out.
-          if (directUrls && !sharedState.directFallbackDone && !res.headersSent) {
-            sharedState.directFallbackDone = true;
-            cleanup(reason);
-            logger.warn(
-              { youtubeId, reason, message },
-              'ytstream: direct-URL seek-restart attempt failed; falling back to yt-dlp pipe'
-            );
-            resolvePipeline(runPipeline(playerClient, hw, { allowHwFallback, allowClientRetry, forcePipeMode: true }));
-            return;
-          }
-
-          // yt-dlp couldn't fetch the video or audio track — a
-          // session/client extraction error, or (defense-in-depth) a 403
-          // from googlevideo itself. Re-run the whole pipeline with the
-          // android client.
-          const isFetchFailure =
-            isRetryableExtractionError(message) || /\b403\b|forbidden/i.test(String(message));
-          if (isFetchFailure && allowClientRetry && !sharedState.retried && !res.headersSent) {
-            sharedState.retried = true;
-            cleanup(reason);
-            logger.warn(
-              { youtubeId, reason, message },
-              `ytstream: yt-dlp fetch failed; retrying with player_client=${RETRY_PLAYER_CLIENT}`
-            );
-            resolvePipeline(attempt(2));
-            return;
-          }
-
-          // Nothing has reached the client yet — safe to retry in software
-          // if this attempt was using a hardware encoder.
-          if (allowHwFallback && hw !== 'none' && !res.headersSent) {
-            cleanup(reason);
-            logger.warn(
-              { youtubeId, hardwareMode: hw, reason, message },
-              'ytstream: hardware encoder failed before any bytes were sent; retrying with hardwareMode=none (software libx264)'
-            );
-            resolvePipeline(runPipeline(playerClient, 'none', { allowHwFallback: false, allowClientRetry }));
-            return;
-          }
-
-          sharedState.finalized = true;
-          if (streamId) untrackStream(streamId, 'error', message);
-          cleanup(reason);
-          if (!res.headersSent) {
-            logger.error({ youtubeId, reason, message }, 'ytstream: stream failed to start or exited with error');
-            res.status(502).send(`Stream failed: ${String(message).slice(0, 300)}`);
-          } else if (!res.writableEnded) {
-            try { res.end(); } catch { /* ignore */ }
-          }
-          resolvePipeline();
-        }
-
-        const onClientGone = (reason) => () => {
-          sharedState.finalized = true;
-          if (streamId) untrackStream(streamId, 'client-disconnected');
-          cleanup(reason);
-          resolvePipeline();
-        };
-        res.on('close', onClientGone('res-close'));
-        res.on('error', onClientGone('res-error'));
-        req.on('aborted', onClientGone('req-aborted'));
-        req.on('close', onClientGone('req-close'));
-
-        if (needsYtDlpChildren) {
-          ytVideo.on('error', (err) => {
-            logger.error({ err }, 'ytstream: yt-dlp (video) failed to start');
-            handleFailure('ytdlp-video-spawn-error', err.message);
-          });
-          ytAudio.on('error', (err) => {
-            logger.error({ err }, 'ytstream: yt-dlp (audio) failed to start');
-            handleFailure('ytdlp-audio-spawn-error', err.message);
-          });
-        }
-
-        ff.on('error', (err) => {
-          logger.error({ err }, 'ytstream: ffmpeg failed to start');
-          handleFailure('ffmpeg-spawn-error', err.message);
-        });
-
-        if (needsYtDlpChildren) {
-          ytVideo.on('close', (code, signal) => {
-            const killedByUs = state.cleaned || signal === 'SIGTERM' || signal === 'SIGKILL';
-            if (code !== 0 && code !== null && !killedByUs) {
-              logger.error({ code, signal, ytVideoErr: ytVideoErr.slice(-800) }, 'ytstream: yt-dlp (video) exited non-zero');
-              handleFailure('ytdlp-video-exit', ytVideoErr || `yt-dlp (video) exited with code ${code}`);
-            }
-          });
-
-          ytAudio.on('close', (code, signal) => {
-            const killedByUs = state.cleaned || signal === 'SIGTERM' || signal === 'SIGKILL';
-            if (code !== 0 && code !== null && !killedByUs) {
-              logger.error({ code, signal, ytAudioErr: ytAudioErr.slice(-800) }, 'ytstream: yt-dlp (audio) exited non-zero');
-              handleFailure('ytdlp-audio-exit', ytAudioErr || `yt-dlp (audio) exited with code ${code}`);
-            }
-          });
-        }
-
-        ff.on('close', (code, signal) => {
-          const killedByUs = state.cleaned || signal === 'SIGTERM' || signal === 'SIGKILL';
-          if (code !== 0 && code !== null && !killedByUs) {
-            // Prefer yt-dlp's own error text when available — it's far
-            // more diagnostic ("403 Forbidden", "page needs to be
-            // reloaded", etc.) than ffmpeg's generic "Invalid data found"
-            // complaint about an empty/truncated pipe.
-            logger.error(
-              { code, signal, ffErr: ffErr.slice(-800), ytVideoErr: ytVideoErr.slice(-800), ytAudioErr: ytAudioErr.slice(-800) },
-              'ytstream: ffmpeg exited non-zero'
-            );
-            handleFailure('ffmpeg-exit', ytVideoErr || ytAudioErr || ffErr || `ffmpeg exited with code ${code}`);
-            return;
-          }
-          if (sharedState.finalized) return;
-          logger.info(
-            { code, signal, pid: ff.pid, cleaned: state.cleaned, ffErrTail: ffErr ? ffErr.slice(-300) : '' },
-            'ytstream: ffmpeg exited cleanly'
-          );
-          sharedState.finalized = true;
-          if (streamId) untrackStream(streamId, 'completed');
-          if (!res.writableEnded) {
-            try { res.end(); } catch { /* ignore */ }
-          }
-          cleanup('ffmpeg-close');
-          resolvePipeline();
-        });
-      });
-    }
-
-    // Return the promise chain so the caller's `await streamViaFfmpeg(...)`
-    // actually holds the request open until the pipeline (including any
-    // hardware->software fallback) finishes, instead of resolving
-    // immediately and leaving ffmpeg to stream into an already-"finished"
-    // handler.
-    return attempt(1);
-  }
-
   /**
-   * Streaming page — lists every currently-active mode=ffmpeg/mode=hls
+   * Streaming page — lists every currently-active mode=hls
    * stream tracked in activeStreams, with a best-effort title lookup (no
    * live yt-dlp fetch). REST source of truth for initial load/reconnects;
    * live deltas come from the streamProgress/streamStarted/streamStopped
@@ -4863,6 +3855,7 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
         logger.warn({ err }, 'ytstream: failed to resolve titles for /streams');
       }
     }
+    await fillMissingTitlesFromMetadataCache(youtubeIds, titleById, models);
     res.json({ streams: streams.map((s) => ({ ...s, title: titleById[s.youtubeId] || null })) });
   });
 
@@ -4953,6 +3946,7 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
           logger.warn({ err }, 'ytstream: failed to resolve titles for /history');
         }
       }
+      await fillMissingTitlesFromMetadataCache(youtubeIds, titleById, models);
       res.json({
         rows: rows.map((r) => ({
           streamId: r.stream_id,
@@ -5087,6 +4081,13 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
         resolution: info && info.width && info.height ? `${info.width}x${info.height}` : null,
         fps: info?.fps ?? null,
         uploadDate: info?.upload_date ?? null,
+        // False for a row written by the cheap calculatedLength duration-only
+        // probe (ytstream.js's getVideoDurationSeconds) that this video has
+        // never actually streamed/downloaded/materialized past - see
+        // youtubeMetadataCache.js's cacheRawInfoJson doc comment. Lets the
+        // client tell "nothing here yet" apart from "something broke"
+        // without an extra raw=true round trip.
+        hasRawInfoJson: Boolean(row.raw_info_json),
       };
       if (req.query.raw === 'true') {
         detail.rawInfoJson = info;
@@ -5238,8 +4239,8 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
    * Resolves every playback setting the same way for both the real
    * streaming route and the read-only `/simulate` debug route - a single
    * source of truth so the debug trace can never drift from what a real
-   * request would do. Each mode is self-contained: mode=ffmpeg/hls fails
-   * outright (`ffmpegAvailable: false`) rather than substituting a
+   * request would do. Each mode is self-contained: mode=hls/hls-buffer
+   * fails outright (`ffmpegAvailable: false`) rather than substituting a
    * different mode's behavior when ffmpeg isn't available.
    *
    * `probe: true` (the real route) runs the two real yt-dlp lookups this
@@ -5300,16 +4301,31 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
 
     const requestedMode = String(queryOverride('mode') || ytCfg.defaultMode || 'direct').toLowerCase();
     const requestedModeValid = VALID_MODES.includes(requestedMode);
-    let mode = requestedModeValid ? requestedMode : 'direct';
-    if (!requestedModeValid) {
-      steps.push({ step: 'mode', detail: `requested mode "${requestedMode}" isn't one of ${VALID_MODES.join('/')}; falling back to direct`, probed: false });
+    let mode;
+    if (requestedModeValid) {
+      mode = requestedMode;
+    } else {
+      // Most commonly a stale mode baked into an old .strm file/URL from
+      // before a mode was retired (e.g. the removed direct-pipe/ffmpeg
+      // modes) - fall back to whatever's CURRENTLY configured rather than a
+      // hardcoded 'direct', so retiring a mode doesn't silently downgrade
+      // existing .strm files to a much lower quality ceiling than the admin
+      // actually has configured. Only trust ytCfg.defaultMode if it's ALSO
+      // currently valid - if the config itself still holds a since-removed
+      // mode, there's nothing else to fall back to but 'direct'.
+      const configuredMode = String(ytCfg.defaultMode || '').toLowerCase();
+      const configuredModeValid = VALID_MODES.includes(configuredMode);
+      mode = configuredModeValid ? configuredMode : 'direct';
+      const detail = `requested mode "${requestedMode}" isn't one of ${VALID_MODES.join('/')}; using the current ${configuredModeValid ? 'configured default' : 'hardcoded'} mode "${mode}" instead`;
+      logger.info({ youtubeId, requestedMode, resolvedMode: mode }, `ytstream: ${detail}`);
+      steps.push({ step: 'mode', detail, probed: false });
     }
 
     const ffmpegAvailable = isFfmpegAvailable();
-    if ((mode === 'ffmpeg' || mode === 'hls' || mode === 'hls-buffer') && !ffmpegAvailable) {
-      // No fallback to a different mode - mode=ffmpeg/hls/hls-buffer
+    if ((mode === 'hls' || mode === 'hls-buffer') && !ffmpegAvailable) {
+      // No fallback to a different mode - mode=hls/hls-buffer
       // requires ffmpeg, full stop. The real route responds 502 for this
-      // rather than silently serving direct/direct-pipe instead.
+      // rather than silently serving direct instead.
       steps.push({ step: 'mode', detail: `mode=${mode} requested but ffmpeg is unavailable on this host; fails outright (502), no fallback to a different mode`, probed: false });
     } else {
       steps.push({ step: 'mode', detail: `resolved to ${mode}`, probed: false });
@@ -5326,7 +4342,7 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
     const hardwareMode = normalizeHardwareMode(queryOverride('hardware') || ytCfg.hardwareMode || 'none');
     const tuning = normalizeTuning(queryOverride('tuning') || ytCfg.tuning || 'fast');
 
-    const isDirectFamily = mode === 'direct' || mode === 'direct-pipe' || mode === 'direct-redirect';
+    const isDirectFamily = mode === 'direct' || mode === 'direct-redirect';
 
     if (isDirectFamily) {
       steps.push({
@@ -5337,9 +4353,20 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
     }
 
     const requestedQualityStrictnessRaw = String(queryOverride('qualityStrictness') || ytCfg.qualityStrictness || 'fallback').toLowerCase();
-    const qualityStrictness = ['fixed', 'fallback', 'best'].includes(requestedQualityStrictnessRaw) ? requestedQualityStrictnessRaw : 'fallback';
-    if (!['fixed', 'fallback', 'best'].includes(requestedQualityStrictnessRaw)) {
-      steps.push({ step: 'qualityStrictness', detail: `requested "${requestedQualityStrictnessRaw}" isn't fixed/fallback/best; using fallback`, probed: false });
+    const qualityStrictnessValues = ['fixed', 'fallback', 'best'];
+    let qualityStrictness;
+    if (qualityStrictnessValues.includes(requestedQualityStrictnessRaw)) {
+      qualityStrictness = requestedQualityStrictnessRaw;
+    } else {
+      // Same reasoning as mode's fallback above - prefer the currently
+      // configured value over a hardcoded 'fallback' when the request (or a
+      // stale .strm URL) carries something invalid.
+      const configuredQualityStrictness = String(ytCfg.qualityStrictness || '').toLowerCase();
+      const configuredValid = qualityStrictnessValues.includes(configuredQualityStrictness);
+      qualityStrictness = configuredValid ? configuredQualityStrictness : 'fallback';
+      const detail = `requested qualityStrictness "${requestedQualityStrictnessRaw}" isn't fixed/fallback/best; using the current ${configuredValid ? 'configured default' : 'hardcoded'} value "${qualityStrictness}" instead`;
+      logger.info({ youtubeId, requestedQualityStrictnessRaw, resolvedQualityStrictness: qualityStrictness }, `ytstream: ${detail}`);
+      steps.push({ step: 'qualityStrictness', detail, probed: false });
     }
 
     const requestedQuality = String(queryOverride('quality') || ytCfg.quality || config.preferredResolution || '720');
@@ -5426,7 +4453,7 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
       steps.push({ step: 'finalizeToMp4', detail: `on - ${finalizeToMp4Compat.reason}`, probed: false });
     }
 
-    if (transcode === 'copy' && (mode === 'ffmpeg' || mode === 'hls' || mode === 'hls-buffer')) {
+    if (transcode === 'copy' && (mode === 'hls' || mode === 'hls-buffer')) {
       if (!probe) {
         steps.push({
           step: 'transcode',
@@ -5460,13 +4487,11 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
       }
     }
 
-    // Direct-family modes already get their own "ignored" step above; every
-    // other mode actually runs these through an ffmpeg encode, but until
-    // now had no step spelling out the resolved values themselves - only
-    // ever visible buried in wouldCall's streamViaFfmpeg(...) call string,
-    // or not at all for hls/hls-buffer (whose wouldCall is just an opaque
-    // session key hash). container is always a real choice here; hardware/
-    // tuning only matter once transcode has resolved to h264 (see
+    // Direct-family modes already get their own "ignored" step above;
+    // hls/hls-buffer actually run these through an ffmpeg encode, but their
+    // wouldCall is just an opaque session key hash - this spells out the
+    // resolved values themselves. container is always a real choice here;
+    // hardware/tuning only matter once transcode has resolved to h264 (see
     // getModeFieldCompatibility) - copy never touches an encoder.
     if (!isDirectFamily) {
       steps.push({
@@ -5481,23 +4506,18 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
     // Execution/fallback narrative - describes what happens once the
     // resolved mode/quality/transcode is handed to the real serve function,
     // including retry chains (serveDirect/resolveDirectUrl,
-    // streamViaFfmpeg/runPipeline, getOrCreateHlsSession). Static/
-    // descriptive, kept in sync by hand rather than derived; skipped
-    // entirely when probeShortcut would fire.
-    const ffmpegModeBlocked = (mode === 'ffmpeg' || mode === 'hls' || mode === 'hls-buffer') && !ffmpegAvailable;
+    // getOrCreateHlsSession). Static/descriptive, kept in sync by hand
+    // rather than derived; skipped entirely when probeShortcut would fire.
+    const ffmpegModeBlocked = (mode === 'hls' || mode === 'hls-buffer') && !ffmpegAvailable;
     if (!probeShortcut.wouldFire && !ffmpegModeBlocked) {
       if (mode === 'direct') {
         steps.push({ step: 'execution', detail: 'resolve a direct playback URL via yt-dlp (-g)', probed: false });
         steps.push({ step: 'execution', detail: 'if that yt-dlp call fails with a client/session extraction error, retry once with player_client=android', probed: false });
         steps.push({
           step: 'execution',
-          detail: 'once a URL is resolved, fetch it; if that fetch is rejected (e.g. HTTP 403 - a session-bound URL), respond 502 - no fallback (mode=direct-pipe is the explicit alternative for this case)',
+          detail: 'once a URL is resolved, fetch it; if that fetch is rejected (e.g. HTTP 403 - a session-bound URL), respond 502 - no fallback',
           probed: false,
         });
-      } else if (mode === 'direct-pipe') {
-        steps.push({ step: 'execution', detail: 'fetch the resolved format directly through yt-dlp\'s own process (yt-dlp -f <selector> -o -), piped straight to the response - immune to the session-bound-URL 403 plain direct mode can hit', probed: false });
-        steps.push({ step: 'execution', detail: 'no Range/seek support - this is a live sequential pipe, not a byte-range fetch; a seek restarts playback from 0', probed: false });
-        steps.push({ step: 'execution', detail: 'if yt-dlp fails, respond 502 - no further fallback', probed: false });
       } else if (mode === 'direct-redirect') {
         steps.push({ step: 'execution', detail: 'resolve a direct playback URL via yt-dlp (-g), same as plain direct mode', probed: false });
         steps.push({ step: 'execution', detail: 'if that yt-dlp call fails with a client/session extraction error, retry once with player_client=android', probed: false });
@@ -5656,6 +4676,7 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
                 streamId: crypto.randomUUID(),
                 mode: 'probe-cache-hit',
                 youtubeId,
+                ...(await resolveActualServedFileInfo(youtubeId, existingCachedFilePath, models)),
                 clientIp: resolveClientIp(req),
                 userAgent: req.headers['user-agent'] || null,
                 startedAt: Date.now(),
@@ -5731,6 +4752,7 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
                   streamId: crypto.randomUUID(),
                   mode: 'cached-file',
                   youtubeId,
+                  ...(await resolveActualServedFileInfo(youtubeId, cachedVideo.filePath, models)),
                   clientIp: resolveClientIp(req),
                   userAgent: req.headers['user-agent'] || null,
                   startedAt: Date.now(),
@@ -5790,67 +4812,19 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
       ? true
       : parseBooleanQueryFlag(cheapCalculatedLengthRaw);
 
-    // Duration warm-up: kicked off here too, for the SAME reason as the
-    // placeholder warm-up below - createHlsSessionInternal's own
-    // getVideoDurationSeconds call only runs after resolvePlaybackPlan (and
-    // its quality/codec probes) has already fully finished, so without this
-    // the two were fully serial (probe, THEN duration lookup) rather than
-    // overlapping. Observed live: a ~7s quality probe followed by a further
-    // ~5s duration lookup (this video's duration wasn't cached in the DB
-    // yet) - back to back, ~12s before anything reached the client at all,
-    // even with the placeholder fix below in place. Broader gate than the
-    // placeholder's (no instantStart/transcode requirement) since duration
-    // is needed for every calculatedLength session, not just instant-start
-    // ones. Dedup'd against the real call via durationLookupPromises, so
-    // this never spawns a second yt-dlp process for the same video.
+    // Duration warm-up: kicked off here too, since createHlsSessionInternal's
+    // own getVideoDurationSeconds call only runs after resolvePlaybackPlan
+    // (and its quality/codec probes) has already fully finished, so without
+    // this the two were fully serial (probe, THEN duration lookup) rather
+    // than overlapping. Observed live: a ~7s quality probe followed by a
+    // further ~5s duration lookup (this video's duration wasn't cached in
+    // the DB yet) - back to back, ~12s before anything reached the client at
+    // all. Dedup'd against the real call via durationLookupPromises, so this
+    // never spawns a second yt-dlp process for the same video.
     if (cheapCalculatedLength && cheapIsHlsFamily) {
       getVideoDurationSeconds(youtubeId, configModule.getConfig()).catch((err) =>
         logger.warn({ err, youtubeId }, 'ytstream: early calculatedLength duration warm-up failed')
       );
-    }
-
-    // ytstream.instantStart placeholder warm-up: fire-and-forget, started
-    // this early (concurrently with resolvePlaybackPlan's own yt-dlp probes
-    // below - resolveEffectiveQualityHeight/resolveVideoCodec, either of
-    // which can take several seconds on a cache miss) rather than waiting
-    // for the real plan to resolve first. Uses the REQUESTED/configured
-    // quality directly - not the probe's auto-capped value - because
-    // resolveVideoTargetResolution already reflects this video's real known
-    // resolution independent of that probe, so capResolutionToHeight
-    // produces the same effective placeholder height either way in the
-    // overwhelming common case (the probe only ever lowers a request that's
-    // higher than the source truly has, and resolveVideoTargetResolution's
-    // cached value already reflects that same ceiling). ensurePlaceholderSegment's
-    // own cache/dedup (keyed by youtubeId + these resolved dimensions) means
-    // this is never wasted: createHlsSessionInternal's own placeholder call
-    // later either finds this already done or joins the same in-flight
-    // generation - and on the rare disagreement, that later call just
-    // generates its own instead, no worse than not warming up at all.
-    if (
-      cheapCfg.instantStart === true &&
-      cheapCalculatedLength &&
-      cheapTranscode === 'h264' &&
-      cheapIsHlsFamily
-    ) {
-      const cheapHardwareMode = normalizeHardwareMode((cheapForced ? undefined : req.query.hardware) || cheapCfg.hardwareMode || 'none');
-      const cheapTuning = normalizeTuning((cheapForced ? undefined : req.query.tuning) || cheapCfg.tuning || 'fast');
-      const cheapQuality = String((cheapForced ? undefined : req.query.quality) || cheapCfg.quality || configModule.getConfig().preferredResolution || '720');
-      const { segmentType: cheapSegmentType, segmentExt: cheapSegmentExt } = getHlsContainerInfo(cheapCfg.container || 'mp4');
-      (async () => {
-        const sourceResolution = await resolveVideoTargetResolution(youtubeId, models);
-        const { width, height } = capResolutionToHeight(sourceResolution.width, sourceResolution.height, resolveQualityHeight(cheapQuality));
-        const thumbnailPath = resolveLocalThumbnailPath(youtubeId);
-        await ensurePlaceholderSegment({
-          youtubeId,
-          thumbnailPath,
-          segmentType: cheapSegmentType,
-          segmentExt: cheapSegmentExt,
-          hardwareMode: cheapHardwareMode,
-          tuning: cheapTuning,
-          width,
-          height,
-        });
-      })().catch((err) => logger.warn({ err, youtubeId }, 'ytstream: early instant-start placeholder warm-up failed'));
     }
 
     const config = configModule.getConfig();
@@ -5880,12 +4854,10 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
     // mode=direct: resolves a URL and proxies it, no retry beyond
     // resolveDirectUrl's own extraction-error retry. On a 403 (a vprv=1
     // session-bound URL rejection) it fails cleanly, full stop - no
-    // automatic switch to a different behavior. mode=direct-pipe (see
-    // pipeDirectStreamViaYtDlp, below) is the explicit, separately-selected
-    // mode for when that resilience is wanted instead.
+    // automatic switch to a different behavior.
     const serveDirect = async (playerClient) => {
       // Not a live/trackable session on the Streaming page (no process to
-      // show a Stop button for, unlike direct-pipe) - just a StreamHistory
+      // show a Stop button for) - just a StreamHistory
       // audit row, same reasoning as redirectToDirectUrl, so at least a
       // failed/succeeded request shows up somewhere instead of leaving
       // mode=direct completely unaccounted for.
@@ -5920,46 +4892,13 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
     };
 
     try {
-      if ((mode === 'ffmpeg' || mode === 'hls' || mode === 'hls-buffer') && !plan.ffmpegAvailable) {
+      if ((mode === 'hls' || mode === 'hls-buffer') && !plan.ffmpegAvailable) {
         // No fallback to direct - each mode does exactly what it says. If
         // ffmpeg genuinely isn't installed/working on this host,
-        // mode=ffmpeg/hls/hls-buffer just fails outright
+        // mode=hls/hls-buffer just fails outright
         // instead of silently downgrading to a different mode's behavior.
         logger.error({ youtubeId, mode }, `ytstream: mode=${mode} requested but ffmpeg is unavailable on this host`);
         res.status(502).send(`Stream failed: mode=${mode} requires ffmpeg, which is not available on this host`);
-        return;
-      }
-
-      if (mode === 'direct-pipe') {
-        // Live-trackable, unlike direct/direct-redirect: a real yt-dlp
-        // child process for the life of the stream, same shape as
-        // mode=ffmpeg's tracked sessions - visible + stoppable on the
-        // Streaming page, not just a history row.
-        const streamId = crypto.randomUUID();
-        trackStream({
-          streamId,
-          mode: 'direct-pipe',
-          youtubeId,
-          quality,
-          clientIp: resolveClientIp(req),
-          userAgent: req.headers['user-agent'] || null,
-          state: 'starting',
-          startedAt: Date.now(),
-          bytesTransferred: 0,
-          bytesPerSecond: 0,
-          lastActivityAt: Date.now(),
-          stop: null, // wired inside pipeDirectStreamViaYtDlp once the process exists
-        });
-        try {
-          await pipeDirectStreamViaYtDlp(youtubeId, config, quality, qualityStrictness, ytCfg.playerClient, calculatedLength, req, res, streamId);
-        } catch (err) {
-          logger.error({ youtubeId, err: err.message }, 'ytstream: direct-pipe stream failed');
-          if (!res.headersSent) {
-            res.status(502).send(`Direct-pipe stream failed: ${err.message}`);
-          } else if (!res.writableEnded) {
-            try { res.end(); } catch { /* ignore */ }
-          }
-        }
         return;
       }
 
@@ -5973,124 +4912,6 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
           }
         }
         return;
-      }
-
-      if (mode === 'ffmpeg') {
-        const containerContentType = container === 'ts' ? 'video/mp2t' : container === 'mkv' ? 'video/x-matroska' : 'video/mp4';
-        res.set({
-          'Content-Type': containerContentType,
-          'Cache-Control': 'no-store',
-        });
-
-        let effectiveSeekSeconds = seekSeconds;
-        let responseShaping;
-
-        if (calculatedLength) {
-          try {
-            const height = resolveQualityHeight(quality);
-            const durationSeconds = await getVideoDurationSeconds(youtubeId, config);
-            const bytesPerSecond = estimateBitrateBytesPerSecond(height);
-            const estimatedTotalBytes = Math.ceil(durationSeconds * bytesPerSecond);
-            logger.info(
-              { youtubeId, method: req.method, rangeHeader: req.headers.range || null, durationSeconds, bytesPerSecond, estimatedTotalBytes },
-              'ytstream: calculatedLength estimate computed'
-            );
-
-            if (req.method === 'HEAD') {
-              res.set({ 'Accept-Ranges': 'bytes', 'Content-Length': String(estimatedTotalBytes) });
-              return res.status(200).end();
-            }
-
-            const range = parseByteRange(req.headers.range, estimatedTotalBytes);
-            if (range && range.invalid) {
-              logger.warn({ youtubeId, rangeHeader: req.headers.range, estimatedTotalBytes }, 'ytstream: calculatedLength Range unsatisfiable (416)');
-              res.set('Content-Range', `bytes */${estimatedTotalBytes}`);
-              return res.status(416).end();
-            }
-
-            if (range) {
-              const targetLength = range.end - range.start + 1;
-              effectiveSeekSeconds = range.start / bytesPerSecond;
-              responseShaping = {
-                status: 206,
-                targetLength,
-                headers: {
-                  'Accept-Ranges': 'bytes',
-                  'Content-Length': String(targetLength),
-                  'Content-Range': `bytes ${range.start}-${range.end}/${estimatedTotalBytes}`,
-                },
-              };
-            } else {
-              responseShaping = {
-                status: 200,
-                targetLength: estimatedTotalBytes,
-                headers: {
-                  'Accept-Ranges': 'bytes',
-                  'Content-Length': String(estimatedTotalBytes),
-                },
-              };
-            }
-          } catch (err) {
-            // Duration lookup failed (unavailable video, transient yt-dlp
-            // error, etc.) — fall back to the normal chunked/unknown-length
-            // ffmpeg response rather than failing the whole request over a
-            // feature that's opt-in and inherently approximate anyway.
-            logger.warn(
-              { youtubeId, err: err.message },
-              'ytstream: calculatedLength duration lookup failed; falling back to normal chunked response'
-            );
-          }
-        }
-
-        if (calculatedLength) {
-          logger.info(
-            { youtubeId, effectiveSeekSeconds, responseShaping },
-            'ytstream: dispatching ffmpeg mode with calculatedLength responseShaping'
-          );
-        }
-
-        // Streaming-page tracking entry — created once per HTTP request
-        // (not per runPipeline attempt) so it survives streamViaFfmpeg's
-        // internal retries (403/extraction-error, hw->software fallback),
-        // which only ever happen before any byte reaches the client.
-        const streamId = crypto.randomUUID();
-        trackStream({
-          streamId,
-          mode: 'ffmpeg',
-          youtubeId,
-          quality,
-          container,
-          transcode,
-          hardwareMode,
-          tuning,
-          clientIp: resolveClientIp(req),
-          userAgent: req.headers['user-agent'] || null,
-          state: 'starting',
-          startedAt: Date.now(),
-          bytesTransferred: 0,
-          bytesPerSecond: 0,
-          lastActivityAt: Date.now(),
-          stop: null, // wired inside runPipeline once cleanup() exists
-        });
-
-        // Await so Express holds the connection open until streamViaFfmpeg's
-        // response finishes, rather than returning control (and letting the
-        // route handler's outer try/catch fall through) while it's still streaming.
-        return await streamViaFfmpeg({
-          youtubeId,
-          quality,
-          qualityStrictness,
-          container,
-          transcode,
-          hardwareMode,
-          tuning,
-          seekSeconds: effectiveSeekSeconds,
-          config,
-          res,
-          req,
-          responseShaping,
-          streamId,
-        });
       }
 
       if (mode === 'hls' || mode === 'hls-buffer') {
@@ -6123,15 +4944,13 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
           if (clientGoneWhileWaiting || res.writableEnded) {
             return;
           }
-          maybeStripPlaceholderFromPlaylist(session);
           const rawPlaylist = await fs.promises.readFile(session.playlistPath, 'utf8');
           const playlist = rewriteHlsPlaylistUrls(rawPlaylist, session.baseUrl);
           // debug: fires on every playlist request for an already-running
           // session (most of them - only the very first is a real cold
           // start), not just once per session. segmentCount counts the
-          // REAL #EXTINF lines in what's actually being sent right now
-          // (includes the instant-start placeholder entry, if still
-          // present) - the ground truth for "how many segments does this
+          // REAL #EXTINF lines in what's actually being sent right now -
+          // the ground truth for "how many segments does this
           // playlist currently declare", independent of session.totalSegments
           // (which segmentDurationSeconds/fps corrections above may have
           // since revised without ever rewriting this static file).
@@ -6223,20 +5042,18 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
       const probe = /^(1|true|yes)$/i.test(String(req.query.probe || ''));
       const plan = await resolvePlaybackPlan(youtubeId, req, config, { probe });
 
-      const isDirectFamilyMode = plan.mode === 'direct' || plan.mode === 'direct-pipe' || plan.mode === 'direct-redirect';
+      const isDirectFamilyMode = plan.mode === 'direct' || plan.mode === 'direct-redirect';
       const formatSelectors = isDirectFamilyMode
         ? { direct: getDirectFormatSelector(plan.quality, plan.qualityStrictness) }
         : getDashFormatSelectors(plan.quality, plan.qualityStrictness);
 
       let hls = null;
       let wouldCall;
-      const ffmpegModeBlocked = (plan.mode === 'ffmpeg' || plan.mode === 'hls' || plan.mode === 'hls-buffer') && !plan.ffmpegAvailable;
+      const ffmpegModeBlocked = (plan.mode === 'hls' || plan.mode === 'hls-buffer') && !plan.ffmpegAvailable;
       if (plan.probeShortcut.wouldFire) {
         wouldCall = 'tryServeProbeClip(...) [probeShortcut - real request never reaches the mode/quality logic above]';
       } else if (ffmpegModeBlocked) {
         wouldCall = `502 - mode=${plan.mode} requires ffmpeg, which is unavailable on this host (no fallback to a different mode)`;
-      } else if (plan.mode === 'ffmpeg') {
-        wouldCall = `streamViaFfmpeg({ quality: "${plan.quality}", container: "${plan.container}", transcode: "${plan.transcode}", hardwareMode: "${plan.hardwareMode}", tuning: "${plan.tuning}" })`;
       } else if (plan.mode === 'hls' || plan.mode === 'hls-buffer') {
         const sessionKey = buildHlsSessionKey({
           youtubeId,
@@ -6252,8 +5069,6 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
         });
         hls = { sessionKey, sessionAlreadyActive: hlsSessions.has(sessionKey) };
         wouldCall = `getOrCreateHlsSession(sessionKey: "${sessionKey}")`;
-      } else if (plan.mode === 'direct-pipe') {
-        wouldCall = `pipeDirectStreamViaYtDlp(quality: "${plan.quality}")`;
       } else if (plan.mode === 'direct-redirect') {
         wouldCall = `redirectToDirectUrl(quality: "${plan.quality}") [302, no proxy]`;
       } else {
@@ -6276,7 +5091,7 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
       if (typeof entry.stop === 'function') {
         entry.stop();
       } else {
-        // stop() isn't wired up until runPipeline's cleanup() exists —
+        // stop() isn't wired up until the HLS session's encode pass exists —
         // narrow window right at request start. Untrack directly rather
         // than leaving the row stuck with a dead Stop button.
         untrackStream(req.params.streamId, 'manual-stop');
@@ -6301,7 +5116,7 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
     if (!/^[a-f0-9]{20}$/.test(sessionKey)) {
       return res.status(400).send('Invalid session key');
     }
-    if (!/^(playlist\.m3u8|init\.mp4|placeholder-init\.mp4|placeholder\.(ts|m4s)|segment\d{5}\.(ts|m4s))$/.test(filename)) {
+    if (!/^(playlist\.m3u8|init\.mp4|segment\d{5}\.(ts|m4s))$/.test(filename)) {
       return res.status(400).send('Invalid filename');
     }
     const session = hlsSessions.get(sessionKey);
@@ -6312,15 +5127,6 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
     session.lastAccess = Date.now();
 
     const filePath = path.join(session.dir, filename);
-
-    // See maybeStripPlaceholderFromPlaylist's doc comment - a direct fetch
-    // of playlist.m3u8 (as opposed to the entry route's own read, which has
-    // the same call) is exactly the kind of re-fetch that can otherwise
-    // hand back a stale, placeholder-still-included playlist well after the
-    // real content caught up.
-    if (filename === 'playlist.m3u8') {
-      maybeStripPlaceholderFromPlaylist(session);
-    }
 
     // ytstream.hotSwapToCache: check (throttled) whether STRM cache-on-play
     // has finished downloading this video since the session started, and if

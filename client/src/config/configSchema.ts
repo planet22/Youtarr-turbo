@@ -178,7 +178,7 @@ export const CONFIG_FIELDS = {
   // what a full download would use unless explicitly overridden here.
   ytstream: {
     default: {
-      defaultMode: 'direct' as 'direct' | 'direct-pipe' | 'direct-redirect' | 'ffmpeg' | 'hls' | 'hls-buffer',
+      defaultMode: 'direct' as 'direct' | 'direct-redirect' | 'hls' | 'hls-buffer',
       // mkv is ffmpeg-mode only (see YtstreamSettingsSection's Container select)
       container: 'mp4' as 'mp4' | 'ts' | 'mkv',
       // Empty string = auto (derive from videoCodec); copy = remux; h264 = re-encode
@@ -232,14 +232,44 @@ export const CONFIG_FIELDS = {
       // reloaded." extraction error). Advanced override, e.g. "android" or
       // "web,android". See docs/YTSTREAM.md Troubleshooting.
       playerClient: '' as string,
-      // mode=ffmpeg only. Reports a calculated Content-Length and answers
-      // Range requests by restarting the pipeline seeked to the matching
-      // calculated timestamp, so players that refuse to direct-play a
-      // chunked/unknown-length stream (e.g. Jellyfin defaulting to a
-      // server-side HLS transcode) see something that looks like an
-      // ordinary seekable file. The estimate is necessarily approximate —
-      // see docs/YTSTREAM.md. (Renamed from fakeLength; old configs are
-      // migrated automatically - see configModule.js.)
+      // Power-user yt-dlp network tuning for live playback (buildBaseArgs in
+      // server/routes/ytstream.js) - see docs/YTSTREAM.md. 0 means "don't
+      // pass the flag at all" (yt-dlp's own default applies) for every field
+      // below; there is no other way to explicitly disable one once set.
+      //
+      // --http-chunk-size: splits yt-dlp's fetch of the googlevideo URL into
+      // ranged HTTP requests instead of one long-lived connection - yt-dlp's
+      // own docs cite this as the fix for YouTube's mid-download bandwidth
+      // throttling. Only has any effect on modes where yt-dlp itself streams
+      // the media bytes (hls/hls-buffer); inert (but harmless) on
+      // direct/direct-redirect, where yt-dlp only resolves a URL via -g and
+      // never downloads the video itself.
+      httpChunkSizeMiB: 0 as number,
+      // -N/--concurrent-fragments: fetches that chunking concurrently.
+      // Values <= 1 are treated as "disabled" (yt-dlp's own default of a
+      // single sequential fetch). Same hls/hls-buffer-only applicability as
+      // httpChunkSizeMiB above.
+      concurrentFragments: 0 as number,
+      // --throttled-rate: yt-dlp re-extracts the URL if the measured
+      // download rate drops below this. Applies to every mode's yt-dlp
+      // calls, but only actually measures anything on a call that streams
+      // real data (hls/hls-buffer) - a no-op on direct/direct-redirect's
+      // quick -g resolve.
+      throttledRateKBps: 0 as number,
+      // --socket-timeout: how long yt-dlp waits on a stalled connection
+      // before giving up, in seconds. Applies to every yt-dlp call this app
+      // makes (including the -g resolve calls direct/direct-redirect use),
+      // so a stall triggers this app's own retry/fallback logic sooner
+      // instead of hanging on yt-dlp's much longer built-in default.
+      socketTimeoutSeconds: 0 as number,
+      // mode=hls/hls-buffer only (forced on for those; ignored for
+      // direct/direct-redirect). Reports a calculated Content-Length so
+      // players that refuse to direct-play a chunked/unknown-length stream
+      // (e.g. Jellyfin defaulting to a server-side HLS transcode) see
+      // something that looks like an ordinary seekable file. The estimate
+      // is necessarily approximate — see docs/YTSTREAM.md. (Renamed from
+      // fakeLength; old configs are migrated automatically - see
+      // configModule.js.)
       calculatedLength: false as boolean,
       // mode=hls only, pairs with strm.cacheOnPlay. Once the background
       // cache-on-play download finishes, an active HLS session switches its
@@ -258,16 +288,6 @@ export const CONFIG_FIELDS = {
       // live-proxying/transcoding it all over again. Off by default -
       // existing STRM playback behavior is unaffected unless opted in.
       serveCachedFile: false as boolean,
-      // mode=hls + calculatedLength only, transcode=h264 sessions only.
-      // Normally the first HLS response blocks until the real yt-dlp/ffmpeg
-      // pipeline produces its first segment (a real cold start can take
-      // 10-25s). When on, a small pre-generated "loading" clip (cached after
-      // first use, matching the session's actual codec/hardware settings) is
-      // served as segment 0 so playback starts within milliseconds while
-      // the real encode catches up in the background. Has no effect for
-      // transcode=copy (no single placeholder could match every video's
-      // own passthrough codec) or when calculatedLength is off.
-      instantStart: false as boolean,
       // transcode=h264 sessions only. A metadata-probe request (detected by
       // its bare default "Lavf/x.y.z" User-Agent - see
       // server/modules/ytstreamProbeShortcut.js) gets a tiny cached

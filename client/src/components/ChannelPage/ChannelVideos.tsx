@@ -1520,6 +1520,9 @@ function ChannelVideos({
         defaultAudioFormat={defaultAudioFormat}
         defaultAudioFormatSource={defaultAudioFormatSource}
         defaultMediaMode={defaultMediaMode}
+        previewVideos={videos
+          .filter((v) => checkedBoxes.includes(v.youtube_id))
+          .map((v) => ({ id: v.youtube_id, title: v.title }))}
         selectedTab={selectedTab || 'videos'}
         tabLabel={getTabLabel(selectedTab || 'videos')}
         onDownloadDialogClose={() => setDownloadDialogOpen(false)}

@@ -78,7 +78,6 @@ Modeled on the [jellyfin-youtube-plugin](https://github.com/kingschnulli/jellyfi
 | Mode | How it works | Seekable? | Max quality |
 |---|---|---|---|
 | `direct` (Direct) | Resolves one progressive YouTube URL via yt-dlp and proxies the bytes through with Range forwarding — no ffmpeg | Yes (native Range) | ~360p (YouTube's progressive-format ceiling) |
-| `direct-pipe` (Direct, piped) | Same ~360p progressive ceiling, but fetched through yt-dlp's own process instead of a proxied URL, so it survives the session-bound-URL failure `direct` can hit | No — a seek restarts playback from 0 | ~360p |
 | `direct-redirect` (Direct, redirect) | Resolves a playback URL and sends the player a 302 straight to it; Youtarr-Turbo never touches the video bytes | Depends entirely on the player/YouTube CDN | Same ~360p progressive ceiling |
 | `ffmpeg` (Enhanced) | Fetches separate video-only + audio-only DASH streams and muxes them live through one ffmpeg process | Only via pipeline restart (`?t=` seek) | 1080p/1440p/4K |
 | `hls` (Enhanced HLS) | Same DASH fetch, but ffmpeg writes real `.m3u8` + segment files; the response only starts once the first segment exists | Yes, natively, within what's encoded so far | 1080p/1440p/4K |
@@ -122,7 +121,6 @@ Because six modes each support a different subset of settings (a hardware encode
 
 - **`transcode`**: `off` (auto — matches the download codec setting) / `copy` (fast remux, no re-encode) / `h264` (forced re-encode, required for hardware acceleration). A `copy` request is silently upgraded to `h264` if the source turns out not to already be H.264, since a VP9/AV1-in-MP4 remux isn't broadly playable.
 - **`playerClient`**: overrides yt-dlp's `--extractor-args youtube:player_client=`. Defaults to `default,-tv`, which excludes yt-dlp's own "tv" client — the most common source of YouTube's generic extraction-error page.
-- **`instantStart`** (HLS-family modes + `calculatedLength` + `transcode=h264` only): serves a placeholder clip as segment 0 so playback starts within milliseconds instead of blocking for the real encode's first segment. Uses the video's own cached YouTube thumbnail with a "Loading..." overlay when available, falling back to a generic pattern otherwise, while the real encode catches up in the background.
 - **`probeShortcut`**: detects a media server's metadata probe (Jellyfin's ffprobe, recognized by its bare default User-Agent) and serves a small cached clip instead of spinning up a real yt-dlp/ffmpeg session just to answer "what codec is this."
 - **`forceServerSettings`**: ignores any mode/quality/etc. baked into an already-written `.strm` file's URL or passed as query params, always using the current server-side config instead — useful after changing settings, since old `.strm` files otherwise keep using whatever was configured when they were written.
 

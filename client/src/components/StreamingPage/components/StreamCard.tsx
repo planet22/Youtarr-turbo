@@ -10,12 +10,12 @@ import {
   formatModeLabel,
   formatModeChipLabel,
   modeChipColor,
-  ACTUAL_FILE_MODES,
 } from '../utils';
 import { useStreamRowActions } from '../hooks/useStreamRowActions';
-import { formatDetail, STATE_CHIP_COLOR } from './StreamsTable';
+import { STATE_CHIP_COLOR } from './StreamsTable';
 import { SegmentActivityStrip } from './SegmentActivityGrid';
 import StreamCardLayout, { StreamCardStat } from './StreamCardLayout';
+import StreamFormatChips from './StreamFormatChips';
 
 export interface StreamCardProps {
   stream: StreamSnapshot;
@@ -38,19 +38,16 @@ function StreamCard({ stream, token, onStopped, onOpenSegments }: StreamCardProp
             <Chip size="small" label={formatModeChipLabel(stream.mode)} color={modeChipColor(stream.mode)} variant="filled" />
           </Tooltip>
           <Chip size="small" label={stream.state} color={STATE_CHIP_COLOR[stream.state]} variant="filled" />
-          {ACTUAL_FILE_MODES.has(stream.mode) && (
-            <Tooltip title="Serving the real, already-downloaded file directly - this is that file's own actual quality/container, not a requested or configured value">
-              <Chip size="small" variant="outlined" color="success" label="Cached" />
-            </Tooltip>
-          )}
         </>
       }
     >
-      <Tooltip title={`hardware: ${stream.hardwareMode}`}>
-        <Typography variant="caption" color="secondary" style={{ display: 'block' }}>
-          {formatDetail(stream)}
-        </Typography>
-      </Tooltip>
+      <StreamFormatChips
+        quality={stream.quality}
+        container={stream.container}
+        transcode={stream.transcode}
+        hardwareMode={stream.hardwareMode}
+        mode={stream.mode}
+      />
 
       <Tooltip title={stream.userAgent || 'No user-agent reported'}>
         <Box style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>

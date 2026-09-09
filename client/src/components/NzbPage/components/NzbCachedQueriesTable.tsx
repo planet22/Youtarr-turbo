@@ -10,21 +10,107 @@ import {
   TableRow,
   Typography,
   Checkbox,
+  Chip,
   Box,
   Button,
   IconButton,
   Tooltip,
 } from '../../ui';
+import { useMediaQuery } from '../../../hooks/useMediaQuery';
 import { NzbCachedEntry } from '../../../hooks/useNzbStats';
 import { formatCountdown, formatRelativeTime } from '../utils';
 import NzbSettingsIcons from './NzbSettingsIcons';
+import { COMPACT_CHIP_STYLE } from './nzbMobileStyles';
 
 interface NzbCachedQueriesTableProps {
   entries: NzbCachedEntry[];
   onDelete: (keys: string[]) => Promise<void>;
 }
 
+function NzbCachedQueriesMobileList({
+  entries,
+  selected,
+  deleting,
+  onToggleOne,
+  onDeleteOne,
+}: {
+  entries: NzbCachedEntry[];
+  selected: string[];
+  deleting: boolean;
+  onToggleOne: (key: string, checked: boolean) => void;
+  onDeleteOne: (key: string) => void;
+}) {
+  if (entries.length === 0) {
+    return (
+      <Typography variant="body2" color="textSecondary" style={{ padding: '8px 16px 16px' }}>
+        Nothing cached right now - either caching is disabled (Settings, "Search result cache"), or nothing has been searched recently.
+      </Typography>
+    );
+  }
+  return (
+    <Box style={{ maxHeight: 420, overflowY: 'auto' }}>
+      {entries.map((entry) => {
+        const isSelected = selected.includes(entry.key);
+        return (
+          <Box
+            key={entry.key}
+            style={{
+              display: 'flex',
+              gap: 8,
+              padding: '10px 16px',
+              borderBottom: '1px solid var(--border)',
+              backgroundColor: isSelected ? 'var(--muted)' : undefined,
+            }}
+          >
+            <Checkbox
+              checked={isSelected}
+              onChange={(e) => onToggleOne(entry.key, e.target.checked)}
+              style={{ padding: 4, marginTop: -4, flexShrink: 0 }}
+            />
+            <Box style={{ flex: 1, minWidth: 0 }}>
+              <Box style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
+                <Typography
+                  variant="body2"
+                  className="font-semibold"
+                  style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}
+                >
+                  {entry.query || <em>(blank / RSS mode)</em>}
+                </Typography>
+                <Tooltip title="Delete cached entry">
+                  <span>
+                    <IconButton
+                      size="small"
+                      aria-label="Delete cached entry"
+                      onClick={() => onDeleteOne(entry.key)}
+                      disabled={deleting}
+                      style={{ flexShrink: 0 }}
+                    >
+                      <Trash2 size={16} />
+                    </IconButton>
+                  </span>
+                </Tooltip>
+              </Box>
+              <Box style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap', marginTop: 4 }}>
+                <Chip size="small" label={`Count: ${entry.count}`} variant="outlined" style={COMPACT_CHIP_STYLE} />
+                <Chip size="small" label={`Results: ${entry.resultCount}`} variant="outlined" style={COMPACT_CHIP_STYLE} />
+                <Chip size="small" label={`Expires: ${formatCountdown(entry.expiresInMs)}`} variant="outlined" style={COMPACT_CHIP_STYLE} />
+              </Box>
+              <Box style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginTop: 6 }}>
+                <NzbSettingsIcons settings={entry.settingsSnapshot} />
+                <Typography variant="caption" color="textSecondary" style={{ whiteSpace: 'nowrap' }}>
+                  Cached {formatRelativeTime(entry.cachedAt)}
+                </Typography>
+              </Box>
+            </Box>
+          </Box>
+        );
+      })}
+    </Box>
+  );
+}
+
 function NzbCachedQueriesTable({ entries, onDelete }: NzbCachedQueriesTableProps) {
+  const isMobile = useMediaQuery('(max-width: 767px)');
   const [selected, setSelected] = useState<string[]>([]);
   const [deleting, setDeleting] = useState(false);
 
@@ -83,6 +169,15 @@ function NzbCachedQueriesTable({ entries, onDelete }: NzbCachedQueriesTableProps
           </Button>
         )}
       </Box>
+      {isMobile ? (
+        <NzbCachedQueriesMobileList
+          entries={entries}
+          selected={selected}
+          deleting={deleting}
+          onToggleOne={toggleOne}
+          onDeleteOne={handleDeleteOne}
+        />
+      ) : (
       <TableContainer style={{ maxHeight: 420, overflowY: 'auto' }}>
         <Table size="small">
           <TableHead style={{ position: 'sticky', top: 0, zIndex: 1, backgroundColor: 'var(--card)' }}>
@@ -153,6 +248,7 @@ function NzbCachedQueriesTable({ entries, onDelete }: NzbCachedQueriesTableProps
           </TableBody>
         </Table>
       </TableContainer>
+      )}
     </Paper>
   );
 }

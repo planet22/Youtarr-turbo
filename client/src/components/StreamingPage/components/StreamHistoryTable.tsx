@@ -14,17 +14,21 @@ import {
   Link,
   Checkbox,
 } from '../../ui';
+import { Storage as CachedVideoIcon } from '../../../lib/icons';
 import { formatFileSize } from '../../../utils/formatters';
 import { StreamHistoryRow } from '../../../hooks/useStreamHistory';
 import { YOUTUBE_URL_BASE } from '../../shared/VideoModal/constants';
+import { parseClientLabel, formatModeLabel, formatModeChipLabel, modeChipColor } from '../utils';
 import {
-  parseClientLabel,
-  formatModeLabel,
-  formatModeChipLabel,
-  modeChipColor,
-  formatChipColor,
-  ACTUAL_FILE_MODES,
-} from '../utils';
+  FormatResolutionCell,
+  FormatContainerCell,
+  FormatCodecCell,
+  FormatHardwareCell,
+  FormatCachedCell,
+  FORMAT_COLUMN_CHIP_STYLE,
+  FORMAT_COLUMN_LABEL_CLASS,
+} from './StreamFormatChips';
+import { CLIENT_COLUMN_WIDTH, TIGHT_CELL_STYLE } from './StreamsTable';
 
 export interface StreamHistoryTableProps {
   rows: StreamHistoryRow[];
@@ -53,19 +57,11 @@ export const RESULT_CHIPS: Record<string, ResultChip> = {
 /** Shared with StreamHistoryPage's Status filter dropdown - 'in-progress' isn't a real end_reason value, it's the label for ended_at===null (see resultChipFor below). */
 export const STREAM_STATUS_OPTIONS = ['in-progress', ...Object.keys(RESULT_CHIPS)];
 
-// resultChipFor/formatDetail/formatStarted/formatDuration are also used by
+// resultChipFor/formatStarted/formatDuration are also used by
 // StreamHistoryCard (grid view), so both views render identical text/colors.
 export function resultChipFor(row: StreamHistoryRow): ResultChip {
   if (!row.endedAt) return { label: 'In progress', color: 'info' };
   return RESULT_CHIPS[row.endReason || ''] || { label: row.endReason || 'Ended', color: 'default' };
-}
-
-export function formatDetail(row: StreamHistoryRow): string {
-  const parts = [row.quality, row.container, row.transcode];
-  if (row.hardwareMode && row.hardwareMode !== 'none') {
-    parts.push(row.hardwareMode);
-  }
-  return parts.filter(Boolean).join(' · ');
 }
 
 // Seconds + milliseconds (not just minute) so a "Started" time can be
@@ -83,6 +79,31 @@ export function formatStarted(iso: string): string {
     fractionalSecondDigits: 3,
     hour12: true,
   });
+}
+
+// Same info as formatStarted, split into date/time so the table's Started
+// column can wrap it onto two lines (date, then time) instead of forcing a
+// wide single-line column - there's now more columns competing for width
+// (the Format breakdown below).
+export function formatStartedParts(iso: string): { date: string; time: string } {
+  const date = new Date(iso);
+  // Year only when it's not the current year - almost every row is recent,
+  // so a bare year would just be clutter in an already-tight column.
+  const includeYear = date.getFullYear() !== new Date().getFullYear();
+  return {
+    date: date.toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: includeYear ? 'numeric' : undefined,
+    }),
+    time: date.toLocaleTimeString('en-US', {
+      hour: 'numeric',
+      minute: '2-digit',
+      second: '2-digit',
+      fractionalSecondDigits: 3,
+      hour12: true,
+    }),
+  };
 }
 
 // Millisecond precision (not just formatElapsed's seconds, which is right
@@ -151,39 +172,63 @@ function StreamHistoryRowView({
           </Link>
         </Box>
       </TableCell>
-      <TableCell>
+      <TableCell style={TIGHT_CELL_STYLE}>
         <Tooltip title={formatModeLabel(row.mode)}>
-          <Chip size="small" label={formatModeChipLabel(row.mode)} color={modeChipColor(row.mode)} variant="filled" />
+          <Chip
+            size="small"
+            label={formatModeChipLabel(row.mode)}
+            color={modeChipColor(row.mode)}
+            variant="filled"
+            labelClassName={FORMAT_COLUMN_LABEL_CLASS}
+            style={FORMAT_COLUMN_CHIP_STYLE}
+          />
         </Tooltip>
       </TableCell>
-      <TableCell>
-        <Box style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
-          <Tooltip title={`hardware: ${row.hardwareMode || 'none'}`}>
-            <Chip
-              size="small"
-              variant="outlined"
-              color={formatChipColor(row.transcode, row.hardwareMode)}
-              label={formatDetail(row) || '—'}
-            />
-          </Tooltip>
-          {ACTUAL_FILE_MODES.has(row.mode) && (
-            <Tooltip title="Serving the real, already-downloaded file directly - this is that file's own actual quality/container, not a requested or configured value">
-              <Chip size="small" variant="outlined" color="success" label="Cached" />
-            </Tooltip>
-          )}
-        </Box>
+      <TableCell style={TIGHT_CELL_STYLE}>
+        <FormatResolutionCell quality={row.quality} />
       </TableCell>
-      <TableCell>
+      <TableCell style={TIGHT_CELL_STYLE}>
+        <FormatContainerCell container={row.container} />
+      </TableCell>
+      <TableCell style={TIGHT_CELL_STYLE}>
+        <FormatCodecCell transcode={row.transcode} hardwareMode={row.hardwareMode} />
+      </TableCell>
+      <TableCell style={TIGHT_CELL_STYLE}>
+        <FormatHardwareCell hardwareMode={row.hardwareMode} />
+      </TableCell>
+      <TableCell style={TIGHT_CELL_STYLE}>
+        <FormatCachedCell mode={row.mode} />
+      </TableCell>
+      <TableCell style={{ maxWidth: CLIENT_COLUMN_WIDTH }}>
         <Tooltip title={row.userAgent || 'No user-agent reported'}>
-          <Box>
-            <Typography variant="body2">{row.clientIp}</Typography>
-            <Typography variant="caption" style={{ color: 'var(--muted-foreground)' }}>
+          <Box style={{ maxWidth: CLIENT_COLUMN_WIDTH - 12, overflow: 'hidden' }}>
+            <Typography variant="body2" style={{ whiteSpace: 'nowrap' }}>{row.clientIp}</Typography>
+            <Typography
+              variant="caption"
+              style={{
+                color: 'var(--muted-foreground)',
+                display: 'block',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+            >
               {parseClientLabel(row.userAgent)}
             </Typography>
           </Box>
         </Tooltip>
       </TableCell>
-      <TableCell style={{ whiteSpace: 'nowrap' }}>{formatStarted(row.startedAt)}</TableCell>
+      <TableCell style={{ whiteSpace: 'nowrap' }}>
+        {(() => {
+          const { date, time } = formatStartedParts(row.startedAt);
+          return (
+            <>
+              <Typography variant="body2" style={{ lineHeight: 1.3 }}>{date}</Typography>
+              <Typography variant="caption" style={{ color: 'var(--muted-foreground)', display: 'block' }}>{time}</Typography>
+            </>
+          );
+        })()}
+      </TableCell>
       <TableCell style={{ whiteSpace: 'nowrap' }}>{formatDuration(row)}</TableCell>
       <TableCell style={{ whiteSpace: 'nowrap' }}>{formatFileSize(row.bytesTransferred) || '0MB'}</TableCell>
       <TableCell>
@@ -216,10 +261,16 @@ function StreamHistoryTable({ rows, selectedIds, onToggleSelect, onSelectAll }: 
                 />
               </TableCell>
               <TableCell component="th">Video</TableCell>
-              <TableCell component="th" style={{ width: 76 }}>Mode</TableCell>
-              <TableCell component="th" style={{ width: 150 }}>Format</TableCell>
-              <TableCell component="th" style={{ width: 180 }}>Client</TableCell>
-              <TableCell component="th" style={{ width: 140 }}>Started</TableCell>
+              <TableCell component="th" style={{ ...TIGHT_CELL_STYLE, width: 52 }} title="Mode">Mode</TableCell>
+              <TableCell component="th" style={{ ...TIGHT_CELL_STYLE, width: 38 }} title="Resolution">Res</TableCell>
+              <TableCell component="th" style={{ ...TIGHT_CELL_STYLE, width: 38 }} title="Container">Cont</TableCell>
+              <TableCell component="th" style={{ ...TIGHT_CELL_STYLE, width: 38 }} title="Codec">Codec</TableCell>
+              <TableCell component="th" style={{ ...TIGHT_CELL_STYLE, width: 32 }} title="Hardware">HW</TableCell>
+              <TableCell component="th" style={{ ...TIGHT_CELL_STYLE, width: 24 }} title="Cached">
+                <CachedVideoIcon size={12} />
+              </TableCell>
+              <TableCell component="th" style={{ width: CLIENT_COLUMN_WIDTH }}>Client</TableCell>
+              <TableCell component="th" style={{ width: 90 }}>Started</TableCell>
               <TableCell component="th" style={{ width: 80 }}>Duration</TableCell>
               <TableCell component="th" style={{ width: 90 }}>Total</TableCell>
               <TableCell component="th" style={{ width: 120 }}>Result</TableCell>

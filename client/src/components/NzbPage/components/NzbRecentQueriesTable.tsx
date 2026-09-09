@@ -11,12 +11,59 @@ import {
   Chip,
   Box,
 } from '../../ui';
+import { useMediaQuery } from '../../../hooks/useMediaQuery';
 import { NzbRecentQuery } from '../../../hooks/useNzbStats';
 import { formatDurationMs, formatRelativeTime } from '../utils';
 import NzbSettingsIcons from './NzbSettingsIcons';
+import { COMPACT_CHIP_STYLE } from './nzbMobileStyles';
 
 interface NzbRecentQueriesTableProps {
   queries: NzbRecentQuery[];
+}
+
+function NzbRecentQueriesMobileList({ queries }: NzbRecentQueriesTableProps) {
+  if (queries.length === 0) {
+    return (
+      <Typography variant="body2" color="textSecondary" style={{ padding: '8px 16px 16px' }}>
+        No NZB queries yet - once Sonarr, Radarr, or Prowlarr search Youtarr-Turbo, they'll show up here.
+      </Typography>
+    );
+  }
+  return (
+    <Box style={{ maxHeight: 420, overflowY: 'auto' }}>
+      {queries.map((q, index) => (
+        <Box
+          key={`${q.timestamp}-${index}`}
+          style={{ padding: '10px 16px', borderBottom: '1px solid var(--border)' }}
+        >
+          <Typography
+            variant="body2"
+            className="font-semibold"
+            style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}
+          >
+            {q.query || <em>(blank / RSS mode)</em>}
+          </Typography>
+          <Box style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap', marginTop: 4 }}>
+            <Chip size="small" label={`Count: ${q.count}`} variant="outlined" style={COMPACT_CHIP_STYLE} />
+            <Chip size="small" label={`Results: ${q.resultCount}`} variant="outlined" style={COMPACT_CHIP_STYLE} />
+            <Chip
+              size="small"
+              label={q.cacheHit ? 'Hit' : 'Miss'}
+              color={q.cacheHit ? 'success' : 'default'}
+              variant="filled"
+              style={COMPACT_CHIP_STYLE}
+            />
+          </Box>
+          <Box style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginTop: 6 }}>
+            <NzbSettingsIcons settings={q.settingsSnapshot} />
+            <Typography variant="caption" color="textSecondary" style={{ whiteSpace: 'nowrap' }}>
+              {formatRelativeTime(q.timestamp)} · {formatDurationMs(q.durationMs)}
+            </Typography>
+          </Box>
+        </Box>
+      ))}
+    </Box>
+  );
 }
 
 // Column widths/order are shared with NzbCachedQueriesTable (see its own
@@ -24,6 +71,8 @@ interface NzbRecentQueriesTableProps {
 // here, so they're rendered blank rather than omitted, keeping every column
 // position lined up between the two stacked tables.
 function NzbRecentQueriesTable({ queries }: NzbRecentQueriesTableProps) {
+  const isMobile = useMediaQuery('(max-width: 767px)');
+
   return (
     <Paper variant="outlined" style={{ overflow: 'hidden' }}>
       <Box className="px-4 py-3">
@@ -32,6 +81,9 @@ function NzbRecentQueriesTable({ queries }: NzbRecentQueriesTableProps) {
           The last {queries.length} searches Sonarr/Radarr/Prowlarr sent through the Newznab endpoint.
         </Typography>
       </Box>
+      {isMobile ? (
+        <NzbRecentQueriesMobileList queries={queries} />
+      ) : (
       <TableContainer style={{ maxHeight: 420, overflowY: 'auto' }}>
         <Table size="small">
           <TableHead style={{ position: 'sticky', top: 0, zIndex: 1, backgroundColor: 'var(--card)' }}>
@@ -84,6 +136,7 @@ function NzbRecentQueriesTable({ queries }: NzbRecentQueriesTableProps) {
           </TableBody>
         </Table>
       </TableContainer>
+      )}
     </Paper>
   );
 }

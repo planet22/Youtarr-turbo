@@ -1356,8 +1356,12 @@ class JobModule {
         { text: 'Download job completed.', videos: updatedFields.data?.videos || [] }
       );
 
-      // Only modify output and status for actual completions, not terminations
-      if (updatedFields.status !== 'Terminated') {
+      // Only modify output and status for actual completions, not
+      // terminations or errors - an 'Error' status already carries its own
+      // descriptive output/notes (see downloadJobFinalizer.js) and callers
+      // like nzb.js's resolveNzbJobOutcome depend on 'Error' surviving here
+      // to report failed grabs back to Sonarr/Radarr correctly.
+      if (updatedFields.status !== 'Terminated' && updatedFields.status !== 'Error') {
         let numVideos = updatedFields.data?.videos?.length || 0;
         updatedFields.output = numVideos + ' videos.';
         if (updatedFields.status !== 'Complete with Warnings') {
@@ -1413,8 +1417,10 @@ class JobModule {
         }
         job.data.videos = videos;
 
-        // Update output message to reflect correct video count
-        if (updatedFields.status !== 'Terminated') {
+        // Update output message to reflect correct video count - only for
+        // genuine successes; Error/Killed jobs keep the descriptive output
+        // text their finalizer already set instead of a bare video count.
+        if (updatedFields.status === 'Complete' || updatedFields.status === 'Complete with Warnings') {
           job.output = `${videos.length} videos.`;
         }
 

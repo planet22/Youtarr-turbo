@@ -13,7 +13,7 @@ import {
   IconButton,
   Box,
 } from '../../ui';
-import { Stop as StopIcon, Search as ProbeIcon } from '../../../lib/icons';
+import { Stop as StopIcon, Search as ProbeIcon, Storage as CachedVideoIcon } from '../../../lib/icons';
 import { formatFileSize } from '../../../utils/formatters';
 import { StreamSnapshot } from '../../../hooks/useActiveStreams';
 import { YOUTUBE_URL_BASE } from '../../shared/VideoModal/constants';
@@ -24,11 +24,18 @@ import {
   formatModeLabel,
   formatModeChipLabel,
   modeChipColor,
-  formatChipColor,
-  ACTUAL_FILE_MODES,
 } from '../utils';
 import { useStreamRowActions } from '../hooks/useStreamRowActions';
 import { SegmentActivityStrip } from './SegmentActivityGrid';
+import {
+  FormatResolutionCell,
+  FormatContainerCell,
+  FormatCodecCell,
+  FormatHardwareCell,
+  FormatCachedCell,
+  FORMAT_COLUMN_CHIP_STYLE,
+  FORMAT_COLUMN_LABEL_CLASS,
+} from './StreamFormatChips';
 
 export interface StreamsTableProps {
   streams: StreamSnapshot[];
@@ -36,6 +43,18 @@ export interface StreamsTableProps {
   onStopped: (streamId: string) => void;
   onOpenSegments: (streamId: string) => void;
 }
+
+// An IPv4 address never needs more than "255.255.255.255" (15 chars) worth
+// of width - the old 180px column was sized for the client-label subtext,
+// not the address itself. Shared with StreamHistoryTable so both Client
+// columns match.
+export const CLIENT_COLUMN_WIDTH = 130;
+
+// Mode + the 5 format-breakdown columns (Res/Cont/Codec/HW/Cache) each hold
+// one short chip - tight padding (vs. the table's normal cell padding) so
+// six columns of single chips don't blow the table out wide. Shared with
+// StreamHistoryTable so both tables' columns match.
+export const TIGHT_CELL_STYLE: React.CSSProperties = { padding: '2px 4px' };
 
 // Shared with StreamCard's State chip (grid view), so both views color a
 // given state identically.
@@ -45,15 +64,6 @@ export const STATE_CHIP_COLOR: Record<StreamSnapshot['state'], 'default' | 'succ
   cached: 'default',
   failed: 'error',
 };
-
-// Shared with StreamCard (grid view).
-export function formatDetail(stream: StreamSnapshot): string {
-  const parts = [stream.quality, stream.container, stream.transcode];
-  if (stream.hardwareMode && stream.hardwareMode !== 'none') {
-    parts.push(stream.hardwareMode);
-  }
-  return parts.filter(Boolean).join(' · ');
-}
 
 function StreamRow({
   stream,
@@ -98,40 +108,54 @@ function StreamRow({
           </Box>
         </Box>
       </TableCell>
-      <TableCell>
+      <TableCell style={TIGHT_CELL_STYLE}>
         <Tooltip title={formatModeLabel(stream.mode)}>
-          <Chip size="small" label={formatModeChipLabel(stream.mode)} color={modeChipColor(stream.mode)} variant="filled" />
+          <Chip
+            size="small"
+            label={formatModeChipLabel(stream.mode)}
+            color={modeChipColor(stream.mode)}
+            variant="filled"
+            labelClassName={FORMAT_COLUMN_LABEL_CLASS}
+            style={FORMAT_COLUMN_CHIP_STYLE}
+          />
         </Tooltip>
       </TableCell>
-      <TableCell>
-        <Box style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
-          <Tooltip title={`hardware: ${stream.hardwareMode}`}>
-            <Chip
-              size="small"
-              variant="outlined"
-              color={formatChipColor(stream.transcode, stream.hardwareMode)}
-              label={formatDetail(stream) || '—'}
-            />
-          </Tooltip>
-          {ACTUAL_FILE_MODES.has(stream.mode) && (
-            <Tooltip title="Serving the real, already-downloaded file directly - this is that file's own actual quality/container, not a requested or configured value">
-              <Chip size="small" variant="outlined" color="success" label="Cached" />
-            </Tooltip>
-          )}
-        </Box>
+      <TableCell style={TIGHT_CELL_STYLE}>
+        <FormatResolutionCell quality={stream.quality} />
       </TableCell>
-      <TableCell>
+      <TableCell style={TIGHT_CELL_STYLE}>
+        <FormatContainerCell container={stream.container} />
+      </TableCell>
+      <TableCell style={TIGHT_CELL_STYLE}>
+        <FormatCodecCell transcode={stream.transcode} hardwareMode={stream.hardwareMode} />
+      </TableCell>
+      <TableCell style={TIGHT_CELL_STYLE}>
+        <FormatHardwareCell hardwareMode={stream.hardwareMode} />
+      </TableCell>
+      <TableCell style={TIGHT_CELL_STYLE}>
+        <FormatCachedCell mode={stream.mode} />
+      </TableCell>
+      <TableCell style={{ maxWidth: CLIENT_COLUMN_WIDTH }}>
         <Tooltip title={stream.userAgent || 'No user-agent reported'}>
-          <Box>
+          <Box style={{ maxWidth: CLIENT_COLUMN_WIDTH - 12, overflow: 'hidden' }}>
             <Box style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-              <Typography variant="body2">{stream.clientIp}</Typography>
+              <Typography variant="body2" style={{ whiteSpace: 'nowrap' }}>{stream.clientIp}</Typography>
               {isLikelyProbeRequest(stream.userAgent) && (
                 <Tooltip title="Likely a metadata probe (e.g. Jellyfin's ffprobe), not a real viewer — bare default User-Agent (Lavf/...), no override applied">
                   <ProbeIcon size={14} style={{ color: 'var(--warning)' }} data-testid="ProbeIcon" />
                 </Tooltip>
               )}
             </Box>
-            <Typography variant="caption" style={{ color: 'var(--muted-foreground)' }}>
+            <Typography
+              variant="caption"
+              style={{
+                color: 'var(--muted-foreground)',
+                display: 'block',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+            >
               {parseClientLabel(stream.userAgent)}
               {stream.viewerCount && stream.viewerCount > 1 ? ` · +${stream.viewerCount - 1} viewers` : ''}
             </Typography>
@@ -172,9 +196,15 @@ function StreamsTable({ streams, token, onStopped, onOpenSegments }: StreamsTabl
           <TableHead>
             <TableRow>
               <TableCell component="th">Video</TableCell>
-              <TableCell component="th" style={{ width: 76 }}>Mode</TableCell>
-              <TableCell component="th" style={{ width: 150 }}>Format</TableCell>
-              <TableCell component="th" style={{ width: 180 }}>Client</TableCell>
+              <TableCell component="th" style={{ ...TIGHT_CELL_STYLE, width: 52 }} title="Mode">Mode</TableCell>
+              <TableCell component="th" style={{ ...TIGHT_CELL_STYLE, width: 38 }} title="Resolution">Res</TableCell>
+              <TableCell component="th" style={{ ...TIGHT_CELL_STYLE, width: 38 }} title="Container">Cont</TableCell>
+              <TableCell component="th" style={{ ...TIGHT_CELL_STYLE, width: 38 }} title="Codec">Codec</TableCell>
+              <TableCell component="th" style={{ ...TIGHT_CELL_STYLE, width: 32 }} title="Hardware">HW</TableCell>
+              <TableCell component="th" style={{ ...TIGHT_CELL_STYLE, width: 24 }} title="Cached">
+                <CachedVideoIcon size={12} />
+              </TableCell>
+              <TableCell component="th" style={{ width: CLIENT_COLUMN_WIDTH }}>Client</TableCell>
               <TableCell component="th" style={{ width: 80 }}>Duration</TableCell>
               <TableCell component="th" style={{ width: 90 }}>Throughput</TableCell>
               <TableCell component="th" style={{ width: 90 }}>Total</TableCell>

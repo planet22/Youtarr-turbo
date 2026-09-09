@@ -2,9 +2,10 @@ import React from 'react';
 import { Chip, Tooltip, Box, Typography, Checkbox } from '../../ui';
 import { formatFileSize } from '../../../utils/formatters';
 import { StreamHistoryRow } from '../../../hooks/useStreamHistory';
-import { parseClientLabel, formatModeLabel, formatModeChipLabel, modeChipColor, ACTUAL_FILE_MODES } from '../utils';
-import { resultChipFor, formatDetail, formatStarted, formatDuration } from './StreamHistoryTable';
+import { parseClientLabel, formatModeLabel, formatModeChipLabel, modeChipColor } from '../utils';
+import { resultChipFor, formatStarted, formatDuration } from './StreamHistoryTable';
 import StreamCardLayout, { StreamCardStat } from './StreamCardLayout';
+import StreamFormatChips from './StreamFormatChips';
 
 export interface StreamHistoryCardProps {
   row: StreamHistoryRow;
@@ -42,19 +43,16 @@ function StreamHistoryCard({ row, isSelected, onToggleSelect }: StreamHistoryCar
             <Chip size="small" label={formatModeChipLabel(row.mode)} color={modeChipColor(row.mode)} variant="filled" />
           </Tooltip>
           {row.errorMessage ? <Tooltip title={row.errorMessage}>{chipElement}</Tooltip> : chipElement}
-          {ACTUAL_FILE_MODES.has(row.mode) && (
-            <Tooltip title="Serving the real, already-downloaded file directly - this is that file's own actual quality/container, not a requested or configured value">
-              <Chip size="small" variant="outlined" color="success" label="Cached" />
-            </Tooltip>
-          )}
         </>
       }
     >
-      <Tooltip title={`hardware: ${row.hardwareMode || 'none'}`}>
-        <Typography variant="caption" color="secondary" style={{ display: 'block' }}>
-          {formatDetail(row)}
-        </Typography>
-      </Tooltip>
+      <StreamFormatChips
+        quality={row.quality}
+        container={row.container}
+        transcode={row.transcode}
+        hardwareMode={row.hardwareMode}
+        mode={row.mode}
+      />
 
       <Tooltip title={row.userAgent || 'No user-agent reported'}>
         <Box style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>

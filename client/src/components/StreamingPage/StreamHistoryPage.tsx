@@ -14,10 +14,9 @@ import {
 } from '../shared/VideoList';
 import StreamHistoryTable, { RESULT_CHIPS, STREAM_STATUS_OPTIONS } from './components/StreamHistoryTable';
 import StreamHistoryCard from './components/StreamHistoryCard';
+import StreamHistoryListMobile from './components/StreamHistoryListMobile';
 import DeleteStreamHistoryDialog from './components/DeleteStreamHistoryDialog';
 import { MODE_LABELS, STREAM_MODE_OPTIONS } from './utils';
-
-const VIEW_MODES: VideoListViewMode[] = ['grid', 'table'];
 
 // The Mode/Result filter dropdowns need to show the same friendly text as
 // the table's own Mode chip / Result chip (formatModeLabel / resultChipFor),
@@ -51,9 +50,9 @@ function StreamHistoryPage({ token }: StreamHistoryPageProps) {
   const isMobile = useMediaQuery('(max-width: 767px)');
   // Same search box / filters button+badge / active-filter chips chrome as
   // the Videos and (live) Streaming pages, for a consistent filtering
-  // experience across list-style pages. Grid defaults on mobile, same as
-  // those pages; both views are always available on either size.
-  const listState = useVideoListState({ initialViewMode: isMobile ? 'grid' : 'table' });
+  // experience across list-style pages. "list" (dense mobile rows) replaces
+  // "table" on mobile, same split as VideosPage/StreamingPage.
+  const listState = useVideoListState({ initialViewMode: isMobile ? 'list' : 'table' });
   const [page, setPage] = useState(1);
   // Same shared page-size control/values (and localStorage persistence) as
   // the Videos/Library page - GET /api/ytstream/history's `limit` is capped
@@ -166,11 +165,22 @@ function StreamHistoryPage({ token }: StreamHistoryPageProps) {
     </Box>
   );
 
+  // "list" (dense mobile rows) only makes sense on mobile; "table" only on
+  // desktop - "grid" is available on both. Mirrors VideosPage's own split.
+  const availableViewModes: VideoListViewMode[] = isMobile ? ['grid', 'list'] : ['grid', 'table'];
+
+  useEffect(() => {
+    if (!availableViewModes.includes(listState.viewMode)) {
+      listState.setViewMode(isMobile ? 'list' : 'table');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isMobile, listState.viewMode]);
+
   return (
     <>
       <VideoListContainer<string>
         state={listState}
-        viewModes={VIEW_MODES}
+        viewModes={availableViewModes}
         filters={filterConfigs}
         searchPlaceholder="Search by video, IP, or client..."
         headerSlot={headerSlot}
@@ -178,28 +188,40 @@ function StreamHistoryPage({ token }: StreamHistoryPageProps) {
         isLoading={loading}
         isError={false}
         customEmptyMessage={hasActiveFilters || normalizedSearch ? 'No sessions found matching your filters' : 'No streaming activity yet.'}
-        renderContent={(mode) =>
-          mode === 'grid' ? (
-            <Grid container spacing={2}>
-              {rows.map((row) => (
-                <Grid item xs={12} sm={6} md={4} lg={3} key={row.streamId}>
-                  <StreamHistoryCard
-                    row={row}
-                    isSelected={selectedIds.includes(row.streamId)}
-                    onToggleSelect={handleToggleSelect}
-                  />
-                </Grid>
-              ))}
-            </Grid>
-          ) : (
+        renderContent={(mode) => {
+          if (mode === 'grid') {
+            return (
+              <Grid container spacing={2}>
+                {rows.map((row) => (
+                  <Grid item xs={12} sm={6} md={4} lg={3} key={row.streamId}>
+                    <StreamHistoryCard
+                      row={row}
+                      isSelected={selectedIds.includes(row.streamId)}
+                      onToggleSelect={handleToggleSelect}
+                    />
+                  </Grid>
+                ))}
+              </Grid>
+            );
+          }
+          if (mode === 'list') {
+            return (
+              <StreamHistoryListMobile
+                rows={rows}
+                selectedIds={selectedIds}
+                onToggleSelect={handleToggleSelect}
+              />
+            );
+          }
+          return (
             <StreamHistoryTable
               rows={rows}
               selectedIds={selectedIds}
               onToggleSelect={handleToggleSelect}
               onSelectAll={handleSelectAll}
             />
-          )
-        }
+          );
+        }}
         pagination={
           <VideoListPaginationBar
             placement="bottom"

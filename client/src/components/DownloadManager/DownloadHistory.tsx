@@ -130,6 +130,29 @@ function getDiagnosisTitles(job: Job): string[] {
   return (job.data?.diagnoses || []).map((diagnosis) => diagnosis.title);
 }
 
+// Which numbered attempt this transient-403 auto-retry job represents - not
+// folded into getJobSourceLabel since that also drives the Source filter
+// dropdown, where every retry should still group under one generic
+// "Auto-retry" option.
+function autoRetryAttemptSuffix(job: Job): string {
+  const attempt = job.data?.autoRetryAttempt;
+  return attempt ? ` (attempt ${attempt})` : '';
+}
+
+// The curated `notes` text, or - for a job that genuinely failed but never
+// got a notes message of its own (exception-path failures: job-finalization
+// errors, yt-dlp spawn errors, an inaccessible output directory) - the raw
+// `output` field instead. Only for Error/Killed: other statuses either
+// always carry real notes or (for a plain success) have nothing worth
+// surfacing in output.
+function jobErrorDetailText(job: Job): string | null {
+  if (job.data?.notes) return job.data.notes;
+  if ((job.status === 'Error' || job.status === 'Killed') && job.output) {
+    return job.output;
+  }
+  return null;
+}
+
 // mm:ss for under an hour, h:mm otherwise - mirrors the live "In Progress"
 // timer's format but doesn't wrap at 60 minutes the way that one does.
 function formatJobDurationMs(ms: number): string {
@@ -399,11 +422,12 @@ const DownloadHistory: React.FC<DownloadHistoryProps> = ({
           let hours = timeCreated.getHours();
           const period = hours >= 12 ? 'PM' : 'AM';
 
-          const formattedJobType = getJobSourceLabel(job.jobType);
+          const formattedJobType = getJobSourceLabel(job.jobType) + autoRetryAttemptSuffix(job);
 
           hours = hours % 12;
           hours = hours ? hours : 12;
           const formattedTimeCreated = `${month}-${day} ${hours}:${minutes} ${period}`;
+          const errorDetail = jobErrorDetailText(job);
 
           const nzbFallback = videos.length === 0 ? nzbFallbackVideo(job) : null;
           const singleVideo = videos[0] || nzbFallback || undefined;
@@ -477,9 +501,9 @@ const DownloadHistory: React.FC<DownloadHistoryProps> = ({
                   {fileNameOf(singleVideo?.filePath)}
                 </Typography>
               )}
-              {job.data?.notes && (
+              {errorDetail && (
                 <Typography variant="caption" className="mt-0.5 block" style={{ color: 'var(--destructive)' }}>
-                  {job.data.notes}
+                  {errorDetail}
                 </Typography>
               )}
               {skippedCount > 0 && (
@@ -627,11 +651,12 @@ const DownloadHistory: React.FC<DownloadHistoryProps> = ({
               let hours = timeCreated.getHours();
               const period = hours >= 12 ? 'PM' : 'AM';
 
-              const formattedJobType = getJobSourceLabel(job.jobType);
+              const formattedJobType = getJobSourceLabel(job.jobType) + autoRetryAttemptSuffix(job);
 
               hours = hours % 12;
               hours = hours ? hours : 12;
               const formattedTimeCreated = `${month}-${day} ${hours}:${minutes} ${period}`;
+              const errorDetail = jobErrorDetailText(job);
 
               const failedForJob = getDisplayableFailedVideos(job);
               const terminatedChannels = job.data?.terminatedChannels || [];
@@ -663,9 +688,9 @@ const DownloadHistory: React.FC<DownloadHistoryProps> = ({
                             />
                           )}
                         </Box>
-                        {job.data?.notes && (
+                        {errorDetail && (
                           <Typography variant="caption" className="block" style={{ color: 'var(--destructive)' }}>
-                            {job.data.notes}
+                            {errorDetail}
                           </Typography>
                         )}
                         {skippedCount > 0 && (
@@ -776,9 +801,9 @@ const DownloadHistory: React.FC<DownloadHistoryProps> = ({
                               {fileNameOf(singleVideo.filePath)}
                             </Typography>
                           )}
-                          {job.data?.notes && (
+                          {errorDetail && (
                             <Typography variant="caption" className="block" style={{ color: 'var(--destructive)' }}>
-                              {job.data.notes}
+                              {errorDetail}
                             </Typography>
                           )}
                         </Box>
@@ -788,9 +813,9 @@ const DownloadHistory: React.FC<DownloadHistoryProps> = ({
                     ) : (
                       <Box>
                         <span>{cleanJobTypeLabel(job.jobType)}</span>
-                        {job.data?.notes && (
+                        {errorDetail && (
                           <Typography variant="caption" className="block" style={{ color: 'var(--destructive)' }}>
-                            {job.data.notes}
+                            {errorDetail}
                           </Typography>
                         )}
                       </Box>

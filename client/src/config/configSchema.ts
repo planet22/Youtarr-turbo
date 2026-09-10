@@ -339,6 +339,23 @@ export const CONFIG_FIELDS = {
       // whenever it exists (server/modules/tsRemuxCache.js), without ever
       // touching the original .ts.
       finalizeToMp4: false as boolean,
+      // mode=hls-buffer only - keeps the buffered file out of the visible
+      // library folder entirely, in the same hidden cache the untracked
+      // buffer cache already uses (server/routes/ytstream.js's
+      // HLS_UNTRACKED_BUFFER_CACHE_DIR). The .strm is never touched (no
+      // is_strm flip, no filePath change), so a media server always keeps
+      // resolving playback through Youtarr instead of ever indexing a real
+      // file directly - see the "Jellyfin loses track of the file mid-swap"
+      // failure mode this avoids. When finalizeToMp4 is ALSO on, the hidden
+      // .ts is swapped for its .mp4 remux in place once ready (.ts deleted,
+      // .mp4 becomes the hidden cache's canonical file - never promoted to
+      // the library), subject to the same strm.cacheOnPlayExpiryHours sweep
+      // as the untracked cache. When this is off but finalizeToMp4 is
+      // on, the .ts still buffers into the hidden cache first, but the
+      // finished .mp4 IS promoted straight into the library once ready -
+      // Jellyfin only ever sees the .strm replaced by the finished .mp4,
+      // never the intermediate .ts.
+      stealthCache: false as boolean,
       // This file's own per-request/per-segment diagnostic lines (segment
       // serves, playlist polls, buffer-fetch progress ticks, etc.) are too
       // high-volume for logger.info by default, but gating them behind the

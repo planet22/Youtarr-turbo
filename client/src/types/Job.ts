@@ -39,6 +39,14 @@ export interface Job {
       categoryName?: string;
       youtubeId?: string;
       nzbName?: string;
+      // Server-computed, display-only summary of this NZB grab's real
+      // post-download lifecycle (queued for Sonarr/Radarr import, imported,
+      // removed from Sonarr/Radarr's own history, etc.) - see
+      // server/routes/nzb.js's computeNzbStatusDetail. Distinct from the
+      // job's own `status` field (which stays a plain SABnzbd-style string
+      // like 'Complete'/'Deleted' for protocol/filter purposes); when
+      // present, the UI should prefer this over the raw status text.
+      statusDetail?: string;
     };
     // Advisory explanation for the terminal status (e.g. cookie/bot-detection
     // guidance, a manual/timeout termination reason, or a terminated-channel

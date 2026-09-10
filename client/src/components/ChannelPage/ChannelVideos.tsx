@@ -129,9 +129,16 @@ function ChannelVideos({
   const isMobile = useMediaQuery('(max-width: 767px)');
   const initialViewMode: VideoListViewMode = isMobile ? 'list' : 'table';
 
+  // Search text is per-channel (unlike view mode, a global display
+  // preference) - sharing one storage key across every channel would leak
+  // one channel's search into another's page on navigation.
+  const { channel_id: routeChannelIdForSearchKey } = useParams();
+  const channelIdForSearchKey = propChannelId ?? routeChannelIdForSearchKey ?? 'unknown';
+
   const listState = useVideoListState({
     initialViewMode,
     viewModeStorageKey: VIEW_MODE_STORAGE_KEY,
+    searchStorageKey: `youtarr:channelVideosSearch:${channelIdForSearchKey}`,
   });
 
   // Legacy selection state: preserved so existing VideoCard/VideoListItem/VideoTableView
@@ -1486,6 +1493,7 @@ function ChannelVideos({
           filters={filterConfigs}
           customFilters={channelFilterPreviewToggle}
           searchPlaceholder="Search videos..."
+          searchTooltip="Searches video title."
           headerSlot={headerSlot}
           toolbarRightActions={toolbarRightActions}
           tabsSlot={tabsSlot}

@@ -6,7 +6,9 @@ import {
   Typography,
   Button,
   Chip,
+  Collapse,
 } from '../../ui';
+import { CheckCircle, Warning, AccessTime, ChevronDown, XCircle } from '../../../lib/icons';
 import { ConfigurationAccordion } from '../common/ConfigurationAccordion';
 import { InfoTooltip } from '../common/InfoTooltip';
 import { useCookieManagement } from '../hooks/useCookieManagement';
@@ -36,6 +38,7 @@ export const CookieConfigSection: React.FC<CookieConfigSectionProps> = ({
   onMobileTooltipClick,
 }) => {
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
+  const [showTestDetails, setShowTestDetails] = React.useState(false);
   const {
     cookieStatus,
     uploadingCookie,
@@ -45,6 +48,11 @@ export const CookieConfigSection: React.FC<CookieConfigSectionProps> = ({
     cookieTestResult,
     testCookies,
   } = useCookieManagement({ token, setConfig, setSnackbar });
+
+  // Collapse a stale disclosure rather than carrying it over to the next test run.
+  React.useEffect(() => {
+    setShowTestDetails(false);
+  }, [cookieTestResult?.testedAt]);
 
   const handleCookieUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -93,9 +101,10 @@ export const CookieConfigSection: React.FC<CookieConfigSectionProps> = ({
           <>
             <Grid item xs={12}>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
                   <Button
                     variant="contained"
+                    size="small"
                     disabled={uploadingCookie}
                     onClick={() => fileInputRef.current?.click()}
                   >
@@ -114,17 +123,8 @@ export const CookieConfigSection: React.FC<CookieConfigSectionProps> = ({
                       <Chip
                         label="Custom cookies uploaded"
                         color="success"
-                        size="small"
+                        size="medium"
                       />
-                      <Button
-                        variant="outlined"
-                        size="small"
-                        disabled={testingCookies}
-                        loading={testingCookies}
-                        onClick={testCookies}
-                      >
-                        {testingCookies ? 'Testing...' : 'Test Cookies'}
-                      </Button>
                       <Button
                         variant="outlined"
                         color="error"
@@ -143,60 +143,182 @@ export const CookieConfigSection: React.FC<CookieConfigSectionProps> = ({
               </div>
             </Grid>
 
-            {cookieTestResult && (
-              <Grid item xs={12}>
-                <Alert severity={cookieTestResult.success ? 'success' : 'error'}>
-                  {cookieTestResult.success
-                    ? cookieTestResult.message
-                    : cookieTestResult.error || 'Cookie test failed.'}
-                </Alert>
-              </Grid>
-            )}
-
             {cookieStatus && (
               <Grid item xs={12}>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  <Typography variant="caption" style={{ color: 'var(--muted-foreground)' }}>
-                    Status: {cookieStatus.customFileExists ?
-                      'Using custom cookies' :
-                      'No cookie file uploaded'}
-                  </Typography>
+                <div
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 12,
+                    padding: 12,
+                    borderRadius: 4,
+                    border: '1px solid var(--border)',
+                    backgroundColor: 'var(--muted)',
+                  }}
+                >
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      flexWrap: 'wrap',
+                      gap: 12,
+                    }}
+                  >
+                    <Typography variant="subtitle2" style={{ fontWeight: 600 }}>
+                      Cookie Details
+                    </Typography>
+                    {cookieStatus.customFileExists && (
+                      <Button
+                        variant="outlined"
+                        size="small"
+                        disabled={testingCookies}
+                        loading={testingCookies}
+                        onClick={testCookies}
+                      >
+                        {testingCookies ? 'Testing...' : 'Test Cookies'}
+                      </Button>
+                    )}
+                  </div>
 
-                  {cookieStatus.customFileExists && (
-                    <>
-                      {typeof cookieStatus.sizeBytes === 'number' && cookieStatus.uploadedAt && (
-                        <Typography variant="caption" style={{ color: 'var(--muted-foreground)' }}>
-                          {formatByteSize(cookieStatus.sizeBytes)}, uploaded {formatDateTime(cookieStatus.uploadedAt)}
-                        </Typography>
-                      )}
+                  {cookieTestResult && (
+                    <Alert severity={cookieTestResult.success ? 'success' : 'error'}>
+                      {cookieTestResult.success
+                        ? cookieTestResult.message
+                        : cookieTestResult.error || 'Cookie test failed.'}
 
-                      {typeof cookieStatus.authCookiesFound === 'number' && (
-                        <div style={{ display: 'flex', alignItems: 'center' }}>
-                          <Typography variant="caption" style={{ color: 'var(--muted-foreground)' }}>
-                            {cookieStatus.authCookiesFound > 0
-                              ? `${cookieStatus.authCookiesFound} login cookie${cookieStatus.authCookiesFound === 1 ? '' : 's'} found`
-                              : 'No login cookies found in this file'}
-                          </Typography>
-                          <InfoTooltip text={AUTH_COOKIES_EXPLAINER} onMobileClick={onMobileTooltipClick} />
+                      {!cookieTestResult.success && cookieTestResult.details && (
+                        <div style={{ marginTop: 8 }}>
+                          <button
+                            type="button"
+                            onClick={() => setShowTestDetails((prev) => !prev)}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 4,
+                              background: 'none',
+                              border: 'none',
+                              padding: 0,
+                              cursor: 'pointer',
+                              color: 'inherit',
+                              font: 'inherit',
+                              fontWeight: 600,
+                              textDecoration: 'underline',
+                            }}
+                          >
+                            Technical details
+                            <ChevronDown
+                              size={14}
+                              style={{
+                                transform: showTestDetails ? 'rotate(180deg)' : 'rotate(0deg)',
+                                transition: 'transform 200ms',
+                              }}
+                            />
+                          </button>
+                          <Collapse in={showTestDetails} timeout="auto" unmountOnExit>
+                            <pre
+                              style={{
+                                marginTop: 8,
+                                marginBottom: 0,
+                                padding: 8,
+                                borderRadius: 4,
+                                backgroundColor: 'rgba(0, 0, 0, 0.2)',
+                                fontSize: 12,
+                                fontFamily: 'monospace',
+                                whiteSpace: 'pre-wrap',
+                                wordBreak: 'break-word',
+                                maxHeight: 200,
+                                overflowY: 'auto',
+                              }}
+                            >
+                              {cookieTestResult.details}
+                            </pre>
+                          </Collapse>
                         </div>
                       )}
+                    </Alert>
+                  )}
 
-                      {cookieStatus.earliestExpiry && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      {cookieStatus.customFileExists ? (
+                        <CheckCircle size={14} style={{ color: 'var(--success)', flexShrink: 0 }} />
+                      ) : null}
+                      <Typography variant="caption" style={{ color: 'var(--muted-foreground)' }}>
+                        Status: {cookieStatus.customFileExists ?
+                          'Using custom cookies' :
+                          'No cookie file uploaded'}
+                      </Typography>
+                    </div>
+
+                    {cookieTestResult && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        {cookieTestResult.success ? (
+                          <CheckCircle size={14} style={{ color: 'var(--success)', flexShrink: 0 }} />
+                        ) : (
+                          <XCircle size={14} style={{ color: 'var(--destructive)', flexShrink: 0 }} />
+                        )}
                         <Typography
                           variant="caption"
                           style={{
-                            color: cookieStatus.hasExpiredAuthCookie
-                              ? 'var(--destructive)'
-                              : 'var(--muted-foreground)',
+                            color: cookieTestResult.success ? 'var(--muted-foreground)' : 'var(--destructive)',
                           }}
                         >
-                          {cookieStatus.hasExpiredAuthCookie
-                            ? `${cookieStatus.earliestExpiryName} expired ${formatDateTime(cookieStatus.earliestExpiry)}`
-                            : `${cookieStatus.earliestExpiryName} ${formatExpiresIn(cookieStatus.earliestExpiry)}`}
+                          Subscription test: {cookieTestResult.success ? 'Passed' : 'Failed'}
+                          {formatDateTime(cookieTestResult.testedAt) ? ` (${formatDateTime(cookieTestResult.testedAt)})` : ''}
                         </Typography>
-                      )}
-                    </>
-                  )}
+                      </div>
+                    )}
+
+                    {cookieStatus.customFileExists && (
+                      <>
+                        {typeof cookieStatus.sizeBytes === 'number' && (
+                          <Typography variant="caption" style={{ color: 'var(--muted-foreground)' }}>
+                            File size: {formatByteSize(cookieStatus.sizeBytes)}
+                          </Typography>
+                        )}
+
+                        {cookieStatus.uploadedAt && (
+                          <Typography variant="caption" style={{ color: 'var(--muted-foreground)' }}>
+                            Uploaded: {formatDateTime(cookieStatus.uploadedAt)}
+                          </Typography>
+                        )}
+
+                        {typeof cookieStatus.authCookiesFound === 'number' && (
+                          <div style={{ display: 'flex', alignItems: 'center' }}>
+                            <Typography variant="caption" style={{ color: 'var(--muted-foreground)' }}>
+                              {cookieStatus.authCookiesFound > 0
+                                ? `${cookieStatus.authCookiesFound} login cookie${cookieStatus.authCookiesFound === 1 ? '' : 's'} found`
+                                : 'No login cookies found in this file'}
+                            </Typography>
+                            <InfoTooltip text={AUTH_COOKIES_EXPLAINER} onMobileClick={onMobileTooltipClick} />
+                          </div>
+                        )}
+
+                        {cookieStatus.earliestExpiry && (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            {cookieStatus.hasExpiredAuthCookie ? (
+                              <Warning size={14} style={{ color: 'var(--destructive)', flexShrink: 0 }} />
+                            ) : (
+                              <AccessTime size={14} style={{ color: 'var(--muted-foreground)', flexShrink: 0 }} />
+                            )}
+                            <Typography
+                              variant="caption"
+                              style={{
+                                color: cookieStatus.hasExpiredAuthCookie
+                                  ? 'var(--destructive)'
+                                  : 'var(--muted-foreground)',
+                              }}
+                            >
+                              {cookieStatus.hasExpiredAuthCookie
+                                ? `${cookieStatus.earliestExpiryName} expired ${formatDateTime(cookieStatus.earliestExpiry)}`
+                                : `${cookieStatus.earliestExpiryName} ${formatExpiresIn(cookieStatus.earliestExpiry)}`}
+                            </Typography>
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
                 </div>
               </Grid>
             )}

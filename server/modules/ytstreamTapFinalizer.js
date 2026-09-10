@@ -212,4 +212,42 @@ function discardTapOutput({ youtubeId, tempPath, sourceLabel = 'hls-buffer' }) {
   });
 }
 
-module.exports = { finalizeTapOutput, discardTapOutput };
+/**
+ * server/routes/ytstream.js's swapHiddenCacheToMp4 (ytstream.stealthCache,
+ * or a genuinely untracked video, once finalizeToMp4 remuxes its hidden
+ * .ts): the .ts recorded by recordUntrackedDownloadHistory/finalizeTapOutput
+ * above is about to be deleted, superseded by an .mp4 - this updates that
+ * SAME job's aux_data (both the in-memory copy jobModule.getRunningJobsWithFreshVideos
+ * actually reads - see its own hlsBufferInfoNeedingBackfill handling - and
+ * the DB row, so it survives a restart) so Download History reflects the
+ * .mp4 instead of a path that no longer exists.
+ *
+ * Matched by exact youtubeId + old filePath (not youtubeId alone) so a
+ * later, unrelated re-cache of the same video is never misattributed to
+ * this stale entry.
+ * @param {string} youtubeId
+ * @param {string} oldFilePath - the .ts path recorded at fetch-finalize time
+ * @param {string} newFilePath - the .mp4 path that supersedes it
+ * @param {number} newFileSize
+ * @returns {Promise<boolean>} true if a matching job was found and updated
+ */
+async function updateHiddenCacheJobFileInfo(youtubeId, oldFilePath, newFilePath, newFileSize) {
+  const match = Object.values(jobModule.jobs).find((j) =>
+    j.data && j.data.hlsBufferCacheInfo
+    && j.data.hlsBufferCacheInfo.youtubeId === youtubeId
+    && j.data.hlsBufferCacheInfo.filePath === oldFilePath
+  );
+  if (!match) return false;
+  match.data.hlsBufferCacheInfo = { ...match.data.hlsBufferCacheInfo, filePath: newFilePath, fileSize: newFileSize };
+  try {
+    await Job.update(
+      { aux_data: serializeAuxData(match.data) },
+      { where: { id: match.id } }
+    );
+  } catch (err) {
+    logger.warn({ err, youtubeId, oldFilePath, newFilePath }, 'ytstream: failed to persist updated hidden-cache job aux_data (in-memory copy still updated)');
+  }
+  return true;
+}
+
+module.exports = { finalizeTapOutput, discardTapOutput, updateHiddenCacheJobFileInfo };

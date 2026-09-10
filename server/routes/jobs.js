@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const strmMaterializer = require('../modules/strmMaterializer');
+const nzbRoutes = require('./nzb');
 
 /**
  * Creates job routes
@@ -84,7 +85,20 @@ module.exports = function createJobRoutes({ verifyToken, jobModule, downloadModu
   router.get('/runningjobs', verifyToken, async (req, res) => {
     try {
       const runningJobs = await jobModule.getRunningJobsWithFreshVideos();
-      res.json(runningJobs);
+      // NZB-originated jobs (server/routes/nzb.js) get an extra display-only
+      // job.data.nzb.statusDetail computed fresh on every request - it can
+      // change between polls (e.g. Sonarr/Radarr importing) independent of
+      // this job ever being updated/saved, so it's never cached on the job
+      // itself. Returns a new object rather than mutating runningJobs'
+      // entries in place, since those are live references into jobModule's
+      // own in-memory job cache.
+      const enrichedJobs = await Promise.all(runningJobs.map(async (job) => {
+        if (!job.data?.nzb) return job;
+        const statusDetail = await nzbRoutes.computeNzbStatusDetail(job);
+        if (!statusDetail) return job;
+        return { ...job, data: { ...job.data, nzb: { ...job.data.nzb, statusDetail } } };
+      }));
+      res.json(enrichedJobs);
     } catch (error) {
       req.log.error({ err: error }, 'Failed to get running jobs');
       res.status(500).json({ error: 'Failed to get running jobs' });

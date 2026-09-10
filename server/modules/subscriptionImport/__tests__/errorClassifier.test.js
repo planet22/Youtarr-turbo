@@ -12,6 +12,10 @@ describe('classifyYtdlpError', () => {
     ['ERROR: unable to download webpage: HTTPSConnectionPool', ERROR_CODES.NETWORK],
     ['ERROR: Network is unreachable', ERROR_CODES.NETWORK],
     ['ERROR: getaddrinfo ENOTFOUND www.youtube.com', ERROR_CODES.NETWORK],
+    [
+      'WARNING: [youtube:tab] Incomplete yt initial data received; please report this issue',
+      ERROR_CODES.OUTDATED_YTDLP,
+    ],
     ['some completely unrelated message', ERROR_CODES.UNKNOWN],
     ['', ERROR_CODES.UNKNOWN],
   ])('classifies %j as %s', (stderr, expected) => {

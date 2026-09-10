@@ -182,16 +182,30 @@ function destroyHlsSession(session, reason) {
   // Checked by createHlsSessionInternal's process-exit handlers so a
   // deliberate teardown isn't logged as an unexpected crash.
   session.destroying = true;
-  // This session may have been the one thing blocking promoteFinalizedTsToLibraryMp4
-  // (see maybeFinalizeTsToMp4) from reclaiming its cachedFilePath's .ts - now
-  // that it's gone (removed from hlsSessions just above), retry: a no-op
-  // unless finalizeToMp4 already produced a .mp4 for this exact file AND no
-  // OTHER live session still references it.
+  // This session may have been the one thing blocking
+  // resolveHlsBufferPromoteFn's chosen strategy (see maybeFinalizeTsToMp4)
+  // from reclaiming its cachedFilePath's .ts - now that it's gone (removed
+  // from hlsSessions just above), retry: a no-op unless finalizeToMp4
+  // already produced a .mp4 for this exact file AND no OTHER live session
+  // still references it.
   if (session.cachedFilePath && path.extname(session.cachedFilePath).toLowerCase() === '.ts'
     && (configModule.getConfig().ytstream || {}).finalizeToMp4 === true) {
     const mp4Path = require('../modules/tsRemuxCache').findExistingSeekableMp4(session.cachedFilePath);
+    streamDebug(
+      {
+        sessionKey: session.key,
+        youtubeId: session.youtubeId,
+        cachedFilePath: session.cachedFilePath,
+        bufferStealth: !!session.bufferStealth,
+        bufferHybridPromote: !!session.bufferHybridPromote,
+        bufferUntracked: !!session.bufferUntracked,
+        mp4Found: !!mp4Path,
+      },
+      'ytstream: destroyHlsSession teardown-retry promotion check'
+    );
     if (mp4Path) {
-      promoteFinalizedTsToLibraryMp4(session.youtubeId, session.cachedFilePath, mp4Path, { youtubeId: session.youtubeId, sourceLabel: 'session-teardown' })
+      const promoteFn = resolveHlsBufferPromoteFn(session);
+      promoteFn(session.youtubeId, session.cachedFilePath, mp4Path, { youtubeId: session.youtubeId, sourceLabel: 'session-teardown' })
         .catch(() => { /* already logs internally */ });
     }
   }
@@ -901,10 +915,39 @@ const YTSTREAM_CLIPS_DIR = path.join(YTSTREAM_CACHE_DIR, 'ytstream-clips');
 // lands HERE keyed by youtubeId instead of a library location — no Video/Job
 // row, invisible in the library/Download History, purely a same-video
 // speed-up. Persistent so a later replay (even post-restart) can reuse it.
+//
+// Also reused (deliberately - same dir, same finalize semantics) by
+// ytstream.stealthCache and finalizeToMp4 for a genuinely TRACKED, still-STRM
+// video's hls-buffer fetch — see bufferEnabled's tracked-video branch below.
+// Keeping the .ts here instead of the library folder is what keeps it
+// invisible to Jellyfin's own scanner; the Video row stays untouched
+// (finalizeTapOutput runs with skipVideoUpsert:true, same as the untracked
+// case) for as long as the file lives here.
 const HLS_UNTRACKED_BUFFER_CACHE_DIR = path.join(YTSTREAM_CLIPS_DIR, 'hls-buffer-untracked-cache');
 
 function getUntrackedBufferCachePath(youtubeId) {
   return path.join(HLS_UNTRACKED_BUFFER_CACHE_DIR, `${youtubeId}.ts`);
+}
+
+// ytstream.finalizeToMp4 + (stealthCache on, or genuinely untracked): once a
+// hidden .ts is remuxed, swapHiddenCacheToMp4 makes this .mp4 the hidden
+// cache's new canonical file and deletes the .ts - so "does a warm hidden
+// cache already exist for this youtubeId" has to check both extensions.
+function getUntrackedBufferCacheMp4Path(youtubeId) {
+  return path.join(HLS_UNTRACKED_BUFFER_CACHE_DIR, `${youtubeId}.mp4`);
+}
+
+/**
+ * @param {string} youtubeId
+ * @returns {string|null} whichever of the hidden cache's two possible files
+ *   (.mp4 preferred - it's what a completed swapHiddenCacheToMp4 leaves
+ *   behind - falling back to .ts) currently exists, or null if neither does.
+ */
+function findWarmUntrackedBufferCache(youtubeId) {
+  const mp4Path = getUntrackedBufferCacheMp4Path(youtubeId);
+  if (fs.existsSync(mp4Path)) return mp4Path;
+  const tsPath = getUntrackedBufferCachePath(youtubeId);
+  return fs.existsSync(tsPath) ? tsPath : null;
 }
 
 /**
@@ -956,7 +999,9 @@ async function sweepExpiredUntrackedBufferCache() {
  */
 async function getUntrackedBufferCacheStat(youtubeId) {
   try {
-    const stat = await fs.promises.stat(getUntrackedBufferCachePath(youtubeId));
+    const filePath = findWarmUntrackedBufferCache(youtubeId);
+    if (!filePath) return { exists: false, size: null, mtime: null };
+    const stat = await fs.promises.stat(filePath);
     if (!stat.isFile()) return { exists: false, size: null, mtime: null };
     return { exists: true, size: stat.size, mtime: stat.mtime.toISOString() };
   } catch (err) {
@@ -965,10 +1010,16 @@ async function getUntrackedBufferCacheStat(youtubeId) {
   }
 }
 
-/** Deletes one untracked buffer cache file; returns whether one existed to delete. */
+/**
+ * Deletes one untracked buffer cache file (whichever of .ts/.mp4 currently
+ * represents it - see findWarmUntrackedBufferCache); returns whether one
+ * existed to delete.
+ */
 async function deleteUntrackedBufferCacheFile(youtubeId) {
+  const filePath = findWarmUntrackedBufferCache(youtubeId);
+  if (!filePath) return false;
   try {
-    await fs.promises.unlink(getUntrackedBufferCachePath(youtubeId));
+    await fs.promises.unlink(filePath);
     return true;
   } catch (err) {
     if (err.code === 'ENOENT') return false;
@@ -979,7 +1030,9 @@ async function deleteUntrackedBufferCacheFile(youtubeId) {
 /**
  * Every untracked buffer cache entry, for the Library page's "Show
  * untracked" bucket (videosModule.js's _getUntrackedCandidates) to merge
- * against youtube_metadata_cache rows.
+ * against youtube_metadata_cache rows. Recognizes both the raw .ts a fresh
+ * fetch always lands first, and the .mp4 swapHiddenCacheToMp4 leaves in its
+ * place once finalizeToMp4 remuxes it (see findWarmUntrackedBufferCache).
  * @returns {Promise<Array<{youtubeId: string, size: number, mtime: string}>>}
  */
 async function listUntrackedBufferCacheEntries() {
@@ -987,12 +1040,13 @@ async function listUntrackedBufferCacheEntries() {
   const entries = await fs.promises.readdir(HLS_UNTRACKED_BUFFER_CACHE_DIR);
   const results = [];
   for (const entry of entries) {
-    if (!entry.endsWith('.ts')) continue;
+    const ext = path.extname(entry);
+    if (ext !== '.ts' && ext !== '.mp4') continue;
     try {
       const filePath = path.join(HLS_UNTRACKED_BUFFER_CACHE_DIR, entry);
       const stat = await fs.promises.stat(filePath);
       if (!stat.isFile()) continue;
-      results.push({ youtubeId: entry.slice(0, -3), size: stat.size, mtime: stat.mtime.toISOString(), filePath });
+      results.push({ youtubeId: entry.slice(0, -ext.length), size: stat.size, mtime: stat.mtime.toISOString(), filePath });
     } catch (err) {
       logger.warn({ err, entry }, 'ytstream: failed to stat one untracked buffer cache entry while listing');
     }
@@ -1359,6 +1413,18 @@ function getModeFieldCompatibility({ mode, transcode }) {
     : {
       status: 'ignored',
       reason: 'This mode never finalizes a permanent .ts file to convert.',
+    };
+
+  // Only hls-buffer ever writes a genuinely permanent file at all - every
+  // other mode has nothing to keep hidden from a media server's library scan.
+  fields.stealthCache = mode === 'hls-buffer'
+    ? {
+      status: 'optional',
+      reason: 'Keeps the buffered file out of the library folder entirely, in Youtarr\'s own hidden cache instead - the .strm is never touched, so Jellyfin (or any other media server) always keeps resolving playback through Youtarr instead of ever indexing a real file directly.',
+    }
+    : {
+      status: 'ignored',
+      reason: 'This mode never finalizes a permanent file that could be kept hidden.',
     };
 
   return fields;
@@ -1763,6 +1829,225 @@ async function promoteFinalizedTsToLibraryMp4(youtubeId, finalPath, mp4CachePath
 }
 
 /**
+ * Hybrid finalizeToMp4 path (ytstream.stealthCache off, finalizeToMp4 on):
+ * promotes a hidden hls-buffer cache .ts's tsRemuxCache .mp4 (see
+ * tsRemuxCache.js) directly into a still-STRM video's real library location
+ * as a `.mp4` sibling of its `.strm` - the `.ts` itself never touched the
+ * visible library folder at any point (it was buffer-fetched into the same
+ * hidden cache the untracked path uses - see bufferEnabled's tracked-video
+ * branch above). Jellyfin's scanner therefore only ever sees the `.strm`
+ * replaced by the finished `.mp4` in one step, never an intermediate `.ts`
+ * it could index and then lose - the exact race the old always-visible-.ts
+ * flow (promoteFinalizedTsToLibraryMp4) doesn't protect against.
+ *
+ * Unlike promoteFinalizedTsToLibraryMp4, the Video row's filePath was never
+ * repointed at the hidden .ts (finalizeTapOutput ran with
+ * skipVideoUpsert:true for it, same as the untracked-cache path - see
+ * session.bufferUntracked), so this looks the video up by youtubeId +
+ * is_strm:true instead of an exact filePath match, and resolves
+ * targetDir/fileStem from its CURRENT .strm path at promotion time (which
+ * may differ from whatever it was when buffering started).
+ *
+ * Guarded by the same findLiveSessionReferencing check
+ * promoteFinalizedTsToLibraryMp4 uses - deferred while the hidden .ts is
+ * still an active session's source, retried by destroyHlsSession's teardown
+ * hook. Deliberately never deletes the hidden .ts (unlike
+ * trySafeDeleteFinalizedTs) - it's the same shared cache the untracked path
+ * uses and stays a valid warm copy either way, reclaimed later by the
+ * existing untracked-cache expiry sweep rather than here.
+ * @param {string} youtubeId
+ * @param {string} hiddenTsPath - the hidden-cache .ts file's on-disk path
+ * @param {string} mp4CachePath - tsRemuxCache's already-produced .mp4 for it
+ * @param {object} context - extra fields for the log lines only
+ */
+async function promoteHiddenMp4ToLibrary(youtubeId, hiddenTsPath, mp4CachePath, context) {
+  streamDebug({ ...context, youtubeId, hiddenTsPath, mp4CachePath }, 'ytstream: promoteHiddenMp4ToLibrary invoked');
+  const stillReferencedBy = findLiveSessionReferencing(hiddenTsPath);
+  if (stillReferencedBy) {
+    logger.info(
+      { ...context, hiddenTsPath, blockedBySessionKey: stillReferencedBy.key },
+      'ytstream: keeping hidden .ts for now - still referenced by an active HLS session'
+    );
+    return;
+  }
+  try {
+    const Video = require('../models/video');
+    const video = await Video.findOne({ where: { youtubeId, is_strm: true } });
+    if (!video || !video.filePath) {
+      // Already promoted by a previous run, or no longer STRM/tracked -
+      // nothing to do here; the hidden .ts is left alone either way.
+      streamDebug(
+        { ...context, youtubeId, hiddenTsPath, videoFound: !!video },
+        'ytstream: promoteHiddenMp4ToLibrary skipped - no longer a STRM Video row to promote into'
+      );
+      return;
+    }
+    const targetDir = path.dirname(video.filePath);
+    const fileStem = path.basename(video.filePath, path.extname(video.filePath));
+    const libraryMp4Path = path.join(targetDir, `${fileStem}.mp4`);
+    fs.mkdirSync(targetDir, { recursive: true });
+    try {
+      fs.renameSync(mp4CachePath, libraryMp4Path);
+    } catch (err) {
+      if (err.code !== 'EXDEV') throw err;
+      fs.copyFileSync(mp4CachePath, libraryMp4Path);
+      fs.unlinkSync(mp4CachePath);
+    }
+    const fileSize = fs.statSync(libraryMp4Path).size;
+
+    // A REAL, persisted Job row for Download History - same shape as
+    // finalizeTapOutput's tracked-path Job.create, just a second row for
+    // this video (the earlier hidden-cache finalize already created one via
+    // skipVideoUpsert): that one records "buffered into the hidden cache",
+    // this one records "promoted to a real library file" - two genuinely
+    // distinct events worth keeping separate in the history.
+    const Job = require('../models/job');
+    const jobInstance = await Job.create({
+      status: 'Complete',
+      timeInitiated: new Date(),
+      timeCreated: new Date(),
+      jobType: `HLS Buffer Cache: ${youtubeId}`,
+      output: '1 videos.',
+    });
+    const videoPersistence = require('../modules/videoPersistence');
+    // is_strm:false here is what triggers upsertVideoForJob's
+    // _archiveStaleStrmSidecars - the .strm gets renamed to .strm.cached in
+    // this exact call, replaced by libraryMp4Path, so Jellyfin's next scan
+    // finds the .mp4 and nothing else.
+    const videoInstance = await videoPersistence.upsertVideoForJob(
+      { youtubeId, filePath: libraryMp4Path, fileSize, is_strm: false },
+      jobInstance,
+      true
+    );
+    const jobModule = require('../modules/jobModule');
+    jobModule.jobs[jobInstance.id] = {
+      id: jobInstance.id,
+      jobType: jobInstance.jobType,
+      status: jobInstance.status,
+      output: jobInstance.output,
+      timeInitiated: jobInstance.timeInitiated,
+      timeCreated: jobInstance.timeCreated,
+      data: { videos: [{ id: videoInstance.id }] },
+    };
+
+    logger.info(
+      { ...context, hiddenTsPath, libraryMp4Path },
+      'ytstream: promoted hidden hls-buffer cache to a real library .mp4 - .strm archived, Jellyfin never saw the .ts'
+    );
+  } catch (err) {
+    logger.warn({ err, ...context, hiddenTsPath, mp4CachePath }, 'ytstream: promoteHiddenMp4ToLibrary failed; leaving .strm and hidden .ts as-is');
+  }
+}
+
+/**
+ * ytstream.stealthCache (full stealth), or a genuinely untracked video:
+ * once the hidden .ts has been remuxed to .mp4 (maybeFinalizeTsToMp4 /
+ * tsRemuxCache.ensureSeekableMp4), makes that .mp4 the hidden cache's new
+ * canonical file instead of leaving it as an orphaned copy inside
+ * tsRemuxCache's own hashed-name dir - moves it to
+ * getUntrackedBufferCacheMp4Path(youtubeId), right alongside where the .ts
+ * used to live, then deletes the now-redundant .ts. Every lookup of this
+ * hidden cache (findWarmUntrackedBufferCache, probe-shortcut,
+ * listUntrackedBufferCacheEntries) already checks both extensions, so this
+ * swap is transparent to them - there's no promotion to a library location
+ * here (unlike promoteFinalizedTsToLibraryMp4/promoteHiddenMp4ToLibrary),
+ * is_strm/.strm are never touched.
+ *
+ * Also updates the fetch's own "HLS Buffer Cache" Job (ytstreamTapFinalizer.
+ * updateHiddenCacheJobFileInfo) so Download History reflects the .mp4 and
+ * its real size, not the now-deleted .ts recorded at fetch-finalize time.
+ *
+ * Guarded by the same findLiveSessionReferencing check the library-promote
+ * functions use - deferred while the hidden .ts is still an active
+ * session's source, retried by destroyHlsSession's teardown hook.
+ * @param {string} youtubeId
+ * @param {string} hiddenTsPath - the hidden-cache .ts file's on-disk path
+ * @param {string} mp4CachePath - tsRemuxCache's already-produced .mp4 for it
+ * @param {object} context - extra fields for the log lines only
+ */
+async function swapHiddenCacheToMp4(youtubeId, hiddenTsPath, mp4CachePath, context) {
+  const stillReferencedBy = findLiveSessionReferencing(hiddenTsPath);
+  if (stillReferencedBy) {
+    logger.info(
+      { ...context, hiddenTsPath, blockedBySessionKey: stillReferencedBy.key },
+      'ytstream: keeping hidden .ts for now - still referenced by an active HLS session'
+    );
+    return;
+  }
+  try {
+    const hiddenMp4Path = getUntrackedBufferCacheMp4Path(youtubeId);
+    fs.mkdirSync(path.dirname(hiddenMp4Path), { recursive: true });
+    try {
+      fs.renameSync(mp4CachePath, hiddenMp4Path);
+    } catch (err) {
+      if (err.code !== 'EXDEV') throw err;
+      fs.copyFileSync(mp4CachePath, hiddenMp4Path);
+      fs.unlinkSync(mp4CachePath);
+    }
+    const fileSize = fs.statSync(hiddenMp4Path).size;
+    fs.unlink(hiddenTsPath, (err) => {
+      if (err && err.code !== 'ENOENT') {
+        logger.warn({ err, ...context, hiddenTsPath }, 'ytstream: failed to delete hidden .ts after swapping stealth cache to .mp4');
+      }
+    });
+    const updated = await require('../modules/ytstreamTapFinalizer').updateHiddenCacheJobFileInfo(youtubeId, hiddenTsPath, hiddenMp4Path, fileSize);
+    logger.info(
+      { ...context, hiddenTsPath, hiddenMp4Path, downloadHistoryUpdated: updated },
+      'ytstream: swapped hidden hls-buffer cache from .ts to .mp4'
+    );
+  } catch (err) {
+    logger.warn({ err, ...context, hiddenTsPath, mp4CachePath }, 'ytstream: swapHiddenCacheToMp4 failed; leaving hidden .ts and cache .mp4 as-is');
+  }
+}
+
+/**
+ * Picks the right "what to do once this .ts is remuxed to .mp4" strategy
+ * for an hls-buffer session, shared by both the finalize-success dispatch
+ * and destroyHlsSession's teardown-retry hook so they can never disagree:
+ *  - bufferStealth (ytstream.stealthCache on): swap the hidden cache to
+ *    .mp4 in place - see swapHiddenCacheToMp4's own doc comment.
+ *  - bufferHybridPromote (stealthCache off, finalizeToMp4 on): promote the
+ *    .mp4 straight into the library - see promoteHiddenMp4ToLibrary.
+ *  - bufferUntracked (genuinely no Video row, stealthCache/hybrid both
+ *    irrelevant): same hidden cache, same swap-to-mp4 treatment - there's
+ *    no library to promote into either way.
+ *  - none of the above (today's plain tracked-library .ts, unrelated to
+ *    any of ytstream.stealthCache's hidden-cache machinery): the original
+ *    promoteFinalizedTsToLibraryMp4.
+ * @param {object} session
+ * @returns {(youtubeId: string, finalPath: string, mp4Path: string, context: object) => Promise<void>}
+ */
+function resolveHlsBufferPromoteFn(session) {
+  if (session.bufferStealth) return swapHiddenCacheToMp4;
+  if (session.bufferHybridPromote) return promoteHiddenMp4ToLibrary;
+  if (session.bufferUntracked) return swapHiddenCacheToMp4;
+  return promoteFinalizedTsToLibraryMp4;
+}
+
+/**
+ * A reused hidden-cache hit (bufferEnabled's "already warm, skip fetch"
+ * branches) never otherwise gets a chance at maybeFinalizeTsToMp4 - that
+ * only ever runs off a FRESH finalize's finish() callback. Without this, a
+ * video cached while finalizeToMp4 was off (or before a remux attempt ever
+ * succeeded) would stay a .ts forever once warm - nothing else re-triggers
+ * a remux for an already-cached file, so every later reuse would just keep
+ * finding the same untouched .ts. Safe to call unconditionally on every
+ * reuse hit: tsRemuxCache.ensureSeekableMp4 is a cheap existence check once
+ * a remux already exists, and joins/dedupes an in-flight one otherwise -
+ * see its own doc comment.
+ * @param {string} youtubeId
+ * @param {string} cachedFilePath - whatever findWarmUntrackedBufferCache returned
+ * @param {object} session
+ */
+function maybeRetroactivelyRemuxReusedCache(youtubeId, cachedFilePath, session) {
+  if (path.extname(cachedFilePath).toLowerCase() !== '.ts') return;
+  const promoteFn = resolveHlsBufferPromoteFn(session);
+  maybeFinalizeTsToMp4(youtubeId, cachedFilePath, 'hls-buffer-reuse', {
+    promote: (mp4Path) => promoteFn(youtubeId, cachedFilePath, mp4Path, { youtubeId, sourceLabel: 'hls-buffer-reuse' }),
+  });
+}
+
+/**
  * ytstream.finalizeToMp4: called after finalizeTapOutput (mode=hls-buffer)
  * successfully lands a session's permanent output file. Fires a
  * background (never awaited by any caller) tsRemuxCache.ensureSeekableMp4
@@ -1770,22 +2055,33 @@ async function promoteFinalizedTsToLibraryMp4(youtubeId, finalPath, mp4CachePath
  * real playback/probe of it already finds the .mp4 via
  * tryServeCachedVideoFile's own findExistingSeekableMp4 check instead of
  * paying the remux cost live. No-op (and no ffmpeg run at all) unless the
- * config option is on and the file is actually .ts. Once the remux
- * succeeds, also tries to promote it into the library (see
- * promoteFinalizedTsToLibraryMp4) - safe to skip if something's still using
- * it; destroyHlsSession retries this once that session ends.
+ * config option is on and the file is actually .ts.
+ *
+ * `promote`, if given, is called with the finished .mp4's cache path once
+ * the remux succeeds - the caller picks the right strategy for how this
+ * particular .ts got here: promoteFinalizedTsToLibraryMp4 for a .ts that
+ * was already sitting in the library, promoteHiddenMp4ToLibrary for one
+ * that was deliberately kept hidden (ytstream.stealthCache's hybrid mode -
+ * see the bufferEnabled tracked-video branch), or omitted entirely for a
+ * full-stealth session, which must never promote or delete anything - see
+ * that branch's own comment on why the hidden .ts has to survive the remux.
+ * Failures are logged internally by whichever promote function runs;
+ * destroyHlsSession's teardown-retry hook re-attempts a blocked promotion
+ * once the session that was blocking it ends.
  */
-function maybeFinalizeTsToMp4(youtubeId, finalPath, sourceLabel) {
+function maybeFinalizeTsToMp4(youtubeId, finalPath, sourceLabel, { promote } = {}) {
   try {
     if ((configModule.getConfig().ytstream || {}).finalizeToMp4 !== true) return;
     if (!finalPath || path.extname(finalPath).toLowerCase() !== '.ts') return;
     logger.info({ youtubeId, finalPath, sourceLabel }, 'ytstream: starting background .ts -> .mp4 finalize');
+    streamDebug({ youtubeId, finalPath, sourceLabel, willPromote: !!promote }, 'ytstream: maybeFinalizeTsToMp4 promote-strategy decision');
     require('../modules/tsRemuxCache').ensureSeekableMp4(finalPath)
       .then((mp4Path) => {
         if (mp4Path) {
           logger.info({ youtubeId, finalPath, mp4Path, sourceLabel }, 'ytstream: finalized .ts remuxed to .mp4 for direct playback');
-          promoteFinalizedTsToLibraryMp4(youtubeId, finalPath, mp4Path, { youtubeId, sourceLabel })
-            .catch(() => { /* already logs internally */ });
+          if (promote) {
+            promote(mp4Path).catch(() => { /* already logs internally */ });
+          }
         }
       })
       .catch((err) => logger.warn({ err, youtubeId, finalPath, sourceLabel }, 'ytstream: post-finalize .ts -> .mp4 remux failed'));
@@ -1808,8 +2104,8 @@ function maybeFinalizeTsToMp4(youtubeId, finalPath, sourceLabel) {
  *   complete local copy exists yet.
  */
 async function findExistingCachedVideoFilePath(youtubeId, models) {
-  const untrackedPath = getUntrackedBufferCachePath(youtubeId);
-  if (fs.existsSync(untrackedPath)) return untrackedPath;
+  const untrackedPath = findWarmUntrackedBufferCache(youtubeId);
+  if (untrackedPath) return untrackedPath;
   if (models && models.Video) {
     try {
       const video = await models.Video.findOne({ where: { youtubeId }, attributes: ['is_strm', 'filePath'] });
@@ -3043,12 +3339,35 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
             session.cachedFilePath = finalPath;
             session.bufferFetchDone = true;
             logger.info(
-              { sessionKey: session.sessionKey, youtubeId, finalPath, untracked: session.bufferUntracked === true },
-              session.bufferUntracked
-                ? 'ytstream: hls-buffer fetch finalized into the untracked-video cache'
-                : 'ytstream: hls-buffer fetch finalized as permanent download'
+              {
+                sessionKey: session.sessionKey,
+                youtubeId,
+                finalPath,
+                untracked: session.bufferUntracked === true,
+                stealth: session.bufferStealth === true,
+                hybridPromote: session.bufferHybridPromote === true,
+              },
+              session.bufferStealth
+                ? 'ytstream: hls-buffer fetch finalized into the hidden stealth cache (Video row untouched)'
+                : session.bufferHybridPromote
+                  ? 'ytstream: hls-buffer fetch finalized into the hidden cache, pending .mp4 promotion to library'
+                  : session.bufferUntracked
+                    ? 'ytstream: hls-buffer fetch finalized into the untracked-video cache'
+                    : 'ytstream: hls-buffer fetch finalized as permanent download'
             );
-            maybeFinalizeTsToMp4(youtubeId, finalPath, 'hls-buffer');
+            // resolveHlsBufferPromoteFn picks the right "what to do once
+            // this .ts is remuxed to .mp4" strategy - swap the hidden cache
+            // in place (stealthCache on, or genuinely untracked), promote
+            // to the library (the hybrid case), or the original
+            // library-.ts promotion (finalizeToMp4 off entirely makes this
+            // whole call a no-op anyway - maybeFinalizeTsToMp4 checks that
+            // config itself before ever touching ffmpeg).
+            {
+              const promoteFn = resolveHlsBufferPromoteFn(session);
+              maybeFinalizeTsToMp4(youtubeId, finalPath, 'hls-buffer', {
+                promote: (mp4Path) => promoteFn(youtubeId, finalPath, mp4Path, { youtubeId, sourceLabel: 'hls-buffer' }),
+              });
+            }
             // An already-running hls-buffer session just keeps transcoding
             // until it ends - a mid-session switch to serving this finished
             // file directly was attempted and reverted: it requires splicing
@@ -3558,28 +3877,100 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
           attributes: ['is_strm', 'filePath'],
         });
         if (video && video.is_strm === true && video.filePath) {
-          const targetDir = path.dirname(video.filePath);
-          const fileStem = path.basename(video.filePath, path.extname(video.filePath));
           session.bufferEnabled = true;
-          // Deliberately its OWN directory, NOT session.dir: this fetch
-          // keeps running and finalizes even after the HLS session is torn
-          // down (idle reap, retry, manual stop), so it must not live where
-          // destroyHlsSession schedules deletion on teardown.
-          // Always .ts regardless of the session's `container` setting -
-          // MPEG-TS is the hard requirement for a file safely readable
-          // while still being appended to (no moov-atom-style trailing
-          // index the way MP4 has).
-          const bufferDir = path.join(resolveHlsBaseDir(), `buffer-${youtubeId}-${crypto.randomBytes(4).toString('hex')}`);
-          fs.mkdirSync(bufferDir, { recursive: true });
-          session.bufferDir = bufferDir;
-          session.bufferTempPath = path.join(bufferDir, 'buffer.ts');
-          session.bufferFinalPath = path.join(targetDir, `${fileStem}.ts`);
-          // Kicked off immediately, fire-and-forget - not awaited - so it
-          // gets every bit of this function's remaining setup time
-          // (duration lookup, placeholder generation, trackStream) as a
-          // free head start before the initial pass's waitForBufferedThrough
-          // wait even begins below.
-          startHlsBufferFetch(session);
+          const ytCfg = configModule.getConfig().ytstream || {};
+          const stealthCache = ytCfg.stealthCache === true;
+          const finalizeToMp4Enabled = ytCfg.finalizeToMp4 === true;
+          // ytstream.stealthCache (or finalizeToMp4 alone) - route the
+          // fetch's .ts into the SAME hidden cache the untracked path above
+          // uses (getUntrackedBufferCachePath), instead of writing it into
+          // the visible library folder, so Jellyfin's scanner never has a
+          // file to discover mid-flight:
+          //  - stealthCache on: stays hidden forever, Video row (and its
+          //    .strm) never touched - see session.bufferStealth below.
+          //  - stealthCache off, finalizeToMp4 on ("hybrid"): stays hidden
+          //    until the background remux finishes, then promotes the
+          //    REMUXED .mp4 straight into the library (promoteHiddenMp4ToLibrary)
+          //    - Jellyfin only ever sees the .strm replaced by a finished
+          //    .mp4, never the intermediate .ts. See session.bufferHybridPromote.
+          //  - both off: unchanged, today's behavior - .ts written directly
+          //    into the library folder, is_strm flips immediately.
+          const useHiddenStaging = stealthCache || finalizeToMp4Enabled;
+          streamDebug(
+            { sessionKey, youtubeId, stealthCache, finalizeToMp4Enabled, useHiddenStaging },
+            'ytstream: bufferEnabled tracked-video routing decision'
+          );
+          if (useHiddenStaging) {
+            session.bufferStealth = stealthCache;
+            session.bufferHybridPromote = !stealthCache && finalizeToMp4Enabled;
+            // findWarmUntrackedBufferCache (not a raw .ts existsSync) since a
+            // previously-finalized fetch may have already been swapped over
+            // to .mp4 by swapHiddenCacheToMp4 - that's just as warm/reusable.
+            const existingHiddenCache = findWarmUntrackedBufferCache(youtubeId);
+            if (existingHiddenCache) {
+              // Already warm from an earlier play (or from being genuinely
+              // untracked before this video was added to the library) -
+              // reuse it immediately, same as the untracked branch below.
+              // destroyHlsSession's teardown-retry hook still gets a chance
+              // to (re)attempt promotion for the hybrid case once this
+              // session ends, using whatever tsRemuxCache state exists.
+              streamDebug(
+                { sessionKey, youtubeId, existingHiddenCache, bufferStealth: session.bufferStealth, bufferHybridPromote: session.bufferHybridPromote },
+                'ytstream: reusing already-warm hidden hls-buffer cache, skipping fetch'
+              );
+              session.usingCachedSource = true;
+              session.cachedFilePath = existingHiddenCache;
+              session.bufferFetchDone = true;
+              session.bufferUntracked = true;
+              session.bufferFinalPath = existingHiddenCache;
+              maybeRetroactivelyRemuxReusedCache(youtubeId, existingHiddenCache, session);
+            } else {
+              // A fresh fetch always lands as .ts first (see the comment
+              // below on why) - never .mp4 directly, so this is the one spot
+              // that still needs the plain .ts-only path, not the
+              // either-extension lookup above.
+              const hiddenCachePath = getUntrackedBufferCachePath(youtubeId);
+              const bufferDir = path.join(resolveHlsBaseDir(), `buffer-${youtubeId}-${crypto.randomBytes(4).toString('hex')}`);
+              fs.mkdirSync(bufferDir, { recursive: true });
+              fs.mkdirSync(HLS_UNTRACKED_BUFFER_CACHE_DIR, { recursive: true });
+              session.bufferDir = bufferDir;
+              session.bufferTempPath = path.join(bufferDir, 'buffer.ts');
+              session.bufferFinalPath = hiddenCachePath;
+              // Reuses the untracked finalize path (skipVideoUpsert) - the
+              // Video row must stay exactly as-is (still STRM) while the
+              // file lives in the hidden cache, same requirement whether
+              // this video genuinely has no Video row or has one that's
+              // deliberately not being touched yet.
+              session.bufferUntracked = true;
+              streamDebug(
+                { sessionKey, youtubeId, hiddenCachePath, bufferStealth: session.bufferStealth, bufferHybridPromote: session.bufferHybridPromote },
+                'ytstream: starting hidden hls-buffer fetch (stealth/hybrid staging)'
+              );
+              startHlsBufferFetch(session);
+            }
+          } else {
+            const targetDir = path.dirname(video.filePath);
+            const fileStem = path.basename(video.filePath, path.extname(video.filePath));
+            // Deliberately its OWN directory, NOT session.dir: this fetch
+            // keeps running and finalizes even after the HLS session is torn
+            // down (idle reap, retry, manual stop), so it must not live where
+            // destroyHlsSession schedules deletion on teardown.
+            // Always .ts regardless of the session's `container` setting -
+            // MPEG-TS is the hard requirement for a file safely readable
+            // while still being appended to (no moov-atom-style trailing
+            // index the way MP4 has).
+            const bufferDir = path.join(resolveHlsBaseDir(), `buffer-${youtubeId}-${crypto.randomBytes(4).toString('hex')}`);
+            fs.mkdirSync(bufferDir, { recursive: true });
+            session.bufferDir = bufferDir;
+            session.bufferTempPath = path.join(bufferDir, 'buffer.ts');
+            session.bufferFinalPath = path.join(targetDir, `${fileStem}.ts`);
+            startHlsBufferFetch(session);
+          }
+          // Both startHlsBufferFetch calls above are fire-and-forget - not
+          // awaited - so a fresh fetch gets every bit of this function's
+          // remaining setup time (duration lookup, placeholder generation,
+          // trackStream) as a free head start before the initial pass's
+          // waitForBufferedThrough wait even begins below.
         } else {
           // This video isn't something Youtarr's own library currently owns
           // (no Video row - an untracked NZB `strm` grab, or one disowned
@@ -3587,8 +3978,11 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
           // finalize into, so falls back to Youtarr's own untracked-buffer
           // cache keyed by youtubeId alone: not a library entry, never shows
           // up in Download History - purely a same-video-again speed-up.
-          const untrackedCachePath = getUntrackedBufferCachePath(youtubeId);
-          const alreadyCached = fs.existsSync(untrackedCachePath);
+          // findWarmUntrackedBufferCache (not a raw .ts existsSync) since a
+          // previous fetch may have already been swapped to .mp4 by
+          // swapHiddenCacheToMp4 once finalizeToMp4 remuxed it.
+          const existingUntrackedCache = findWarmUntrackedBufferCache(youtubeId);
+          const alreadyCached = !!existingUntrackedCache;
           session.bufferEnabled = true;
           if (alreadyCached) {
             // A previous play of this same untracked video already finished
@@ -3597,9 +3991,20 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
             // comment on why THAT deliberately stays network-sourced), this
             // file is already complete, nothing to wait for.
             session.usingCachedSource = true;
-            session.cachedFilePath = untrackedCachePath;
+            session.cachedFilePath = existingUntrackedCache;
             session.bufferFetchDone = true;
+            // Needed so resolveHlsBufferPromoteFn (called just below) picks
+            // swapHiddenCacheToMp4 rather than falling through to the
+            // library-.ts promote function - this session never sets
+            // bufferStealth/bufferHybridPromote (this whole branch is only
+            // reached when there's no Video row at all), so bufferUntracked
+            // is the only signal it has.
+            session.bufferUntracked = true;
+            maybeRetroactivelyRemuxReusedCache(youtubeId, existingUntrackedCache, session);
           } else {
+            // A fresh fetch always lands as .ts first, never .mp4 directly -
+            // see startHlsBufferFetch/the comment a few lines above.
+            const untrackedCachePath = getUntrackedBufferCachePath(youtubeId);
             fs.mkdirSync(HLS_UNTRACKED_BUFFER_CACHE_DIR, { recursive: true });
             const bufferDir = path.join(resolveHlsBaseDir(), `buffer-${youtubeId}-${crypto.randomBytes(4).toString('hex')}`);
             fs.mkdirSync(bufferDir, { recursive: true });
@@ -3616,7 +4021,7 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
               videoFound: !!video,
               isStrm: video ? video.is_strm : null,
               hasFilePath: video ? !!video.filePath : null,
-              untrackedCachePath,
+              existingUntrackedCache,
               alreadyCached,
             },
             alreadyCached
@@ -3677,7 +4082,17 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
       tuning: tier,
       clientIp,
       userAgent,
-      state: 'starting',
+      // 'cached' (not the generic 'starting') when this session is already
+      // sourcing from a warm local file (a hls-buffer reuse hit - see
+      // bufferEnabled's tracked/untracked reuse branches, both stealth and
+      // otherwise) rather than genuinely fetching over the network - the
+      // Streaming page's state chip otherwise looked identical to a live
+      // network fetch during the several seconds ffmpeg still needs to spin
+      // up the HLS encode, even though there's nothing to wait on the
+      // network for. A fresh fetch still in progress correctly stays
+      // 'starting' here (usingCachedSource only flips true once its own
+      // finish() callback resolves, later than this trackStream call).
+      state: session.usingCachedSource ? 'cached' : 'starting',
       startedAt: Date.now(),
       bytesTransferred: 0,
       bytesPerSecond: 0,
@@ -4218,7 +4633,11 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
     let freedBytes = 0;
     const failed = [];
     for (const youtubeId of youtubeIds) {
-      const filePath = getUntrackedBufferCachePath(youtubeId);
+      // findWarmUntrackedBufferCache (not getUntrackedBufferCachePath, which
+      // is always `.ts`) so this catches a finalizeToMp4'd `.mp4` too - same
+      // both-extensions lookup the per-video delete route above already uses.
+      const filePath = findWarmUntrackedBufferCache(youtubeId);
+      if (!filePath) continue;
       try {
         const stat = await fs.promises.stat(filePath);
         if (!stat.isFile()) continue;
@@ -4453,6 +4872,20 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
       steps.push({ step: 'finalizeToMp4', detail: `on - ${finalizeToMp4Compat.reason}`, probed: false });
     }
 
+    const stealthCache = ytCfg.stealthCache === true;
+    const stealthCacheCompat = modeCompat.stealthCache;
+    if (stealthCache && stealthCacheCompat.status === 'ignored') {
+      steps.push({ step: 'stealthCache', detail: `on, but ignored - ${stealthCacheCompat.reason}`, probed: false });
+    } else if (stealthCache && stealthCacheCompat.status === 'optional') {
+      steps.push({
+        step: 'stealthCache',
+        detail: finalizeToMp4
+          ? `on - ${stealthCacheCompat.reason} (finalizeToMp4 is also on: once the hidden .ts is remuxed, it's swapped for the .mp4 within the hidden cache itself - never promoted to the library)`
+          : `on - ${stealthCacheCompat.reason}`,
+        probed: false,
+      });
+    }
+
     if (transcode === 'copy' && (mode === 'hls' || mode === 'hls-buffer')) {
       if (!probe) {
         steps.push({
@@ -4601,6 +5034,7 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
       hotSwapToCache,
       backfillMissingSegments,
       finalizeToMp4,
+      stealthCache,
       forceServerSettings,
       ignoredQueryParams,
       probeShortcut,

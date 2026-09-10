@@ -22,6 +22,10 @@ export interface VideoListContainerProps<IdType extends string | number> {
   filters?: FilterConfig[];
   sort?: SortConfig;
   searchPlaceholder?: string;
+  // Shown on hover of the search box's magnifying-glass icon - what
+  // columns/fields the text search actually matches, since that's rarely
+  // obvious from the placeholder alone.
+  searchTooltip?: string;
 
   headerSlot?: React.ReactNode;
   toolbarExtras?: React.ReactNode;
@@ -52,6 +56,7 @@ function VideoListContainer<IdType extends string | number>({
   filters = [],
   sort,
   searchPlaceholder,
+  searchTooltip,
   headerSlot,
   toolbarExtras,
   toolbarRightActions,
@@ -95,6 +100,7 @@ function VideoListContainer<IdType extends string | number>({
           state={state}
           viewModes={viewModes}
           searchPlaceholder={searchPlaceholder}
+          searchTooltip={searchTooltip}
           filtersButtonActive={filtersButtonActive}
           filtersBadgeCount={activeCount}
           onFiltersClick={filters.length > 0 ? toggleFilters : undefined}

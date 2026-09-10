@@ -143,8 +143,21 @@ function verifyNzbApiKey(req, res, next) {
  * history repeatedly before importing.
  */
 function stageForSonarrImport(job, categoryName, videoRow) {
-  if (job.data.nzb.stagedPath && fs.existsSync(job.data.nzb.stagedPath)) {
-    return job.data.nzb.stagedPath;
+  if (job.data.nzb.stagedPath) {
+    if (fs.existsSync(job.data.nzb.stagedPath)) {
+      return job.data.nzb.stagedPath;
+    }
+    // The previously-staged hardlink is gone - the only thing that ever
+    // removes it is Sonarr/Radarr's own import step (see this function's doc
+    // comment above), so that's proof the import already happened. Recorded
+    // once, in-memory only (like stagedPath itself - never persisted via
+    // saveJobOnly, so it resets on restart the same way stagedPath does);
+    // computeNzbStatusDetail below is what surfaces it to the Download
+    // History page. The block below still re-stages a fresh hardlink as
+    // before - unrelated to this flag, and left as-is.
+    if (!job.data.nzb.importedAt) {
+      job.data.nzb.importedAt = Date.now();
+    }
   }
   const filePath = videoRow?.filePath;
   if (!filePath || !fs.existsSync(filePath)) {
@@ -228,6 +241,7 @@ async function untrackFromYoutarrLibrary(job, videoRow) {
     const videoCount = await Video.destroy({ where: { id: videoId } });
     counts = { jobVideoCount, watchStatusCount, videoCount };
     job.data.nzb.untracked = true;
+    job.data.nzb.untrackedAt = Date.now();
     if (videoCount === 0) {
       // destroy() resolves with 0 rather than throwing when nothing matches,
       // so this is the only signal that the "successful" untrack above was
@@ -405,6 +419,25 @@ async function reconcileMovedUntrackedVideo(videoRow) {
     }
   }
 
+  // Mirror untrackFromYoutarrLibrary's own bookkeeping on the job record, so
+  // the Download History page (computeNzbStatusDetail below) can tell this
+  // job apart from one still awaiting import even though no history-delete
+  // call ever arrived for it - without this the job's status silently stayed
+  // "Downloaded - awaiting import" forever despite the video being long gone.
+  try {
+    const matchedJob = jobModule.getJob(matchedJobId);
+    if (matchedJob?.data?.nzb) {
+      matchedJob.data.nzb.untracked = true;
+      matchedJob.data.nzb.untrackedAt = Date.now();
+      await jobModule.saveJobOnly(matchedJobId, matchedJob);
+    }
+  } catch (err) {
+    logger.warn(
+      { err, jobId: matchedJobId },
+      'nzb: reconcileMovedUntrackedVideo - failed to stamp job as untracked (video DB rows were still removed above)'
+    );
+  }
+
   logger.info(
     { jobId: matchedJobId, videoId: videoRow.id, youtubeId: videoRow.youtubeId, counts },
     'nzb: untracked video after its file was moved away by Sonarr/Radarr import (no history-delete call received)'
@@ -493,6 +526,7 @@ async function handleHistoryDeleteRequest(jobIds) {
       const job = jobModule.getJob(jobId);
       if (!job?.data?.nzb) continue;
       job.data.nzb.historyRemoved = true;
+      job.data.nzb.historyRemovedAt = Date.now();
       job.status = 'Deleted';
       const category = findCategory(categories, { name: job.data.nzb.categoryName });
       if ((category?.importStrategy || 'hardlink') === 'untracked') {
@@ -744,6 +778,85 @@ async function resolveNzbJobOutcome(job) {
     recordFailedGrab(job, 'Completed with no video file produced - check server logs for the underlying error (e.g. age-restricted content, yt-dlp bot-check, network failure).');
   }
   return { failed, explicitlyFailed, videoRow };
+}
+
+// HH:MM:SS.mmm (local time) - millisecond precision matters here because
+// several of these events (a history poll noticing an import, a delete
+// request) can land within the same second, and the raw epoch-ms
+// timestamps behind them (Date.now()) already carry that precision - a
+// second-granularity display would silently throw it away.
+function formatEventTimestamp(epochMs) {
+  if (!epochMs) return null;
+  const d = new Date(epochMs);
+  const pad = (n, len = 2) => String(n).padStart(len, '0');
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(d.getMilliseconds(), 3)}`;
+}
+
+/**
+ * Human-readable post-download status for the regular Download History page
+ * (client/src/components/DownloadManager/DownloadHistory.tsx) - reuses the
+ * same facts this file already tracks for the Newznab/SABnzbd emulation
+ * itself: which import strategy the grab used, whether Sonarr/Radarr's
+ * staged hardlink has since been consumed (see stageForSonarrImport's
+ * importedAt), whether the video was untracked from Youtarr's own library
+ * (see untrackFromYoutarrLibrary/reconcileMovedUntrackedVideo), and whether
+ * Sonarr/Radarr removed the item from ITS OWN history (see
+ * handleHistoryDeleteRequest). job.status itself is deliberately left
+ * untouched by this (e.g. it still literally reads 'Deleted' after a
+ * history-delete call) since other code - the mode=history filter above,
+ * status-based UI filters on the client - depends on those exact values;
+ * this only computes an additional display-only string layered on top.
+ * Returns null for non-NZB jobs, still-active jobs, and Error/Terminated
+ * jobs (whose existing status text/notes are already accurate), so the
+ * caller falls back to the plain job.status text in all of those cases.
+ * @returns {Promise<string|null>}
+ */
+async function computeNzbStatusDetail(job) {
+  if (!job?.data?.nzb) return null;
+  if (job.status === 'Pending' || job.status === 'In Progress') return null;
+  if (job.status === 'Error' || job.status === 'Terminated') return null;
+
+  const { failed } = await resolveNzbJobOutcome(job);
+  if (failed) return 'Failed - no video produced';
+
+  const nzb = job.data.nzb;
+  const cfg = configModule.getConfig();
+  const category = findCategory(cfg.nzb?.categories || [], { name: nzb.categoryName });
+  const strategy = nzb.importStrategy || category?.importStrategy || 'hardlink';
+  const historyRemoved = Boolean(nzb.historyRemoved);
+  const historyRemovedAt = formatEventTimestamp(nzb.historyRemovedAt);
+  const untrackedAt = formatEventTimestamp(nzb.untrackedAt);
+
+  if (strategy === 'untracked') {
+    if (nzb.untracked) {
+      return `Imported by Sonarr/Radarr - removed from Youtarr library${untrackedAt ? ` at ${untrackedAt}` : ''}`;
+    }
+    if (historyRemoved) {
+      // handleHistoryDeleteRequest asked untrackFromYoutarrLibrary to remove
+      // the video but that DB operation itself threw (its `outcome: 'error'`
+      // branch) - historyRemoved got set regardless, but the video is still
+      // here.
+      return `Removed from Sonarr/Radarr history${historyRemovedAt ? ` at ${historyRemovedAt}` : ''} - untrack failed, check server logs`;
+    }
+    return 'Downloaded - awaiting Sonarr/Radarr import';
+  }
+
+  // hardlink strategy: the real library file is never touched by Sonarr/
+  // Radarr's import (only the staged copy is - see stageForSonarrImport), so
+  // "imported" here just means that staged hardlink has been consumed since
+  // it was created.
+  const imported = Boolean(nzb.importedAt) ||
+    (nzb.stagedPath ? !fs.existsSync(nzb.stagedPath) : false);
+  const importedAt = formatEventTimestamp(nzb.importedAt);
+
+  if (historyRemoved) {
+    return imported
+      ? `Imported by Sonarr/Radarr (history cleared${historyRemovedAt ? ` at ${historyRemovedAt}` : ''})`
+      : `Removed from Sonarr/Radarr history${historyRemovedAt ? ` at ${historyRemovedAt}` : ''} (still in Youtarr library)`;
+  }
+  return imported
+    ? `Imported by Sonarr/Radarr${importedAt ? ` at ${importedAt}` : ''}`
+    : 'Downloaded - awaiting Sonarr/Radarr import';
 }
 
 /**
@@ -1102,7 +1215,13 @@ module.exports = function createNzbRoutes() {
               // thumbnail-jpg for every NZB grab, real download or STRM.
               skipMediaSidecarFiles: true,
             },
-            nzb: { categoryName: category.name, youtubeId, nzbName: nzbName || youtubeId },
+            // importStrategy is snapshotted here rather than always re-read
+            // live from config later (computeNzbStatusDetail still falls
+            // back to a live lookup for older jobs saved before this field
+            // existed) - a category can be renamed/reconfigured/deleted
+            // after the grab, which would otherwise silently reinterpret an
+            // old job's history under today's (or the default) strategy.
+            nzb: { categoryName: category.name, youtubeId, nzbName: nzbName || youtubeId, importStrategy: category.importStrategy || 'hardlink' },
           },
         });
         res.json({ status: true, nzo_ids: [String(jobId)] });
@@ -1315,6 +1434,10 @@ module.exports.evaluateTitleFilter = evaluateTitleFilter;
 module.exports.getRecentSearchTraces = getRecentSearchTraces;
 module.exports.getRecentFailedGrabs = getRecentFailedGrabs;
 module.exports.getNzbJobsSnapshot = getNzbJobsSnapshot;
+// Consumed by routes/jobs.js's /runningjobs handler to enrich NZB-originated
+// jobs for the regular Download History page - see this function's own doc
+// comment for why job.status itself is never changed to carry this instead.
+module.exports.computeNzbStatusDetail = computeNzbStatusDetail;
 // Consumed by videosModule's real-time file check - see this function's own
 // doc comment for why the reconciliation can't just live inside nzb.js.
 module.exports.reconcileMovedUntrackedVideo = reconcileMovedUntrackedVideo;

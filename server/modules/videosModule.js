@@ -544,6 +544,31 @@ class VideosModule {
         video.cachedVideoAgo = formatRelativeTimeAgo(video.cachedVideoAt);
       }
 
+      // ytstream.stealthCache (or finalizeToMp4 alone) hls-buffer's hidden
+      // cache - see server/routes/ytstream.js's bufferEnabled tracked-video
+      // branch - lands a warm copy of a still-STRM video in the exact same
+      // hidden dir the untracked cache uses, without ever flipping is_strm.
+      // hasCachedVideo above can't see it (that's driven by cached_at, which
+      // only a real is_strm-flipping promotion sets), so a still-STRM row
+      // with a warm hidden copy would otherwise look identical to one that's
+      // never been played at all. One cheap readdir, skipped entirely when
+      // this page has no STRM rows to check.
+      if (videos.some((v) => v.is_strm)) {
+        const bufferEntries = await require('../routes/ytstream').listUntrackedBufferCacheEntries();
+        const stealthCacheByYoutubeId = new Map(bufferEntries.map((e) => [e.youtubeId, e]));
+        for (const video of videos) {
+          const entry = video.is_strm ? stealthCacheByYoutubeId.get(video.youtubeId) : null;
+          video.hasStealthCache = Boolean(entry);
+          // Real facts about the hidden cache file itself - the Library
+          // page's size column shows this instead of the "STRM" placeholder
+          // for a stealth-cached row (still genuinely STRM - hasStealthCache/
+          // the format chip already say so - but the size is real and worth
+          // showing, same as any other cached/downloaded video).
+          video.stealthCacheFileSize = entry ? entry.size : null;
+          video.stealthCacheAt = entry ? entry.mtime : null;
+        }
+      }
+
       // Hydrate only the untracked rows that will actually be returned on
       // this page - title/uploader require parsing raw_info_json, which is
       // deliberately never pulled for the whole capped candidate list.

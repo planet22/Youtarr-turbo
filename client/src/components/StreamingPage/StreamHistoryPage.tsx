@@ -52,7 +52,10 @@ function StreamHistoryPage({ token }: StreamHistoryPageProps) {
   // the Videos and (live) Streaming pages, for a consistent filtering
   // experience across list-style pages. "list" (dense mobile rows) replaces
   // "table" on mobile, same split as VideosPage/StreamingPage.
-  const listState = useVideoListState({ initialViewMode: isMobile ? 'list' : 'table' });
+  const listState = useVideoListState({
+    initialViewMode: isMobile ? 'list' : 'table',
+    searchStorageKey: 'youtarr:streamHistorySearch',
+  });
   const [page, setPage] = useState(1);
   // Same shared page-size control/values (and localStorage persistence) as
   // the Videos/Library page - GET /api/ytstream/history's `limit` is capped
@@ -183,6 +186,7 @@ function StreamHistoryPage({ token }: StreamHistoryPageProps) {
         viewModes={availableViewModes}
         filters={filterConfigs}
         searchPlaceholder="Search by video, IP, or client..."
+        searchTooltip="Searches video title, YouTube ID, client IP address, and user agent."
         headerSlot={headerSlot}
         itemCount={rows.length}
         isLoading={loading}

@@ -127,7 +127,8 @@
         "historyRetentionDays": 90,
         "hlsStorageLocation": "tmp",
         "backfillMissingSegments": false,
-        "finalizeToMp4": false
+        "finalizeToMp4": false,
+        "stealthCache": false
     },
     "nzb": {
         "enabled": false,

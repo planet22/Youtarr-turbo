@@ -7,10 +7,11 @@ import {
   Download as DownloadIcon,
   Clock as ScheduleIcon,
   AlarmCheck as AlarmOnIcon,
+  Ghost as StealthCacheIcon,
 } from 'lucide-react';
 import { Database as MetadataCacheIcon, Storage as CachedVideoIcon, ClearCache as ClearCacheIcon } from '../../../lib/icons';
 import { formatDuration, formatYTDate } from '../../../utils';
-import { formatAddedDateTime, formatFileSize } from '../../../utils/formatters';
+import { formatAddedDateTime, formatFileSize, formatExpiresIn } from '../../../utils/formatters';
 import { getDisplayPath } from '../../../utils/paths';
 import { getMediaTypeInfo } from '../../../utils/videoStatus';
 import { getEnabledChannelId } from '../../../utils/enabledChannels';
@@ -357,17 +358,29 @@ function VideoCard({
               </Tooltip>
             )}
             {video.hasCachedVideo && (
-              <Tooltip title="Cached video — click for details">
-                <IconButton
+              <Tooltip title="Opportunistically cached from STRM - will automatically revert to STRM when it expires. Click for details.">
+                <Chip
                   size="small"
-                  aria-label="Cached video"
+                  icon={<CachedVideoIcon size={14} />}
+                  label={formatExpiresIn(video.cachedVideoExpiresAt) ?? 'Cached'}
+                  variant="outlined"
                   onClick={(e) => {
                     e.stopPropagation();
                     onOpenCacheDetail(video.youtubeId, 'video');
                   }}
-                >
-                  <CachedVideoIcon size={16} />
-                </IconButton>
+                  style={{ ...SHARED_STATUS_CHIP_SMALL_STYLE, cursor: 'pointer' }}
+                />
+              </Tooltip>
+            )}
+            {video.hasStealthCache && (
+              <Tooltip title="Stealth-cached — playback served locally via Youtarr; still STRM, hidden from media server scans">
+                <Chip
+                  size="small"
+                  icon={<StealthCacheIcon size={14} color="#9c27b0" />}
+                  label={video.stealthCacheFileSize ? formatFileSize(video.stealthCacheFileSize) : 'Cached'}
+                  variant="outlined"
+                  style={{ ...SHARED_STATUS_CHIP_SMALL_STYLE, borderColor: '#9c27b0', color: '#9c27b0' }}
+                />
               </Tooltip>
             )}
           </Box>

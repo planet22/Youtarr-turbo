@@ -19,6 +19,7 @@ import {
 import {
   AlertCircle as ErrorOutlineIcon,
   Trash2 as DeleteIcon,
+  Ghost as StealthCacheIcon,
 } from 'lucide-react';
 import { Database as MetadataCacheIcon, Storage as CachedVideoIcon, ClearCache as ClearCacheIcon, Shield as ProtectSpacerIcon } from '../../../lib/icons';
 import { formatDuration, formatYTDate } from '../../../utils';
@@ -32,7 +33,7 @@ import DownloadFormatIndicator from '../../shared/DownloadFormatIndicator';
 import ProtectionShieldButton from '../../shared/ProtectionShieldButton';
 import ThumbnailClickOverlay from '../../shared/ThumbnailClickOverlay';
 import AvailabilityChip from '../../shared/AvailabilityChip';
-import { SHARED_STATUS_CHIP_SMALL_STYLE } from '../../shared/chipStyles';
+import { SHARED_STATUS_CHIP_SMALL_STYLE, SHARED_THEMED_CHIP_SMALL_STYLE } from '../../shared/chipStyles';
 import ChannelNameDisplay from './ChannelNameDisplay';
 import WatchedChip from '../../shared/WatchedChip';
 
@@ -160,15 +161,6 @@ function VideosTable({
                 enabledChannels
               );
               const mediaTypeInfo = getMediaTypeInfo(video.media_type);
-              const fileSizeNumber = video.fileSize
-                ? typeof video.fileSize === 'string'
-                  ? parseInt(video.fileSize, 10)
-                  : video.fileSize
-                : null;
-              // .strm files are text pointers, not media - their real size reads
-              // as a meaningless "0MB" here. Match DownloadFormatIndicator's chip.
-              const isVideoStrm =
-                typeof video.filePath === 'string' && video.filePath.toLowerCase().endsWith('.strm');
               const downloadedTooltip = videoCacheExpiryText(video);
               const pathText = [video.filePath, video.audioFilePath]
                 .filter((p): p is string => Boolean(p))
@@ -350,8 +342,41 @@ function VideosTable({
                   <TableCell style={{ whiteSpace: 'nowrap' }}>
                     {video.duration ? formatDuration(video.duration) : '-'}
                   </TableCell>
-                  <TableCell style={{ whiteSpace: 'nowrap' }}>
-                    {isVideoStrm ? 'STRM' : fileSizeNumber ? formatFileSize(fileSizeNumber) : '-'}
+                  <TableCell onClick={(e) => e.stopPropagation()}>
+                    <Stack direction="row" spacing={0.5} className="flex-wrap gap-1">
+                      {!video.removed && video.filePath && (
+                        <DownloadFormatIndicator
+                          filePath={video.filePath}
+                          fileSize={video.fileSize}
+                          videoResolution={video.video_resolution}
+                          onVideoChipClick={isTracked ? () => onStrmChipClick(video) : undefined}
+                        />
+                      )}
+                      {video.hasCachedVideo && (
+                        <Tooltip title="Opportunistically cached from STRM - will automatically revert to STRM when it expires. Click for details.">
+                          <Chip
+                            size="small"
+                            icon={<CachedVideoIcon size={14} />}
+                            label={formatExpiresIn(video.cachedVideoExpiresAt) ?? 'Cached'}
+                            variant="outlined"
+                            onClick={() => onOpenCacheDetail(video.youtubeId, 'video')}
+                            style={{ ...SHARED_THEMED_CHIP_SMALL_STYLE, cursor: 'pointer' }}
+                          />
+                        </Tooltip>
+                      )}
+                      {video.hasStealthCache && (
+                        <Tooltip title="Stealth-cached — playback served locally via Youtarr; still STRM, hidden from media server scans">
+                          <Chip
+                            size="small"
+                            icon={<StealthCacheIcon size={14} color="#9c27b0" />}
+                            label={video.stealthCacheFileSize ? formatFileSize(video.stealthCacheFileSize) : 'Cached'}
+                            variant="outlined"
+                            style={{ ...SHARED_THEMED_CHIP_SMALL_STYLE, borderColor: '#9c27b0', color: '#9c27b0' }}
+                          />
+                        </Tooltip>
+                      )}
+                      {video.removed || !(video.filePath || video.hasCachedVideo || video.hasStealthCache) ? '-' : null}
+                    </Stack>
                   </TableCell>
                   <TableCell>
                     <RatingBadge
@@ -383,14 +408,10 @@ function VideosTable({
                   </TableCell>
                   <TableCell>
                     <Stack direction="row" spacing={0.5} className="flex-wrap gap-1" onClick={(e) => e.stopPropagation()}>
-                      {!video.removed && (video.filePath || video.audioFilePath) && (
+                      {!video.removed && video.audioFilePath && (
                         <DownloadFormatIndicator
-                          filePath={video.filePath}
                           audioFilePath={video.audioFilePath}
-                          fileSize={video.fileSize}
                           audioFileSize={video.audioFileSize}
-                          videoResolution={video.video_resolution}
-                          onVideoChipClick={isTracked ? () => onStrmChipClick(video) : undefined}
                         />
                       )}
                       {mediaTypeInfo && (
@@ -408,18 +429,6 @@ function VideosTable({
                       ) : video.fileSize ? (
                         <AvailabilityChip isAvailable={true} />
                       ) : null)}
-                      {video.hasCachedVideo && (
-                        <Tooltip title="Cached video — click for details">
-                          <Chip
-                            size="small"
-                            icon={<CachedVideoIcon size={14} />}
-                            label="Cached"
-                            variant="outlined"
-                            onClick={() => onOpenCacheDetail(video.youtubeId, 'video')}
-                            style={{ ...SHARED_STATUS_CHIP_SMALL_STYLE, cursor: 'pointer' }}
-                          />
-                        </Tooltip>
-                      )}
                       <WatchedChip watchedBy={video.watchedBy || []} />
                     </Stack>
                   </TableCell>

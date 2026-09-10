@@ -25,7 +25,10 @@ function StreamingPage({ token }: StreamingPageProps) {
   // Same pattern as VideosPage: a dense mobile "list" view replaces the
   // desktop "table" view (each is only available on its own screen size),
   // with "grid" available on both.
-  const listState = useVideoListState({ initialViewMode: isMobile ? 'list' : 'table' });
+  const listState = useVideoListState({
+    initialViewMode: isMobile ? 'list' : 'table',
+    searchStorageKey: 'youtarr:activeStreamsSearch',
+  });
   const { streams, loading, refetch } = useActiveStreams(token);
   const [sortKey, setSortKey] = useState<SortKey>('startedAt');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
@@ -93,6 +96,7 @@ function StreamingPage({ token }: StreamingPageProps) {
         viewModes={availableViewModes}
         sort={sort}
         searchPlaceholder="Search by video, IP, or client..."
+        searchTooltip="Searches video title/ID, client IP address, and user agent."
         headerSlot={headerSlot}
         itemCount={filteredAndSorted.length}
         isLoading={loading}

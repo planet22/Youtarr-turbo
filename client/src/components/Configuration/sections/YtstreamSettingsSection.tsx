@@ -76,6 +76,7 @@ export const DEFAULT_YTSTREAM: YtstreamConfig = {
   hlsStorageLocation: 'tmp',
   backfillMissingSegments: false,
   finalizeToMp4: false,
+  stealthCache: false,
   debugLogging: false,
   forceKeyframesByHardwareMode: {},
 };
@@ -928,6 +929,28 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
             text={
               'Browsers and some players (Jellyfin included) can\'t direct-play raw .ts. When on, once this mode\'s permanent .ts is fully finalized, a background pass remuxes it (no re-encode) into a sibling .mp4; playback prefers that .mp4 automatically once it exists.'
               + (modeCompat.finalizeToMp4?.reason ? ` For the current Playback mode (${mode}): ${modeCompat.finalizeToMp4.reason}` : '')
+            }
+            onMobileClick={onMobileTooltipClick}
+          />
+        </Box>
+      </Grid>
+
+      <Grid item xs={12} sm={6} md={3}>
+        <Box className="flex items-center gap-1 md:mt-5 md:min-h-[48px]">
+          <FormControlLabel
+            control={
+              <Switch
+                checked={ytstream.stealthCache ?? false}
+                onChange={(e) => setYtstream({ stealthCache: e.target.checked })}
+                disabled={disabled || modeCompat.stealthCache?.status !== 'optional'}
+              />
+            }
+            label="Stealth cache"
+          />
+          <InfoTooltip
+            text={
+              'Keeps the buffered file out of the library folder entirely - the .strm is never touched, so a media server (Jellyfin included) always keeps resolving playback through Youtarr instead of ever indexing a real file directly and losing track of it. When Finalize .ts to .mp4 is also on, the hidden .ts is swapped for its .mp4 remux in place (still hidden, .ts deleted) once ready. When this is off but Finalize .ts to .mp4 is on, the .ts still buffers hidden first, but the finished .mp4 IS promoted into the library once ready - a media server only ever sees the .strm replaced by the finished .mp4, never the .ts.'
+              + (modeCompat.stealthCache?.reason ? ` For the current Playback mode (${mode}): ${modeCompat.stealthCache.reason}` : '')
             }
             onMobileClick={onMobileTooltipClick}
           />

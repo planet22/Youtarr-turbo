@@ -97,6 +97,7 @@ export interface YtstreamDryRunPlan {
   hotSwapToCache: boolean;
   backfillMissingSegments: boolean;
   finalizeToMp4: boolean;
+  stealthCache: boolean;
   forceServerSettings: boolean;
   ignoredQueryParams: string[];
   probeShortcut: YtstreamDryRunProbeShortcut;
@@ -151,6 +152,7 @@ export interface CookieTestResult {
   success: boolean;
   message?: string;
   error?: string;
+  details?: string;
   channelCount?: number;
   testedAt: string;
 }

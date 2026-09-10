@@ -16,7 +16,7 @@ import {
 import { ChevronDown, Eye as ShowEmptyIcon } from 'lucide-react';
 import { Job, FailedVideo } from '../../types/Job';
 import { VideoData } from '../../types/VideoData';
-import { formatDownloadSpeed } from '../../utils/formatters';
+import { formatDownloadSpeed, formatFileSize } from '../../utils/formatters';
 import { useSwipeable } from 'react-swipeable';
 import { useConfig } from '../../hooks/useConfig';
 import VideoModal from '../shared/VideoModal';
@@ -113,6 +113,16 @@ const ExpandChevron: React.FC<{ expanded: boolean }> = ({ expanded }) => (
   />
 );
 
+// video.fileSize (Videos.fileSize) comes back as a string over the wire -
+// same parse VideosTable.tsx uses for its own File Size column, kept
+// consistent here rather than trusting formatFileSize's number param type.
+function videoFileSizeText(video?: VideoData): string {
+  const raw = video?.fileSize;
+  if (!raw) return '';
+  const size = typeof raw === 'string' ? parseInt(raw, 10) : raw;
+  return Number.isFinite(size) && size > 0 ? formatFileSize(size) : '';
+}
+
 function fileNameOf(filePath?: string | null): string | null {
   if (!filePath) return null;
   const normalized = filePath.replace(/\\/g, '/');
@@ -172,6 +182,18 @@ function jobDurationText(job: Job): string | null {
   const end = new Date(job.data.endDate).getTime();
   if (Number.isNaN(start) || Number.isNaN(end) || end < start) return null;
   return formatJobDurationMs(end - start);
+}
+
+// The job's own status text, or - for an NZB-originated job - the richer
+// server-computed lifecycle description (see server/routes/nzb.js's
+// computeNzbStatusDetail). A raw job.status of "Deleted - no new videos"
+// collapses several very different real outcomes for an NZB grab (still
+// queued for Sonarr/Radarr's import, actually imported, removed from
+// Sonarr/Radarr's own history while the video still lives in Youtarr's
+// library, etc.) into one misleading phrase; statusDetail, when present,
+// spells out which of those actually happened.
+function jobStatusText(job: Job, isCompletedWithNoVideos: boolean): string {
+  return job.data?.nzb?.statusDetail || (isCompletedWithNoVideos ? `${job.status} - no new videos` : job.status);
 }
 
 // Zero-padded local date key (YYYY-MM-DD) matching the <input type="date">
@@ -256,7 +278,10 @@ const DownloadHistory: React.FC<DownloadHistoryProps> = ({
   // Same search box / filters button+badge / active-filter chips chrome the
   // Videos and Streaming pages use, for a consistent filtering experience
   // across list-style pages even though this one isn't listing videos.
-  const listState = useVideoListState({ initialViewMode: 'table' });
+  const listState = useVideoListState({
+    initialViewMode: 'table',
+    searchStorageKey: 'youtarr:downloadHistorySearch',
+  });
 
   const handleImageError = (youtubeId: string) => {
     setImageErrors((prev) => ({ ...prev, [youtubeId]: true }));
@@ -404,7 +429,7 @@ const DownloadHistory: React.FC<DownloadHistoryProps> = ({
 
           let durationString = '';
           if (job.status !== 'In Progress') {
-            durationString = isCompletedWithNoVideos ? `${job.status} - no new videos` : job.status;
+            durationString = jobStatusText(job, isCompletedWithNoVideos);
             const ranFor = jobDurationText(job);
             if (ranFor) durationString += ` (${ranFor})`;
           } else {
@@ -557,6 +582,11 @@ const DownloadHistory: React.FC<DownloadHistoryProps> = ({
                     <Typography variant="caption" color="secondary">
                       Status: {durationString}
                     </Typography>
+                    {singleVideo && videoFileSizeText(singleVideo) && (
+                      <Typography variant="caption" color="secondary">
+                        File Size: {videoFileSizeText(singleVideo)}
+                      </Typography>
+                    )}
                     {singleVideo && formatDownloadSpeed(singleVideo.avgDownloadMBps) && (
                       <Typography variant="caption" color="secondary">
                         Speed: {formatDownloadSpeed(singleVideo.avgDownloadMBps)}
@@ -620,6 +650,7 @@ const DownloadHistory: React.FC<DownloadHistoryProps> = ({
               <TableCell>Title</TableCell>
               <TableCell>Source</TableCell>
               <TableCell>Status</TableCell>
+              <TableCell>File Size</TableCell>
               <TableCell>Speed</TableCell>
               <TableCell align="right" />
             </TableRow>
@@ -633,7 +664,7 @@ const DownloadHistory: React.FC<DownloadHistoryProps> = ({
 
               let durationString = '';
               if (job.status !== 'In Progress') {
-                durationString = isCompletedWithNoVideos ? `${job.status} - no new videos` : job.status;
+                durationString = jobStatusText(job, isCompletedWithNoVideos);
                 const ranFor = jobDurationText(job);
                 if (ranFor) durationString += ` (${ranFor})`;
               } else {
@@ -702,8 +733,9 @@ const DownloadHistory: React.FC<DownloadHistoryProps> = ({
                       <TableCell>{formattedJobType}</TableCell>
                       <TableCell>{durationString}</TableCell>
                       {/* Blank at the summary-row level - this rolls up multiple
-                          videos, each with its own speed; see the per-video Speed
-                          cell in the expanded sub-table below instead. */}
+                          videos, each with its own file size/speed; see the
+                          per-video cells in the expanded sub-table below instead. */}
+                      <TableCell />
                       <TableCell />
                       <TableCell align="right">
                         <Box style={{ display: 'inline-flex', alignItems: 'center', color: 'var(--foreground)' }}>
@@ -713,7 +745,7 @@ const DownloadHistory: React.FC<DownloadHistoryProps> = ({
                     </TableRow>
 
                     <TableRow>
-                      <TableCell colSpan={6} style={{ padding: 0, border: 'none' }}>
+                      <TableCell colSpan={7} style={{ padding: 0, border: 'none' }}>
                         <Collapse in={isExpanded} timeout="auto" unmountOnExit fancy>
                           <Box className="p-2">
                             {videos.length > 0 && (
@@ -737,7 +769,8 @@ const DownloadHistory: React.FC<DownloadHistoryProps> = ({
                                       <Typography variant="caption" color="secondary" className="block">{video.youTubeChannelName}</Typography>
                                     </TableCell>
                                     <TableCell>{formattedJobType}</TableCell>
-                                    <TableCell>{job.status}</TableCell>
+                                    <TableCell>{jobStatusText(job, false)}</TableCell>
+                                    <TableCell>{videoFileSizeText(video)}</TableCell>
                                     <TableCell>{formatDownloadSpeed(video.avgDownloadMBps)}</TableCell>
                                     <TableCell />
                                   </TableRow>
@@ -823,6 +856,7 @@ const DownloadHistory: React.FC<DownloadHistoryProps> = ({
                   </TableCell>
                   <TableCell>{formattedJobType || '---'}</TableCell>
                   <TableCell>{durationString}</TableCell>
+                  <TableCell>{singleVideo ? videoFileSizeText(singleVideo) : ''}</TableCell>
                   <TableCell>{singleVideo ? formatDownloadSpeed(singleVideo.avgDownloadMBps) : ''}</TableCell>
                   <TableCell align="right" />
                 </TableRow>
@@ -868,6 +902,7 @@ const DownloadHistory: React.FC<DownloadHistoryProps> = ({
           viewModes={['table']}
           filters={filterConfigs}
           searchPlaceholder="Search jobs by title or channel..."
+          searchTooltip="Searches video title, channel name, job type/source, and NZB name."
           headerSlot={headerSlot}
           itemCount={currentJobs.length}
           isLoading={false}

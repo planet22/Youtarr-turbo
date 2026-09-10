@@ -10,6 +10,7 @@ import {
   AccordionSummary,
   AccordionDetails,
   CircularProgress,
+  Alert,
 } from '../../ui';
 import {
   Database as MetadataCacheIcon,
@@ -54,10 +55,16 @@ function CacheDetailDialog({ open, onClose, video, kind, token, onClear, clearin
   const [loadingRaw, setLoadingRaw] = useState(false);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  // Deleting a cached video is a real, irreversible disk action (reverts a
+  // tracked video to STRM, or removes an untracked buffer copy outright) -
+  // require a second click, same as ClearCachedVideoDialog's bulk-selection
+  // confirmation, before onClear actually fires.
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   const isTracked = video.isTracked !== false;
 
   useEffect(() => {
+    setConfirmingDelete(false);
     if (!open) {
       setMetadataDetail(null);
       setVideoDetail(null);
@@ -176,6 +183,15 @@ function CacheDetailDialog({ open, onClose, video, kind, token, onClear, clearin
             )}
           </div>
         )}
+        {kind === 'video' && confirmingDelete && (
+          <Alert severity="warning" style={{ marginTop: 12 }}>
+            <Typography variant="body2">
+              {isTracked
+                ? 'This will delete the cached video file and revert this video back to its STRM placeholder.'
+                : "This will delete this video's buffered copy outright."}
+            </Typography>
+          </Alert>
+        )}
       </DialogContent>
 
       <DialogActions>
@@ -193,9 +209,19 @@ function CacheDetailDialog({ open, onClose, video, kind, token, onClear, clearin
             {refreshing ? 'Refreshing…' : 'Refresh'}
           </Button>
         )}
-        <Button onClick={onClear} disabled={clearing} variant="outlined" color="error">
-          Clear
-        </Button>
+        {kind === 'metadata' ? (
+          <Button onClick={onClear} disabled={clearing} variant="outlined" color="error">
+            Clear
+          </Button>
+        ) : confirmingDelete ? (
+          <Button onClick={onClear} disabled={clearing} variant="contained" color="error" autoFocus>
+            {clearing ? 'Deleting…' : 'Confirm Delete'}
+          </Button>
+        ) : (
+          <Button onClick={() => setConfirmingDelete(true)} disabled={clearing} variant="outlined" color="error">
+            Delete
+          </Button>
+        )}
       </DialogActions>
     </Dialog>
   );

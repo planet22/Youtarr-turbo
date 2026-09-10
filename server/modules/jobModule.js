@@ -1161,22 +1161,43 @@ class JobModule {
     }
 
     const hlsBufferMetadataByYoutubeId = new Map();
+    // ytstream.stealthCache (and its hybrid finalizeToMp4 promotion) reuse
+    // this same skipVideoUpsert finalize path for a video that IS actually
+    // tracked (still STRM, deliberately left untouched - see
+    // server/routes/ytstream.js's bufferEnabled tracked-video branch), not
+    // just genuinely-untracked ones. Check for a real Video row per
+    // youtubeId here so those show up correctly (isTracked, real id/is_strm)
+    // instead of the synthetic untracked display below - same fix also
+    // covers the pre-existing edge case of a genuinely untracked video that
+    // was later added to the library.
+    const hlsBufferTrackedVideoByYoutubeId = new Map();
     if (hlsBufferInfoNeedingBackfill.size > 0) {
+      const trackedRows = await Video.findAll({
+        where: { youtubeId: Array.from(hlsBufferInfoNeedingBackfill.keys()) },
+      });
+      for (const v of trackedRows) {
+        hlsBufferTrackedVideoByYoutubeId.set(v.youtubeId, v.dataValues);
+      }
       // Lazy require (like youtubeMetadataCache.js's own getModel): this
       // model/its ../db dependency shouldn't load eagerly for every jobModule
-      // consumer, only the rare read path that actually needs it.
-      const YoutubeMetadataCache = require('../models/youtubemetadatacache');
-      const metaRows = await YoutubeMetadataCache.findAll({
-        where: { youtube_id: Array.from(hlsBufferInfoNeedingBackfill.keys()) },
-      });
-      for (const row of metaRows) {
-        let info = null;
-        try {
-          info = row.raw_info_json ? JSON.parse(row.raw_info_json) : null;
-        } catch (err) {
-          logger.warn({ err, youtubeId: row.youtube_id }, 'getRunningJobsWithFreshVideos: failed to parse cached raw_info_json for HLS Buffer Cache backfill');
+      // consumer, only the rare read path that actually needs it. Only
+      // needed for ids with no real Video row - the synthetic display below.
+      const untrackedIds = Array.from(hlsBufferInfoNeedingBackfill.keys())
+        .filter((id) => !hlsBufferTrackedVideoByYoutubeId.has(id));
+      if (untrackedIds.length > 0) {
+        const YoutubeMetadataCache = require('../models/youtubemetadatacache');
+        const metaRows = await YoutubeMetadataCache.findAll({
+          where: { youtube_id: untrackedIds },
+        });
+        for (const row of metaRows) {
+          let info = null;
+          try {
+            info = row.raw_info_json ? JSON.parse(row.raw_info_json) : null;
+          } catch (err) {
+            logger.warn({ err, youtubeId: row.youtube_id }, 'getRunningJobsWithFreshVideos: failed to parse cached raw_info_json for HLS Buffer Cache backfill');
+          }
+          hlsBufferMetadataByYoutubeId.set(row.youtube_id, info);
         }
-        hlsBufferMetadataByYoutubeId.set(row.youtube_id, info);
       }
     }
 
@@ -1197,6 +1218,31 @@ class JobModule {
       }
 
       if (!hasVideos && hlsBufferInfo?.youtubeId) {
+        const trackedVideo = hlsBufferTrackedVideoByYoutubeId.get(hlsBufferInfo.youtubeId);
+        if (trackedVideo) {
+          // Identity (id/title/channel/is_strm/removed) comes from the real,
+          // live Video row so this correctly shows as tracked - but filePath/
+          // fileSize/timing must come from hlsBufferCacheInfo (what THIS job
+          // actually produced: the hidden hls-buffer cache file), not the
+          // Video row's own filePath. For a stealthCache/hybrid job the row's
+          // filePath is still its untouched .strm (is_strm stays true on
+          // purpose - see ytstream.js's bufferEnabled tracked-video branch),
+          // so showing that verbatim made a "we just cached this" row look
+          // exactly like nothing had happened at all.
+          return {
+            ...job,
+            data: {
+              ...job.data,
+              videos: [{
+                ...trackedVideo,
+                filePath: hlsBufferInfo.filePath ?? trackedVideo.filePath,
+                fileSize: hlsBufferInfo.fileSize ?? trackedVideo.fileSize,
+                downloadDurationSeconds: hlsBufferInfo.downloadDurationSeconds ?? trackedVideo.downloadDurationSeconds,
+                avgDownloadMBps: hlsBufferInfo.avgDownloadMBps ?? trackedVideo.avgDownloadMBps,
+              }],
+            },
+          };
+        }
         const info = hlsBufferMetadataByYoutubeId.get(hlsBufferInfo.youtubeId) || null;
         return {
           ...job,

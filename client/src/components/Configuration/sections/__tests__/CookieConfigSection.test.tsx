@@ -128,6 +128,30 @@ describe('CookieConfigSection', () => {
     expect(
       screen.getByText('Cookies are working (found 12 subscribed channels).')
     ).toBeInTheDocument();
+    expect(screen.getByText(/Subscription test: Passed/)).toBeInTheDocument();
+  });
+
+  test('shows a failed subscription test line when the cookie test fails', () => {
+    createHookValue({
+      cookieStatus: {
+        cookiesEnabled: true,
+        customCookiesUploaded: true,
+        customFileExists: true,
+      },
+      cookieTestResult: {
+        success: false,
+        error: 'Your cookies appear to be expired or invalid.',
+        testedAt: new Date().toISOString(),
+      },
+    });
+
+    const props = createSectionProps({
+      config: createConfig({ cookiesEnabled: true }),
+    });
+
+    renderWithProviders(<CookieConfigSection {...props} />);
+
+    expect(screen.getByText(/Subscription test: Failed/)).toBeInTheDocument();
   });
 
   test('shows an error alert when the cookie test fails', () => {
@@ -153,6 +177,35 @@ describe('CookieConfigSection', () => {
     expect(
       screen.getByText('Your cookies appear to be expired or invalid.')
     ).toBeInTheDocument();
+  });
+
+  test('reveals technical details for a failed test only after clicking the toggle', async () => {
+    const user = userEvent.setup();
+    createHookValue({
+      cookieStatus: {
+        cookiesEnabled: true,
+        customCookiesUploaded: true,
+        customFileExists: true,
+      },
+      cookieTestResult: {
+        success: false,
+        error: 'Your cookies appear to be expired or invalid.',
+        details: 'ERROR: [youtube:tab] channels: Failed to resolve url (does the playlist exist?)',
+        testedAt: new Date().toISOString(),
+      },
+    });
+
+    const props = createSectionProps({
+      config: createConfig({ cookiesEnabled: true }),
+    });
+
+    renderWithProviders(<CookieConfigSection {...props} />);
+
+    expect(screen.queryByText(/Failed to resolve url/)).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /technical details/i }));
+
+    expect(screen.getByText(/Failed to resolve url/)).toBeInTheDocument();
   });
 
   test('shows expiry metadata for the uploaded cookie file', () => {

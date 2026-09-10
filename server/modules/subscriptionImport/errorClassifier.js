@@ -6,6 +6,7 @@ const ERROR_CODES = Object.freeze({
   NETWORK: 'NETWORK',
   TIMEOUT: 'TIMEOUT',
   NO_CHANNELS_FOUND: 'NO_CHANNELS_FOUND',
+  OUTDATED_YTDLP: 'OUTDATED_YTDLP',
   UNKNOWN: 'UNKNOWN',
 });
 
@@ -20,6 +21,8 @@ const USER_MESSAGES = {
     'Fetching your subscriptions took too long and was cancelled. Please try again.',
   [ERROR_CODES.NO_CHANNELS_FOUND]:
     'YouTube returned no subscriptions for this account. Make sure you are signed into the right account when you exported cookies.',
+  [ERROR_CODES.OUTDATED_YTDLP]:
+    'yt-dlp received an incomplete response from YouTube, which usually means yt-dlp needs to be updated to handle a recent YouTube change. Go to Settings > yt-dlp Update, install the latest version, then test your cookies again.',
   [ERROR_CODES.UNKNOWN]:
     'yt-dlp could not fetch your subscriptions. See the technical details below, or try the Google Takeout option instead.',
 };
@@ -30,6 +33,7 @@ const HTTP_STATUS = {
   [ERROR_CODES.NETWORK]: 502,
   [ERROR_CODES.TIMEOUT]: 504,
   [ERROR_CODES.NO_CHANNELS_FOUND]: 422,
+  [ERROR_CODES.OUTDATED_YTDLP]: 502,
   [ERROR_CODES.UNKNOWN]: 502,
 };
 
@@ -44,6 +48,13 @@ const PATTERNS = [
   {
     re: /HTTPSConnectionPool|connection refused|network is unreachable|getaddrinfo|ENOTFOUND|ECONNREFUSED|ETIMEDOUT/i,
     code: ERROR_CODES.NETWORK,
+  },
+  {
+    // yt-dlp couldn't parse YouTube's page payload -- almost always fixed
+    // by updating yt-dlp to a build that understands the current format,
+    // rather than a cookie problem (see errorClassifier.test.js).
+    re: /incomplete yt initial data received/i,
+    code: ERROR_CODES.OUTDATED_YTDLP,
   },
 ];
 

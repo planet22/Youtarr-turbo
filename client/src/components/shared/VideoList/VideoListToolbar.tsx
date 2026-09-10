@@ -7,6 +7,7 @@ import {
   TextField,
   ListItemIcon,
   ListItemText,
+  Tooltip,
 } from '../../ui';
 import {
   Search as SearchIcon,
@@ -23,6 +24,7 @@ export interface VideoListToolbarProps {
   state: VideoListState;
   viewModes: VideoListViewMode[];
   searchPlaceholder?: string;
+  searchTooltip?: string;
   filtersButtonActive?: boolean;
   filtersBadgeCount?: number;
   onFiltersClick?: () => void;
@@ -98,6 +100,7 @@ function VideoListToolbar({
   state,
   viewModes,
   searchPlaceholder = 'Search videos...',
+  searchTooltip,
   filtersButtonActive = false,
   filtersBadgeCount = 0,
   onFiltersClick,
@@ -106,6 +109,15 @@ function VideoListToolbar({
   rightActions,
   isMobile,
 }: VideoListToolbarProps) {
+  const searchIcon = <SearchIcon size={16} data-testid="SearchIcon" />;
+  const searchStartAdornment = searchTooltip ? (
+    <Tooltip title={searchTooltip} arrow placement="bottom-start">
+      <span style={{ display: 'inline-flex' }}>{searchIcon}</span>
+    </Tooltip>
+  ) : (
+    searchIcon
+  );
+
   const filtersButton = onFiltersClick ? (
     <Button
       variant={filtersButtonActive ? 'contained' : 'outlined'}
@@ -141,7 +153,7 @@ function VideoListToolbar({
           value={state.searchInput}
           onChange={(e) => state.setSearchInput(e.target.value)}
           InputProps={{
-            startAdornment: <SearchIcon size={16} data-testid="SearchIcon" />,
+            startAdornment: searchStartAdornment,
           }}
         />
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>

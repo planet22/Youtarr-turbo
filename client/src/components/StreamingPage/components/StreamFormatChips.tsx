@@ -82,8 +82,7 @@ const EMPTY_CELL = <span style={{ color: 'var(--muted-foreground)' }}>—</span>
 // Chip's own default horizontal padding (its `size="small"` Tailwind class).
 export const FORMAT_COLUMN_CHIP_STYLE: React.CSSProperties = {
   ...SHARED_STATUS_CHIP_SMALL_STYLE,
-  height: 18,
-  fontSize: '0.6rem',
+  height: 20,
   padding: '0 4px',
 };
 

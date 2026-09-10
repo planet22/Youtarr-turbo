@@ -94,6 +94,7 @@ export const useCookieManagement = ({
         success: !!data.success,
         message: data.message,
         error: data.error,
+        details: data.details,
         channelCount: data.channelCount,
         testedAt: new Date().toISOString(),
       });

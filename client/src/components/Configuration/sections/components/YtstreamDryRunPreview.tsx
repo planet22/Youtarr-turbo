@@ -22,6 +22,7 @@ const STEP_LABELS: Record<string, string> = {
   hotSwapToCache: 'Hot-swap to cache',
   backfillMissingSegments: 'Backfill missing segments',
   finalizeToMp4: 'Finalize .ts to .mp4',
+  stealthCache: 'Stealth cache',
   transcode: 'Transcode',
   execution: 'What happens',
 };

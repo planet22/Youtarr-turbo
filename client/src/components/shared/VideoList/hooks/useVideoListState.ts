@@ -9,6 +9,10 @@ export interface UseVideoListStateOptions {
   viewModeStorageKey?: string;
   initialSearch?: string;
   searchDebounceMs?: number;
+  // Persists the search text across page loads/refreshes, same pattern as
+  // viewModeStorageKey below - omit to keep today's behavior (search always
+  // starts blank).
+  searchStorageKey?: string;
 }
 
 export interface VideoListState {
@@ -37,14 +41,25 @@ function readStoredViewMode(key: string | undefined): VideoListViewMode | null {
   }
 }
 
+function readStoredSearch(key: string | undefined): string | null {
+  if (!key || typeof window === 'undefined') return null;
+  try {
+    return window.localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
 export function useVideoListState({
   initialViewMode,
   viewModeStorageKey,
   initialSearch = '',
   searchDebounceMs = SEARCH_DEBOUNCE_MS,
+  searchStorageKey,
 }: UseVideoListStateOptions): VideoListState {
-  const [searchInput, setSearchInputState] = useState(initialSearch);
-  const [search, setSearch] = useState(initialSearch);
+  const initialSearchValue = readStoredSearch(searchStorageKey) ?? initialSearch;
+  const [searchInput, setSearchInputState] = useState(initialSearchValue);
+  const [search, setSearch] = useState(initialSearchValue);
 
   const [viewMode, setViewModeState] = useState<VideoListViewMode>(() => {
     return readStoredViewMode(viewModeStorageKey) ?? initialViewMode;
@@ -66,8 +81,16 @@ export function useVideoListState({
     () =>
       debounce((value: string) => {
         setSearch(value);
+        if (searchStorageKey && typeof window !== 'undefined') {
+          try {
+            if (value) window.localStorage.setItem(searchStorageKey, value);
+            else window.localStorage.removeItem(searchStorageKey);
+          } catch {
+            /* ignore storage errors */
+          }
+        }
       }, searchDebounceMs),
-    [searchDebounceMs]
+    [searchDebounceMs, searchStorageKey]
   );
 
   useEffect(() => {
@@ -88,7 +111,14 @@ export function useVideoListState({
     debouncedCommitSearch.cancel();
     setSearchInputState('');
     setSearch('');
-  }, [debouncedCommitSearch]);
+    if (searchStorageKey && typeof window !== 'undefined') {
+      try {
+        window.localStorage.removeItem(searchStorageKey);
+      } catch {
+        /* ignore storage errors */
+      }
+    }
+  }, [debouncedCommitSearch, searchStorageKey]);
 
   const setViewMode = useCallback(
     (mode: VideoListViewMode) => {

@@ -2,8 +2,9 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
 import { useSwipeable } from 'react-swipeable';
-import { Alert, Box, Grid, Snackbar, Typography } from '../ui';
+import { Alert, Box, Button, Grid, Snackbar, Typography } from '../ui';
 import { Trash2 as DeleteIcon, Star as RatingIcon, Download as DownloadIcon, Purge as PurgeIcon, Obliterate as ObliterateIcon, Wifi as StrmIcon, Database as MetadataCacheIcon, Storage as CachedVideoIcon } from '../../lib/icons';
+import { Eye as ShowFilePathsIcon } from 'lucide-react';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
 import { useConfig } from '../../hooks/useConfig';
 import { useDownloadListingsRefresh } from '../../hooks/useDownloadListingsRefresh';
@@ -53,6 +54,7 @@ interface VideosPageProps {
 }
 
 const VIEW_MODE_STORAGE_KEY = 'youtarr:videosPageViewMode';
+const SEARCH_STORAGE_KEY = 'youtarr:videosPageSearch';
 
 const YOUTUBE_CHANNEL_ID_PATTERN = /^UC[a-zA-Z0-9_-]{22}$/;
 
@@ -113,6 +115,7 @@ function VideosPage({ token }: VideosPageProps) {
   const listState = useVideoListState({
     initialViewMode: (isMobile ? 'list' : 'table') as VideoListViewMode,
     viewModeStorageKey: VIEW_MODE_STORAGE_KEY,
+    searchStorageKey: SEARCH_STORAGE_KEY,
   });
 
   const [page, setPage] = useState(1);
@@ -291,25 +294,47 @@ function VideosPage({ token }: VideosPageProps) {
 
   const handleDeleteConfirm = async (selectedYoutubeIds: string[]) => {
     setDeleteDialogOpen(false);
-    const deletableIds = selectedYoutubeIds
+    const selectedMeta = selectedYoutubeIds
       .map((youtubeId) => videoMetaRef.current.get(youtubeId))
-      .filter((meta): meta is VideoSelectionMeta => Boolean(meta && meta.id !== null && !meta.removed))
+      .filter((meta): meta is VideoSelectionMeta => Boolean(meta));
+    const deletableIds = selectedMeta
+      .filter((meta) => meta.id !== null && !meta.removed)
       .map((meta) => meta.id as number);
-    if (deletableIds.length === 0) return;
-    const result = await deleteVideos(deletableIds, token);
+    // Untracked/cache-only rows (id === null - the "Show untracked" bucket)
+    // have no real library row for deleteVideos to act on, so selecting one
+    // alongside real videos silently dropped it from a bulk delete before -
+    // clear whatever cache it has instead, the same as the single-row
+    // "delete" action (handleClearCachedRowConfirm) already does for it.
+    const cacheOnlyMeta = selectedMeta.filter(
+      (meta) => meta.id === null && (meta.hasCachedMetadata || meta.hasCachedVideo)
+    );
+    if (deletableIds.length === 0 && cacheOnlyMeta.length === 0) return;
+
+    const [result] = await Promise.all([
+      deletableIds.length > 0
+        ? deleteVideos(deletableIds, token)
+        : Promise.resolve({ success: true, deleted: [], failed: [] }),
+      ...cacheOnlyMeta.flatMap((meta) => [
+        meta.hasCachedMetadata ? cacheActions.clearMetadataCache(meta.youtubeId) : Promise.resolve(),
+        meta.hasCachedVideo ? cacheActions.clearVideoCache(meta.youtubeId) : Promise.resolve(),
+      ]),
+    ]);
+    const clearedCacheCount = cacheOnlyMeta.length;
+    const describeCounts = (deletedCount: number) => {
+      const parts = [];
+      if (deletedCount > 0) parts.push(`${deletedCount} video${deletedCount !== 1 ? 's' : ''}`);
+      if (clearedCacheCount > 0) parts.push(`${clearedCacheCount} cached-only row${clearedCacheCount !== 1 ? 's' : ''}`);
+      return parts.join(' and ');
+    };
     if (result.success) {
-      setSuccessMessage(
-        `Successfully deleted ${result.deleted.length} video${result.deleted.length !== 1 ? 's' : ''}`
-      );
+      setSuccessMessage(`Successfully removed ${describeCounts(result.deleted.length)}`);
       selection.clear();
       refetch();
     } else {
       const deletedCount = result.deleted.length;
       const failedCount = result.failed.length;
-      if (deletedCount > 0) {
-        setSuccessMessage(
-          `Deleted ${deletedCount} video${deletedCount !== 1 ? 's' : ''}, but ${failedCount} failed`
-        );
+      if (deletedCount > 0 || clearedCacheCount > 0) {
+        setSuccessMessage(`Removed ${describeCounts(deletedCount)}, but ${failedCount} video${failedCount !== 1 ? 's' : ''} failed`);
         selection.clear();
         refetch();
       } else {
@@ -481,7 +506,12 @@ function VideosPage({ token }: VideosPageProps) {
           deleteLoading ||
           !ids.some((id) => {
             const meta = videoMetaRef.current.get(id);
-            return Boolean(meta && meta.isTracked && !meta.removed);
+            if (!meta) return false;
+            // A real tracked video, or an untracked cache-only row (id ===
+            // null) with a cache to clear - handleDeleteConfirm handles
+            // both, so this button must stay enabled for either.
+            return (meta.isTracked && !meta.removed) ||
+              (!meta.isTracked && (meta.hasCachedMetadata || meta.hasCachedVideo));
           }),
         onClick: () => setDeleteDialogOpen(true),
       },
@@ -652,6 +682,11 @@ function VideosPage({ token }: VideosPageProps) {
     for (const id of selection.selectedIds) {
       const meta = videoMetaRef.current.get(id);
       if (meta && meta.isTracked && !meta.removed) {
+        deletable += 1;
+      } else if (meta && !meta.isTracked && (meta.hasCachedMetadata || meta.hasCachedVideo)) {
+        // Cache-only row (id === null) - handleDeleteConfirm clears its
+        // cache instead of calling deleteVideos, but it's still something
+        // this action actually removes, not a no-op skip.
         deletable += 1;
       } else {
         skipped += 1;
@@ -1039,12 +1074,9 @@ function VideosPage({ token }: VideosPageProps) {
         onChange: withPageReset(setChannelFilter),
       },
       { id: 'showUntracked', value: showUntracked, onChange: withPageReset(setShowUntracked) },
-      // Pure display toggle - doesn't filter the dataset, so it doesn't reset
-      // the page like the other filters above.
-      { id: 'showFilePaths', value: showFilePaths, onChange: setShowFilePaths },
     ];
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dateFrom, dateTo, addedDateFrom, addedDateTo, maxRatingFilter, protectedFilter, missingFilter, watchedFilter, strmFilter, metadataCacheFilter, cachedVideoFilter, metadataOnlyFilter, channelFilter, uniqueChannels, showUntracked, showFilePaths]);
+  }, [dateFrom, dateTo, addedDateFrom, addedDateTo, maxRatingFilter, protectedFilter, missingFilter, watchedFilter, strmFilter, metadataCacheFilter, cachedVideoFilter, metadataOnlyFilter, channelFilter, uniqueChannels, showUntracked]);
 
   const sortConfig: SortConfig = useMemo(
     () => ({
@@ -1208,7 +1240,20 @@ function VideosPage({ token }: VideosPageProps) {
         filters={filterConfigs}
         sort={activeSort}
         searchPlaceholder="Search videos by name or channel..."
+        searchTooltip="Searches video title and channel name."
         headerSlot={headerSlot}
+        toolbarExtras={
+          <Button
+            variant={showFilePaths ? 'contained' : 'outlined'}
+            size="small"
+            onClick={() => setShowFilePaths(!showFilePaths)}
+            startIcon={<ShowFilePathsIcon size={16} />}
+            className={showFilePaths ? undefined : 'text-foreground border-border hover:bg-muted hover:border-foreground'}
+            data-testid="video-list-show-file-paths-button"
+          >
+            Show file paths
+          </Button>
+        }
         itemCount={videos.length}
         isLoading={loading}
         isError={Boolean(loadError)}

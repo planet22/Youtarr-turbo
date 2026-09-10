@@ -61,6 +61,17 @@ export interface VideoData {
   cachedVideoAt?: string | null;
   cachedVideoAgo?: string | null;
   cachedVideoExpiresAt?: string | null;
+  // ytstream.stealthCache (or finalizeToMp4 alone, hybrid mode) hls-buffer
+  // cache: true only for a still-STRM tracked row (is_strm true) with a warm
+  // copy sitting in the same hidden dir the untracked cache uses - distinct
+  // from hasCachedVideo, which only ever applies once is_strm has actually
+  // flipped false. See server/modules/videosModule.js's getVideosPaginated.
+  hasStealthCache?: boolean;
+  // Real size/mtime of that hidden cache file - shown in place of the
+  // "STRM" placeholder wherever a size is normally shown, since the file
+  // itself is real even though the library item is still genuinely STRM.
+  stealthCacheFileSize?: number | null;
+  stealthCacheAt?: string | null;
 }
 
 export interface EnabledChannel {

@@ -1800,6 +1800,218 @@ class VideosModule {
     return this._resolutionTagBackfillRunning;
   }
 
+  /**
+   * One-time maintenance pass: fully regenerates the .nfo file for every
+   * already-downloaded/STRM'd video from its cached .info.json (same cache
+   * backfillResolutionTags reads from getJobsPath()/info/<youtubeId>.info.json),
+   * for whenever the NFO template itself changes and existing files should
+   * pick up the new fields/format rather than only ever getting new fields
+   * patched in surgically. Unlike patchExistingNfoWithResolutionTag, this
+   * rewrites the whole file - so it merges this video's DB-frozen
+   * normalized_rating/rating_source (and, for TV Series library mode,
+   * season/episode/youTubeChannelName) onto the cached jsonData first,
+   * exactly as bulkUpdateVideoRatings already does for a single video, so a
+   * manual rating override (or a video's season/episode) is never dropped
+   * just because the cached .info.json predates it.
+   *
+   * Only touches videos whose raw yt-dlp metadata is already cached -
+   * deliberately does NOT fetch fresh metadata for uncached videos, to
+   * avoid a full-library yt-dlp fetch spree (same reasoning as
+   * backfillResolutionTags).
+   */
+  async regenerateVideoMetadataFiles(arg = {}) {
+    const opts = typeof arg === 'number' ? { timeLimit: arg } : arg;
+    const timeLimit = opts.timeLimit ?? 10 * 60 * 1000;
+    const trigger = opts.trigger ?? 'manual';
+
+    if (this._metadataRegenRunning) {
+      logger.info({ trigger }, 'Metadata regeneration already running, skipping');
+      return { skipped: true, reason: 'already-running' };
+    }
+    this._metadataRegenRunning = true;
+
+    const nfoGenerator = require('./nfoGenerator');
+    const startTime = Date.now();
+    const startedAtIso = new Date(startTime).toISOString();
+    const logProgress = (message) => {
+      const elapsed = Math.round((Date.now() - startTime) / 1000);
+      logger.info({ elapsed, context: 'metadataRegen' }, message);
+    };
+    const checkTimeLimit = () => {
+      if (Date.now() - startTime > timeLimit) {
+        throw new Error(`Time limit exceeded (${timeLimit / 1000}s)`);
+      }
+    };
+
+    let totalScanned = 0;
+    let totalRegenerated = 0;
+    let totalSkippedNoCache = 0;
+    let totalSkippedNoFile = 0;
+    let totalErrors = 0;
+    let result;
+
+    try {
+      messageEmitter.emitMessage('broadcast', null, 'server', 'metadataRegenStatus', { running: true, trigger });
+      logProgress('Starting metadata regeneration...');
+
+      const infoDir = path.join(configModule.getJobsPath(), 'info');
+      const CHUNK_SIZE = 500;
+      let offset = 0;
+      const totalCount = await Video.count();
+      logProgress(`Scanning ${totalCount} videos...`);
+
+      while (offset < totalCount) {
+        checkTimeLimit();
+        const videos = await Video.findAll({
+          attributes: [
+            'id', 'youtubeId', 'filePath', 'youTubeChannelName',
+            'season', 'episode', 'normalized_rating', 'rating_source',
+          ],
+          limit: CHUNK_SIZE,
+          offset,
+          raw: true,
+        });
+        if (videos.length === 0) break;
+
+        for (const video of videos) {
+          checkTimeLimit();
+          totalScanned++;
+
+          if (!video.filePath) {
+            totalSkippedNoFile++;
+            continue; // no downloaded/materialized file to attach an .nfo to
+          }
+
+          let jsonData;
+          try {
+            const infoPath = path.join(infoDir, `${video.youtubeId}.info.json`);
+            const content = await fs.readFile(infoPath, 'utf8');
+            jsonData = JSON.parse(content);
+          } catch {
+            totalSkippedNoCache++;
+            continue;
+          }
+
+          jsonData.normalized_rating = video.normalized_rating;
+          jsonData.rating_source = video.rating_source;
+
+          try {
+            const written = video.season != null
+              ? nfoGenerator.writeEpisodeNfoFile(video.filePath, jsonData, {
+                season: video.season,
+                episode: video.episode,
+                showTitle: video.youTubeChannelName,
+              })
+              : nfoGenerator.writeVideoNfoFile(video.filePath, jsonData);
+            if (written) {
+              totalRegenerated++;
+            } else {
+              totalErrors++;
+            }
+          } catch (err) {
+            totalErrors++;
+            logger.warn({ err, youtubeId: video.youtubeId }, 'Failed to regenerate NFO file');
+          }
+        }
+
+        offset += CHUNK_SIZE;
+        if (offset % (CHUNK_SIZE * 4) === 0) {
+          logProgress(`Progress: ${totalScanned}/${totalCount} scanned, ${totalRegenerated} regenerated`);
+        }
+      }
+
+      const elapsed = Math.round((Date.now() - startTime) / 1000);
+      logger.info({
+        elapsed, totalScanned, totalRegenerated, totalSkippedNoCache, totalSkippedNoFile, totalErrors,
+      }, 'Metadata regeneration completed');
+
+      result = {
+        scanned: totalScanned,
+        regenerated: totalRegenerated,
+        skippedNoCache: totalSkippedNoCache,
+        skippedNoFile: totalSkippedNoFile,
+        errors: totalErrors,
+        timeElapsed: elapsed,
+        trigger,
+        startedAt: startedAtIso,
+        completedAt: new Date().toISOString(),
+        status: 'completed',
+      };
+      return result;
+    } catch (err) {
+      const elapsed = Math.round((Date.now() - startTime) / 1000);
+      if (err.message && err.message.includes('Time limit exceeded')) {
+        logger.info({ elapsed }, 'Metadata regeneration stopped (time limit reached)');
+        result = {
+          scanned: totalScanned,
+          regenerated: totalRegenerated,
+          skippedNoCache: totalSkippedNoCache,
+          skippedNoFile: totalSkippedNoFile,
+          errors: totalErrors,
+          timeElapsed: elapsed,
+          trigger,
+          startedAt: startedAtIso,
+          completedAt: new Date().toISOString(),
+          status: 'timed-out',
+        };
+        return result;
+      }
+      logger.error({ err }, 'Error during metadata regeneration');
+      result = {
+        scanned: totalScanned,
+        regenerated: totalRegenerated,
+        skippedNoCache: totalSkippedNoCache,
+        skippedNoFile: totalSkippedNoFile,
+        errors: totalErrors,
+        timeElapsed: elapsed,
+        trigger,
+        startedAt: startedAtIso,
+        completedAt: new Date().toISOString(),
+        status: 'error',
+        errorMessage: err.message || 'Unknown error',
+      };
+      throw err;
+    } finally {
+      this._metadataRegenRunning = false;
+
+      if (result) {
+        try {
+          const currentConfig = configModule.getConfig();
+          configModule.updateConfig({ ...currentConfig, metadataRegenLastRun: result });
+        } catch (persistErr) {
+          logger.error({ err: persistErr }, 'Failed to persist metadataRegenLastRun');
+        }
+      }
+
+      try {
+        messageEmitter.emitMessage('broadcast', null, 'server', 'metadataRegenStatus', {
+          running: false,
+          lastRun: result || null,
+        });
+      } catch (emitErr) {
+        logger.error({ err: emitErr }, 'Failed to emit metadataRegenStatus completion');
+      }
+    }
+  }
+
+  /**
+   * Atomically check the lock and kick off a metadata regeneration.
+   * Mirrors tryStartResolutionTagBackfill/tryStartImageRegen.
+   */
+  tryStartMetadataRegen({ trigger = 'manual' } = {}) {
+    if (this._metadataRegenRunning) {
+      return { started: false, reason: 'already-running' };
+    }
+    this.regenerateVideoMetadataFiles({ trigger }).catch((err) => {
+      logger.error({ err }, 'Manual metadata regeneration run failed');
+    });
+    return { started: true };
+  }
+
+  isMetadataRegenRunning() {
+    return this._metadataRegenRunning;
+  }
+
   async setVideoProtection(id, protectedState) {
     const video = await Video.findByPk(id);
     if (!video) {

@@ -768,7 +768,7 @@ async function resolveTrackedOwnerChannelId(youtubeId, metadataChannelId) {
         const channelId = lookupChannelId;
         channelRecord = await Channel.findOne({
           where: { channel_id: channelId },
-          attributes: ['id', 'sub_folder', 'title', 'uploader', 'folder_name', 'default_rating', 'enabled', 'skip_video_folder', 'library_mode', 'season_episode_regex']
+          attributes: ['id', 'sub_folder', 'title', 'uploader', 'folder_name', 'default_rating', 'enabled', 'skip_video_folder', 'library_mode', 'season_episode_regex', 'description']
         });
 
         logger.info({ channelId, ownerProvided: !!ownerChannelId, found: !!channelRecord }, 'Post-process channel lookup');
@@ -1560,7 +1560,8 @@ async function resolveTrackedOwnerChannelId(youtubeId, metadataChannelId) {
     if (!skipMediaSidecarFiles && libraryMode === 'series' && seriesSeason != null) {
       const seasonFolderPath = path.dirname(finalVideoPath);
       const showTitle = (settingsChannelRecord && settingsChannelRecord.title) || jsonData.uploader || jsonData.channel || 'Unknown Channel';
-      nfoGenerator.writeShowNfoFile(finalChannelFolderPath, { title: showTitle, plot: '', channelId: jsonData.channel_id });
+      const showPlot = (settingsChannelRecord && settingsChannelRecord.description) || '';
+      nfoGenerator.writeShowNfoFile(finalChannelFolderPath, { title: showTitle, plot: showPlot, channelId: jsonData.channel_id });
       nfoGenerator.writeSeasonNfoFile(seasonFolderPath, { showTitle, season: seriesSeason });
       if (jsonData.channel_id) {
         await copySeasonPosterIfNeeded(jsonData.channel_id, seasonFolderPath);

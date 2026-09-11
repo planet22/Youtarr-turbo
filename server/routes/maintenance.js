@@ -154,6 +154,53 @@ function createMaintenanceRoutes({ verifyToken, videosModule, configModule, jobM
 
   /**
    * @swagger
+   * /api/maintenance/regenerate-metadata:
+   *   post:
+   *     summary: Fully regenerate the .nfo file for every already-downloaded/STRM'd video from its cached .info.json
+   *     description: Unlike the resolution-tag backfill (which only patches one tag into the existing file), this rewrites the whole .nfo - useful after an NFO template/field change so existing files pick up the new format. DB-frozen fields (rating override, season/episode) are merged back in first so they're never dropped just because the cached .info.json predates them. Skips videos with no downloaded file or no cached metadata.
+   *     tags: [Maintenance]
+   *     responses:
+   *       202:
+   *         description: Regeneration started
+   *       409:
+   *         description: A regeneration is already in progress
+   */
+  router.post('/api/maintenance/regenerate-metadata', verifyToken, (req, res) => {
+    try {
+      const result = videosModule.tryStartMetadataRegen({ trigger: 'manual' });
+      if (!result.started) {
+        return res.status(409).json({ error: 'Metadata regeneration already in progress' });
+      }
+      return res.status(202).json({ status: 'started', trigger: 'manual' });
+    } catch (err) {
+      logger.error({ err }, 'Failed to start manual metadata regeneration');
+      return res.status(500).json({ error: 'Failed to start metadata regeneration' });
+    }
+  });
+
+  /**
+   * @swagger
+   * /api/maintenance/regenerate-metadata-status:
+   *   get:
+   *     summary: Get current metadata regeneration running state and last-run summary
+   *     tags: [Maintenance]
+   *     responses:
+   *       200:
+   *         description: Status object
+   */
+  router.get('/api/maintenance/regenerate-metadata-status', verifyToken, (req, res) => {
+    try {
+      const running = videosModule.isMetadataRegenRunning();
+      const lastRun = configModule.getConfig().metadataRegenLastRun ?? null;
+      return res.status(200).json({ running, lastRun });
+    } catch (err) {
+      logger.error({ err }, 'Failed to read metadata regeneration status');
+      return res.status(500).json({ error: 'Failed to read metadata regeneration status' });
+    }
+  });
+
+  /**
+   * @swagger
    * /api/maintenance/compact-history-preview:
    *   get:
    *     summary: Dry-run count for compacting Download History

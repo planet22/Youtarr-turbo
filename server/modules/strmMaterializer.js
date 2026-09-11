@@ -309,7 +309,7 @@ class StrmMaterializer {
         const { Channel } = require('../models');
         channelRecord = await Channel.findOne({
           where: { channel_id: meta.channel_id, enabled: true },
-          attributes: ['title', 'library_mode', 'sub_folder', 'season_episode_regex'],
+          attributes: ['title', 'library_mode', 'sub_folder', 'season_episode_regex', 'description'],
         });
       } catch (err) {
         logger.debug({ err }, 'STRM: channel lookup failed');
@@ -476,7 +476,7 @@ class StrmMaterializer {
       await this._ensureChannelPoster(meta, paths.channelDir);
 
       if (libraryMode === 'series' && seriesSeason != null) {
-        await this._ensureSeriesNfoFiles(meta, paths, seriesSeason);
+        await this._ensureSeriesNfoFiles(meta, paths, seriesSeason, channelRecord);
         await this._ensureSeasonPoster(meta, paths.videoDir);
       }
     }
@@ -856,10 +856,11 @@ class StrmMaterializer {
    * Write/refresh tvshow.nfo (channel root) and season.nfo (season folder)
    * for TV Series library mode. Idempotent - safe to call on every video.
    */
-  async _ensureSeriesNfoFiles(meta, paths, season) {
+  async _ensureSeriesNfoFiles(meta, paths, season, channelRecord) {
     try {
       const showTitle = meta.uploader || meta.channel || 'Unknown Channel';
-      nfoGenerator.writeShowNfoFile(paths.channelDir, { title: showTitle, plot: '', channelId: meta.channel_id });
+      const showPlot = (channelRecord && channelRecord.description) || '';
+      nfoGenerator.writeShowNfoFile(paths.channelDir, { title: showTitle, plot: showPlot, channelId: meta.channel_id });
       nfoGenerator.writeSeasonNfoFile(paths.videoDir, { showTitle, season });
     } catch (err) {
       logger.warn({ err, youtubeId: meta.id }, 'STRM: series show/season NFO write failed');

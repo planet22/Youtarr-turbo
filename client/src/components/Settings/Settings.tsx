@@ -51,6 +51,7 @@ import { SETTINGS_PAGES, SettingsIndex } from './SettingsIndex';
 import { MaintenanceSection } from './MaintenanceSection';
 import { ResolutionTagBackfillSection } from './ResolutionTagBackfillSection';
 import { ChannelImageRegenSection } from './ChannelImageRegenSection';
+import { MetadataRegenSection } from './MetadataRegenSection';
 import { CompactHistorySection } from './CompactHistorySection';
 
 interface SettingsProps {
@@ -513,6 +514,7 @@ export function Settings({ token }: SettingsProps) {
                 <MaintenanceSection token={token} />
                 <ResolutionTagBackfillSection token={token} />
                 <ChannelImageRegenSection token={token} />
+                <MetadataRegenSection token={token} />
                 <CompactHistorySection token={token} />
               </>
             }

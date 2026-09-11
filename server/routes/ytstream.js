@@ -1366,7 +1366,7 @@ function getModeFieldCompatibility({ mode, transcode }) {
       status: 'ignored',
       reason: mode === 'hls-buffer'
         ? 'This mode replaces hot-swap-to-cache entirely with its own buffer finalize mechanism - there\'s nothing session-swap-shaped for it to do here.'
-        : 'Only mode=Enhanced HLS uses this - there\'s no live HLS session in this mode to hot-swap onto a finished download.',
+        : 'Only mode=hls (plain Enhanced HLS, not currently offered in the Playback mode dropdown - hls-buffer replaces it there) has a live HLS session to hot-swap onto a finished download.',
     };
 
   // Mirrors the exact bufferWillAttempt condition the real cache-on-play

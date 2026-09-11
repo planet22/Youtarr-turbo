@@ -82,7 +82,8 @@ describe('VideosModule', () => {
     };
 
     mockNfoGenerator = {
-      writeVideoNfoFile: jest.fn()
+      writeVideoNfoFile: jest.fn(),
+      writeEpisodeNfoFile: jest.fn()
     };
 
     mockMessageEmitter = {
@@ -1727,6 +1728,157 @@ describe('VideosModule', () => {
       expect(VideosModule.isImageRegenRunning()).toBe(true);
       VideosModule._imageRegenRunning = false;
       expect(VideosModule.isImageRegenRunning()).toBe(false);
+    });
+  });
+
+  describe('regenerateVideoMetadataFiles', () => {
+    test('regenerates a movie-mode NFO from cached metadata, merging in the DB rating', async () => {
+      mockVideo.count.mockResolvedValueOnce(1);
+      mockVideo.findAll.mockResolvedValueOnce([
+        {
+          id: 1,
+          youtubeId: 'abc123',
+          filePath: '/test/output/dir/Video [abc123].mp4',
+          youTubeChannelName: 'Some Channel',
+          season: null,
+          episode: null,
+          normalized_rating: 'PG-13',
+          rating_source: 'Manual Override'
+        }
+      ]);
+      mockFs.readFile.mockResolvedValueOnce(JSON.stringify({ title: 'Video', normalized_rating: null }));
+      mockNfoGenerator.writeVideoNfoFile.mockReturnValue(true);
+      mockConfigModule.getConfig.mockReturnValue({});
+
+      const result = await VideosModule.regenerateVideoMetadataFiles({ trigger: 'manual' });
+
+      expect(mockNfoGenerator.writeVideoNfoFile).toHaveBeenCalledWith(
+        '/test/output/dir/Video [abc123].mp4',
+        expect.objectContaining({ title: 'Video', normalized_rating: 'PG-13', rating_source: 'Manual Override' })
+      );
+      expect(mockNfoGenerator.writeEpisodeNfoFile).not.toHaveBeenCalled();
+      expect(result).toEqual(expect.objectContaining({
+        scanned: 1,
+        regenerated: 1,
+        skippedNoCache: 0,
+        skippedNoFile: 0,
+        errors: 0,
+        trigger: 'manual',
+        status: 'completed'
+      }));
+      expect(mockConfigModule.updateConfig).toHaveBeenCalledWith(
+        expect.objectContaining({ metadataRegenLastRun: expect.objectContaining({ status: 'completed' }) })
+      );
+    });
+
+    test('regenerates an episode-mode NFO for a TV Series library mode video', async () => {
+      mockVideo.count.mockResolvedValueOnce(1);
+      mockVideo.findAll.mockResolvedValueOnce([
+        {
+          id: 2,
+          youtubeId: 'def456',
+          filePath: '/test/output/dir/Some Channel/Season 2024/Video [def456].mp4',
+          youTubeChannelName: 'Some Channel',
+          season: 2024,
+          episode: 3,
+          normalized_rating: null,
+          rating_source: null
+        }
+      ]);
+      mockFs.readFile.mockResolvedValueOnce(JSON.stringify({ title: 'Video' }));
+      mockNfoGenerator.writeEpisodeNfoFile.mockReturnValue(true);
+
+      await VideosModule.regenerateVideoMetadataFiles({ trigger: 'manual' });
+
+      expect(mockNfoGenerator.writeEpisodeNfoFile).toHaveBeenCalledWith(
+        '/test/output/dir/Some Channel/Season 2024/Video [def456].mp4',
+        expect.objectContaining({ title: 'Video' }),
+        { season: 2024, episode: 3, showTitle: 'Some Channel' }
+      );
+      expect(mockNfoGenerator.writeVideoNfoFile).not.toHaveBeenCalled();
+    });
+
+    test('skips videos with no downloaded file and videos with no cached metadata', async () => {
+      mockVideo.count.mockResolvedValueOnce(2);
+      mockVideo.findAll.mockResolvedValueOnce([
+        { id: 1, youtubeId: 'noFile', filePath: null, season: null },
+        { id: 2, youtubeId: 'noCache', filePath: '/test/output/dir/Video [noCache].mp4', season: null }
+      ]);
+      mockFs.readFile.mockRejectedValueOnce(new Error('ENOENT'));
+
+      const result = await VideosModule.regenerateVideoMetadataFiles({ trigger: 'manual' });
+
+      expect(mockNfoGenerator.writeVideoNfoFile).not.toHaveBeenCalled();
+      expect(result).toEqual(expect.objectContaining({
+        scanned: 2,
+        regenerated: 0,
+        skippedNoFile: 1,
+        skippedNoCache: 1,
+        errors: 0
+      }));
+    });
+
+    test('counts a failed write as an error without throwing', async () => {
+      mockVideo.count.mockResolvedValueOnce(1);
+      mockVideo.findAll.mockResolvedValueOnce([
+        { id: 1, youtubeId: 'abc123', filePath: '/test/output/dir/Video [abc123].mp4', season: null }
+      ]);
+      mockFs.readFile.mockResolvedValueOnce(JSON.stringify({ title: 'Video' }));
+      mockNfoGenerator.writeVideoNfoFile.mockReturnValue(false);
+
+      const result = await VideosModule.regenerateVideoMetadataFiles({ trigger: 'manual' });
+
+      expect(result).toEqual(expect.objectContaining({ regenerated: 0, errors: 1, status: 'completed' }));
+    });
+
+    test('returns skipped without scanning when already running', async () => {
+      VideosModule._metadataRegenRunning = true;
+
+      const result = await VideosModule.regenerateVideoMetadataFiles({ trigger: 'manual' });
+
+      expect(result).toEqual({ skipped: true, reason: 'already-running' });
+      expect(mockVideo.count).not.toHaveBeenCalled();
+      VideosModule._metadataRegenRunning = false;
+    });
+
+    test('records an error-status lastRun and rethrows when the scan fails', async () => {
+      mockVideo.count.mockRejectedValue(new Error('db unavailable'));
+
+      await expect(VideosModule.regenerateVideoMetadataFiles({ trigger: 'manual' })).rejects.toThrow('db unavailable');
+
+      expect(mockConfigModule.updateConfig).toHaveBeenCalledWith(
+        expect.objectContaining({
+          metadataRegenLastRun: expect.objectContaining({ status: 'error', errorMessage: 'db unavailable' })
+        })
+      );
+      expect(VideosModule._metadataRegenRunning).toBe(false);
+    });
+  });
+
+  describe('tryStartMetadataRegen', () => {
+    test('returns started: true when not running', () => {
+      VideosModule._metadataRegenRunning = false;
+      const spy = jest.spyOn(VideosModule, 'regenerateVideoMetadataFiles').mockResolvedValue();
+      const result = VideosModule.tryStartMetadataRegen({ trigger: 'manual' });
+      expect(result).toEqual({ started: true });
+      expect(spy).toHaveBeenCalledWith({ trigger: 'manual' });
+      spy.mockRestore();
+    });
+
+    test('returns started: false when already running', () => {
+      VideosModule._metadataRegenRunning = true;
+      const result = VideosModule.tryStartMetadataRegen();
+      expect(result).toEqual({ started: false, reason: 'already-running' });
+      VideosModule._metadataRegenRunning = false;
+    });
+  });
+
+  describe('isMetadataRegenRunning', () => {
+    test('reflects the internal running flag', () => {
+      VideosModule._metadataRegenRunning = true;
+      expect(VideosModule.isMetadataRegenRunning()).toBe(true);
+      VideosModule._metadataRegenRunning = false;
+      expect(VideosModule.isMetadataRegenRunning()).toBe(false);
     });
   });
 });

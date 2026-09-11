@@ -94,6 +94,7 @@ class NfoGenerator {
     const plot = this.escapeXml(jsonData.description || '');
     const youtubeId = jsonData.id || '';
     const premiered = this.formatDate(jsonData.upload_date);
+    const year = premiered ? premiered.substring(0, 4) : null;
 
     // Use uploader as primary, fall back to channel
     const studio = this.escapeXml(
@@ -127,7 +128,19 @@ class NfoGenerator {
       .map(tag => `  <tag>${this.escapeXml(tag)}</tag>`)
       .join('\n');
 
-    return { title, plot, youtubeId, premiered, studio, credits, durationSeconds, runtimeMinutes, genres, tags };
+    // Raw video dimensions/aspect from yt-dlp's format selection. Jellyfin's
+    // NFO parser reads width/height/aspect out of fileinfo/streamdetails/video
+    // (unlike codec/audio, which it ignores) - for STRM-mode "videos" there's
+    // no real file for Jellyfin to ffprobe, so this is the only source it has.
+    const videoWidth = jsonData.width || null;
+    const videoHeight = jsonData.height || null;
+    const videoAspect = jsonData.aspect_ratio || null;
+
+    return {
+      title, plot, youtubeId, premiered, year, studio, credits,
+      durationSeconds, runtimeMinutes, genres, tags,
+      videoWidth, videoHeight, videoAspect,
+    };
   }
 
   /**
@@ -251,8 +264,9 @@ class NfoGenerator {
       });
 
       const {
-        title, plot, youtubeId, premiered, studio, credits,
-        durationSeconds, runtimeMinutes, genres, tags
+        title, plot, youtubeId, premiered, year, studio, credits,
+        durationSeconds, runtimeMinutes, genres, tags,
+        videoWidth, videoHeight, videoAspect,
       } = this._extractCommonFields(jsonData);
 
       // Build the XML content
@@ -278,6 +292,9 @@ class NfoGenerator {
       xml += '\n  <!-- Dates -->\n';
       if (premiered) {
         xml += `  <premiered>${premiered}</premiered>\n`;
+      }
+      if (year) {
+        xml += `  <year>${year}</year>\n`;
       }
       xml += `  <dateadded>${this.formatDateAdded()}</dateadded>\n`;
 
@@ -306,6 +323,9 @@ class NfoGenerator {
         xml += '    <streamdetails>\n';
         xml += '      <video>\n';
         xml += `        <durationinseconds>${durationSeconds}</durationinseconds>\n`;
+        if (videoWidth) xml += `        <width>${videoWidth}</width>\n`;
+        if (videoHeight) xml += `        <height>${videoHeight}</height>\n`;
+        if (videoAspect) xml += `        <aspect>${videoAspect}</aspect>\n`;
         xml += '      </video>\n';
         xml += '    </streamdetails>\n';
         xml += '  </fileinfo>\n';
@@ -347,8 +367,9 @@ class NfoGenerator {
       const nfoPath = path.format({ dir: parsedPath.dir, name: parsedPath.name, ext: '.nfo' });
 
       const {
-        title, plot, youtubeId, premiered, studio, credits,
-        durationSeconds, runtimeMinutes, genres, tags
+        title, plot, youtubeId, premiered, year, studio, credits,
+        durationSeconds, runtimeMinutes, genres, tags,
+        videoWidth, videoHeight, videoAspect,
       } = this._extractCommonFields(jsonData);
 
       let xml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n';
@@ -371,6 +392,9 @@ class NfoGenerator {
       if (premiered) {
         xml += `  <aired>${premiered}</aired>\n`;
         xml += `  <premiered>${premiered}</premiered>\n`;
+      }
+      if (year) {
+        xml += `  <year>${year}</year>\n`;
       }
       xml += `  <dateadded>${this.formatDateAdded()}</dateadded>\n`;
 
@@ -399,6 +423,9 @@ class NfoGenerator {
         xml += '    <streamdetails>\n';
         xml += '      <video>\n';
         xml += `        <durationinseconds>${durationSeconds}</durationinseconds>\n`;
+        if (videoWidth) xml += `        <width>${videoWidth}</width>\n`;
+        if (videoHeight) xml += `        <height>${videoHeight}</height>\n`;
+        if (videoAspect) xml += `        <aspect>${videoAspect}</aspect>\n`;
         xml += '      </video>\n';
         xml += '    </streamdetails>\n';
         xml += '  </fileinfo>\n';

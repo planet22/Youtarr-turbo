@@ -24,7 +24,9 @@ describe('Maintenance routes', () => {
       isBackfillRunning: jest.fn().mockReturnValue(false),
       tryStartBackfill: jest.fn(),
       isImageRegenRunning: jest.fn().mockReturnValue(false),
-      tryStartImageRegen: jest.fn()
+      tryStartImageRegen: jest.fn(),
+      isMetadataRegenRunning: jest.fn().mockReturnValue(false),
+      tryStartMetadataRegen: jest.fn()
     };
     mockConfigModule = {
       getConfig: jest.fn().mockReturnValue({})
@@ -149,6 +151,60 @@ describe('Maintenance routes', () => {
       mockConfigModule.getConfig.mockReturnValue({ channelImageRegenLastRun: lastRun });
 
       const res = await request(app).get('/api/maintenance/regenerate-channel-images-status');
+
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ running: true, lastRun });
+    });
+  });
+
+  describe('POST /api/maintenance/regenerate-metadata', () => {
+    test('returns 202 when started', async () => {
+      mockVideosModule.tryStartMetadataRegen.mockReturnValue({ started: true });
+
+      const res = await request(app).post('/api/maintenance/regenerate-metadata');
+
+      expect(res.status).toBe(202);
+      expect(res.body).toEqual({ status: 'started', trigger: 'manual' });
+      expect(mockVideosModule.tryStartMetadataRegen).toHaveBeenCalledWith({ trigger: 'manual' });
+    });
+
+    test('returns 409 when already running', async () => {
+      mockVideosModule.tryStartMetadataRegen.mockReturnValue({ started: false, reason: 'already-running' });
+
+      const res = await request(app).post('/api/maintenance/regenerate-metadata');
+
+      expect(res.status).toBe(409);
+      expect(res.body).toEqual({ error: 'Metadata regeneration already in progress' });
+    });
+  });
+
+  describe('GET /api/maintenance/regenerate-metadata-status', () => {
+    test('returns running false and lastRun null when nothing has run', async () => {
+      mockVideosModule.isMetadataRegenRunning.mockReturnValue(false);
+      mockConfigModule.getConfig.mockReturnValue({});
+
+      const res = await request(app).get('/api/maintenance/regenerate-metadata-status');
+
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ running: false, lastRun: null });
+    });
+
+    test('returns running true and lastRun from config', async () => {
+      mockVideosModule.isMetadataRegenRunning.mockReturnValue(true);
+      const lastRun = {
+        startedAt: '2026-05-04T15:00:00.000Z',
+        completedAt: '2026-05-04T15:01:00.000Z',
+        trigger: 'manual',
+        status: 'completed',
+        scanned: 5,
+        regenerated: 4,
+        skippedNoCache: 1,
+        skippedNoFile: 0,
+        errors: 0
+      };
+      mockConfigModule.getConfig.mockReturnValue({ metadataRegenLastRun: lastRun });
+
+      const res = await request(app).get('/api/maintenance/regenerate-metadata-status');
 
       expect(res.status).toBe(200);
       expect(res.body).toEqual({ running: true, lastRun });

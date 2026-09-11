@@ -378,13 +378,17 @@ function VideosListMobile({
                   </Tooltip>
                 )}
                 {video.hasStealthCache && (
-                  <Tooltip title="Stealth-cached — playback served locally via Youtarr; still STRM, hidden from media server scans">
+                  <Tooltip title="Stealth-cached — playback served locally via Youtarr; still STRM, hidden from media server scans. Click for details.">
                     <Chip
                       size="small"
                       icon={<StealthCacheIcon size={12} color="#9c27b0" />}
                       label={video.stealthCacheFileSize ? formatFileSize(video.stealthCacheFileSize) : 'Cached'}
                       variant="outlined"
-                      style={{ ...compactStatusChipStyle, borderColor: '#9c27b0', color: '#9c27b0' }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onOpenCacheDetail(video.youtubeId, 'video');
+                      }}
+                      style={{ ...compactStatusChipStyle, borderColor: '#9c27b0', color: '#9c27b0', cursor: 'pointer' }}
                     />
                   </Tooltip>
                 )}

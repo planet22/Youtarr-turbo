@@ -40,7 +40,7 @@ const ClearCachedVideoDialog: React.FC<ClearCachedVideoDialogProps> = ({
         <div className="space-y-4">
           <Alert severity="warning">
             <Typography variant="body2">
-              The cached video file for {videoCount} {videoCount === 1 ? 'video' : 'videos'} will be deleted. A tracked video reverts to its STRM placeholder; an untracked video&apos;s buffered copy is simply removed.
+              The cached video file for {videoCount} {videoCount === 1 ? 'video' : 'videos'} will be deleted. A video with a materialized cache reverts to its STRM placeholder; an untracked or stealth-cached video&apos;s buffered copy is simply removed.
             </Typography>
           </Alert>
 

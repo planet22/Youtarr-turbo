@@ -26,3 +26,14 @@
   --layout-header-menu-background: var(--card);
   --layout-header-menu-shadow: none;
 }
+
+/* Top-nav items scroll horizontally instead of overflowing off-screen when they don't
+   fit; keep the scrollbar itself invisible since the row still looks centered when it fits. */
+.nav-top-items-scroll {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.nav-top-items-scroll::-webkit-scrollbar {
+  display: none;
+}

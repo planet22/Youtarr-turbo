@@ -72,6 +72,7 @@ export interface VideoData {
   // itself is real even though the library item is still genuinely STRM.
   stealthCacheFileSize?: number | null;
   stealthCacheAt?: string | null;
+  stealthCacheExpiresAt?: string | null;
 }
 
 export interface EnabledChannel {

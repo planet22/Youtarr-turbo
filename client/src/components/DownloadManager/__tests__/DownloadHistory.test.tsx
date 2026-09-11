@@ -162,7 +162,7 @@ describe('DownloadHistory', () => {
   test('renders with title and no jobs message when jobs array is empty', () => {
     render(<DownloadHistory {...defaultProps} />);
 
-    expect(screen.getByText('Download History')).toBeInTheDocument();
+    expect(screen.getByText(/Download History \(0 jobs\)/)).toBeInTheDocument();
     expect(screen.getByText('No jobs currently running')).toBeInTheDocument();
   });
 
@@ -317,7 +317,7 @@ describe('DownloadHistory', () => {
 
     render(<DownloadHistory {...defaultProps} jobs={singleVideoJob} isMobile={true} />);
 
-    expect(screen.getByText('Download History')).toBeInTheDocument();
+    expect(screen.getByText(/Download History \(1 job\)/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Test Video 1' })).toBeInTheDocument();
     expect(screen.getByText('Test Channel')).toBeInTheDocument();
     expect(screen.getByText(/Date:/)).toBeInTheDocument();

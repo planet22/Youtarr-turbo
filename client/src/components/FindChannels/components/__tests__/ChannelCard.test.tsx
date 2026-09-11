@@ -66,4 +66,17 @@ describe('ChannelCard', () => {
 
     expect(screen.getByAltText('Alpha Channel')).toHaveAttribute('loading', 'lazy');
   });
+
+  test('renders a YouTube link that opens the channel in a new tab without triggering onClick', () => {
+    const onClick = jest.fn();
+    render(<ChannelCard result={base} onClick={onClick} />);
+
+    const link = screen.getByRole('link', { name: /open alpha channel on youtube/i });
+    expect(link).toHaveAttribute('href', base.url);
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(link).toHaveAttribute('rel', expect.stringContaining('noopener'));
+
+    fireEvent.click(link);
+    expect(onClick).not.toHaveBeenCalled();
+  });
 });

@@ -56,6 +56,32 @@ describe('VideoListToolbar', () => {
     expect(setSearchInput).toHaveBeenCalledWith('a');
   });
 
+  test('does not render a clear button when the search box is empty', () => {
+    renderWithProviders(
+      <VideoListToolbar
+        state={buildState({ searchInput: '' })}
+        viewModes={VIEW_MODES}
+        isMobile={false}
+      />
+    );
+    expect(screen.queryByLabelText('Clear search')).not.toBeInTheDocument();
+  });
+
+  test('renders a clear button when there is search text and it calls state.clearSearch', async () => {
+    const user = userEvent.setup();
+    const clearSearch = jest.fn();
+    renderWithProviders(
+      <VideoListToolbar
+        state={buildState({ searchInput: 'abc', clearSearch })}
+        viewModes={VIEW_MODES}
+        isMobile={false}
+      />
+    );
+    const clearButton = screen.getByLabelText('Clear search');
+    await user.click(clearButton);
+    expect(clearSearch).toHaveBeenCalledTimes(1);
+  });
+
   test('uses a custom search placeholder when provided', () => {
     renderWithProviders(
       <VideoListToolbar

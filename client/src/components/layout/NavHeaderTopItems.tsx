@@ -3,6 +3,7 @@ import { Box, Button, Paper } from '../ui';
 import { Link as RouterLink, useLocation } from 'react-router-dom';
 import { useThemeEngine } from '../../contexts/ThemeEngineContext';
 import { NavItem, isNavItemExpanded, isNavPathActive } from './navigation';
+import './layoutFallback.css';
 
 interface NavHeaderTopItemsProps {
   navItems: NavItem[];
@@ -19,12 +20,18 @@ export const NavHeaderTopItems: React.FC<NavHeaderTopItemsProps> = ({
   const { showSectionIcons } = useThemeEngine();
 
   const [activeKey, setActiveKey] = useState<string | null>(null);
+  // Submenus are positioned relative to the viewport (not the item) so the row below
+  // can be horizontally scrollable without clipping the dropdown.
+  const [menuAnchor, setMenuAnchor] = useState<{ top: number; left: number } | null>(null);
 
   useEffect(() => {
     setActiveKey(null);
+    setMenuAnchor(null);
   }, [location.pathname]);
 
-  const handleUnitEnter = (_event: React.MouseEvent<HTMLElement>, key: string) => {
+  const handleUnitEnter = (event: React.MouseEvent<HTMLElement>, key: string) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    setMenuAnchor({ top: rect.bottom, left: rect.left });
     setActiveKey(key);
   };
 
@@ -47,17 +54,19 @@ export const NavHeaderTopItems: React.FC<NavHeaderTopItemsProps> = ({
 
   return (
     <Box
-      className="flex items-center gap-2"
+      className={`flex items-center gap-2${showLandscapeNavItems ? '' : ' nav-top-items-scroll'}`}
       style={{
-        position: showLandscapeNavItems ? 'relative' : 'absolute',
-        left: showLandscapeNavItems ? undefined : '50%',
-        transform: showLandscapeNavItems ? undefined : 'translateX(-50%)',
+        position: 'relative',
         height: showLandscapeNavItems ? 'auto' : '100%',
-        width: showLandscapeNavItems ? '100%' : undefined,
+        width: '100%',
         flex: showLandscapeNavItems ? '0 0 auto' : undefined,
         flexWrap: showLandscapeNavItems ? 'wrap' : 'nowrap',
+        justifyContent: 'center',
         minWidth: 0,
-        overflow: 'visible',
+        // Non-landscape: the row gets a bounded share of the header (see NavHeader.tsx) and
+        // scrolls horizontally instead of overflowing past the viewport edge when items don't fit.
+        overflowX: showLandscapeNavItems ? 'visible' : 'auto',
+        overflowY: 'visible',
         rowGap: showLandscapeNavItems ? 6 : 0,
         paddingBottom: showLandscapeNavItems ? 4 : 0,
       }}
@@ -98,12 +107,12 @@ export const NavHeaderTopItems: React.FC<NavHeaderTopItemsProps> = ({
               </RouterLink>
             </Button>
 
-            {hasSubItems && isOpen && !showLandscapeNavItems && (
+            {hasSubItems && isOpen && !showLandscapeNavItems && menuAnchor && (
               <div
                 style={{
-                  position: 'absolute',
-                  top: '100%',
-                  left: 0,
+                  position: 'fixed',
+                  top: menuAnchor.top,
+                  left: menuAnchor.left,
                   zIndex: 1500,
                   paddingTop: 8,
                 }}

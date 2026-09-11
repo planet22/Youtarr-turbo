@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { useSwipeable } from 'react-swipeable';
 import { Alert, Box, Button, Grid, Snackbar, Typography } from '../ui';
 import { Trash2 as DeleteIcon, Star as RatingIcon, Download as DownloadIcon, Purge as PurgeIcon, Obliterate as ObliterateIcon, Wifi as StrmIcon, Database as MetadataCacheIcon, Storage as CachedVideoIcon } from '../../lib/icons';
-import { Eye as ShowFilePathsIcon } from 'lucide-react';
+import { Folder as ShowFilePathsIcon } from 'lucide-react';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
 import { useConfig } from '../../hooks/useConfig';
 import { useDownloadListingsRefresh } from '../../hooks/useDownloadListingsRefresh';
@@ -69,6 +69,13 @@ interface VideoSelectionMeta {
   isTracked: boolean;
   hasCachedMetadata: boolean;
   hasCachedVideo: boolean;
+  // ytstream.stealthCache hls-buffer cache on an otherwise still-STRM tracked
+  // row - see VideoData.hasStealthCache. Mutually exclusive with
+  // hasCachedVideo (that only ever applies once is_strm has flipped false),
+  // but should be treated identically everywhere "clear the cached video"
+  // is offered - it's the same untracked-buffer-cache file, just for a
+  // tracked video.
+  hasStealthCache: boolean;
 }
 
 function deriveIsStrm(video: VideoData): boolean {
@@ -246,6 +253,7 @@ function VideosPage({ token }: VideosPageProps) {
         isTracked: video.isTracked !== false,
         hasCachedMetadata: Boolean(video.hasCachedMetadata),
         hasCachedVideo: Boolean(video.hasCachedVideo),
+        hasStealthCache: Boolean(video.hasStealthCache),
       });
     }
   }, [videos]);
@@ -399,8 +407,13 @@ function VideosPage({ token }: VideosPageProps) {
       const trackedCachedVideoIds = metas
         .filter((m) => m.isTracked && m.hasCachedVideo && m.id !== null)
         .map((m) => m.id as number);
-      const untrackedCachedVideoIds = metas
-        .filter((m) => !m.isTracked && m.hasCachedVideo)
+      // A genuinely untracked row's buffer cache, or a stealth-cached
+      // still-STRM tracked row's hidden buffer cache (see
+      // VideoSelectionMeta.hasStealthCache) - both live in, and are cleared
+      // via, the same untracked buffer-cache dir/endpoint. Phase 2 below
+      // deletes the tracked row's own .strm entry separately.
+      const bufferCacheYoutubeIds = metas
+        .filter((m) => (!m.isTracked && m.hasCachedVideo) || m.hasStealthCache)
         .map((m) => m.youtubeId);
       const cachedMetadataIds = metas
         .filter((m) => m.hasCachedMetadata)
@@ -408,7 +421,7 @@ function VideosPage({ token }: VideosPageProps) {
 
       await Promise.all([
         trackedCachedVideoIds.length ? revertToStrm(trackedCachedVideoIds, token) : Promise.resolve(null),
-        untrackedCachedVideoIds.length ? cacheActions.bulkClearVideoCache(untrackedCachedVideoIds) : Promise.resolve(null),
+        bufferCacheYoutubeIds.length ? cacheActions.bulkClearVideoCache(bufferCacheYoutubeIds) : Promise.resolve(null),
         cachedMetadataIds.length ? cacheActions.bulkClearMetadataCache(cachedMetadataIds) : Promise.resolve(null),
       ]);
 
@@ -601,7 +614,7 @@ function VideosPage({ token }: VideosPageProps) {
         disabled: (ids) =>
           !ids.some((id) => {
             const meta = videoMetaRef.current.get(id);
-            return Boolean(meta && meta.hasCachedVideo);
+            return Boolean(meta && (meta.hasCachedVideo || meta.hasStealthCache));
           }),
         onClick: () => setClearCachedVideoDialogOpen(true),
       },
@@ -858,7 +871,7 @@ function VideosPage({ token }: VideosPageProps) {
     let skipped = 0;
     for (const id of selection.selectedIds) {
       const meta = videoMetaRef.current.get(id);
-      if (meta && meta.hasCachedVideo) {
+      if (meta && (meta.hasCachedVideo || meta.hasStealthCache)) {
         eligible += 1;
       } else {
         skipped += 1;
@@ -888,29 +901,35 @@ function VideosPage({ token }: VideosPageProps) {
     }
   };
 
-  // Tracked rows' cached video is the STRM cache-on-play file - clearing it
-  // means reverting to STRM (the existing useStrmSwitch endpoint), same
-  // action as "Switch to STRM" but reached from the cache icon instead.
-  // Untracked rows' cached video is a plain buffer-cache file - clearing it
-  // is a direct delete via useCacheActions, no revert semantics apply.
+  // Tracked rows' materialized cached video is the STRM cache-on-play file -
+  // clearing it means reverting to STRM (the existing useStrmSwitch
+  // endpoint), same action as "Switch to STRM" but reached from the cache
+  // icon instead. Untracked rows, and stealth-cached tracked rows (still
+  // genuinely STRM - see VideoSelectionMeta.hasStealthCache), share a plain
+  // buffer-cache file - clearing it is a direct delete via useCacheActions,
+  // no revert semantics apply.
   const handleClearCachedVideoConfirm = async () => {
     setClearCachedVideoDialogOpen(false);
     const eligibleMeta = selection.selectedIds
       .map((id) => videoMetaRef.current.get(id))
-      .filter((meta): meta is VideoSelectionMeta => Boolean(meta && meta.hasCachedVideo));
+      .filter((meta): meta is VideoSelectionMeta => Boolean(meta && (meta.hasCachedVideo || meta.hasStealthCache)));
     if (eligibleMeta.length === 0) return;
 
-    const trackedIds = eligibleMeta.filter((m) => m.isTracked && m.id !== null).map((m) => m.id as number);
-    const untrackedYoutubeIds = eligibleMeta.filter((m) => !m.isTracked).map((m) => m.youtubeId);
+    const trackedIds = eligibleMeta.filter((m) => m.isTracked && m.hasCachedVideo && m.id !== null).map((m) => m.id as number);
+    // Everything else eligible: a genuinely untracked row's buffer cache
+    // (hasCachedVideo, isTracked false) or a stealth-cached still-STRM
+    // tracked row's buffer cache (hasStealthCache, hasCachedVideo false) -
+    // both live in, and are cleared via, the same untracked buffer-cache dir.
+    const bufferCacheYoutubeIds = eligibleMeta.filter((m) => !(m.isTracked && m.hasCachedVideo)).map((m) => m.youtubeId);
 
-    const [strmResult, untrackedResult] = await Promise.all([
+    const [strmResult, bufferCacheResult] = await Promise.all([
       trackedIds.length ? revertToStrm(trackedIds, token) : Promise.resolve(null),
-      untrackedYoutubeIds.length ? cacheActions.bulkClearVideoCache(untrackedYoutubeIds) : Promise.resolve(null),
+      bufferCacheYoutubeIds.length ? cacheActions.bulkClearVideoCache(bufferCacheYoutubeIds) : Promise.resolve(null),
     ]);
 
     const clearedCount =
       (strmResult ? strmResult.processed.length : 0) +
-      (untrackedResult ? untrackedYoutubeIds.length - untrackedResult.failed.length : 0);
+      (bufferCacheResult ? bufferCacheYoutubeIds.length - bufferCacheResult.failed.length : 0);
     const failedCount = eligibleMeta.length - clearedCount;
 
     if (failedCount === 0) {
@@ -932,7 +951,11 @@ function VideosPage({ token }: VideosPageProps) {
         await cacheActions.clearMetadataCache(cacheDetailTarget.youtubeId);
       } else {
         const meta = videoMetaRef.current.get(cacheDetailTarget.youtubeId);
-        if (meta && meta.isTracked && meta.id !== null) {
+        // A materialized cache-on-play file (hasCachedVideo) reverts the
+        // tracked video back to STRM; a stealth-cached still-STRM row or a
+        // genuinely untracked row just deletes the hidden buffer-cache file
+        // directly - no is_strm flip to revert.
+        if (meta && meta.isTracked && meta.hasCachedVideo && meta.id !== null) {
           await revertToStrm([meta.id], token);
         } else {
           await cacheActions.clearVideoCache(cacheDetailTarget.youtubeId);

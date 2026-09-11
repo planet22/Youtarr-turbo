@@ -1,5 +1,6 @@
 import React from 'react';
-import { Avatar, Box, Card, CardActionArea, Chip, Typography } from '../../ui';
+import { Avatar, Box, Card, CardActionArea, Chip, IconButton, Tooltip, Typography } from '../../ui';
+import { Youtube as YoutubeIcon } from 'lucide-react';
 import { ChannelSearchResult } from '../types';
 
 interface ChannelCardProps {
@@ -15,7 +16,31 @@ function formatCount(count: number): string {
 
 export default function ChannelCard({ result, onClick }: ChannelCardProps) {
   return (
-    <Card className="overflow-hidden hover:shadow-md transition-shadow">
+    <Card className="overflow-hidden hover:shadow-md transition-shadow relative">
+      <Tooltip title="Open channel on YouTube">
+        <IconButton
+          asChild
+          size="small"
+          style={{
+            position: 'absolute',
+            top: 4,
+            right: 4,
+            zIndex: 1,
+            backgroundColor: 'var(--media-overlay-background)',
+            color: 'var(--media-overlay-foreground)',
+          }}
+        >
+          <a
+            href={result.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label={`Open ${result.name} on YouTube`}
+            onClick={(e: React.MouseEvent) => e.stopPropagation()}
+          >
+            <YoutubeIcon size={16} />
+          </a>
+        </IconButton>
+      </Tooltip>
       <CardActionArea
         onClick={onClick}
         aria-label={result.subscribed ? `View ${result.name}` : `Add ${result.name}`}

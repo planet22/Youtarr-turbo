@@ -566,6 +566,11 @@ class VideosModule {
           // showing, same as any other cached/downloaded video).
           video.stealthCacheFileSize = entry ? entry.size : null;
           video.stealthCacheAt = entry ? entry.mtime : null;
+          // Same untracked-buffer-cache dir, same TTL sweep (see
+          // sweepExpiredUntrackedBufferCache) as hasCachedVideo's
+          // cachedVideoExpiresAt above - the Library page's cache detail
+          // dialog shows this for a stealth-cached row the same way.
+          video.stealthCacheExpiresAt = entry ? computeExpiresAt(entry.mtime, cacheOnPlayExpiryHours) : null;
         }
       }
 

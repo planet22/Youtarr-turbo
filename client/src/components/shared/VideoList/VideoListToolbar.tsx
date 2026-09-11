@@ -15,6 +15,7 @@ import {
   ArrowUpward as ArrowUpIcon,
   ArrowDownward as ArrowDownIcon,
   Check as CheckIcon,
+  Clear as ClearIcon,
 } from '../../../lib/icons';
 import VideoListViewToggle from './VideoListViewToggle';
 import { VideoListViewMode, SortConfig } from './types';
@@ -117,6 +118,23 @@ function VideoListToolbar({
   ) : (
     searchIcon
   );
+  const searchEndAdornment = state.searchInput ? (
+    <button
+      type="button"
+      onClick={() => state.clearSearch()}
+      aria-label="Clear search"
+      style={{
+        background: 'none',
+        border: 'none',
+        cursor: 'pointer',
+        display: 'inline-flex',
+        alignItems: 'center',
+        padding: 0,
+      }}
+    >
+      <ClearIcon size={16} data-testid="ClearSearchIcon" />
+    </button>
+  ) : null;
 
   const filtersButton = onFiltersClick ? (
     <Button
@@ -154,6 +172,7 @@ function VideoListToolbar({
           onChange={(e) => state.setSearchInput(e.target.value)}
           InputProps={{
             startAdornment: searchStartAdornment,
+            endAdornment: searchEndAdornment,
           }}
         />
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -188,7 +207,8 @@ function VideoListToolbar({
         value={state.searchInput}
         onChange={(e) => state.setSearchInput(e.target.value)}
         InputProps={{
-          startAdornment: <SearchIcon size={16} data-testid="SearchIcon" />,
+          startAdornment: searchStartAdornment,
+          endAdornment: searchEndAdornment,
         }}
         style={{ flex: '1 1 240px', minWidth: 220 }}
       />

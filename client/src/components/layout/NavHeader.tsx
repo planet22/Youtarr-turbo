@@ -65,6 +65,7 @@ export const NavHeader: React.FC<NavHeaderProps> = ({
   const usesInsetFrame = isInsetFrame && !showLandscapeNavItems;
 
   const showTopNavItems = (layoutPolicy.showDesktopNavItems && !isMobile) || showLandscapeNavItems;
+  const showInlineTopNavItems = showTopNavItems && !showLandscapeNavItems;
 
   const headerHorizontalGutter = NAV_DRAWER_SECTION_BUTTON_GUTTER;
   const headerHorizontalPadding = isMobile
@@ -173,9 +174,12 @@ export const NavHeader: React.FC<NavHeaderProps> = ({
             className="flex items-center min-w-0"
             style={{
               height: APP_BAR_TOGGLE_SIZE,
-              flex: '1 1 auto',
+              // In inline top-nav themes, the title shouldn't grow and compete with the
+              // nav items for space -- it takes only what it needs, and the nav items box
+              // below gets the rest (and scrolls instead of overflowing when it doesn't fit).
+              flex: showInlineTopNavItems ? '0 1 auto' : '1 1 auto',
               minWidth: 0,
-              marginRight: showTopNavItems && !showLandscapeNavItems ? 32 : 0,
+              marginRight: showInlineTopNavItems ? 32 : 0,
             }}
           >
             <RouterLink
@@ -238,6 +242,25 @@ export const NavHeader: React.FC<NavHeaderProps> = ({
             </RouterLink>
           </Box>
 
+          {showInlineTopNavItems && (
+            <Box
+              style={{
+                flex: '1 1 auto',
+                minWidth: 0,
+                display: 'flex',
+                justifyContent: 'center',
+                alignItems: 'center',
+                height: '100%',
+              }}
+            >
+              <NavHeaderTopItems
+                navItems={navItems}
+                showLandscapeNavItems={false}
+                menuPaperStyle={menuPaperStyle}
+              />
+            </Box>
+          )}
+
           {!showTopNavItems && <Box className="flex-1" />}
 
           <NavHeaderActions
@@ -256,10 +279,10 @@ export const NavHeader: React.FC<NavHeaderProps> = ({
           />
         </Box>
 
-        {showTopNavItems && (
+        {showLandscapeNavItems && (
           <NavHeaderTopItems
             navItems={navItems}
-            showLandscapeNavItems={showLandscapeNavItems}
+            showLandscapeNavItems
             menuPaperStyle={menuPaperStyle}
           />
         )}

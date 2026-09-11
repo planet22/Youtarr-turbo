@@ -889,7 +889,7 @@ const DownloadHistory: React.FC<DownloadHistoryProps> = ({
   const headerSlot = (
     <div style={{ padding: '12px 16px 0 16px' }}>
       <Typography variant={isMobile ? 'h6' : 'h5'} align="center">
-        Download History
+        Download History ({jobsToDisplay.length} job{jobsToDisplay.length === 1 ? '' : 's'})
       </Typography>
     </div>
   );

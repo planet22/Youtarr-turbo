@@ -21,6 +21,7 @@ import {
 import { VideoData } from '../../../types/VideoData';
 import { useCacheActions, MetadataCacheDetail, UntrackedCacheDetail } from '../hooks/useCacheActions';
 import { formatAddedDateTime, formatFileSize, formatExpiresIn } from '../../../utils/formatters';
+import { resolutionTierLabel } from '../../../utils/videoResolution';
 
 export interface CacheDetailDialogProps {
   open: boolean;
@@ -62,6 +63,13 @@ function CacheDetailDialog({ open, onClose, video, kind, token, onClear, clearin
   const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   const isTracked = video.isTracked !== false;
+  // ytstream.stealthCache's hls-buffer copy of a still-STRM tracked video -
+  // lives in the same hidden untracked-buffer-cache dir/file as a genuinely
+  // untracked row's cache, so it's fetched/cleared through the same
+  // untracked-cache endpoints rather than the tracked "materialized" path
+  // below (which only applies once is_strm has actually flipped false).
+  const isStealth = Boolean(video.hasStealthCache);
+  const isMaterialized = isTracked && !isStealth;
 
   useEffect(() => {
     setConfirmingDelete(false);
@@ -80,7 +88,7 @@ function CacheDetailDialog({ open, onClose, video, kind, token, onClear, clearin
           setLoading(false);
         }
       });
-    } else if (!isTracked) {
+    } else if (!isMaterialized) {
       fetchVideoCacheDetail(video.youtubeId).then((detail) => {
         if (!cancelled) {
           setVideoDetail(detail);
@@ -166,19 +174,19 @@ function CacheDetailDialog({ open, onClose, video, kind, token, onClear, clearin
           </div>
         ) : (
           <div>
-            {isTracked ? (
+            {isMaterialized ? (
               <>
                 <Row label="File Path" value={video.filePath} />
                 <Row label="File Size" value={formatFileSize(video.fileSize ? Number(video.fileSize) : null)} />
-                <Row label="Resolution" value={video.video_resolution} />
+                <Row label="Resolution" value={resolutionTierLabel(video.video_resolution)} />
                 <Row label="Cached" value={formatAddedDateTime(video.cachedVideoAt)} />
                 <Row label="Expires" value={formatExpiresIn(video.cachedVideoExpiresAt) ?? 'Never'} />
               </>
             ) : (
               <>
                 <Row label="File Size" value={formatFileSize(videoDetail?.size ?? null)} />
-                <Row label="Cached" value={formatAddedDateTime(videoDetail?.mtime ?? video.cachedVideoAt)} />
-                <Row label="Expires" value={formatExpiresIn(video.cachedVideoExpiresAt) ?? 'Never'} />
+                <Row label="Cached" value={formatAddedDateTime(videoDetail?.mtime ?? (isStealth ? video.stealthCacheAt : video.cachedVideoAt))} />
+                <Row label="Expires" value={formatExpiresIn(isStealth ? video.stealthCacheExpiresAt : video.cachedVideoExpiresAt) ?? 'Never'} />
               </>
             )}
           </div>
@@ -186,7 +194,7 @@ function CacheDetailDialog({ open, onClose, video, kind, token, onClear, clearin
         {kind === 'video' && confirmingDelete && (
           <Alert severity="warning" style={{ marginTop: 12 }}>
             <Typography variant="body2">
-              {isTracked
+              {isMaterialized
                 ? 'This will delete the cached video file and revert this video back to its STRM placeholder.'
                 : "This will delete this video's buffered copy outright."}
             </Typography>

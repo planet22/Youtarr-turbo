@@ -11,6 +11,7 @@ Youtarr-Turbo is a fork of [DialmasterOrg/Youtarr](https://github.com/Dialmaster
 - **Fast seek-restarts at any resolution** — HLS seeks resolve a direct DASH URL and seek it natively instead of decoding-and-discarding from the start, with automatic fallback to the old method if that ever fails.
 - **Stream History** — a persisted, browsable audit trail of every playback session (what played, when, how long, format, and how it ended), separate from the live "who's streaming right now" view.
 - **Download History filtering and detail** — the download job history is searchable and filterable by source, status, and date, and surfaces terminated-channel detail, per-job skip counts, run duration, and any notes/summary text recorded on the job.
+- **Persistent list filters** — every filter and the search box on the Videos, Download History, Channel Videos, and Stream History pages remembers its value across page navigation and reloads instead of resetting to defaults, with a one-click "Clear All" in the filter panel to go back to a clean slate.
 - **Cache-on-play, including a "stealth" variant** — a STRM video that gets watched starts downloading in the background automatically, so the next play (and Plex/Jellyfin/Emby scans) get a real cached file instead of a live proxy; a Stealth cache option keeps that cached file hidden from the library folder entirely, so the video stays permanently STRM-routed through Youtarr-Turbo even once it's fully cached.
 - **Sonarr/Radarr/Prowlarr integration** — Youtarr can impersonate a Newznab indexer and a SABnzbd download client simultaneously, so YouTube videos can be searched for and "grabbed" through your existing *arr stack, with a dedicated NZB diagnostics page for search/cache/grab activity.
 - **yt-dlp metadata caching** — every yt-dlp metadata extraction, regardless of which feature triggered it (streaming, downloading, STRM generation), is written to one persistent cache keyed by video ID, so any later feature that needs the same video's duration/fps/resolution/etc. reuses it instead of re-querying YouTube; the Library page can browse cached-but-untracked videos, and Settings lets you inspect or clear the cache.
@@ -182,7 +183,7 @@ A new persisted audit trail of ytstream playback sessions (Settings → Streamin
 
 The Download History list (part of the Download Manager) goes well beyond a flat job log:
 
-- **Filters**: source (Channels, Playlists, Manual Videos, a specific API key, or a specific NZB category), status, and a downloaded-date range, plus a text search across job titles and channel names.
+- **Filters**: source (Channels, Playlists, Manual Videos, a specific API key, or a specific NZB category), status, and a downloaded-date range, plus a text search across job titles and channel names. Every filter (and the search box) is remembered across navigation and reloads — the same persistence, and the same "Clear All" reset, apply to the Videos, Channel Videos, and Stream History pages' own filter panels.
 - **Terminated-channel detail**: a job that stopped a channel partway through (e.g. it was deleted or disabled mid-run) shows which channels were terminated and any failures encountered while doing so.
 - **Skip counts**: how many videos in a job were already downloaded and skipped.
 - **Duration**: how long a completed job actually ran, computed from its start/end timestamps.
@@ -224,29 +225,9 @@ A dedicated page (separate from Settings → Sonarr/Radarr) shows live activity 
 
 ---
 
-## API Keys (external single-video download access)
-
-A new Settings page for generating per-key API tokens with usage/last-used tracking and a configurable rate limit, used to trigger a single-video download from outside the web UI via `POST /api/videos/download` with an `x-api-key` header — includes a generated browser bookmarklet and an iOS/Android Shortcuts recipe. Single-video only; not a path for subscribing to channels or playlists.
-
----
-
-## Download reliability engineering
-
-A handful of settings (Settings → YT-DLP) aimed at making downloads more resilient on flaky connections or against YouTube throttling, none of which exist upstream:
-
-- **Stall detection** — flags a download as stalled based on a rolling throughput window and rate threshold, rather than just a fixed timeout.
-- **Separate retry counts** — a manual retry count (user-triggered) and a distinct automatic retry count (Youtarr-Turbo re-queues a fresh job on its own after a transient HTTP 403).
-- **Socket timeout** and **throttle-rate detection** as independent tunables.
-- **Proxy support** — route yt-dlp traffic through a SOCKS/HTTP proxy URL.
-- **Custom yt-dlp arguments** — a raw arguments field with a server-side dry-run validator (`POST /api/ytdlp/validate-args`) that tokenizes, denylist-checks, and test-runs arbitrary flags via `yt-dlp --help` (no network call) before trusting them.
-- **yt-dlp update channel** (`stable`/`nightly`) with scheduled auto-update.
-
----
-
 ## Deeper media-server integration
 
-- **Jellyfin and Emby** get full first-class connection management (URL, API key, user selection, library picking, connection testing) — upstream only lists Jellyfin/Emby playlist mirroring as a feature, not a full settings page per server.
-- **Per-subfolder library mapping** for Plex and Jellyfin (not Emby) — different channel subfolders can land in different media-server libraries, independent of one global default library.
+- **Per-subfolder library mapping** for Jellyfin (not Emby) — different channel subfolders can land in different media-server libraries, independent of one global default library.
 
 ---
 
@@ -262,20 +243,20 @@ A handful of settings (Settings → YT-DLP) aimed at making downloads more resil
 | Settings page | What it configures | Notes |
 |---|---|---|
 | Core | Download frequency/count, resolution/codec, metadata output toggles, filename templates, TV-series mode | Baseline, richer template UI |
-| YT-DLP | Update channel, download performance/reliability, proxy, custom args, **post-download hardware transcode** | Mostly Turbo additions |
-| API Keys | External single-video download tokens | Turbo |
-| Appearance | Theme selection, dark mode, motion, branding visibility | Turbo |
-| Auto Removal | Age/space/watched-based removal, keep-recent, STRM fallback | Baseline concept, Turbo depth |
-| Cookies | yt-dlp cookie file upload/management | Baseline |
-| Maintenance & Rescan | Filesystem rescan + resolution-tag backfill | Rescan baseline, backfill Turbo |
-| Notifications | Apprise multi-service webhooks | Turbo upgrade |
-| Sonarr/Radarr | Newznab + SABnzbd emulation for the *arr stack, per-category rules, exclude terms | Turbo |
-| Plex | Connection, library mapping, playlist token | Baseline+ |
-| Jellyfin | Connection, user, libraries, subfolder mapping | Turbo depth |
-| Emby | Connection, user, libraries | Turbo depth |
-| Watch Status | Cross-server watched-state sync | Baseline concept, Turbo depth |
+| YT-DLP | Update channel, download performance/reliability, proxy, custom args, **post-download hardware transcode** | Baseline + Turbo |
+| API Keys | External single-video download tokens | Baseline |
+| Appearance | Theme selection, dark mode, motion, branding visibility | Baseline + Turbo |
+| Auto Removal | Age/space/watched-based removal, keep-recent, STRM fallback | Baseline + Turbo |
+| Cookies | yt-dlp cookie file upload/management | Baseline + Turbo debug|
+| Maintenance & Rescan | Filesystem rescan + resolution-tag backfill | Rescan baseline, additions Turbo |
+| Notifications | Apprise multi-service webhooks | Baseline |
+| Sonarr/Radarr | Newznab + SABnzbd emulation for the *arr stack, per-category rules, exclude terms |  Turbo — entirely new |
+| Plex | Connection, library mapping, playlist token | Baseline |
+| Jellyfin | Connection, user, libraries, subfolder mapping | Basline + Turbo upgrade |
+| Emby | Connection, user, libraries | Baseline |
+| Watch Status | Cross-server watched-state sync | Baseline |
 | Account Security | Password change | Baseline |
-| SponsorBlock | Segment removal, categories, custom API URL | Baseline + Turbo extra |
+| SponsorBlock | Segment removal, categories, custom API URL | Baseline |
 | Streaming | STRM mode, media mode, cache-on-play/stealth cache, playback modes with per-mode field enforcement, hardware/network/decode tuning + three benchmarks, Stream History, [yt-dlp metadata cache](#yt-dlp-metadata-caching) management | Turbo — entirely new |
 | YouTube API | Optional YouTube Data API key | Baseline |
 

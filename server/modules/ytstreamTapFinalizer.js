@@ -15,6 +15,16 @@ const { serializeAuxData } = require('./jobAuxData');
 // for where this prefix is recognized client-side.
 const HLS_BUFFER_CACHE_LABEL_PREFIX = 'HLS Buffer Cache: ';
 
+// A distinct jobType for the "swapped the hidden .ts for its .mp4 remux"
+// event (recordTsToMp4Finalize below) - kept as its own Job row rather than
+// mutating the original fetch's row in place, so the original row keeps
+// showing exactly what IT recorded (its own avgDownloadMBps/duration -
+// figures a later, unrelated ffmpeg remux has nothing to do with) instead of
+// silently losing them the moment a remux happens to complete. See
+// DownloadHistory.tsx's cleanJobTypeLabel/getJobSourceLabel/jobStatusText
+// for where this prefix is recognized client-side.
+const HLS_BUFFER_FINALIZE_LABEL_PREFIX = 'HLS Buffer Cache Finalize: ';
+
 /**
  * server/routes/ytstream.js mode=hls-buffer: called once the
  * independent buffer-fetch pipeline (startHlsBufferFetch) finishes
@@ -216,11 +226,14 @@ function discardTapOutput({ youtubeId, tempPath, sourceLabel = 'hls-buffer' }) {
  * server/routes/ytstream.js's swapHiddenCacheToMp4 (ytstream.stealthCache,
  * or a genuinely untracked video, once finalizeToMp4 remuxes its hidden
  * .ts): the .ts recorded by recordUntrackedDownloadHistory/finalizeTapOutput
- * above is about to be deleted, superseded by an .mp4 - this updates that
- * SAME job's aux_data (both the in-memory copy jobModule.getRunningJobsWithFreshVideos
- * actually reads - see its own hlsBufferInfoNeedingBackfill handling - and
- * the DB row, so it survives a restart) so Download History reflects the
- * .mp4 instead of a path that no longer exists.
+ * above is about to be deleted, superseded by an .mp4. Records this as a
+ * SEPARATE completed Job row rather than overwriting the original fetch's
+ * aux_data in place - the original row keeps its own recorded
+ * fileSize/avgDownloadMBps/duration (what THAT fetch actually did) instead
+ * of a later, unrelated ffmpeg remux silently clobbering them the moment it
+ * happens to finish. Both rows are cross-linked (finalizeOfJobId on the new
+ * row, finalizedByJobId on the original) so Download History can offer a
+ * jump-to link each way - see DownloadHistory.tsx.
  *
  * Matched by exact youtubeId + old filePath (not youtubeId alone) so a
  * later, unrelated re-cache of the same video is never misattributed to
@@ -229,25 +242,51 @@ function discardTapOutput({ youtubeId, tempPath, sourceLabel = 'hls-buffer' }) {
  * @param {string} oldFilePath - the .ts path recorded at fetch-finalize time
  * @param {string} newFilePath - the .mp4 path that supersedes it
  * @param {number} newFileSize
- * @returns {Promise<boolean>} true if a matching job was found and updated
+ * @returns {Promise<boolean>} true if a matching original job was found and a finalize job recorded
  */
-async function updateHiddenCacheJobFileInfo(youtubeId, oldFilePath, newFilePath, newFileSize) {
+async function recordTsToMp4Finalize(youtubeId, oldFilePath, newFilePath, newFileSize) {
   const match = Object.values(jobModule.jobs).find((j) =>
     j.data && j.data.hlsBufferCacheInfo
     && j.data.hlsBufferCacheInfo.youtubeId === youtubeId
     && j.data.hlsBufferCacheInfo.filePath === oldFilePath
   );
   if (!match) return false;
-  match.data.hlsBufferCacheInfo = { ...match.data.hlsBufferCacheInfo, filePath: newFilePath, fileSize: newFileSize };
+
+  const finalizeData = {
+    hlsBufferCacheInfo: { youtubeId, filePath: newFilePath, fileSize: newFileSize },
+    finalizeOfJobId: match.id,
+  };
+
+  const jobInstance = await Job.create({
+    status: 'Complete',
+    timeInitiated: new Date(),
+    timeCreated: new Date(),
+    jobType: `${HLS_BUFFER_FINALIZE_LABEL_PREFIX}${youtubeId}`,
+    output: '1 videos.',
+    aux_data: serializeAuxData(finalizeData),
+  });
+
+  jobModule.jobs[jobInstance.id] = {
+    id: jobInstance.id,
+    jobType: jobInstance.jobType,
+    status: jobInstance.status,
+    output: jobInstance.output,
+    timeInitiated: jobInstance.timeInitiated,
+    timeCreated: jobInstance.timeCreated,
+    data: { ...finalizeData, videos: [] },
+  };
+
+  match.data.finalizedByJobId = jobInstance.id;
   try {
     await Job.update(
       { aux_data: serializeAuxData(match.data) },
       { where: { id: match.id } }
     );
   } catch (err) {
-    logger.warn({ err, youtubeId, oldFilePath, newFilePath }, 'ytstream: failed to persist updated hidden-cache job aux_data (in-memory copy still updated)');
+    logger.warn({ err, youtubeId, oldFilePath, newFilePath }, 'ytstream: failed to persist finalize-link on original job (in-memory copy still updated)');
   }
+
   return true;
 }
 
-module.exports = { finalizeTapOutput, discardTapOutput, updateHiddenCacheJobFileInfo };
+module.exports = { finalizeTapOutput, discardTapOutput, recordTsToMp4Finalize };

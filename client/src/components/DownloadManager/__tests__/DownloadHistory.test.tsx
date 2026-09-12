@@ -154,6 +154,7 @@ describe('DownloadHistory', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    window.localStorage.clear();
     mockUseConfig.mockReturnValue({
       config: { channelVideosHotLoad: false },
     } as ReturnType<typeof useConfig>);

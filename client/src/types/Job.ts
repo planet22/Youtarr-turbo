@@ -75,5 +75,11 @@ export interface Job {
     // those live controls; strmPaused mirrors the live pause state.
     isStrmBatch?: boolean;
     strmPaused?: boolean;
+    // Cross-links between an HLS Buffer Cache fetch and the separate
+    // "HLS Buffer Cache Finalize" job recorded once its hidden .ts is
+    // remuxed to .mp4 - see ytstreamTapFinalizer.js's recordTsToMp4Finalize.
+    // Only one of the two is ever set on a given job.
+    finalizeOfJobId?: string;
+    finalizedByJobId?: string;
   };
 }

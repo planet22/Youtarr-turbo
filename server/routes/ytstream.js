@@ -1953,9 +1953,10 @@ async function promoteHiddenMp4ToLibrary(youtubeId, hiddenTsPath, mp4CachePath, 
  * here (unlike promoteFinalizedTsToLibraryMp4/promoteHiddenMp4ToLibrary),
  * is_strm/.strm are never touched.
  *
- * Also updates the fetch's own "HLS Buffer Cache" Job (ytstreamTapFinalizer.
- * updateHiddenCacheJobFileInfo) so Download History reflects the .mp4 and
- * its real size, not the now-deleted .ts recorded at fetch-finalize time.
+ * Also records a separate "HLS Buffer Cache Finalize" Job (ytstreamTapFinalizer.
+ * recordTsToMp4Finalize) so Download History shows the .mp4 and its real
+ * size as its own history line, cross-linked to the original fetch's row,
+ * rather than overwriting that row's own recorded fileSize/speed.
  *
  * Guarded by the same findLiveSessionReferencing check the library-promote
  * functions use - deferred while the hidden .ts is still an active
@@ -1990,7 +1991,7 @@ async function swapHiddenCacheToMp4(youtubeId, hiddenTsPath, mp4CachePath, conte
         logger.warn({ err, ...context, hiddenTsPath }, 'ytstream: failed to delete hidden .ts after swapping stealth cache to .mp4');
       }
     });
-    const updated = await require('../modules/ytstreamTapFinalizer').updateHiddenCacheJobFileInfo(youtubeId, hiddenTsPath, hiddenMp4Path, fileSize);
+    const updated = await require('../modules/ytstreamTapFinalizer').recordTsToMp4Finalize(youtubeId, hiddenTsPath, hiddenMp4Path, fileSize);
     logger.info(
       { ...context, hiddenTsPath, hiddenMp4Path, downloadHistoryUpdated: updated },
       'ytstream: swapped hidden hls-buffer cache from .ts to .mp4'

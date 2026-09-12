@@ -16,7 +16,7 @@ import {
 import { ChevronDown, Eye as ShowEmptyIcon } from 'lucide-react';
 import { Job, FailedVideo } from '../../types/Job';
 import { VideoData } from '../../types/VideoData';
-import { formatDownloadSpeed, formatFileSize } from '../../utils/formatters';
+import { formatDownloadSpeed, formatByteSize } from '../../utils/formatters';
 import { useSwipeable } from 'react-swipeable';
 import { useConfig } from '../../hooks/useConfig';
 import VideoModal from '../shared/VideoModal';
@@ -28,6 +28,7 @@ import FailedDownloadsDetail from './FailedDownloadsDetail';
 import TerminatedChannelsDetail from './TerminatedChannelsDetail';
 import {
   useListPageSize,
+  usePersistedFilterState,
   useVideoListState,
   VideoListContainer,
   VideoListPaginationBar,
@@ -56,6 +57,7 @@ function cleanJobTypeLabel(jobType: string): string {
     return match ? `NZB grab (${match[1]}): ${match[2]}` : 'NZB grab';
   }
   if (jobType.startsWith('STRM Cache: ')) return 'STRM Cache-on-play';
+  if (jobType.startsWith('HLS Buffer Cache Finalize: ')) return 'HLS Buffer Cache: Finalize .ts → .mp4';
   if (jobType.startsWith('HLS Buffer Cache: ')) return 'HLS Buffer Cache';
   return jobType;
 }
@@ -75,6 +77,11 @@ function getJobSourceLabel(jobType: string): string {
     return categoryMatch ? `NZB (${categoryMatch[1]})` : 'NZB';
   }
   if (jobType.startsWith('STRM Cache: ')) return 'STRM Cache-on-play';
+  // Grouped under the same "HLS Buffer Cache" filter option as the fetch
+  // it finalizes, rather than fragmenting the Source dropdown - the two are
+  // the same feature, just two separate history lines now (see
+  // ytstreamTapFinalizer.js's recordTsToMp4Finalize).
+  if (jobType.startsWith('HLS Buffer Cache Finalize: ')) return 'HLS Buffer Cache';
   if (jobType.startsWith('HLS Buffer Cache: ')) return 'HLS Buffer Cache';
   return 'Other';
 }
@@ -115,12 +122,14 @@ const ExpandChevron: React.FC<{ expanded: boolean }> = ({ expanded }) => (
 
 // video.fileSize (Videos.fileSize) comes back as a string over the wire -
 // same parse VideosTable.tsx uses for its own File Size column, kept
-// consistent here rather than trusting formatFileSize's number param type.
+// consistent here. Uses formatByteSize (not formatFileSize) since STRM
+// files are a few bytes of text, not a real media file - formatFileSize's
+// MB/GB-only scaling would round that down to "0MB".
 function videoFileSizeText(video?: VideoData): string {
   const raw = video?.fileSize;
   if (!raw) return '';
   const size = typeof raw === 'string' ? parseInt(raw, 10) : raw;
-  return Number.isFinite(size) && size > 0 ? formatFileSize(size) : '';
+  return Number.isFinite(size) && size > 0 ? formatByteSize(size) : '';
 }
 
 function fileNameOf(filePath?: string | null): string | null {
@@ -193,7 +202,23 @@ function jobDurationText(job: Job): string | null {
 // library, etc.) into one misleading phrase; statusDetail, when present,
 // spells out which of those actually happened.
 function jobStatusText(job: Job, isCompletedWithNoVideos: boolean): string {
+  if (job.jobType.startsWith('HLS Buffer Cache Finalize: ')) return 'Finalized .ts → .mp4';
   return job.data?.nzb?.statusDetail || (isCompletedWithNoVideos ? `${job.status} - no new videos` : job.status);
+}
+
+// The other history line in an HLS Buffer Cache fetch/finalize pair, if any -
+// a finalize job points back at the fetch it finalized (finalizeOfJobId) and
+// the fetch points forward at whichever finalize job superseded it
+// (finalizedByJobId) - see ytstreamTapFinalizer.js's recordTsToMp4Finalize.
+// Only one of the two is ever set on a given job, so at most one link shows.
+function relatedFinalizeJobId(job: Job): { targetJobId: string; label: string } | null {
+  if (job.data?.finalizeOfJobId) {
+    return { targetJobId: job.data.finalizeOfJobId, label: '← Original download' };
+  }
+  if (job.data?.finalizedByJobId) {
+    return { targetJobId: job.data.finalizedByJobId, label: 'Finalized to .mp4 →' };
+  }
+  return null;
 }
 
 // Zero-padded local date key (YYYY-MM-DD) matching the <input type="date">
@@ -259,12 +284,28 @@ const DownloadHistory: React.FC<DownloadHistoryProps> = ({
   onVideoDeleted,
 }) => {
   const [modalVideo, setModalVideo] = useState<VideoData | null>(null);
-  const [showNoVideoJobs, setShowNoVideoJobs] = useState(false);
-  const [sourceFilter, setSourceFilter] = useState('');
-  const [statusFilter, setStatusFilter] = useState('');
-  const [dateFrom, setDateFrom] = useState('');
-  const [dateTo, setDateTo] = useState('');
+  // Persisted the same way as the search box above, so switching away from
+  // this page and back (or reloading) doesn't quietly drop the filters back
+  // to their defaults - see usePersistedFilterState.
+  const [showNoVideoJobs, setShowNoVideoJobs] = usePersistedFilterState('youtarr:downloadHistory:filter:showNoVideoJobs', false);
+  const [sourceFilter, setSourceFilter] = usePersistedFilterState('youtarr:downloadHistory:filter:source', '');
+  const [statusFilter, setStatusFilter] = usePersistedFilterState('youtarr:downloadHistory:filter:status', '');
+  const [dateFrom, setDateFrom] = usePersistedFilterState('youtarr:downloadHistory:filter:dateFrom', '');
+  const [dateTo, setDateTo] = usePersistedFilterState('youtarr:downloadHistory:filter:dateTo', '');
   const [imageErrors, setImageErrors] = useState<Record<string, boolean>>({});
+  // Briefly highlighted after jumping to a job row via relatedFinalizeJobId's
+  // link, so landing on the right row amid a long list is obvious. Only
+  // scrolls/highlights a row currently rendered on this page - a target job
+  // hidden by pagination/filters is a rare edge case not worth chasing
+  // across pages for.
+  const [highlightedJobId, setHighlightedJobId] = useState<string | null>(null);
+  const highlightTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scrollToJobRow = (jobId: string) => {
+    document.getElementById(`job-row-${jobId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    setHighlightedJobId(jobId);
+    if (highlightTimeoutRef.current) clearTimeout(highlightTimeoutRef.current);
+    highlightTimeoutRef.current = setTimeout(() => setHighlightedJobId(null), 1800);
+  };
   const buttonRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const [currentPage, setCurrentPage] = useState(1);
   // Same shared page-size control/values (and localStorage persistence) as
@@ -467,11 +508,18 @@ const DownloadHistory: React.FC<DownloadHistoryProps> = ({
           const terminationFailures = job.data?.terminationFailures || [];
           const skippedCount = job.data?.cumulativeSkipped || 0;
           const hasExpandable = hasMultiple || failedForJob.length > 0 || terminatedChannels.length > 0 || terminationFailures.length > 0;
+          const relatedLink = relatedFinalizeJobId(job);
 
           return (
             <Box
               key={job.id}
-              style={{ border: 'var(--border-weight) solid var(--border)', borderRadius: 'var(--radius-ui)' }}
+              id={`job-row-${job.id}`}
+              style={{
+                border: 'var(--border-weight) solid var(--border)',
+                borderRadius: 'var(--radius-ui)',
+                transition: 'background-color 300ms ease',
+                backgroundColor: highlightedJobId === job.id ? 'var(--accent-muted, rgba(255,220,0,0.15))' : undefined,
+              }}
               className="p-3"
             >
               <Box className="flex items-start justify-between gap-2">
@@ -591,6 +639,16 @@ const DownloadHistory: React.FC<DownloadHistoryProps> = ({
                       <Typography variant="caption" color="secondary">
                         Speed: {formatDownloadSpeed(singleVideo.avgDownloadMBps)}
                       </Typography>
+                    )}
+                    {relatedLink && (
+                      <Link
+                        component="button"
+                        type="button"
+                        onClick={() => scrollToJobRow(relatedLink.targetJobId)}
+                        style={{ background: 'none', border: 'none', padding: 0, textAlign: 'left', width: 'fit-content' }}
+                      >
+                        <Typography variant="caption">{relatedLink.label}</Typography>
+                      </Link>
                     )}
                   </Box>
                 )}
@@ -797,8 +855,17 @@ const DownloadHistory: React.FC<DownloadHistoryProps> = ({
               const nzbFallback = videos.length === 0 ? nzbFallbackVideo(job) : null;
               const singleVideo = videos[0] || nzbFallback || undefined;
               const isNzbFallback = !videos[0] && !!nzbFallback;
+              const relatedLink = relatedFinalizeJobId(job);
               return (
-                <TableRow key={job.id} hover>
+                <TableRow
+                  key={job.id}
+                  id={`job-row-${job.id}`}
+                  hover
+                  style={{
+                    transition: 'background-color 300ms ease',
+                    backgroundColor: highlightedJobId === job.id ? 'var(--accent-muted, rgba(255,220,0,0.15))' : undefined,
+                  }}
+                >
                   <TableCell>{formattedTimeCreated}</TableCell>
                   <TableCell>
                     {singleVideo ? (
@@ -838,6 +905,16 @@ const DownloadHistory: React.FC<DownloadHistoryProps> = ({
                             <Typography variant="caption" className="block" style={{ color: 'var(--destructive)' }}>
                               {errorDetail}
                             </Typography>
+                          )}
+                          {relatedLink && (
+                            <Link
+                              component="button"
+                              type="button"
+                              onClick={(e: React.MouseEvent) => { e.stopPropagation(); scrollToJobRow(relatedLink.targetJobId); }}
+                              style={{ background: 'none', border: 'none', padding: 0, textAlign: 'left' }}
+                            >
+                              <Typography variant="caption" className="block">{relatedLink.label}</Typography>
+                            </Link>
                           )}
                         </Box>
                       </Box>

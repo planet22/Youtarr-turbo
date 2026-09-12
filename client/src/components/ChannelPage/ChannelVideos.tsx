@@ -50,6 +50,7 @@ import {
   VideoListContainer,
   VideoListPaginationBar,
   useListPageSize,
+  usePersistedFilterState,
   useVideoListState,
   useVideoSelection,
   type ChipFilterMode,
@@ -149,11 +150,14 @@ function ChannelVideos({
 
   const [sortBy, setSortBy] = useState<SortBy>('date');
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc');
-  const [maxRating, setMaxRating] = useState('');
-  const [protectedFilter, setProtectedFilter] = useState<ChipFilterMode>('off');
-  const [missingFilter, setMissingFilter] = useState<ChipFilterMode>('off');
-  const [ignoredFilter, setIgnoredFilter] = useState<ChipFilterMode>('off');
-  const [watchedFilter, setWatchedFilter] = useState<ChipFilterMode>('off');
+  // Persisted per-channel the same way the search box above is, so switching
+  // away from this channel's page and back (or reloading) doesn't quietly
+  // drop these filters back to their defaults - see usePersistedFilterState.
+  const [maxRating, setMaxRating] = usePersistedFilterState(`youtarr:channelVideos:filter:${channelIdForSearchKey}:maxRating`, '');
+  const [protectedFilter, setProtectedFilter] = usePersistedFilterState<ChipFilterMode>(`youtarr:channelVideos:filter:${channelIdForSearchKey}:protected`, 'off');
+  const [missingFilter, setMissingFilter] = usePersistedFilterState<ChipFilterMode>(`youtarr:channelVideos:filter:${channelIdForSearchKey}:missing`, 'off');
+  const [ignoredFilter, setIgnoredFilter] = usePersistedFilterState<ChipFilterMode>(`youtarr:channelVideos:filter:${channelIdForSearchKey}:ignored`, 'off');
+  const [watchedFilter, setWatchedFilter] = usePersistedFilterState<ChipFilterMode>(`youtarr:channelVideos:filter:${channelIdForSearchKey}:watched`, 'off');
   // Display-only toggle (not a real content filter, so it isn't part of
   // filterConfigs/_applyStatusFilters below): when on, each row's Status
   // column shows whether it would pass this channel's own Download
@@ -166,7 +170,7 @@ function ChannelVideos({
 
   const [pageSize, setPageSize] = useListPageSize('youtarr.channelVideos.pageSize');
   const [page, setPage] = useState(1);
-  const [downloadedFilter, setDownloadedFilter] = useState<ChipFilterMode>('off');
+  const [downloadedFilter, setDownloadedFilter] = usePersistedFilterState<ChipFilterMode>(`youtarr:channelVideos:filter:${channelIdForSearchKey}:downloaded`, 'off');
   const [mobileTooltip, setMobileTooltip] = useState<string | null>(null);
   const [downloadDialogOpen, setDownloadDialogOpen] = useState(false);
   const [hoveredVideo, setHoveredVideo] = useState<string | null>(null);
@@ -199,7 +203,7 @@ function ChannelVideos({
     setDateFrom,
     setDateTo,
     clearAllFilters: clearBaseFilters,
-  } = useChannelVideoFilters();
+  } = useChannelVideoFilters(`youtarr:channelVideos:filter:${channelIdForSearchKey}`);
 
   const { deleteVideosByYoutubeIds, loading: deleteLoading } = useVideoDeletion();
   const { forceDownload, revertToStrm, loading: strmSwitchLoading } = useStrmSwitch();

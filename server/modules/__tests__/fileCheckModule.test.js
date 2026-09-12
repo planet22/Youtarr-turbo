@@ -60,6 +60,61 @@ describe('FileCheckModule', () => {
       expect(mockFs.stat).toHaveBeenCalledWith('/videos/channel/video.mp4');
     });
 
+    test('should not mark a just-downloaded video removed when its file check fails (grace period)', async () => {
+      const videos = [
+        {
+          id: 1,
+          youtubeId: 'abc123',
+          filePath: '/videos/channel/video.mp4',
+          removed: false,
+          last_downloaded_at: new Date().toISOString()
+        }
+      ];
+
+      mockFs.stat.mockRejectedValue({ code: 'ENOENT' });
+
+      const result = await fileCheckModule.checkVideoFiles(videos);
+
+      expect(result.videos).toEqual(videos);
+      expect(result.updates).toEqual([]);
+    });
+
+    test('should not mark removed when timeCreated (getVideos alias) is recent, even if last_downloaded_at is absent', async () => {
+      const videos = [
+        {
+          id: 1,
+          youtubeId: 'abc123',
+          filePath: '/videos/channel/video.mp4',
+          removed: false,
+          timeCreated: new Date().toISOString()
+        }
+      ];
+
+      mockFs.stat.mockRejectedValue({ code: 'ENOENT' });
+
+      const result = await fileCheckModule.checkVideoFiles(videos);
+
+      expect(result.updates).toEqual([]);
+    });
+
+    test('should mark removed once the grace period has elapsed', async () => {
+      const videos = [
+        {
+          id: 1,
+          youtubeId: 'abc123',
+          filePath: '/videos/channel/video.mp4',
+          removed: false,
+          last_downloaded_at: new Date(Date.now() - 10 * 60 * 1000).toISOString()
+        }
+      ];
+
+      mockFs.stat.mockRejectedValue({ code: 'ENOENT' });
+
+      const result = await fileCheckModule.checkVideoFiles(videos);
+
+      expect(result.updates).toEqual([{ id: 1, removed: true }]);
+    });
+
     test('should not update video when already marked as removed', async () => {
       const videos = [
         {

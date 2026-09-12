@@ -5,6 +5,7 @@ import { useMediaQuery } from '../../hooks/useMediaQuery';
 import { useStreamHistory } from '../../hooks/useStreamHistory';
 import {
   useListPageSize,
+  usePersistedFilterState,
   useVideoListState,
   VideoListContainer,
   VideoListPaginationBar,
@@ -66,10 +67,13 @@ function StreamHistoryPage({ token }: StreamHistoryPageProps) {
     setPage(1);
   };
 
-  const [modeFilter, setModeFilter] = useState('');
-  const [statusFilter, setStatusFilter] = useState('');
-  const [dateFrom, setDateFrom] = useState('');
-  const [dateTo, setDateTo] = useState('');
+  // Persisted the same way as the search box above, so switching away from
+  // this page and back (or reloading) doesn't quietly drop these filters
+  // back to their defaults - see usePersistedFilterState.
+  const [modeFilter, setModeFilter] = usePersistedFilterState('youtarr:streamHistory:filter:mode', '');
+  const [statusFilter, setStatusFilter] = usePersistedFilterState('youtarr:streamHistory:filter:status', '');
+  const [dateFrom, setDateFrom] = usePersistedFilterState('youtarr:streamHistory:filter:dateFrom', '');
+  const [dateTo, setDateTo] = usePersistedFilterState('youtarr:streamHistory:filter:dateTo', '');
   const normalizedSearch = listState.search.trim();
 
   // Filters are applied server-side (see useStreamHistory/GET

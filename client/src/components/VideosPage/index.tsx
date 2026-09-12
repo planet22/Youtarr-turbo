@@ -39,6 +39,7 @@ import {
   VideoListContainer,
   VideoListPaginationBar,
   useListPageSize,
+  usePersistedFilterState,
   useVideoListState,
   useVideoSelection,
   type ChipFilterMode,
@@ -126,25 +127,28 @@ function VideosPage({ token }: VideosPageProps) {
   });
 
   const [page, setPage] = useState(1);
-  const [channelFilter, setChannelFilter] = useState('');
+  // Persisted the same way as the search box above, so switching away from
+  // this page and back (or reloading) doesn't quietly drop these filters
+  // back to their defaults - see usePersistedFilterState.
+  const [channelFilter, setChannelFilter] = usePersistedFilterState('youtarr:videosPage:filter:channel', '');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const [orderBy, setOrderBy] = useState<'published' | 'added'>('added');
-  const [dateFrom, setDateFrom] = useState<string>('');
-  const [dateTo, setDateTo] = useState<string>('');
-  const [addedDateFrom, setAddedDateFrom] = useState<string>('');
-  const [addedDateTo, setAddedDateTo] = useState<string>('');
-  const [maxRatingFilter, setMaxRatingFilter] = useState('');
-  const [protectedFilter, setProtectedFilter] = useState<ChipFilterMode>('off');
-  const [missingFilter, setMissingFilter] = useState<ChipFilterMode>('off');
-  const [watchedFilter, setWatchedFilter] = useState<ChipFilterMode>('off');
-  const [strmFilter, setStrmFilter] = useState<ChipFilterMode>('off');
-  const [metadataCacheFilter, setMetadataCacheFilter] = useState<ChipFilterMode>('off');
-  const [cachedVideoFilter, setCachedVideoFilter] = useState<ChipFilterMode>('off');
-  const [metadataOnlyFilter, setMetadataOnlyFilter] = useState<ChipFilterMode>('off');
+  const [dateFrom, setDateFrom] = usePersistedFilterState('youtarr:videosPage:filter:publishedFrom', '');
+  const [dateTo, setDateTo] = usePersistedFilterState('youtarr:videosPage:filter:publishedTo', '');
+  const [addedDateFrom, setAddedDateFrom] = usePersistedFilterState('youtarr:videosPage:filter:downloadedFrom', '');
+  const [addedDateTo, setAddedDateTo] = usePersistedFilterState('youtarr:videosPage:filter:downloadedTo', '');
+  const [maxRatingFilter, setMaxRatingFilter] = usePersistedFilterState('youtarr:videosPage:filter:maxRating', '');
+  const [protectedFilter, setProtectedFilter] = usePersistedFilterState<ChipFilterMode>('youtarr:videosPage:filter:protected', 'off');
+  const [missingFilter, setMissingFilter] = usePersistedFilterState<ChipFilterMode>('youtarr:videosPage:filter:missing', 'off');
+  const [watchedFilter, setWatchedFilter] = usePersistedFilterState<ChipFilterMode>('youtarr:videosPage:filter:watched', 'off');
+  const [strmFilter, setStrmFilter] = usePersistedFilterState<ChipFilterMode>('youtarr:videosPage:filter:strm', 'off');
+  const [metadataCacheFilter, setMetadataCacheFilter] = usePersistedFilterState<ChipFilterMode>('youtarr:videosPage:filter:metadataCache', 'off');
+  const [cachedVideoFilter, setCachedVideoFilter] = usePersistedFilterState<ChipFilterMode>('youtarr:videosPage:filter:cachedVideo', 'off');
+  const [metadataOnlyFilter, setMetadataOnlyFilter] = usePersistedFilterState<ChipFilterMode>('youtarr:videosPage:filter:metadataOnly', 'off');
   // Defaults on - untracked cache-only videos (played/cached but never
   // downloaded) are part of what this page is for surfacing, not an
   // edge case someone has to opt into seeing.
-  const [showUntracked, setShowUntracked] = useState(true);
+  const [showUntracked, setShowUntracked] = usePersistedFilterState('youtarr:videosPage:filter:showUntracked', true);
   const [showFilePaths, setShowFilePaths] = useState(false);
 
   const [imageErrors, setImageErrors] = useState<Record<string, boolean>>({});
@@ -258,7 +262,26 @@ function VideosPage({ token }: VideosPageProps) {
     }
   }, [videos]);
 
-  useDownloadListingsRefresh(refetch);
+  // Infinite-scroll ("hot load") keeps every page fetched so far in `videos`
+  // and merges new pages in via mergeUniqueByYoutubeId, which keeps the
+  // FIRST copy of any duplicate youtubeId. A plain refetch() after a
+  // mutation (delete/purge/rating/etc.) only re-fetches the current page, so
+  // a video mutated on an earlier page keeps its stale pre-mutation data
+  // forever - e.g. a deleted video stays visible looking untouched. Reset
+  // back to page 1 first so the refetch fully replaces `videos` instead of
+  // merging into the stale accumulated set (see useVideosData's `page <= 1`
+  // branch). Mobile's List view is the main place this was visible, since
+  // its compact rows make scrolling deep into hot-loaded pages routine.
+  const refetchList = useCallback(() => {
+    if (useInfiniteScroll && page > 1) {
+      setVideos([]);
+      setPage(1);
+    } else {
+      refetch();
+    }
+  }, [useInfiniteScroll, page, refetch, setVideos]);
+
+  useDownloadListingsRefresh(refetchList);
 
   useEffect(() => {
     setVideos([]);
@@ -337,14 +360,14 @@ function VideosPage({ token }: VideosPageProps) {
     if (result.success) {
       setSuccessMessage(`Successfully removed ${describeCounts(result.deleted.length)}`);
       selection.clear();
-      refetch();
+      refetchList();
     } else {
       const deletedCount = result.deleted.length;
       const failedCount = result.failed.length;
       if (deletedCount > 0 || clearedCacheCount > 0) {
         setSuccessMessage(`Removed ${describeCounts(deletedCount)}, but ${failedCount} video${failedCount !== 1 ? 's' : ''} failed`);
         selection.clear();
-        refetch();
+        refetchList();
       } else {
         setErrorMessage(
           `Failed to delete videos: ${result.failed[0]?.error || 'Unknown error'}`
@@ -366,7 +389,7 @@ function VideosPage({ token }: VideosPageProps) {
         `Successfully purged ${result.purged.length} video${result.purged.length !== 1 ? 's' : ''}`
       );
       selection.clear();
-      refetch();
+      refetchList();
     } else {
       const purgedCount = result.purged.length;
       const failedCount = result.failed.length;
@@ -375,7 +398,7 @@ function VideosPage({ token }: VideosPageProps) {
           `Purged ${purgedCount} video${purgedCount !== 1 ? 's' : ''}, but ${failedCount} failed`
         );
         selection.clear();
-        refetch();
+        refetchList();
       } else {
         setErrorMessage(
           `Failed to purge videos: ${result.failed[0]?.error || 'Unknown error'}`
@@ -452,7 +475,7 @@ function VideosPage({ token }: VideosPageProps) {
         );
       }
       selection.clear();
-      refetch();
+      refetchList();
     } finally {
       setObliterateLoading(false);
     }
@@ -474,7 +497,7 @@ function VideosPage({ token }: VideosPageProps) {
         `Successfully updated content rating for ${selectedIds.length} video(s)`
       );
       selection.clear();
-      refetch();
+      refetchList();
     } catch (error: unknown) {
       console.error('Failed to update ratings:', error);
       const message = axios.isAxiosError(error)
@@ -799,7 +822,7 @@ function VideosPage({ token }: VideosPageProps) {
         `Queued ${result.processed.length} video${result.processed.length !== 1 ? 's' : ''} for download`
       );
       if (!isSingle) selection.clear();
-      refetch();
+      refetchList();
     } else {
       const processedCount = result.processed.length;
       const failedCount = result.failed.length;
@@ -808,7 +831,7 @@ function VideosPage({ token }: VideosPageProps) {
           `Queued ${processedCount} video${processedCount !== 1 ? 's' : ''}, but ${failedCount} failed`
         );
         if (!isSingle) selection.clear();
-        refetch();
+        refetchList();
       } else {
         setErrorMessage(
           `Failed to queue download: ${result.failed[0]?.error || 'Unknown error'}`
@@ -833,7 +856,7 @@ function VideosPage({ token }: VideosPageProps) {
         `Switched ${result.processed.length} video${result.processed.length !== 1 ? 's' : ''} back to STRM`
       );
       if (!isSingle) selection.clear();
-      refetch();
+      refetchList();
     } else {
       const processedCount = result.processed.length;
       const failedCount = result.failed.length;
@@ -842,7 +865,7 @@ function VideosPage({ token }: VideosPageProps) {
           `Switched ${processedCount} video${processedCount !== 1 ? 's' : ''} back to STRM, but ${failedCount} failed`
         );
         if (!isSingle) selection.clear();
-        refetch();
+        refetchList();
       } else {
         setErrorMessage(
           `Failed to switch to STRM: ${result.failed[0]?.error || 'Unknown error'}`
@@ -895,7 +918,7 @@ function VideosPage({ token }: VideosPageProps) {
         `Cleared cached metadata for ${eligibleIds.length - result.failed.length} video${eligibleIds.length !== 1 ? 's' : ''}`
       );
       selection.clear();
-      refetch();
+      refetchList();
     } else {
       setErrorMessage('Failed to clear cached metadata');
     }
@@ -940,7 +963,7 @@ function VideosPage({ token }: VideosPageProps) {
       setErrorMessage('Failed to clear cached video');
     }
     selection.clear();
-    refetch();
+    refetchList();
   };
 
   const handleClearSingleCacheDetail = async () => {
@@ -962,7 +985,7 @@ function VideosPage({ token }: VideosPageProps) {
         }
       }
       setCacheDetailTarget(null);
-      refetch();
+      refetchList();
     } finally {
       setClearingCacheDetail(false);
     }
@@ -983,7 +1006,7 @@ function VideosPage({ token }: VideosPageProps) {
         video.hasCachedVideo ? cacheActions.clearVideoCache(video.youtubeId) : Promise.resolve(),
       ]);
       setClearCachedRowTarget(null);
-      refetch();
+      refetchList();
     } finally {
       setClearingCachedRow(false);
     }
@@ -1370,7 +1393,7 @@ function VideosPage({ token }: VideosPageProps) {
             token={token}
             onClear={handleClearSingleCacheDetail}
             clearing={clearingCacheDetail}
-            onRefreshed={refetch}
+            onRefreshed={refetchList}
           />
         );
       })()}
@@ -1449,7 +1472,7 @@ function VideosPage({ token }: VideosPageProps) {
           token={token}
           onVideoDeleted={() => {
             setModalVideo(null);
-            refetch();
+            refetchList();
           }}
           onProtectionChanged={(youtubeId, isProtected) => {
             setVideos((prev) =>

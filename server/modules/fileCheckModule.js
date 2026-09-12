@@ -8,6 +8,29 @@ const createLimiter = require('./subscriptionImport/concurrencyLimiter');
 // 128-row page sequentially takes ~1s of wall time there.
 const MAX_CONCURRENT_FILE_CHECKS = 16;
 
+// A video downloaded within this window that fails its file-existence check
+// is treated as "not yet confirmed missing" rather than flipped to
+// removed=true. Post-processing (poster/nfo/sidecar writes) keeps touching
+// the video's directory on a network-backed mount for a moment after the
+// video file itself has already been moved into place, and on some mounts a
+// fresh stat of the just-written path can still come back ENOENT in that
+// window (directory-entry/attribute cache lag) - without this grace period
+// that one unlucky check permanently persists removed=true, and the video
+// shows as "Missing" in the library until someone notices and it happens to
+// get re-checked again. The next real-time check, moments later, settles it
+// for real either way.
+const REMOVED_FLIP_GRACE_MS = 2 * 60 * 1000;
+
+// Callers pass either raw Video rows (last_downloaded_at) or the getVideos
+// listing's computed alias (timeCreated, which is last_downloaded_at itself
+// whenever that column is set - see videosModule.js's ADDED_DATE_EXPR).
+function wasRecentlyDownloaded(video) {
+  const raw = video.last_downloaded_at || video.timeCreated;
+  if (!raw) return false;
+  const downloadedAt = new Date(raw).getTime();
+  return Number.isFinite(downloadedAt) && (Date.now() - downloadedAt) < REMOVED_FLIP_GRACE_MS;
+}
+
 /**
  * Check file existence and update video metadata.
  * Real-time per-page check: stats the stored path, falls back to same-dir
@@ -121,7 +144,7 @@ class FileCheckModule {
         if (hasAnyFile && video.removed) {
           update.removed = false;
           hasUpdates = true;
-        } else if (!hasAnyFile && !video.removed) {
+        } else if (!hasAnyFile && !video.removed && !wasRecentlyDownloaded(video)) {
           update.removed = true;
           hasUpdates = true;
         }

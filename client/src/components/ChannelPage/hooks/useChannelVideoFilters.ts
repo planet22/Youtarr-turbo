@@ -30,12 +30,75 @@ const initialFilters: VideoFilters = {
 
 const DEBOUNCE_DELAY = 400; // ms
 
-export function useChannelVideoFilters(): UseChannelVideoFiltersReturn {
-  const [filters, setFilters] = useState<VideoFilters>(initialFilters);
+function readStoredNumber(key: string): number | null {
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw === null) return null;
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredNumber(key: string, value: number | null): void {
+  try {
+    if (value === null) localStorage.removeItem(key);
+    else localStorage.setItem(key, String(value));
+  } catch {
+    // localStorage may be unavailable (private mode, quota); keep in-memory value
+  }
+}
+
+function readStoredDate(key: string): Date | null {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    const parsed = new Date(raw);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredDate(key: string, value: Date | null): void {
+  try {
+    if (value === null) localStorage.removeItem(key);
+    else localStorage.setItem(key, value.toISOString());
+  } catch {
+    // localStorage may be unavailable (private mode, quota); keep in-memory value
+  }
+}
+
+// Duration/date are read from localStorage under `${storageKeyPrefix}:<field>`
+// when a prefix is given - same pattern as usePersistedFilterState, but
+// handled by hand here since these values aren't JSON-safe (Date) and
+// minDuration/maxDuration are debounced rather than written on every
+// keystroke.
+function readInitialFilters(storageKeyPrefix?: string): VideoFilters {
+  if (!storageKeyPrefix) return initialFilters;
+  return {
+    minDuration: readStoredNumber(`${storageKeyPrefix}:minDuration`),
+    maxDuration: readStoredNumber(`${storageKeyPrefix}:maxDuration`),
+    dateFrom: readStoredDate(`${storageKeyPrefix}:dateFrom`),
+    dateTo: readStoredDate(`${storageKeyPrefix}:dateTo`),
+  };
+}
+
+// Pass a storageKeyPrefix (e.g. a per-channel key, since these filters are
+// meaningful per-channel) to persist duration/date filters across page
+// navigations and reloads, mirroring useVideoListState's searchStorageKey.
+// Omit it to keep the original in-memory-only behavior.
+export function useChannelVideoFilters(storageKeyPrefix?: string): UseChannelVideoFiltersReturn {
+  const [filters, setFilters] = useState<VideoFilters>(() => readInitialFilters(storageKeyPrefix));
 
   // Separate state for immediate input values (for responsive UI)
-  const [inputMinDuration, setInputMinDuration] = useState<number | null>(null);
-  const [inputMaxDuration, setInputMaxDuration] = useState<number | null>(null);
+  const [inputMinDuration, setInputMinDuration] = useState<number | null>(
+    () => readInitialFilters(storageKeyPrefix).minDuration
+  );
+  const [inputMaxDuration, setInputMaxDuration] = useState<number | null>(
+    () => readInitialFilters(storageKeyPrefix).maxDuration
+  );
 
   // Refs for debounce timers
   const minDurationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -61,8 +124,9 @@ export function useChannelVideoFilters(): UseChannelVideoFiltersReturn {
     // Debounce the actual filter update
     minDurationTimerRef.current = setTimeout(() => {
       setFilters((prev) => ({ ...prev, minDuration: value }));
+      if (storageKeyPrefix) writeStoredNumber(`${storageKeyPrefix}:minDuration`, value);
     }, DEBOUNCE_DELAY);
-  }, []);
+  }, [storageKeyPrefix]);
 
   const setMaxDuration = useCallback((value: number | null) => {
     // Update input immediately for responsive UI
@@ -76,16 +140,19 @@ export function useChannelVideoFilters(): UseChannelVideoFiltersReturn {
     // Debounce the actual filter update
     maxDurationTimerRef.current = setTimeout(() => {
       setFilters((prev) => ({ ...prev, maxDuration: value }));
+      if (storageKeyPrefix) writeStoredNumber(`${storageKeyPrefix}:maxDuration`, value);
     }, DEBOUNCE_DELAY);
-  }, []);
+  }, [storageKeyPrefix]);
 
   const setDateFrom = useCallback((value: Date | null) => {
     setFilters((prev) => ({ ...prev, dateFrom: value }));
-  }, []);
+    if (storageKeyPrefix) writeStoredDate(`${storageKeyPrefix}:dateFrom`, value);
+  }, [storageKeyPrefix]);
 
   const setDateTo = useCallback((value: Date | null) => {
     setFilters((prev) => ({ ...prev, dateTo: value }));
-  }, []);
+    if (storageKeyPrefix) writeStoredDate(`${storageKeyPrefix}:dateTo`, value);
+  }, [storageKeyPrefix]);
 
   const clearAllFilters = useCallback(() => {
     // Clear any pending debounce timers
@@ -96,7 +163,14 @@ export function useChannelVideoFilters(): UseChannelVideoFiltersReturn {
     setInputMinDuration(null);
     setInputMaxDuration(null);
     setFilters(initialFilters);
-  }, []);
+
+    if (storageKeyPrefix) {
+      writeStoredNumber(`${storageKeyPrefix}:minDuration`, null);
+      writeStoredNumber(`${storageKeyPrefix}:maxDuration`, null);
+      writeStoredDate(`${storageKeyPrefix}:dateFrom`, null);
+      writeStoredDate(`${storageKeyPrefix}:dateTo`, null);
+    }
+  }, [storageKeyPrefix]);
 
   const hasActiveFilters = useMemo(() => {
     return (

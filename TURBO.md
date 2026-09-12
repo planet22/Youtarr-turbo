@@ -13,6 +13,7 @@ Youtarr-Turbo is a fork of [DialmasterOrg/Youtarr](https://github.com/Dialmaster
 - **Download History filtering and detail** — the download job history is searchable and filterable by source, status, and date, and surfaces terminated-channel detail, per-job skip counts, run duration, and any notes/summary text recorded on the job.
 - **Cache-on-play, including a "stealth" variant** — a STRM video that gets watched starts downloading in the background automatically, so the next play (and Plex/Jellyfin/Emby scans) get a real cached file instead of a live proxy; a Stealth cache option keeps that cached file hidden from the library folder entirely, so the video stays permanently STRM-routed through Youtarr-Turbo even once it's fully cached.
 - **Sonarr/Radarr/Prowlarr integration** — Youtarr can impersonate a Newznab indexer and a SABnzbd download client simultaneously, so YouTube videos can be searched for and "grabbed" through your existing *arr stack, with a dedicated NZB diagnostics page for search/cache/grab activity.
+- **yt-dlp metadata caching** — every yt-dlp metadata extraction, regardless of which feature triggered it (streaming, downloading, STRM generation), is written to one persistent cache keyed by video ID, so any later feature that needs the same video's duration/fps/resolution/etc. reuses it instead of re-querying YouTube; the Library page can browse cached-but-untracked videos, and Settings lets you inspect or clear the cache.
 - **API Keys** for triggering single-video downloads from outside the web UI (bookmarklet, iOS/Android Shortcuts).
 - **Deeper media-server integration** — full Jellyfin/Emby connection management (not just playlist mirroring), per-subfolder library mapping for Plex and Jellyfin, and a third watched-based auto-removal strategy alongside age/space.
 - **Obliterate** — a one-step, irreversible bulk action on the Videos page that deletes a video's file(s), erases its database record entirely (not just marks it removed), and clears any cached metadata/video, regardless of the video's current state.
@@ -137,6 +138,17 @@ A second, separate set of tunables from [Download reliability engineering](#down
 
 ---
 
+## yt-dlp metadata caching
+
+Every yt-dlp metadata extraction — whether triggered by streaming a STRM video, a real download, or STRM-file generation — writes the full extracted metadata to one persistent cache keyed by YouTube video ID, shared across every feature rather than belonging to whichever one happened to trigger it. Any other feature that later needs the same video's duration, fps, resolution/codec, uploader, upload date, title, or description reads it back from the cache instead of re-running yt-dlp — this is what lets `hls`/`hls-buffer`'s segment-duration correction and fast seek-restart cache-warming skip an extra live yt-dlp call for a video the app has already seen, from any source.
+
+- **What's cached, and what isn't**: immutable upload facts (duration, fps, resolution, codec, uploader, upload date, title, description) are cached indefinitely with no per-field expiry. Anything that can go stale or is session-bound — signed CDN/manifest URLs, subtitle URLs, view/like counts, live/availability status, age-restriction state — is never served from the cache and is always re-resolved live.
+- **Retention, not expiry**: there's no TTL on individual facts, but a row is pruned automatically (nightly) once a full year passes since it was last *touched* by any feature — not since it was first learned — so a video that keeps getting streamed, re-downloaded, or re-checked never expires, while one nobody's looked at in a year quietly falls out of the cache and simply relearns itself on next use.
+- **Library page**: the Videos page shows a "Cached Metadata" indicator and detail dialog per video (uploader, resolution, fps, upload date, fetched/last-accessed timestamps, computed expiry, an opt-in raw-JSON view), plus per-video and bulk "clear cached metadata" actions. A **"Show untracked"** view surfaces videos that have cached metadata (and/or an untracked `hls-buffer` file) but no library entry at all — an NZB grab Sonarr/Radarr later removed from tracking, or a video played once via STRM but never downloaded — searchable and filterable the same way tracked videos are, without requiring a real download first.
+- **Settings**: Settings → Streaming shows a live count of cached videos with a one-click "delete all"; clearing it is harmless, since each cleared video simply relearns itself via a live yt-dlp lookup the next time it's streamed, downloaded, or STRM-generated.
+
+---
+
 ## Hardware-accelerated transcoding
 
 Turbo adds hardware encoding (QSV / NVENC / VAAPI / AMF, plus software) in **two independent places**:
@@ -240,7 +252,7 @@ A handful of settings (Settings → YT-DLP) aimed at making downloads more resil
 
 ## Maintenance extras
 
-- **Resolution-tag backfill** — patches an "Available: ..." resolution tag onto videos that were downloaded before this feature existed, using already-cached metadata (no fresh YouTube calls).
+- **Resolution-tag backfill** — patches an "Available: ..." resolution tag onto videos that were downloaded before this feature existed, using [already-cached metadata](#yt-dlp-metadata-caching) (no fresh YouTube calls).
 - The existing filesystem rescan (reconciling Youtarr-Turbo's database against what's actually on disk) is unchanged from upstream but lives alongside this new tool on the same Maintenance page.
 
 ---
@@ -264,7 +276,7 @@ A handful of settings (Settings → YT-DLP) aimed at making downloads more resil
 | Watch Status | Cross-server watched-state sync | Baseline concept, Turbo depth |
 | Account Security | Password change | Baseline |
 | SponsorBlock | Segment removal, categories, custom API URL | Baseline + Turbo extra |
-| Streaming | STRM mode, media mode, cache-on-play/stealth cache, playback modes with per-mode field enforcement, hardware/network/decode tuning + three benchmarks, Stream History | Turbo — entirely new |
+| Streaming | STRM mode, media mode, cache-on-play/stealth cache, playback modes with per-mode field enforcement, hardware/network/decode tuning + three benchmarks, Stream History, [yt-dlp metadata cache](#yt-dlp-metadata-caching) management | Turbo — entirely new |
 | YouTube API | Optional YouTube Data API key | Baseline |
 
 For install/deployment instructions, screenshots, licensing, and the full upstream feature set this fork builds on, see [README.md](README.md).

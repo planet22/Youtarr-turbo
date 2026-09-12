@@ -90,7 +90,7 @@ You'll need Docker, Docker Compose, Git, and a Bash shell (Git Bash on Windows).
 
 ### Help & Support
 - [Troubleshooting Guide](docs/TROUBLESHOOTING.md) - Common issues and solutions
-- [GitHub Issues](https://github.com/DialmasterOrg/Youtarr/issues) - Report bugs or request features
+- [GitHub Issues](https://github.com/planet22/Youtarr-turbo/issues) - Report bugs or request features
 - [Discord Server](https://discord.gg/68rvWnYMtD) - Join the community for help and discussion
 
 ## Contributing

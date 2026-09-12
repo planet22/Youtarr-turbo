@@ -20,7 +20,7 @@ Youtarr ships four Compose files so each supported runtime can layer the right o
 ## Container Details
 
 ### Application Container (youtarr)
-- **Image**: `dialmaster/youtarr:latest`
+- **Image**: `ghcr.io/planet22/youtarr-turbo:latest`
 - **Exposed Ports**:
   - 3087 → 3011 (Web interface + WebSocket)
 - **Volumes**:
@@ -186,20 +186,20 @@ mkdir -p youtarr && cd youtarr
 
 ```bash
 # Download docker-compose.yml
-wget https://raw.githubusercontent.com/DialmasterOrg/Youtarr/main/docker-compose.yml
+wget https://raw.githubusercontent.com/planet22/Youtarr-turbo/main/docker-compose.yml
 
 # Download environment template
-wget https://raw.githubusercontent.com/DialmasterOrg/Youtarr/main/.env.example -O .env.example
+wget https://raw.githubusercontent.com/planet22/Youtarr-turbo/main/.env.example -O .env.example
 ```
 
 **Alternative for systems without wget:**
-- Manually copy `docker-compose.yml` from [GitHub](https://github.com/DialmasterOrg/Youtarr/blob/main/docker-compose.yml)
-- Manually copy `.env.example` from [GitHub](https://github.com/DialmasterOrg/Youtarr/blob/main/.env.example)
+- Manually copy `docker-compose.yml` from [GitHub](https://github.com/planet22/Youtarr-turbo/blob/main/docker-compose.yml)
+- Manually copy `.env.example` from [GitHub](https://github.com/planet22/Youtarr-turbo/blob/main/.env.example)
 
-**Using an external MariaDB/MySQL instance?** Download [`docker-compose.external-db.yml`](https://raw.githubusercontent.com/DialmasterOrg/Youtarr/main/docker-compose.external-db.yml) instead of `docker-compose.yml` and rename it to `docker-compose.yml` locally so the rest of this guide works unchanged:
+**Using an external MariaDB/MySQL instance?** Download [`docker-compose.external-db.yml`](https://raw.githubusercontent.com/planet22/Youtarr-turbo/main/docker-compose.external-db.yml) instead of `docker-compose.yml` and rename it to `docker-compose.yml` locally so the rest of this guide works unchanged:
 
 ```bash
-wget https://raw.githubusercontent.com/DialmasterOrg/Youtarr/main/docker-compose.external-db.yml -O docker-compose.yml
+wget https://raw.githubusercontent.com/planet22/Youtarr-turbo/main/docker-compose.external-db.yml -O docker-compose.yml
 ```
 
 You will also need to set `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, and `DB_NAME` in your `.env` (see [External Database Setup](#using-an-external-database) earlier in this document). Skip the bundled-database permission steps below if you go this route.
@@ -327,7 +327,7 @@ docker compose down
 tar -czf backup-$(date +%Y%m%d).tar.gz config jobs
 
 # 3. Download updated compose file
-wget https://raw.githubusercontent.com/DialmasterOrg/Youtarr/main/docker-compose.yml -O docker-compose.yml
+wget https://raw.githubusercontent.com/planet22/Youtarr-turbo/main/docker-compose.yml -O docker-compose.yml
 
 # 4. Pull latest images
 docker compose pull
@@ -340,8 +340,8 @@ docker compose logs -f
 ```
 
 **Notes**:
-- Check [.env.example](https://github.com/DialmasterOrg/Youtarr/blob/main/.env.example) for new variables after major updates.
-- If you originally downloaded `docker-compose.external-db.yml` for an external database setup, swap step 3 above for `wget https://raw.githubusercontent.com/DialmasterOrg/Youtarr/main/docker-compose.external-db.yml -O docker-compose.yml`. Mixing compose files across updates will silently switch you between bundled and external database modes.
+- Check [.env.example](https://github.com/planet22/Youtarr-turbo/blob/main/.env.example) for new variables after major updates.
+- If you originally downloaded `docker-compose.external-db.yml` for an external database setup, swap step 3 above for `wget https://raw.githubusercontent.com/planet22/Youtarr-turbo/main/docker-compose.external-db.yml -O docker-compose.yml`. Mixing compose files across updates will silently switch you between bundled and external database modes.
 
 ### Platform-Specific Notes
 
@@ -432,7 +432,7 @@ If you encounter issues with manual setup:
 1. Verify you followed all steps exactly as documented
 2. Check [TROUBLESHOOTING.md](TROUBLESHOOTING.md) for common issues
 3. Review Docker logs: `docker compose logs -f youtarr`
-4. When reporting issues on [GitHub](https://github.com/DialmasterOrg/Youtarr/issues):
+4. When reporting issues on [GitHub](https://github.com/planet22/Youtarr-turbo/issues):
    - Mention you're using manual installation (Method 3)
    - Provide your `.env` configuration (redact sensitive data)
    - Include relevant log output

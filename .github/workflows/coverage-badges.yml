@@ -130,7 +130,7 @@ jobs:
               echo ""
               echo "![Backend Coverage](${backend_badge})"
               echo "![Frontend Coverage](${frontend_badge})"
-              echo "![CI Status](https://github.com/DialmasterOrg/Youtarr/workflows/CI%20-%20Lint%20and%20Test/badge.svg)"
+              echo "![CI Status](https://github.com/${{ github.repository }}/workflows/CI%20-%20Lint%20and%20Test/badge.svg)"
             } | sed -i '2r /dev/stdin' README.md
           fi
 

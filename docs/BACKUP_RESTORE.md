@@ -136,8 +136,8 @@ Skips the confirmation prompt. Use with caution in scripts.
 
 3. **On the new computer:**
    ```bash
-   git clone https://github.com/DialmasterOrg/Youtarr.git
-   cd Youtarr
+   git clone https://github.com/planet22/Youtarr-turbo.git
+   cd Youtarr-turbo
    ./scripts/restore.sh /path/to/youtarr-backup.tar.gz
    ```
 
@@ -160,8 +160,8 @@ If your system drive fails but your video files survive (on external/NAS storage
 
 2. **Clone Youtarr:**
    ```bash
-   git clone https://github.com/DialmasterOrg/Youtarr.git
-   cd Youtarr
+   git clone https://github.com/planet22/Youtarr-turbo.git
+   cd Youtarr-turbo
    ```
 
 3. **Restore from your offsite backup:**

@@ -130,7 +130,7 @@ function buildCapsXml(categories = []) {
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <caps>
-<server title="Youtarr" strapline="YouTube via Newznab" version="1.0"/>
+<server title="Youtarr Turbo" strapline="YouTube via Newznab" version="1.0"/>
 <limits max="100" default="25"/>
 <searching>
 <search available="yes" supportedParams="q"/>
@@ -215,7 +215,7 @@ ${categoryAttrs}
   return `<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0" xmlns:newznab="http://www.newznab.com/DTD/2010/feeds/attributes/">
 <channel>
-<title>Youtarr</title>
+<title>Youtarr Turbo</title>
 <description>YouTube via Newznab</description>
 ${items}
 </channel>

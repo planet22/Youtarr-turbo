@@ -26,6 +26,9 @@ jobs:
 
       - name: Get version info
         id: version
+        env:
+          DOCKERHUB_USER: ${{ vars.DOCKERHUB_USERNAME }}
+          DOCKERHUB_PASS: ${{ secrets.DOCKERHUB_TOKEN }}
         run: |
           # Get short SHA for unique RC identifier
           SHORT_SHA=$(git rev-parse --short HEAD)
@@ -35,6 +38,19 @@ jobs:
           
           echo "rc_tag=${RC_TAG}" >> $GITHUB_OUTPUT
           echo "short_sha=${SHORT_SHA}" >> $GITHUB_OUTPUT
+
+          # GHCR requires a lowercase image path
+          OWNER_LC=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          echo "owner_lc=${OWNER_LC}" >> $GITHUB_OUTPUT
+
+          # Docker Hub is optional - only push there if both the username var
+          # and access token secret are actually configured on this repo.
+          if [ -n "$DOCKERHUB_USER" ] && [ -n "$DOCKERHUB_PASS" ]; then
+            echo "dockerhub_enabled=true" >> $GITHUB_OUTPUT
+          else
+            echo "⚠️ DOCKERHUB_USERNAME/DOCKERHUB_TOKEN not set, skipping Docker Hub"
+            echo "dockerhub_enabled=false" >> $GITHUB_OUTPUT
+          fi
           
           echo "🏷️ RC tag: ${RC_TAG}"
 
@@ -75,10 +91,37 @@ jobs:
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
       - name: Login to Docker Hub
+        if: ${{ steps.version.outputs.dockerhub_enabled == 'true' }}
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           username: ${{ vars.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Login to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute RC tags
+        id: rc_tags
+        env:
+          RC_TAG: ${{ steps.version.outputs.rc_tag }}
+          OWNER_LC: ${{ steps.version.outputs.owner_lc }}
+          DOCKERHUB_ENABLED: ${{ steps.version.outputs.dockerhub_enabled }}
+          DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
+        run: |
+          {
+            echo "tags<<TAGS_EOF"
+            echo "ghcr.io/${OWNER_LC}/youtarr-turbo:${RC_TAG}"
+            echo "ghcr.io/${OWNER_LC}/youtarr-turbo:dev-latest"
+            if [ "$DOCKERHUB_ENABLED" = "true" ]; then
+              echo "${DOCKERHUB_USERNAME}/youtarr-turbo:${RC_TAG}"
+              echo "${DOCKERHUB_USERNAME}/youtarr-turbo:dev-latest"
+            fi
+            echo "TAGS_EOF"
+          } >> $GITHUB_OUTPUT
 
       - name: Build and push RC Docker images
         uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # v5
@@ -86,26 +129,39 @@ jobs:
           context: .
           push: true
           platforms: linux/amd64,linux/arm64
-          tags: |
-            ${{ vars.DOCKERHUB_USERNAME }}/youtarr-turbo:${{ steps.version.outputs.rc_tag }}
-            ${{ vars.DOCKERHUB_USERNAME }}/youtarr-turbo:dev-latest
+          tags: ${{ steps.rc_tags.outputs.tags }}
           no-cache: true
 
       - name: Summary
+        env:
+          DOCKERHUB_ENABLED: ${{ steps.version.outputs.dockerhub_enabled }}
+          DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
+          RC_TAG: ${{ steps.version.outputs.rc_tag }}
+          OWNER_LC: ${{ steps.version.outputs.owner_lc }}
         run: |
           echo "## 🚀 Release Candidate Published" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Docker Images" >> $GITHUB_STEP_SUMMARY
-          echo "- \`${{ vars.DOCKERHUB_USERNAME }}/youtarr-turbo:${{ steps.version.outputs.rc_tag }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- \`${{ vars.DOCKERHUB_USERNAME }}/youtarr-turbo:dev-latest\`" >> $GITHUB_STEP_SUMMARY
+          echo "- \`ghcr.io/${OWNER_LC}/youtarr-turbo:${RC_TAG}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- \`ghcr.io/${OWNER_LC}/youtarr-turbo:dev-latest\`" >> $GITHUB_STEP_SUMMARY
+          if [ "$DOCKERHUB_ENABLED" = "true" ]; then
+            echo "- \`${DOCKERHUB_USERNAME}/youtarr-turbo:${RC_TAG}\`" >> $GITHUB_STEP_SUMMARY
+            echo "- \`${DOCKERHUB_USERNAME}/youtarr-turbo:dev-latest\`" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- _(Docker Hub skipped: DOCKERHUB_USERNAME/DOCKERHUB_TOKEN not set)_" >> $GITHUB_STEP_SUMMARY
+          fi
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Pull Commands" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
           echo "# Specific RC version" >> $GITHUB_STEP_SUMMARY
-          echo "docker pull ${{ vars.DOCKERHUB_USERNAME }}/youtarr-turbo:${{ steps.version.outputs.rc_tag }}" >> $GITHUB_STEP_SUMMARY
+          echo "docker pull ghcr.io/${OWNER_LC}/youtarr-turbo:${RC_TAG}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "# Latest dev build" >> $GITHUB_STEP_SUMMARY
-          echo "docker pull ${{ vars.DOCKERHUB_USERNAME }}/youtarr-turbo:dev-latest" >> $GITHUB_STEP_SUMMARY
+          echo "docker pull ghcr.io/${OWNER_LC}/youtarr-turbo:dev-latest" >> $GITHUB_STEP_SUMMARY
+          if [ "$DOCKERHUB_ENABLED" = "true" ]; then
+            echo "# or from Docker Hub" >> $GITHUB_STEP_SUMMARY
+            echo "docker pull ${DOCKERHUB_USERNAME}/youtarr-turbo:dev-latest" >> $GITHUB_STEP_SUMMARY
+          fi
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "⚠️ **Note:** This is a release candidate for testing. Use \`latest\` for stable releases." >> $GITHUB_STEP_SUMMARY

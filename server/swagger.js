@@ -28,9 +28,9 @@ const options = {
   definition: {
     openapi: '3.0.0',
     info: {
-      title: 'Youtarr API',
+      title: 'Youtarr Turbo API',
       version: appVersion,
-      description: 'API documentation for Youtarr - YouTube channel downloader and media server integration',
+      description: 'API documentation for Youtarr Turbo - YouTube channel downloader and media server integration',
       license: {
         name: 'ISC',
       },
@@ -131,7 +131,7 @@ const setupSwagger = (app) => {
   // Serve swagger UI at /swagger
   app.use('/swagger', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
     customCss: '.swagger-ui .topbar { display: none }',
-    customSiteTitle: 'Youtarr API Documentation',
+    customSiteTitle: 'Youtarr Turbo API Documentation',
   }));
 
   // Also expose the raw OpenAPI spec as JSON

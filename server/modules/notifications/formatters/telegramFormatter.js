@@ -95,7 +95,7 @@ function formatDownloadMessage(finalSummary, videoData) {
     }
   }
 
-  body += '\n<i>— Youtarr</i>';
+  body += '\n<i>— Youtarr Turbo</i>';
 
   return { title, body };
 }
@@ -108,7 +108,7 @@ function formatDownloadMessage(finalSummary, videoData) {
 function formatTestMessage(name) {
   return {
     title: '✅ Test Notification',
-    body: `<b>Testing: ${escapeHtml(name)}</b>\n\nYour Youtarr notifications are working correctly!\n\n📺 <b>Example Video</b>\nChannel Name - Video Title\n<i>⏱️ 10:30</i>\n\n<i>— Youtarr</i>`
+    body: `<b>Testing: ${escapeHtml(name)}</b>\n\nYour Youtarr Turbo notifications are working correctly!\n\n📺 <b>Example Video</b>\nChannel Name - Video Title\n<i>⏱️ 10:30</i>\n\n<i>— Youtarr Turbo</i>`
   };
 }
 
@@ -167,7 +167,7 @@ function formatAutoRemovalMessage(cleanupResult) {
     }
   }
 
-  body += '\n<i>— Youtarr</i>';
+  body += '\n<i>— Youtarr Turbo</i>';
 
   return { title, body };
 }

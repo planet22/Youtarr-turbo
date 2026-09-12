@@ -204,7 +204,7 @@ Note: *The `/path/to/youtube/videos` is just an example. Use the path you have c
 
 ### YOUTARR_IMAGE
 **Required**: No
-**Default**: `dialmaster/youtarr:latest`
+**Default**: `ghcr.io/planet22/youtarr-turbo:latest`
 **Description**: Docker image selection
 **Development**: Set to `youtarr-dev:latest` for local builds
 **Note**: Development scripts handle this automatically

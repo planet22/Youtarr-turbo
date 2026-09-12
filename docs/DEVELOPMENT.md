@@ -12,7 +12,7 @@ The `dev-latest` tag always points at the most recent dev build. Each commit als
 ./start.sh --dev --pull-latest
 ```
 
-This pulls `dialmaster/youtarr:dev-latest` and starts the stack. On later runs, drop `--pull-latest` if you want to stay on the image you already have locally.
+This pulls `ghcr.io/planet22/youtarr-turbo:dev-latest` and starts the stack. On later runs, drop `--pull-latest` if you want to stay on the image you already have locally.
 
 ### Alternative: bypass `./start.sh`
 
@@ -22,8 +22,8 @@ To pull the dev image while managing compose file selection yourself, use docker
 
 ```bash
 ./stop.sh
-docker pull dialmaster/youtarr:dev-latest
-YOUTARR_IMAGE=dialmaster/youtarr:dev-latest docker compose up -d
+docker pull ghcr.io/planet22/youtarr-turbo:dev-latest
+YOUTARR_IMAGE=ghcr.io/planet22/youtarr-turbo:dev-latest docker compose up -d
 ```
 
 This uses only `docker-compose.yml` and leaves your MariaDB volume config alone.
@@ -98,8 +98,8 @@ Youtarr/
 ### 1. Clone Repository
 
 ```bash
-git clone https://github.com/DialmasterOrg/Youtarr.git
-cd Youtarr
+git clone https://github.com/planet22/Youtarr-turbo.git
+cd Youtarr-turbo
 ```
 
 ### 2. Build Development Environment

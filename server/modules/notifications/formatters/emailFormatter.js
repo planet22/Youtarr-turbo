@@ -75,7 +75,7 @@ function buildEmailHtml(title, subtitle, content) {
       ${content}
     </div>
     <div class="footer">
-      Sent by Youtarr • ${new Date().toLocaleString()}
+      Sent by Youtarr Turbo • ${new Date().toLocaleString()}
     </div>
   </div>
 </body>
@@ -111,7 +111,7 @@ function formatDownloadMessage(finalSummary, videoData) {
     content += `
       <div class="warning-card">
         <strong>⚠️ ${escapeHtml(buildTerminatedCountLabel(terminatedCount))}.</strong>
-        ${terminatedItems ? `<ul>${terminatedItems}</ul>` : '<p>See Youtarr channels list for details.</p>'}
+        ${terminatedItems ? `<ul>${terminatedItems}</ul>` : '<p>See Youtarr Turbo channels list for details.</p>'}
         ${moreTerminated}
       </div>`;
   }
@@ -128,7 +128,7 @@ function formatDownloadMessage(finalSummary, videoData) {
     content += `
       <div class="warning-card">
         <strong>⚠️ ${escapeHtml(buildTerminationFailureCountLabel(terminationFailureCount))}.</strong>
-        ${failureItems ? `<ul>${failureItems}</ul>` : '<p>Check Youtarr logs for details.</p>'}
+        ${failureItems ? `<ul>${failureItems}</ul>` : '<p>Check Youtarr Turbo logs for details.</p>'}
         ${moreFailures}
       </div>`;
   }
@@ -149,7 +149,7 @@ function formatDownloadMessage(finalSummary, videoData) {
     content += `
       <div class="warning-card">
         <strong>⚠️ ${escapeHtml(buildFailedCountLabel(failedCount))}.</strong>
-        ${failedItems ? `<ul>${failedItems}</ul>` : '<p>See Youtarr download history for details.</p>'}
+        ${failedItems ? `<ul>${failedItems}</ul>` : '<p>See Youtarr Turbo download history for details.</p>'}
         ${moreFailures}
         ${diagnosisItems}
       </div>`;
@@ -190,7 +190,7 @@ function formatDownloadMessage(finalSummary, videoData) {
 function formatTestMessage(name) {
   const content = `
       <p>Testing: <strong>${escapeHtml(name)}</strong></p>
-      <p>Your Youtarr notifications are working correctly!</p>
+      <p>Your Youtarr Turbo notifications are working correctly!</p>
       <div class="video-card">
         <div class="channel-name">📺 Example Channel</div>
         <div class="video-title">Example Video Title</div>
@@ -227,7 +227,7 @@ function buildAutoRemovalEmailHtml(title, subtitle, content) {
       ${content}
     </div>
     <div class="footer">
-      Sent by Youtarr &bull; ${new Date().toLocaleString()}
+      Sent by Youtarr Turbo &bull; ${new Date().toLocaleString()}
     </div>
   </div>
 </body>

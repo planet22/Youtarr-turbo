@@ -193,7 +193,7 @@ class PlexModule {
         { strong: true },
         {
           headers: {
-            'X-Plex-Product': 'Youtarr',
+            'X-Plex-Product': 'Youtarr-Turbo',
             'X-Plex-Client-Identifier': configModule.getConfig().uuid,
           },
         }
@@ -201,7 +201,7 @@ class PlexModule {
       const { id, code } = response.data;
       const authUrl = `https://app.plex.tv/auth#?clientID=${
         configModule.getConfig().uuid
-      }&code=${code}&context%5Bdevice%5D%5Bproduct%5D=Youtarr`;
+      }&code=${code}&context%5Bdevice%5D%5Bproduct%5D=Youtarr-Turbo`;
       return { authUrl, pinId: id };
     } catch (error) {
       logger.error({ err: error }, 'Failed to generate Plex auth URL');

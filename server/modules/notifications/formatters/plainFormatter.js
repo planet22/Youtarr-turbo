@@ -105,7 +105,7 @@ function formatDownloadMessage(finalSummary, videoData) {
 function formatTestMessage(name) {
   return {
     title: '✅ Test Notification',
-    body: `Testing: ${name}\n\nYour Youtarr notifications are working correctly!\n\n📺 Example Video\nChannel Name - Video Title - 10:30`
+    body: `Testing: ${name}\n\nYour Youtarr Turbo notifications are working correctly!\n\n📺 Example Video\nChannel Name - Video Title - 10:30`
   };
 }
 

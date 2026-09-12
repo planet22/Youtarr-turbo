@@ -159,7 +159,7 @@ class MediaServerSync {
           ? `none of the downloaded items has a ${mediaType === 'audio' ? 'mp3' : 'video'} file matching the playlist's Download Type`
           : 'no downloaded items resolved yet'
         : mediaType === 'audio'
-          ? 'downloaded audio files were not found on the server. Audio playlists need a music-type library that includes the Youtarr output folder'
+          ? 'downloaded audio files were not found on the server. Audio playlists need a music-type library that includes the Youtarr Turbo output folder'
           : 'downloaded files were not found on the server yet';
       logger.info(
         { playlist_id: playlist.playlist_id, serverType },

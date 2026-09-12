@@ -36,7 +36,7 @@ function clientErrorMessage(err) {
     const status = err.response?.status;
     return status ? `request failed (HTTP ${status})` : `request failed (${err.code || 'network error'})`;
   }
-  return 'internal error during sync; check Youtarr logs';
+  return 'internal error during sync; check Youtarr Turbo logs';
 }
 
 class WatchStatusSync {

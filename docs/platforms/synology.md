@@ -77,14 +77,14 @@ cd /volume1/docker
 **Option A: Using Git** (recommended):
 ```bash
 cd /volume1/docker
-git clone https://github.com/DialmasterOrg/Youtarr.git
-cd Youtarr
+git clone https://github.com/planet22/Youtarr-turbo.git
+cd Youtarr-turbo
 ```
 
 **Option B: Manual Download**:
 1. Download the latest release from GitHub
 2. Upload to your NAS via File Station
-3. Extract to `/volume1/docker/Youtarr`
+3. Extract to `/volume1/docker/Youtarr-turbo`
 
 ---
 
@@ -993,7 +993,7 @@ rm -rf Youtarr
 - **Docker Guide**: [DOCKER.md](../DOCKER.md)
 - **Media Server Setup**: [MEDIA_SERVERS.md](../MEDIA_SERVERS.md)
 - **General Troubleshooting**: [TROUBLESHOOTING.md](../TROUBLESHOOTING.md)
-- **GitHub Issues**: [Report problems](https://github.com/DialmasterOrg/Youtarr/issues)
+- **GitHub Issues**: [Report problems](https://github.com/planet22/Youtarr-turbo/issues)
 
 ---
 
@@ -1006,7 +1006,7 @@ If you encounter issues not covered in this guide:
    docker compose logs -f
    ```
 
-2. **Search existing issues**: [GitHub Issues](https://github.com/DialmasterOrg/Youtarr/issues)
+2. **Search existing issues**: [GitHub Issues](https://github.com/planet22/Youtarr-turbo/issues)
 
 3. **Create a new issue** with:
    - Your Synology model and DSM version

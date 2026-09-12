@@ -309,7 +309,7 @@ describe('watchStatusSync', () => {
     const summary = await watchStatusSync.syncAll();
 
     // Unexpected internal errors are genericized, never rendered verbatim.
-    expect(summary.servers.plex).toEqual({ error: 'internal error during sync; check Youtarr logs' });
+    expect(summary.servers.plex).toEqual({ error: 'internal error during sync; check Youtarr Turbo logs' });
     expect(summary.servers.jellyfin).toEqual({ updated: 0 });
     expect(VideoWatchStatus.bulkCreate).not.toHaveBeenCalled();
   });

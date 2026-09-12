@@ -191,7 +191,7 @@ Usage: $START_SCRIPT_NAME [--no-auth] [--debug] [--headless-auth] [--pull-latest
                      This will disable web UI credential management (credentials set here persist)
                      To update credentials later, edit .env directly and restart Youtarr
   --pull-latest      Pull latest git commits and Docker images before starting
-  --dev              Use the bleeding-edge dev image (dialmaster/youtarr:dev-latest)
+  --dev              Use the bleeding-edge dev image (ghcr.io/planet22/youtarr-turbo:dev-latest)
                      Warning: Dev builds contain unreleased features and may be unstable
   --arm              Force ARM compose file selection (useful for Apple Silicon / Raspberry Pi)
   --external-db      Use external database compose file (docker-compose.external-db.yml)

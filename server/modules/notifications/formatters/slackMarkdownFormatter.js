@@ -116,7 +116,7 @@ function formatTestMessage(name) {
   const title = '✅ Test Notification';
   const body = `Testing webhook: *${name}*
 
-Your Youtarr notifications are working correctly!
+Your Youtarr Turbo notifications are working correctly!
 
 📺 *Example Channel*
 Example Video Title

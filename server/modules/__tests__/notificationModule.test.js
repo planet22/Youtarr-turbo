@@ -1267,7 +1267,7 @@ describe('Discord Formatter - Auto-Removal', () => {
     expect(message.embeds[0].title).toContain('Auto-Removed');
     expect(message.embeds[0].description).toContain('3.00 GB');
     expect(message.embeds[0].timestamp).toBeDefined();
-    expect(message.embeds[0].footer.text).toBe('Youtarr');
+    expect(message.embeds[0].footer.text).toBe('Youtarr Turbo');
   });
 
   it('should include age strategy field with grouped channels', () => {

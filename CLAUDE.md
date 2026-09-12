@@ -270,7 +270,7 @@ When a code change creates or invalidates information in this file or in `docs/`
 - Merging to `dev` builds an RC image (`dev-latest`, `dev-rc.<sha>`).
 - Merging `dev` -> `main` triggers a production release with semantic versioning.
 - Commit prefixes: `feat:` (minor), `fix:` (patch), `BREAKING CHANGE:` (major).
-- Docker images auto-publish to `dialmaster/youtarr` on release.
+- Docker images auto-publish to `ghcr.io/planet22/youtarr-turbo` (and Docker Hub, if configured) on release.
 
 ### PRs
 - Contributor PRs target `dev`, not `main`.

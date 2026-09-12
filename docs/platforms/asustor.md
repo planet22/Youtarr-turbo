@@ -47,5 +47,5 @@ We don't recommend editing the compose file to bump the version yourself. The ne
 
 ## Getting help
 
-- **Youtarr itself** (downloads failing, features, bugs): [GitHub issues](https://github.com/DialmasterOrg/Youtarr/issues) or the [Discord server](https://discord.gg/68rvWnYMtD)
+- **Youtarr itself** (downloads failing, features, bugs): [GitHub issues](https://github.com/planet22/Youtarr-turbo/issues) or the [Discord server](https://discord.gg/68rvWnYMtD)
 - **The App Central package** (install or update problems, packaging): the maintainer's [forum-nas.fr thread](https://www.forum-nas.fr/threads/youtarr-outil-auto-h%C3%A9berg%C3%A9-permettant-de-t%C3%A9l%C3%A9charger-automatiquement-les-vid%C3%A9os-de-vos-cha%C3%AEnes-et-playlists-youtube-pr%C3%A9f%C3%A9r%C3%A9es.27016/)

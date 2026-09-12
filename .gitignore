@@ -91,5 +91,4 @@ client/build-storybook/
 (org) docker-compose.yaml
 (org)Dockerfile
 docker-compose.yaml
-docker-compose.yml
 Dockerfile

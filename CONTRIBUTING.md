@@ -46,7 +46,7 @@ For detailed setup instructions and troubleshooting, see the [Development Guide]
 ## Ways to Contribute
 
 ### Bug Reports and Fixes
-Found a bug? Check the [GitHub Issues](https://github.com/DialmasterOrg/Youtarr/issues) to see if it's already reported. If not, create a new issue with:
+Found a bug? Check the [GitHub Issues](https://github.com/planet22/Youtarr-turbo/issues) to see if it's already reported. If not, create a new issue with:
 - Steps to reproduce
 - Expected vs actual behavior
 - Your environment (OS, Docker version, etc.)
@@ -363,9 +363,9 @@ If CI checks fail:
 
 When code is merged to `dev`, an RC build is automatically triggered:
 - Builds multi-architecture Docker images (amd64 + arm64)
-- Pushes to Docker Hub with tags:
-  - `dialmaster/youtarr:dev-latest` (always the latest dev build)
-  - `dialmaster/youtarr:dev-rc.<commit-sha>` (specific RC build)
+- Pushes to GHCR (and Docker Hub, if configured) with tags:
+  - `ghcr.io/planet22/youtarr-turbo:dev-latest` (always the latest dev build)
+  - `ghcr.io/planet22/youtarr-turbo:dev-rc.<commit-sha>` (specific RC build)
 
 These RC images allow testing bleeding-edge features before stable release.
 
@@ -377,9 +377,9 @@ When code is merged from `dev` to `main`, a production release is triggered:
 - Generates `CHANGELOG.md` entries
 - Creates GitHub release with release notes
 - Builds multi-architecture Docker images (amd64 + arm64)
-- Publishes to Docker Hub with tags:
-  - `dialmaster/youtarr:latest` (stable release for end-users)
-  - `dialmaster/youtarr:vX.X.X` (specific version)
+- Publishes to GHCR (and Docker Hub, if configured) with tags:
+  - `ghcr.io/planet22/youtarr-turbo:latest` (stable release for end-users)
+  - `ghcr.io/planet22/youtarr-turbo:vX.X.X` (specific version)
 
 You don't need to worry about versioning or releases - just use the correct commit message prefix.
 

@@ -28,14 +28,14 @@ if [ "$DEV_MODE" == "true" ]; then
     yt_success "Development image verified."
   fi
 elif [ "$USE_DEV_IMAGE" == "true" ]; then
-  export YOUTARR_IMAGE=dialmaster/youtarr:dev-latest
+  export YOUTARR_IMAGE=ghcr.io/planet22/youtarr-turbo:dev-latest
   export LOG_LEVEL="${LOG_LEVEL:-info}"
   yt_warn "⚠️  Using bleeding-edge dev image. This contains unreleased features and may be unstable."
   yt_detail "Docker image : $YOUTARR_IMAGE"
   yt_detail "For stable releases, run without --dev flag."
 else
   # Use .env value if set, otherwise default to latest stable
-  export YOUTARR_IMAGE="${YOUTARR_IMAGE:-dialmaster/youtarr:latest}"
+  export YOUTARR_IMAGE="${YOUTARR_IMAGE:-ghcr.io/planet22/youtarr-turbo:latest}"
   export LOG_LEVEL="${LOG_LEVEL:-info}"
   yt_info "Running in production mode."
   yt_detail "Docker image : $YOUTARR_IMAGE"

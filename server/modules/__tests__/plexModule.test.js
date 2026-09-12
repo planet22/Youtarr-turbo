@@ -711,13 +711,13 @@ describe('plexModule', () => {
         { strong: true },
         {
           headers: {
-            'X-Plex-Product': 'Youtarr',
+            'X-Plex-Product': 'Youtarr-Turbo',
             'X-Plex-Client-Identifier': 'test-uuid-1234'
           }
         }
       );
       expect(result).toEqual({
-        authUrl: 'https://app.plex.tv/auth#?clientID=test-uuid-1234&code=ABC123&context%5Bdevice%5D%5Bproduct%5D=Youtarr',
+        authUrl: 'https://app.plex.tv/auth#?clientID=test-uuid-1234&code=ABC123&context%5Bdevice%5D%5Bproduct%5D=Youtarr-Turbo',
         pinId: 12345
       });
     });
@@ -742,7 +742,7 @@ describe('plexModule', () => {
         expect.any(Object),
         {
           headers: {
-            'X-Plex-Product': 'Youtarr',
+            'X-Plex-Product': 'Youtarr-Turbo',
             'X-Plex-Client-Identifier': 'test-uuid-1234'
           }
         }

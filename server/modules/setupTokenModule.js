@@ -125,14 +125,14 @@ class SetupTokenModule {
     logger.warn({
       tokenPath: this.tokenPath,
       instruction: 'Read config/setup-token to complete first-time setup. The token-bearing setup log entry is emitted at info level.'
-    }, 'Youtarr initial setup required');
+    }, 'Youtarr Turbo initial setup required');
     logger.info({
       // Intentionally visible: first-time setup depends on operators seeing this
       // value in logs or reading config/setup-token. Treat forwarded logs as sensitive.
       setupToken: this.token,
       tokenPath: this.tokenPath,
-      instruction: 'Open Youtarr in a browser and paste this token to complete setup.'
-    }, 'Youtarr initial setup required');
+      instruction: 'Open Youtarr Turbo in a browser and paste this token to complete setup.'
+    }, 'Youtarr Turbo initial setup required');
   }
 }
 

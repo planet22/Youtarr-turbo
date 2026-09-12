@@ -57,7 +57,7 @@ function formatDownloadMessage(finalSummary, videoData) {
     const terminatedChannelsToShow = (finalSummary.terminatedChannels || []).slice(0, 5);
     const terminatedValue = terminatedChannelsToShow.length > 0
       ? truncateFieldValueAtLineBoundary(terminatedChannelsToShow.map(formatTerminatedChannelLine).join('\n'))
-      : 'See Youtarr channels list for details.';
+      : 'See Youtarr Turbo channels list for details.';
 
     fields.push({
       name: '⚠️ Channels marked terminated',
@@ -71,7 +71,7 @@ function formatDownloadMessage(finalSummary, videoData) {
     const failuresToShow = (finalSummary.terminationFailures || []).slice(0, 5);
     const failuresValue = failuresToShow.length > 0
       ? truncateFieldValueAtLineBoundary(failuresToShow.map(formatTerminationFailureLine).join('\n'))
-      : 'Check Youtarr logs for details.';
+      : 'Check Youtarr Turbo logs for details.';
 
     fields.push({
       name: '⚠️ Terminations not auto-disabled',
@@ -108,7 +108,7 @@ function formatDownloadMessage(finalSummary, videoData) {
     const failedVideosToShow = (finalSummary.failedVideos || []).slice(0, 5);
     const failedValue = failedVideosToShow.length > 0
       ? truncateFieldValueAtLineBoundary(failedVideosToShow.map(formatFailedVideoLine).join('\n'))
-      : 'See Youtarr download history for details.';
+      : 'See Youtarr Turbo download history for details.';
 
     fields.push({
       name: '⚠️ Failed downloads',
@@ -134,7 +134,7 @@ function formatDownloadMessage(finalSummary, videoData) {
       fields,
       timestamp: new Date().toISOString(),
       footer: {
-        text: 'Youtarr'
+        text: 'Youtarr Turbo'
       }
     }]
   };
@@ -149,11 +149,11 @@ function formatTestMessage(name) {
   return {
     embeds: [{
       title: '✅ Test Notification',
-      description: `Testing webhook: **${name}**\n\nYour Youtarr notifications are working correctly!`,
+      description: `Testing webhook: **${name}**\n\nYour Youtarr Turbo notifications are working correctly!`,
       color: 0x00ff00,
       timestamp: new Date().toISOString(),
       footer: {
-        text: 'Youtarr Notifications'
+        text: 'Youtarr Turbo Notifications'
       },
       fields: [
         {
@@ -264,7 +264,7 @@ function formatAutoRemovalMessage(cleanupResult) {
       fields,
       timestamp: new Date().toISOString(),
       footer: {
-        text: 'Youtarr'
+        text: 'Youtarr Turbo'
       }
     }]
   };

@@ -36,8 +36,8 @@ jobs:
 
       - name: Configure Git user
         run: |
-          git config --global user.email "dial.chris+youtarr_service@gmail.com"
-          git config --global user.name "Youtarr Service Account[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "github-actions[bot]"
 
       - name: Calculate next version (dry run)
         id: calculate_version
@@ -77,12 +77,39 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
+      - name: Compute image metadata
+        id: image_meta
+        env:
+          DOCKERHUB_USER: ${{ vars.DOCKERHUB_USERNAME }}
+          DOCKERHUB_PASS: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          # GHCR requires a lowercase image path
+          OWNER_LC=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          echo "owner_lc=${OWNER_LC}" >> $GITHUB_OUTPUT
+
+          # Docker Hub is optional - only push there if both the username var
+          # and access token secret are actually configured on this repo.
+          if [ -n "$DOCKERHUB_USER" ] && [ -n "$DOCKERHUB_PASS" ]; then
+            echo "dockerhub_enabled=true" >> $GITHUB_OUTPUT
+          else
+            echo "⚠️ DOCKERHUB_USERNAME/DOCKERHUB_TOKEN not set, skipping Docker Hub"
+            echo "dockerhub_enabled=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Login to Docker Hub
-        if: ${{ !inputs.dry_run && steps.calculate_version.outputs.release_type != 'none' }}
+        if: ${{ !inputs.dry_run && steps.calculate_version.outputs.release_type != 'none' && steps.image_meta.outputs.dockerhub_enabled == 'true' }}
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           username: ${{ vars.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Login to GHCR
+        if: ${{ !inputs.dry_run && steps.calculate_version.outputs.release_type != 'none' }}
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Update version in package.json files
         if: ${{ !inputs.dry_run && steps.calculate_version.outputs.release_type != 'none' }}
@@ -119,7 +146,7 @@ jobs:
           context: .
           push: false
           platforms: linux/amd64,linux/arm64
-          tags: ${{ vars.DOCKERHUB_USERNAME }}/youtarr:test-${{ github.run_id }}
+          tags: ghcr.io/${{ steps.image_meta.outputs.owner_lc }}/youtarr-turbo:test-${{ github.run_id }}
           no-cache: true
 
       - name: Record bump commit SHA
@@ -140,28 +167,50 @@ jobs:
           create_release: false
 
 
+      - name: Compute release notes
+        id: release_notes
+        if: ${{ !inputs.dry_run && steps.calculate_version.outputs.release_type != 'none' }}
+        env:
+          CHANGELOG_BODY: ${{ steps.calculate_version.outputs.changelog }}
+          NEW_TAG: ${{ steps.calculate_version.outputs.new_tag }}
+          PREVIOUS_TAG: ${{ steps.calculate_version.outputs.previous_tag }}
+          OWNER_LC: ${{ steps.image_meta.outputs.owner_lc }}
+          DOCKERHUB_ENABLED: ${{ steps.image_meta.outputs.dockerhub_enabled }}
+          DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
+          REPO: ${{ github.repository }}
+        run: |
+          {
+            echo "body<<RELEASE_BODY_EOF"
+            echo "## What's Changed"
+            echo "$CHANGELOG_BODY"
+            echo ""
+            echo "## Docker Image"
+            echo '```bash'
+            if [ "$DOCKERHUB_ENABLED" = "true" ]; then
+              echo "docker pull ${DOCKERHUB_USERNAME}/youtarr-turbo:${NEW_TAG}"
+              echo "# or"
+              echo "docker pull ${DOCKERHUB_USERNAME}/youtarr-turbo:latest"
+              echo "# or from GHCR"
+              echo "docker pull ghcr.io/${OWNER_LC}/youtarr-turbo:${NEW_TAG}"
+            else
+              echo "docker pull ghcr.io/${OWNER_LC}/youtarr-turbo:${NEW_TAG}"
+            fi
+            echo "# or"
+            echo "docker pull ghcr.io/${OWNER_LC}/youtarr-turbo:latest"
+            echo '```'
+            echo ""
+            echo "## Full Changelog"
+            echo "**Full Changelog**: https://github.com/${REPO}/compare/${PREVIOUS_TAG}...${NEW_TAG}"
+            echo "RELEASE_BODY_EOF"
+          } >> $GITHUB_OUTPUT
+
       - name: Create GitHub Release
         if: ${{ !inputs.dry_run && steps.calculate_version.outputs.release_type != 'none' }}
         uses: ncipollo/release-action@339a81892b84b4eeb0f6e744e4574d79d0d9b8dd # v1
         with:
           tag: ${{ steps.calculate_version.outputs.new_tag }}
           name: Release ${{ steps.calculate_version.outputs.new_tag }}
-          body: |
-            ## What's Changed
-            ${{ steps.calculate_version.outputs.changelog }}
-
-            ## Docker Image
-            ```bash
-            docker pull ${{ vars.DOCKERHUB_USERNAME }}/youtarr:${{ steps.calculate_version.outputs.new_tag }}
-            ```
-
-            Or use `latest`:
-            ```bash
-            docker pull ${{ vars.DOCKERHUB_USERNAME }}/youtarr:latest
-            ```
-
-            ## Full Changelog
-            **Full Changelog**: https://github.com/${{ github.repository }}/compare/${{ steps.calculate_version.outputs.previous_tag }}...${{ steps.calculate_version.outputs.new_tag }}
+          body: ${{ steps.release_notes.outputs.body }}
           draft: false
           prerelease: false
           token: ${{ secrets.ACTION_RUNNER_TOKEN }}
@@ -207,6 +256,26 @@ jobs:
         run: |
           echo "CHANGELOG_COMMIT=$(git rev-parse HEAD)" >> $GITHUB_ENV
 
+      - name: Compute release tags
+        id: release_tags
+        if: ${{ !inputs.dry_run && steps.calculate_version.outputs.release_type != 'none' }}
+        env:
+          NEW_TAG: ${{ steps.calculate_version.outputs.new_tag }}
+          OWNER_LC: ${{ steps.image_meta.outputs.owner_lc }}
+          DOCKERHUB_ENABLED: ${{ steps.image_meta.outputs.dockerhub_enabled }}
+          DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
+        run: |
+          {
+            echo "tags<<TAGS_EOF"
+            echo "ghcr.io/${OWNER_LC}/youtarr-turbo:${NEW_TAG}"
+            echo "ghcr.io/${OWNER_LC}/youtarr-turbo:latest"
+            if [ "$DOCKERHUB_ENABLED" = "true" ]; then
+              echo "${DOCKERHUB_USERNAME}/youtarr-turbo:${NEW_TAG}"
+              echo "${DOCKERHUB_USERNAME}/youtarr-turbo:latest"
+            fi
+            echo "TAGS_EOF"
+          } >> $GITHUB_OUTPUT
+
       - name: Build and push Docker images
         if: ${{ !inputs.dry_run && steps.calculate_version.outputs.release_type != 'none' }}
         uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # v5
@@ -214,9 +283,7 @@ jobs:
           context: .
           push: true
           platforms: linux/amd64,linux/arm64
-          tags: |
-            ${{ vars.DOCKERHUB_USERNAME }}/youtarr:${{ steps.calculate_version.outputs.new_tag }}
-            ${{ vars.DOCKERHUB_USERNAME }}/youtarr:latest
+          tags: ${{ steps.release_tags.outputs.tags }}
           no-cache: true
 
       - name: Announce release on Discord
@@ -243,18 +310,18 @@ jobs:
           fi
 
           jq -n \
-            --arg title "Youtarr ${NEW_TAG} Released!" \
+            --arg title "Youtarr Turbo ${NEW_TAG} Released!" \
             --arg desc "$CLEAN_CHANGELOG" \
             --arg url "$RELEASE_URL" \
             '{
-              username: "Youtarr Releases",
+              username: "Youtarr Turbo Releases",
               embeds: [{
                 title: $title,
                 description: $desc,
                 url: $url,
                 color: 5763719,
                 timestamp: (now | strftime("%Y-%m-%dT%H:%M:%SZ")),
-                footer: { text: "Youtarr" }
+                footer: { text: "Youtarr Turbo" }
               }]
             }' \
           | curl -sf -X POST "$DISCORD_WEBHOOK" \
@@ -267,8 +334,8 @@ jobs:
         if: ${{ failure() && !inputs.dry_run && steps.calculate_version.outputs.release_type != 'none' }}
         run: |
           set -e
-          git config --global user.email "dial.chris+youtarr_service@gmail.com"
-          git config --global user.name "Youtarr Service Account[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "github-actions[bot]"
           git fetch origin main
           git checkout main
           git reset --hard origin/main
@@ -329,6 +396,8 @@ jobs:
           RELEASE_TYPE: ${{ steps.calculate_version.outputs.release_type }}
           CHANGELOG_BODY: ${{ steps.calculate_version.outputs.changelog }}
           DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
+          OWNER_LC: ${{ steps.image_meta.outputs.owner_lc }}
+          DOCKERHUB_ENABLED: ${{ steps.image_meta.outputs.dockerhub_enabled }}
         run: |
           echo "🔍 DRY RUN RESULTS:"
           echo "==================="
@@ -343,8 +412,14 @@ jobs:
           echo "${CHANGELOG_BODY}"
           echo ""
           echo "Docker images that would be pushed:"
-          echo "  - ${DOCKERHUB_USERNAME}/youtarr:${NEW_TAG}"
-          echo "  - ${DOCKERHUB_USERNAME}/youtarr:latest"
+          echo "  - ghcr.io/${OWNER_LC}/youtarr-turbo:${NEW_TAG}"
+          echo "  - ghcr.io/${OWNER_LC}/youtarr-turbo:latest"
+          if [ "${DOCKERHUB_ENABLED}" = "true" ]; then
+            echo "  - ${DOCKERHUB_USERNAME}/youtarr-turbo:${NEW_TAG}"
+            echo "  - ${DOCKERHUB_USERNAME}/youtarr-turbo:latest"
+          else
+            echo "  (Docker Hub skipped: DOCKERHUB_USERNAME/DOCKERHUB_TOKEN not set)"
+          fi
           echo ""
           if [ "${RELEASE_TYPE}" = "none" ]; then
             echo "No changes detected since the last release; no build attempted in dry run."

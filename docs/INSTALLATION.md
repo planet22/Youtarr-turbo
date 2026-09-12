@@ -18,8 +18,8 @@ Choose your preferred installation method
 
 1. **Clone the repository**:
    ```bash
-   git clone https://github.com/DialmasterOrg/Youtarr.git
-   cd Youtarr
+   git clone https://github.com/planet22/Youtarr-turbo.git
+   cd Youtarr-turbo
    ```
 2. **Start Youtarr**:
    ```bash
@@ -51,8 +51,8 @@ If you prefer to use standard `docker compose up` commands:
 
 1. **Clone the repository**:
    ```bash
-   git clone https://github.com/DialmasterOrg/Youtarr.git
-   cd Youtarr
+   git clone https://github.com/planet22/Youtarr-turbo.git
+   cd Youtarr-turbo
    ```
 
 2. **Create environment configuration**:
@@ -213,7 +213,7 @@ For external access:
 
 Before upgrading, you can check if updates are available:
 
-- **View release notes and changelog**: [GitHub Releases](https://github.com/DialmasterOrg/Youtarr/releases)
+- **View release notes and changelog**: [GitHub Releases](https://github.com/planet22/Youtarr-turbo/releases)
 - **Check your current version**: Look in the footer of the Youtarr web interface
 - **Compare versions**: If your version number is older than the latest release, an update is available
 

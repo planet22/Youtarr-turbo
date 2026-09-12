@@ -217,15 +217,15 @@ describe('setupTokenModule', () => {
           tokenPath,
           instruction: 'Read config/setup-token to complete first-time setup. The token-bearing setup log entry is emitted at info level.'
         },
-        'Youtarr initial setup required'
+        'Youtarr Turbo initial setup required'
       );
       expect(logger.info).toHaveBeenCalledWith(
         {
           setupToken: mod.getToken(),
           tokenPath,
-          instruction: 'Open Youtarr in a browser and paste this token to complete setup.'
+          instruction: 'Open Youtarr Turbo in a browser and paste this token to complete setup.'
         },
-        'Youtarr initial setup required'
+        'Youtarr Turbo initial setup required'
       );
     });
   });

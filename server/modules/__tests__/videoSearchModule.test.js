@@ -193,6 +193,32 @@ describe('videoSearchModule', () => {
       expect(result.addedAt).toBeUndefined();
     });
 
+    test('parses video_resolution into localResolutionHeight for a downloaded result (the "fixed" resolution-detection tier)', async () => {
+      Video.findAll.mockResolvedValueOnce([
+        { youtubeId: 'aaaaaaaaaaa', removed: false, video_resolution: '1920x1080' },
+      ]);
+      const ndjson = JSON.stringify({ id: 'aaaaaaaaaaa', title: 'A' }) + '\n';
+      ytDlpRunner.run.mockResolvedValueOnce(ndjson);
+
+      const [result] = await videoSearchModule.searchVideos('test', 10, {});
+      expect(result.localResolutionHeight).toBe(1080);
+    });
+
+    test('localResolutionHeight is explicitly null (not left undefined) for a never_downloaded result', async () => {
+      // Unlike the other enrichment fields (databaseId, filePath, ...) in
+      // "leaves enrichment fields absent on never_downloaded results" above,
+      // this one is set unconditionally - nzb.js's "fixed" resolution check
+      // needs to distinguish "looked up, genuinely unknown" (null) from
+      // "never looked up at all" (undefined, results that bypassed
+      // searchVideos entirely).
+      Video.findAll.mockResolvedValueOnce([]);
+      const ndjson = JSON.stringify({ id: 'aaaaaaaaaaa', title: 'A' }) + '\n';
+      ytDlpRunner.run.mockResolvedValueOnce(ndjson);
+
+      const [result] = await videoSearchModule.searchVideos('test', 10, {});
+      expect(result.localResolutionHeight).toBeNull();
+    });
+
     test('addedAt is null when last_downloaded_at is missing on the record', async () => {
       Video.findAll.mockResolvedValueOnce([
         {
@@ -214,6 +240,29 @@ describe('videoSearchModule', () => {
 
       const [result] = await videoSearchModule.searchVideos('test', 10, {});
       expect(result.addedAt).toBeNull();
+    });
+  });
+
+  describe('attachLocalResolutionHeight (standalone, for callers outside searchVideos)', () => {
+    test('attaches localResolutionHeight for a known video and null for an unknown one', async () => {
+      Video.findAll.mockResolvedValueOnce([
+        { youtubeId: 'known1', video_resolution: '1280x720' },
+      ]);
+      const results = [{ youtubeId: 'known1' }, { youtubeId: 'unknown1' }];
+
+      await videoSearchModule.attachLocalResolutionHeight(results);
+
+      expect(results[0].localResolutionHeight).toBe(720);
+      expect(results[1].localResolutionHeight).toBeNull();
+      expect(Video.findAll).toHaveBeenCalledWith(expect.objectContaining({
+        where: { youtubeId: ['known1', 'unknown1'] },
+        attributes: ['youtubeId', 'video_resolution'],
+      }));
+    });
+
+    test('does nothing (no DB call) for an empty result list', async () => {
+      await videoSearchModule.attachLocalResolutionHeight([]);
+      expect(Video.findAll).not.toHaveBeenCalled();
     });
   });
 
@@ -296,11 +345,11 @@ describe('videoSearchModule', () => {
         ytDlpRunner.run.mockResolvedValueOnce(ndjson);
 
         await videoSearchModule.searchVideos('expiring query', 25, {});
-        expect(videoSearchModule.getNzbStats().cachedEntries.some((e) => e.query === 'expiring query')).toBe(true);
+        expect((await videoSearchModule.getNzbStats()).cachedEntries.some((e) => e.query === 'expiring query')).toBe(true);
 
         jest.advanceTimersByTime(11 * 60 * 1000); // past the 10-minute default TTL
 
-        expect(videoSearchModule.getNzbStats().cachedEntries.some((e) => e.query === 'expiring query')).toBe(false);
+        expect((await videoSearchModule.getNzbStats()).cachedEntries.some((e) => e.query === 'expiring query')).toBe(false);
 
         ytDlpRunner.run.mockResolvedValueOnce(ndjson);
         await videoSearchModule.searchVideos('expiring query', 25, {});

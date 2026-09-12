@@ -298,11 +298,16 @@ module.exports = function createConfigRoutes({ verifyToken, configModule, valida
     try {
       const videoSearchModule = require('../modules/videoSearchModule');
       const createNzbRoutes = require('./nzb');
-      const jobs = await createNzbRoutes.getNzbJobsSnapshot();
+      const [nzbStats, searchTraces, failedGrabs, jobs] = await Promise.all([
+        videoSearchModule.getNzbStats(),
+        createNzbRoutes.getRecentSearchTraces(),
+        createNzbRoutes.getRecentFailedGrabs(),
+        createNzbRoutes.getNzbJobsSnapshot(),
+      ]);
       res.json({
-        ...videoSearchModule.getNzbStats(),
-        searchTraces: createNzbRoutes.getRecentSearchTraces(),
-        failedGrabs: createNzbRoutes.getRecentFailedGrabs(),
+        ...nzbStats,
+        searchTraces,
+        failedGrabs,
         jobs,
       });
     } catch (err) {

@@ -42,7 +42,7 @@ function NzbPage({ token }: NzbPageProps) {
                 <NzbCacheKeySummary settings={stats?.searchSettings ?? null} />
               </Grid>
               <Grid item xs={12}>
-                <NzbRecentQueriesTable queries={stats?.recentQueries ?? []} />
+                <NzbRecentQueriesTable queries={stats?.recentQueries ?? []} traces={stats?.searchTraces ?? []} />
               </Grid>
               <Grid item xs={12}>
                 <NzbCachedQueriesTable entries={stats?.cachedEntries ?? []} onDelete={deleteCacheEntries} />

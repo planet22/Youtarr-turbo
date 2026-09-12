@@ -48,6 +48,46 @@ function resolveQualityTier(quality) {
   return tier;
 }
 
+// Ceiling applied when a result's own `definition` is known to be 'sd' (see
+// resolveEffectiveHeightTier) - the API/probe signal only distinguishes
+// HD-or-not, not an exact height, so this is the highest tier a "definitely
+// not HD" source can honestly be labeled.
+const SD_HEIGHT_CEILING = 480;
+
+/**
+ * Per-result height tier, capped below the configured/requested tier when
+ * this specific video is known NOT to be HD - the fix for the general
+ * "every result gets the same [1080p] label regardless of the source
+ * video's own resolution" problem described where resolveQualityTier is
+ * defined. Two levels of precision, in order:
+ *
+ * 1. `r.actualHeightTier` - an exact known tier, from nzb.js's "fixed" check
+ *    (a previously-downloaded video's real recorded resolution) or
+ *    nzbThumbnailProbe's real yt-dlp extraction fallback ("extract"). When
+ *    present this is authoritative - capped against configuredTier only in
+ *    case the source somehow exceeds the user's own configured ceiling.
+ * 2. `r.definition` - a coarser 'hd'/'sd' flag with no exact height, from
+ *    the YouTube Data API (contentDetails.definition, free on the same call
+ *    already used for duration) or nzbThumbnailProbe's cheap maxresdefault-
+ *    thumbnail heuristic ("thumb"). 'sd' caps to SD_HEIGHT_CEILING since
+ *    that's the most this signal can honestly promise.
+ *
+ * Both null/absent means "unknown" (yt-dlp path with no probe run or all
+ * probes disabled/failed, or a failed API call) - falls back to the old
+ * blanket-configured-tier behavior rather than guessing.
+ * @param {number} configuredTier - from resolveQualityTier(quality)
+ * @param {{definition?: string|null, actualHeightTier?: number|null}} r
+ */
+function resolveEffectiveHeightTier(configuredTier, r) {
+  if (r && typeof r.actualHeightTier === 'number' && r.actualHeightTier > 0) {
+    return Math.min(configuredTier, r.actualHeightTier);
+  }
+  if (r && r.definition === 'sd') {
+    return Math.min(configuredTier, SD_HEIGHT_CEILING);
+  }
+  return configuredTier;
+}
+
 /**
  * Rough KB/s per resolution tier, video only - same table as
  * server/routes/ytstream.js's RESOLUTION_BITRATE_KBPS (used there for
@@ -158,9 +198,10 @@ function buildCapsXml(categories = []) {
  * @param {string} [opts.quality] - preferredResolution-style string (e.g.
  *   "1080", "best") - the configured download quality, since every grab
  *   downloads at the same globally-configured quality regardless of the
- *   source video's own resolution (which flat-playlist search can't see -
- *   see nzb.js's search handler for why this isn't a real per-video probe).
- *   Drives both the `[XXXp]` title label and the file-size estimate.
+ *   source video's own resolution. This is only the CEILING for the
+ *   `[XXXp]` label and size estimate now - resolveEffectiveHeightTier caps
+ *   it per-result when a result's own `definition` says it isn't actually
+ *   HD (see that function's doc comment).
  * @param {number} [opts.season] - Sonarr/Radarr's real season number, when
  *   this was a tvsearch with a known season+episode - carried through to the
  *   download link so the eventual grab can use it instead of Youtarr's own
@@ -168,8 +209,7 @@ function buildCapsXml(categories = []) {
  * @param {number} [opts.ep] - real episode number, paired with opts.season.
  */
 function buildSearchXml(results, { categoryName, newznabCategoryIds, baseUrl, apikey, quality, season, ep }) {
-  const heightTier = resolveQualityTier(quality);
-  const qualityLabel = `[${heightTier}p]`;
+  const configuredTier = resolveQualityTier(quality);
   const seasonEpisodeParams = (season != null && ep != null)
     ? `&season=${encodeURIComponent(season)}&ep=${encodeURIComponent(ep)}`
     : '';
@@ -179,6 +219,8 @@ function buildSearchXml(results, { categoryName, newznabCategoryIds, baseUrl, ap
     .join('\n');
 
   const items = results.map((r) => {
+    const heightTier = resolveEffectiveHeightTier(configuredTier, r);
+    const qualityLabel = `[${heightTier}p]`;
     const guid = `https://www.youtube.com/watch?v=${r.youtubeId}`;
     const baseTitle = r.title || r.youtubeId;
     const title = `${baseTitle} ${qualityLabel}`;
@@ -186,10 +228,10 @@ function buildSearchXml(results, { categoryName, newznabCategoryIds, baseUrl, ap
       `${baseUrl}/nzb/download/${encodeURIComponent(categoryName)}/${encodeURIComponent(r.youtubeId)}.nzb` +
       `?title=${encodeURIComponent(baseTitle)}&apikey=${encodeURIComponent(apikey)}${seasonEpisodeParams}`;
     // Real size isn't knowable until downloaded - estimated from the video's
-    // actual duration (reliably available from search results) at the
-    // configured quality's typical bitrate, rather than one flat number for
-    // every result. Falls back to the flat placeholder only when duration
-    // itself is unavailable.
+    // actual duration (reliably available from search results) at this
+    // result's effective quality tier, rather than one flat number for every
+    // result. Falls back to the flat placeholder only when duration itself
+    // is unavailable.
     const size = typeof r.duration === 'number' && r.duration > 0
       ? estimateFileSizeBytes(heightTier, r.duration)
       : 2147483648;
@@ -320,4 +362,6 @@ module.exports = {
   buildSearchXml,
   buildNzbXml,
   parseNzbXml,
+  resolveQualityTier,
+  resolveEffectiveHeightTier,
 };

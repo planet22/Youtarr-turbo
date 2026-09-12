@@ -138,6 +138,12 @@ function normalizeVideoItem(item) {
     contentRating: contentDetails.contentRating || null,
     availability: status.privacyStatus || 'public',
     liveBroadcastContent: snippet.liveBroadcastContent || null,
+    // "hd" or "sd" - already present on the same contentDetails part this
+    // call requests for duration, at no extra quota cost. Used by the NZB
+    // Newznab search (nzbFeedModule.buildSearchXml) to avoid labeling a
+    // SD-only source as the configured download quality (e.g. "1080p") when
+    // YouTube itself says no HD version exists.
+    definition: contentDetails.definition || null,
     thumbnailUrl: snippet.thumbnails?.maxres?.url
       || snippet.thumbnails?.high?.url
       || snippet.thumbnails?.default?.url
@@ -290,6 +296,7 @@ async function searchVideos(apiKey, query, maxResults, { signal } = {}) {
             || null,
           duration: null,
           viewCount: null,
+          definition: null,
           status: 'never_downloaded',
         });
       }
@@ -315,7 +322,7 @@ async function searchVideos(apiKey, query, maxResults, { signal } = {}) {
     return trimmed.map((r) => {
       const m = byId.get(r.youtubeId);
       if (!m) return r;
-      return { ...r, duration: m.duration ?? null, viewCount: m.viewCount ?? null };
+      return { ...r, duration: m.duration ?? null, viewCount: m.viewCount ?? null, definition: m.definition ?? null };
     });
   } catch (err) {
     if (err && err.code === YoutubeApiErrorCode.CANCELED) {

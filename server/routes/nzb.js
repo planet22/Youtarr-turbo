@@ -8,6 +8,8 @@ const configModule = require('../modules/configModule');
 const videoSearchModule = require('../modules/videoSearchModule');
 const jobModule = require('../modules/jobModule');
 const nzbFeedModule = require('../modules/nzbFeedModule');
+const nzbThumbnailProbe = require('../modules/nzbThumbnailProbe');
+const nzbDiagnosticLog = require('../modules/nzbDiagnosticLog');
 const { nzbDownloadJobLabel } = require('../modules/download/jobTypes');
 const ChannelVideo = require('../models/channelvideo');
 const Video = require('../models/video');
@@ -74,6 +76,63 @@ function nearestAllowedCount(requested) {
 function minAllowedCountAtLeast(needed) {
   const found = ALLOWED_SEARCH_COUNTS.find((c) => c >= needed);
   return found !== undefined ? found : ALLOWED_SEARCH_COUNTS[ALLOWED_SEARCH_COUNTS.length - 1];
+}
+
+// nzb.resolutionDetection.{fixed,thumb,extract} (Settings -> Sonarr/Radarr/
+// Prowlarr (NZB) -> Video Actual Resolution) - see configSchema.ts's default
+// for the full fallback-chain explanation. All default true for configs
+// saved before this setting existed.
+function getResolutionDetectionConfig(cfg) {
+  const rd = cfg.nzb?.resolutionDetection || {};
+  return {
+    fixed: rd.fixed !== false,
+    thumb: rd.thumb !== false,
+    extract: rd.extract !== false,
+  };
+}
+
+/**
+ * Determines each result's real resolution, mutating `results` in place with
+ * `definition`/`actualHeightTier`/`resolutionSource` - the "fixed" tier of
+ * the chain (a previously-downloaded video's own known resolution) plus
+ * whatever of "thumb"/"extract" nzbThumbnailProbe still needs to fill in.
+ * Shared between the real search branch and the blank-query RSS-mode branch
+ * below, both of which end in nzbFeedModule.buildSearchXml.
+ * @param {Array<object>} results - the FINAL result set only (post-filter,
+ *   post offset/limit slice) - see fillUnknownDefinitions's own doc comment
+ *   for why this never runs against the larger raw candidate set.
+ * @param {ReturnType<typeof getResolutionDetectionConfig>} resolutionDetection
+ */
+async function applyResolutionDetection(results, resolutionDetection) {
+  if (resolutionDetection.fixed) {
+    const needsLocalLookup = results.filter((r) => r.localResolutionHeight === undefined);
+    if (needsLocalLookup.length > 0) {
+      await videoSearchModule.attachLocalResolutionHeight(needsLocalLookup);
+    }
+    for (const r of results) {
+      if (typeof r.localResolutionHeight === 'number' && r.localResolutionHeight > 0) {
+        r.definition = r.localResolutionHeight >= 720 ? 'hd' : 'sd';
+        r.actualHeightTier = nzbFeedModule.resolveQualityTier(String(r.localResolutionHeight));
+        r.resolutionSource = 'fixed';
+      }
+    }
+  }
+
+  // Whatever the API already enriched (contentDetails.definition) came in
+  // with `definition` already set before this function ran at all - tag its
+  // source now, before fillUnknownDefinitions below only touches the items
+  // still null, so the debug trace can tell "YouTube's own metadata" apart
+  // from "fixed"/"thumb"/"extract".
+  for (const r of results) {
+    if (r.definition != null && r.resolutionSource === undefined) {
+      r.resolutionSource = 'api';
+    }
+  }
+
+  await nzbThumbnailProbe.fillUnknownDefinitions(results, {
+    useThumb: resolutionDetection.thumb,
+    useExtract: resolutionDetection.extract,
+  });
 }
 
 // SABnzbd's timeleft is "H:MM:SS" (no zero-padded hours).
@@ -719,15 +778,13 @@ function applyLocalTitleFilter(results, query, opts = {}) {
 // of whether additionalLocalFilter is even on, so the raw candidate list is
 // always inspectable - not just the ones that got rejected.
 const MAX_SEARCH_TRACES = 20;
-const searchTraces = [];
 
-function recordSearchTrace(trace) {
-  searchTraces.unshift(trace);
-  if (searchTraces.length > MAX_SEARCH_TRACES) searchTraces.length = MAX_SEARCH_TRACES;
+async function recordSearchTrace(trace) {
+  await nzbDiagnosticLog.recordDiagnosticEvent('trace', trace, MAX_SEARCH_TRACES);
 }
 
-function getRecentSearchTraces() {
-  return searchTraces;
+async function getRecentSearchTraces() {
+  return nzbDiagnosticLog.getDiagnosticEvents('trace', MAX_SEARCH_TRACES);
 }
 
 // Rolling list of NZB grabs that completed with nothing to show for it (see
@@ -739,25 +796,28 @@ function getRecentSearchTraces() {
 // so Sonarr/Radarr's repeated history polling doesn't push the same failure
 // in over and over.
 const MAX_FAILED_GRABS = 20;
-const failedGrabs = [];
+// Dedup only, not the log itself (that's nzb_diagnostic_log now) - reset on
+// restart, so a job whose failure was already recorded before a restart can
+// in theory be recorded a second time by the next history poll. Harmless:
+// worst case is one duplicate row that ages out of the last-20 window like
+// any other.
 const recordedFailedGrabJobIds = new Set();
 
-function recordFailedGrab(job, message) {
+async function recordFailedGrab(job, message) {
   if (recordedFailedGrabJobIds.has(job.id)) return;
   recordedFailedGrabJobIds.add(job.id);
-  failedGrabs.unshift({
+  await nzbDiagnosticLog.recordDiagnosticEvent('failedGrab', {
     jobId: String(job.id),
     categoryName: job.data?.nzb?.categoryName || null,
     youtubeId: job.data?.nzb?.youtubeId || null,
     nzbName: job.data?.nzb?.nzbName || null,
     message,
     timestamp: Date.now(),
-  });
-  if (failedGrabs.length > MAX_FAILED_GRABS) failedGrabs.length = MAX_FAILED_GRABS;
+  }, MAX_FAILED_GRABS);
 }
 
-function getRecentFailedGrabs() {
-  return failedGrabs;
+async function getRecentFailedGrabs() {
+  return nzbDiagnosticLog.getDiagnosticEvents('failedGrab', MAX_FAILED_GRABS);
 }
 
 /**
@@ -775,7 +835,7 @@ async function resolveNzbJobOutcome(job) {
   const videoRow = explicitlyFailed ? null : await resolveNzbVideoRow(job);
   const failed = explicitlyFailed || !videoRow;
   if (failed && !explicitlyFailed) {
-    recordFailedGrab(job, 'Completed with no video file produced - check server logs for the underlying error (e.g. age-restricted content, yt-dlp bot-check, network failure).');
+    await recordFailedGrab(job, 'Completed with no video file produced - check server logs for the underlying error (e.g. age-restricted content, yt-dlp bot-check, network failure).');
   }
   return { failed, explicitlyFailed, videoRow };
 }
@@ -979,6 +1039,10 @@ module.exports = function createNzbRoutes() {
             title: v.title,
             publishedAt: v.publishedAt,
           }));
+          // These never went through videoSearchModule, so `definition` is
+          // always unset here - same resolution detection as the real search
+          // branch above.
+          await applyResolutionDetection(results, getResolutionDetectionConfig(cfg));
           res.type('application/xml').send(nzbFeedModule.buildSearchXml(results, responseOpts));
         } catch (err) {
           logger.error({ err }, 'nzb: RSS-mode (blank query) lookup failed');
@@ -1025,7 +1089,12 @@ module.exports = function createNzbRoutes() {
           }
         }
 
-        const rawResults = await videoSearchModule.searchVideos(newquery, fetchCount, { origin: 'nzb' });
+        // Shared between the Recent Query record (videoSearchModule.js) and
+        // the search trace recorded below - lets the diagnostics page's
+        // Recent Queries table link a row straight to its own trace's
+        // full candidate breakdown instead of just showing resultCount.
+        const searchId = crypto.randomUUID();
+        const rawResults = await videoSearchModule.searchVideos(newquery, fetchCount, { origin: 'nzb', searchId });
         let results = rawResults;
 
         // Per-candidate verdict (kept/rejected + why) - computed regardless
@@ -1072,7 +1141,35 @@ module.exports = function createNzbRoutes() {
         // just an empty page, not an error.
         results = results.slice(offset, offset + limit);
 
-        recordSearchTrace({
+        // Best-effort resolution detection for whatever's left in `results` -
+        // deliberately AFTER filtering/slicing above, not on the full
+        // fetchCount-sized rawResults: raw candidates routinely outnumber
+        // what actually survives the local title filter and page slice, and
+        // probing one about to be discarded would be wasted work. See
+        // applyResolutionDetection's doc comment for the fixed/api/thumb/
+        // extract fallback chain this runs.
+        await applyResolutionDetection(results, getResolutionDetectionConfig(cfg));
+
+        // Attach the resolution info just determined onto the matching trace
+        // items, so the diagnostics dialog can show, per kept item, the
+        // actual [XXXp] label it'll be sent to Sonarr/Radarr with (and which
+        // method decided it) - not just whether the title filter kept it.
+        // Only items in this page (`results`, post-slice) were ever probed;
+        // a kept item that fell outside this page (a later offset request
+        // would return it instead) gets no resolution info here, same as a
+        // rejected one.
+        const configuredHeightTier = nzbFeedModule.resolveQualityTier(cfg.preferredResolution);
+        const resultByYoutubeId = new Map(results.map((r) => [r.youtubeId, r]));
+        for (const item of traceItems) {
+          const r = resultByYoutubeId.get(item.youtubeId);
+          if (!r) continue;
+          item.definition = r.definition ?? null;
+          item.effectiveHeightTier = nzbFeedModule.resolveEffectiveHeightTier(configuredHeightTier, r);
+          item.resolutionSource = r.resolutionSource ?? null;
+        }
+
+        await recordSearchTrace({
+          searchId,
           timestamp: Date.now(),
           categoryName: category.name,
           searchType: t,
@@ -1083,6 +1180,7 @@ module.exports = function createNzbRoutes() {
           additionalLocalFilterEnabled: Boolean(category.additionalLocalFilter),
           offset,
           limit,
+          configuredHeightTier,
           items: traceItems,
         });
 
@@ -1424,13 +1522,13 @@ module.exports = function createNzbRoutes() {
 module.exports.titleMatchesEpisodeCode = titleMatchesEpisodeCode;
 module.exports.applyLocalTitleFilter = applyLocalTitleFilter;
 module.exports.evaluateTitleFilter = evaluateTitleFilter;
+module.exports.getResolutionDetectionConfig = getResolutionDetectionConfig;
+module.exports.applyResolutionDetection = applyResolutionDetection;
 // Real production use (not just testability, unlike the two above): the
 // NZB diagnostics page's GET /api/nzb/stats (server/routes/config.js) reads
-// this same factory-function property to surface the per-search trace -
-// works because createNzbRoutes is a function object, and Node caches
-// require() results, so every require('./nzb') (this route registration in
-// server/routes/index.js, and config.js's lazy require) shares the same
-// in-memory searchTraces array.
+// this same factory-function property to surface the per-search trace and
+// failed-grab tables - both now backed by the persisted nzb_diagnostic_log
+// table (see nzbDiagnosticLog.js), not an in-memory array.
 module.exports.getRecentSearchTraces = getRecentSearchTraces;
 module.exports.getRecentFailedGrabs = getRecentFailedGrabs;
 module.exports.getNzbJobsSnapshot = getNzbJobsSnapshot;

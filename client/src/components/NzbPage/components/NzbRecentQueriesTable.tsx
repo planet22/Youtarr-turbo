@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   Paper,
   Table,
@@ -9,19 +9,31 @@ import {
   TableRow,
   Typography,
   Chip,
+  Button,
   Box,
 } from '../../ui';
 import { useMediaQuery } from '../../../hooks/useMediaQuery';
-import { NzbRecentQuery } from '../../../hooks/useNzbStats';
+import { NzbRecentQuery, NzbSearchTrace } from '../../../hooks/useNzbStats';
 import { formatDurationMs, formatRelativeTime } from '../utils';
 import NzbSettingsIcons from './NzbSettingsIcons';
+import NzbSearchTraceDialog from './NzbSearchTraceDialog';
 import { COMPACT_CHIP_STYLE } from './nzbMobileStyles';
 
 interface NzbRecentQueriesTableProps {
   queries: NzbRecentQuery[];
+  // Used to look up the matching search trace (same searchId) for the
+  // "View" link - see recordSearchTrace/recordNzbQuery on the server for
+  // where the two get tagged with the same id.
+  traces: NzbSearchTrace[];
 }
 
-function NzbRecentQueriesMobileList({ queries }: NzbRecentQueriesTableProps) {
+interface NzbRecentQueriesListProps {
+  queries: NzbRecentQuery[];
+  onSelect: (trace: NzbSearchTrace) => void;
+  findTrace: (searchId: string | undefined) => NzbSearchTrace | undefined;
+}
+
+function NzbRecentQueriesMobileList({ queries, onSelect, findTrace }: NzbRecentQueriesListProps) {
   if (queries.length === 0) {
     return (
       <Typography variant="body2" color="textSecondary" style={{ padding: '8px 16px 16px' }}>
@@ -31,18 +43,25 @@ function NzbRecentQueriesMobileList({ queries }: NzbRecentQueriesTableProps) {
   }
   return (
     <Box style={{ maxHeight: 420, overflowY: 'auto' }}>
-      {queries.map((q, index) => (
+      {queries.map((q, index) => {
+        const trace = findTrace(q.searchId);
+        return (
         <Box
           key={`${q.timestamp}-${index}`}
           style={{ padding: '10px 16px', borderBottom: '1px solid var(--border)' }}
         >
-          <Typography
-            variant="body2"
-            className="font-semibold"
-            style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}
-          >
-            {q.query || <em>(blank / RSS mode)</em>}
-          </Typography>
+          <Box style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
+            <Typography
+              variant="body2"
+              className="font-semibold"
+              style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}
+            >
+              {q.query || <em>(blank / RSS mode)</em>}
+            </Typography>
+            {trace && (
+              <Button size="small" onClick={() => onSelect(trace)} style={{ flexShrink: 0 }}>View</Button>
+            )}
+          </Box>
           <Box style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap', marginTop: 4 }}>
             <Chip size="small" label={`Count: ${q.count}`} variant="outlined" style={COMPACT_CHIP_STYLE} />
             <Chip size="small" label={`Results: ${q.resultCount}`} variant="outlined" style={COMPACT_CHIP_STYLE} />
@@ -61,17 +80,22 @@ function NzbRecentQueriesMobileList({ queries }: NzbRecentQueriesTableProps) {
             </Typography>
           </Box>
         </Box>
-      ))}
+        );
+      })}
     </Box>
   );
 }
 
 // Column widths/order are shared with NzbCachedQueriesTable (see its own
-// comment) - the first (checkbox) and last (delete) columns don't apply
-// here, so they're rendered blank rather than omitted, keeping every column
-// position lined up between the two stacked tables.
-function NzbRecentQueriesTable({ queries }: NzbRecentQueriesTableProps) {
+// comment) - the first (checkbox) column doesn't apply here, so it's
+// rendered blank rather than omitted, keeping every column position lined
+// up between the two stacked tables. The last column reuses that same
+// width for a "View" link into the matching search trace, when one exists.
+function NzbRecentQueriesTable({ queries, traces }: NzbRecentQueriesTableProps) {
   const isMobile = useMediaQuery('(max-width: 767px)');
+  const [selected, setSelected] = useState<NzbSearchTrace | null>(null);
+  const findTrace = (searchId: string | undefined) =>
+    searchId ? traces.find((t) => t.searchId === searchId) : undefined;
 
   return (
     <Paper variant="outlined" style={{ overflow: 'hidden' }}>
@@ -82,7 +106,7 @@ function NzbRecentQueriesTable({ queries }: NzbRecentQueriesTableProps) {
         </Typography>
       </Box>
       {isMobile ? (
-        <NzbRecentQueriesMobileList queries={queries} />
+        <NzbRecentQueriesMobileList queries={queries} onSelect={setSelected} findTrace={findTrace} />
       ) : (
       <TableContainer style={{ maxHeight: 420, overflowY: 'auto' }}>
         <Table size="small">
@@ -109,7 +133,9 @@ function NzbRecentQueriesTable({ queries }: NzbRecentQueriesTableProps) {
                 </TableCell>
               </TableRow>
             )}
-            {queries.map((q, index) => (
+            {queries.map((q, index) => {
+              const trace = findTrace(q.searchId);
+              return (
               <TableRow hover key={`${q.timestamp}-${index}`}>
                 <TableCell />
                 <TableCell style={{ maxWidth: 320, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -130,13 +156,17 @@ function NzbRecentQueriesTable({ queries }: NzbRecentQueriesTableProps) {
                 </TableCell>
                 <TableCell>{formatRelativeTime(q.timestamp)}</TableCell>
                 <TableCell>{formatDurationMs(q.durationMs)}</TableCell>
-                <TableCell />
+                <TableCell>
+                  {trace && <Button size="small" onClick={() => setSelected(trace)}>View</Button>}
+                </TableCell>
               </TableRow>
-            ))}
+              );
+            })}
           </TableBody>
         </Table>
       </TableContainer>
       )}
+      <NzbSearchTraceDialog trace={selected} onClose={() => setSelected(null)} />
     </Paper>
   );
 }

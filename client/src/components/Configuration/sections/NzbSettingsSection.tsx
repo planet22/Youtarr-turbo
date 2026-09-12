@@ -131,6 +131,13 @@ export const NzbSettingsSection: React.FC<Props> = ({
     onConfigChange({ nzb: { ...nzb, ...patch } });
   };
 
+  const resolutionDetection = nzb.resolutionDetection ?? { fixed: true, thumb: true, extract: true };
+  const setResolutionDetection = (patch: Partial<typeof resolutionDetection>) => {
+    setNzb({ resolutionDetection: { ...resolutionDetection, ...patch } });
+  };
+  const allResolutionChecksOff =
+    !resolutionDetection.fixed && !resolutionDetection.thumb && !resolutionDetection.extract;
+
   const updateCategory = (index: number, patch: Partial<NzbCategory>) => {
     const next = nzb.categories.slice();
     next[index] = { ...next[index], ...patch };
@@ -349,6 +356,75 @@ export const NzbSettingsSection: React.FC<Props> = ({
               onMobileClick={onMobileTooltipClick}
             />
           </Box>
+        </Grid>
+
+        <Grid item xs={12}>
+          <Typography variant="subtitle2" className="mt-2 mb-1">
+            Video Actual Resolution
+          </Typography>
+          <Typography variant="body2" color="textSecondary" className="mb-2">
+            Every search result's title/size is labeled at the download quality configured in
+            yt-dlp Options - Sonarr/Radarr read that label as the actual quality on offer. These
+            checks try to catch a video that can't really deliver that quality (e.g. an old,
+            low-resolution upload) and label it lower instead. Tried in this order, each a
+            fallback for the one before it - if Fixed and Thumbnail check are both off, Real
+            extraction (when on) is used directly for every result instead of only as a
+            fallback.
+          </Typography>
+          <Box className="flex flex-col gap-1">
+            <Box className="flex items-center">
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={resolutionDetection.fixed}
+                    onChange={(e) => setResolutionDetection({ fixed: e.target.checked })}
+                  />
+                }
+                label="Fixed (previously downloaded)"
+              />
+              <InfoTooltip
+                text="Free and exact: if Youtarr-Turbo has already downloaded this video, uses its real measured resolution instead of guessing. Only applies to a video Youtarr-Turbo already has - never-downloaded results fall through to the checks below."
+                onMobileClick={onMobileTooltipClick}
+              />
+            </Box>
+            <Box className="flex items-center">
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={resolutionDetection.thumb}
+                    onChange={(e) => setResolutionDetection({ thumb: e.target.checked })}
+                  />
+                }
+                label="Thumbnail check"
+              />
+              <InfoTooltip
+                text="Cheap heuristic used only when the video's resolution isn't already free/known (yt-dlp fallback searches - the YouTube Data API, when in use, already answers this for free): checks whether YouTube's largest thumbnail is a real image or a placeholder. Fast, but can occasionally mislabel an old, low-resolution video as HD, since YouTube sometimes regenerates a video's thumbnail at a higher quality than the video itself."
+                onMobileClick={onMobileTooltipClick}
+              />
+            </Box>
+            <Box className="flex items-center">
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={resolutionDetection.extract}
+                    onChange={(e) => setResolutionDetection({ extract: e.target.checked })}
+                  />
+                }
+                label="Real extraction (accurate, slower)"
+              />
+              <InfoTooltip
+                text="Authoritative but slow: runs a real yt-dlp lookup of the video's actual formats. Used to confirm or correct an uncertain/'HD' thumbnail check result - or, if Fixed and Thumbnail check are both off, used directly for every result. Adds real time to each search response and, at heavy search volume, some risk of YouTube rate-limiting - leave this off if that's a concern for your setup."
+                onMobileClick={onMobileTooltipClick}
+              />
+            </Box>
+          </Box>
+          {allResolutionChecksOff && (
+            <Alert severity="warning" className="mt-2">
+              All resolution checks are off - every search result will be labeled at the
+              configured download quality above, even when the source video is actually much
+              lower resolution.
+            </Alert>
+          )}
         </Grid>
 
         <Grid item xs={12}>

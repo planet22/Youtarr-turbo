@@ -414,6 +414,32 @@ export const CONFIG_FIELDS = {
       // decouples the two, same as ytstream.debugLogging above - see
       // nzbDebug in server/routes/nzb.js.
       debugLogging: false as boolean,
+      // How a search result's real resolution is determined when it isn't
+      // already known for free (the YouTube Data API's contentDetails.
+      // definition, when that backend is in use) - see
+      // server/modules/nzbFeedModule.js's resolveEffectiveHeightTier and
+      // server/routes/nzb.js's search handler. Tried in this order, each a
+      // fallback for the one before it; a video that reaches none of them
+      // (or every enabled one fails/is inconclusive) is labeled at the
+      // plain configured download quality, same as before any of this
+      // existed:
+      //   fixed:   a previously-downloaded video's own real recorded
+      //            resolution (Videos.video_resolution) - free, exact, but
+      //            only ever applies to a video Youtarr already has.
+      //   thumb:   nzbThumbnailProbe's maxresdefault-thumbnail heuristic -
+      //            cheap, but a "hd" answer can be a false positive (see
+      //            probeViaExtraction's doc comment).
+      //   extract: a REAL yt-dlp extraction of the video's watch page -
+      //            authoritative, but noticeably slower and more likely to
+      //            draw YouTube's rate-limiting attention if run often, so
+      //            it's only ever used to confirm/correct thumb's uncertain
+      //            or "hd" results. If fixed and thumb are both off, this
+      //            becomes the only remaining check and runs directly.
+      resolutionDetection: {
+        fixed: true,
+        thumb: true,
+        extract: true,
+      } as { fixed: boolean; thumb: boolean; extract: boolean },
       categories: [] as Array<{
         name: string;
         subfolder: string | null;

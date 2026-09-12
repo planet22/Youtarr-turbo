@@ -3,6 +3,7 @@ const ytdlpCommandBuilder = require('./download/ytdlpCommandBuilder');
 const logger = require('../logger');
 const { Video } = require('../models');
 const youtubeApi = require('./youtubeApi');
+const nzbDiagnosticLog = require('./nzbDiagnosticLog');
 
 const SEARCH_TIMEOUT_MS = 60_000;
 const ALLOWED_COUNTS = [10, 25, 50, 100];
@@ -12,6 +13,44 @@ class SearchCanceledError extends Error {
 }
 class SearchTimeoutError extends Error {
   constructor() { super('Search timed out'); this.name = 'SearchTimeoutError'; }
+}
+
+/**
+ * Parses Videos.video_resolution ("WIDTHxHEIGHT", e.g. "1920x1080", as
+ * written by resolutionTier.js's ffprobe measurement) down to just the pixel
+ * height. Shared by _applyLocalStatus and attachLocalResolutionHeight below.
+ * @returns {number|null}
+ */
+function parseResolutionHeight(video_resolution) {
+  if (!video_resolution) return null;
+  const match = /^(\d+)x(\d+)$/.exec(String(video_resolution).trim());
+  if (!match) return null;
+  const height = Number.parseInt(match[2], 10);
+  return Number.isFinite(height) && height > 0 ? height : null;
+}
+
+/**
+ * Standalone version of _applyLocalStatus's video_resolution lookup, for
+ * callers that build their own result list without going through
+ * searchVideos() at all - specifically nzb.js's blank-query "RSS mode"
+ * branch, whose results come straight from ChannelVideo, not this module.
+ * Mutates `results` in place, setting `localResolutionHeight` (see
+ * _applyLocalStatus's doc comment) on every entry with a youtubeId, null
+ * when never downloaded or genuinely unmeasured.
+ * @param {Array<{youtubeId: string}>} results
+ */
+async function attachLocalResolutionHeight(results) {
+  const youtubeIds = results.map((r) => r.youtubeId).filter(Boolean);
+  if (youtubeIds.length === 0) return;
+  const existing = await Video.findAll({
+    where: { youtubeId: youtubeIds },
+    attributes: ['youtubeId', 'video_resolution'],
+  });
+  const byYoutubeId = new Map(existing.map((v) => [v.youtubeId, v]));
+  for (const r of results) {
+    const record = byYoutubeId.get(r.youtubeId);
+    r.localResolutionHeight = record ? parseResolutionHeight(record.video_resolution) : null;
+  }
 }
 
 // Raw (pre-local-status, pre-sort) search results, keyed by the exact
@@ -40,26 +79,30 @@ const nzbStats = {
   totalQueries: 0,
   cacheHits: 0,
   cacheMisses: 0,
-  recentQueries: [],
   recentTimestamps: [],
 };
 
-function recordNzbQuery({ query, count, source, cacheHit, resultCount, durationMs, settingsSnapshot }) {
+// recentQueries itself is persisted (see nzbDiagnosticLog.js) so it survives
+// a restart; totalQueries/cacheHits/recentTimestamps stay as plain running
+// counters in memory - they're aggregate stats, not a log of entries, and
+// resetting to 0 on restart is fine for them.
+async function recordNzbQuery({ searchId, query, count, source, cacheHit, resultCount, durationMs, settingsSnapshot }) {
   const now = Date.now();
   nzbStats.totalQueries += 1;
   if (cacheHit) nzbStats.cacheHits += 1;
   else nzbStats.cacheMisses += 1;
-
-  nzbStats.recentQueries.unshift({ query, count, source, cacheHit, resultCount, durationMs, settingsSnapshot, timestamp: now });
-  if (nzbStats.recentQueries.length > MAX_RECENT_NZB_QUERIES) {
-    nzbStats.recentQueries.length = MAX_RECENT_NZB_QUERIES;
-  }
 
   nzbStats.recentTimestamps.push(now);
   const cutoff = now - QPM_WINDOW_MS;
   while (nzbStats.recentTimestamps.length && nzbStats.recentTimestamps[0] < cutoff) {
     nzbStats.recentTimestamps.shift();
   }
+
+  await nzbDiagnosticLog.recordDiagnosticEvent(
+    'query',
+    { searchId, query, count, source, cacheHit, resultCount, durationMs, settingsSnapshot, timestamp: now },
+    MAX_RECENT_NZB_QUERIES
+  );
 }
 
 // rawResultsCache is never proactively swept on a timer - entries only ever
@@ -125,27 +168,28 @@ function getSearchSettingsSummary() {
   };
 }
 
-function getNzbStats() {
+async function getNzbStats() {
   const now = Date.now();
   const cutoff = now - QPM_WINDOW_MS;
   // recentTimestamps is already pruned to the window on every write, but
   // pruning only happens on the next recordNzbQuery call - filter again here
   // so a stats read during a quiet period doesn't report a stale rate.
   const windowCount = nzbStats.recentTimestamps.filter((t) => t >= cutoff).length;
+  const recentQueries = await nzbDiagnosticLog.getDiagnosticEvents('query', MAX_RECENT_NZB_QUERIES);
   return {
     totalQueries: nzbStats.totalQueries,
     cacheHits: nzbStats.cacheHits,
     cacheMisses: nzbStats.cacheMisses,
     cacheHitRate: nzbStats.totalQueries > 0 ? nzbStats.cacheHits / nzbStats.totalQueries : 0,
     queriesPerMinute: windowCount / (QPM_WINDOW_MS / 60_000),
-    recentQueries: nzbStats.recentQueries,
+    recentQueries,
     cachedEntries: getCacheSnapshot(),
     searchSettings: getSearchSettingsSummary(),
   };
 }
 
 class VideoSearchModule {
-  async searchVideos(query, count, { signal, origin } = {}) {
+  async searchVideos(query, count, { signal, origin, searchId } = {}) {
     if (!ALLOWED_COUNTS.includes(count)) {
       throw new Error(`count must be one of ${ALLOWED_COUNTS.join(', ')}`);
     }
@@ -163,7 +207,13 @@ class VideoSearchModule {
     logger.info({ query, count, resultCount: resultsCopy.length, source }, 'video search complete');
 
     if (origin === 'nzb') {
-      recordNzbQuery({
+      await recordNzbQuery({
+        // Set by nzb.js's search handler (undefined for anything else that
+        // might one day pass origin: 'nzb') - lets the diagnostics page's
+        // Recent Queries table link a row to its matching search trace
+        // (server/routes/nzb.js's recordSearchTrace), which carries the same
+        // searchId.
+        searchId,
         query,
         count,
         source,
@@ -323,6 +373,12 @@ class VideoSearchModule {
       thumbnailUrl,
       publishedAt,
       viewCount: typeof entry.view_count === 'number' ? entry.view_count : null,
+      // Flat-playlist yt-dlp entries carry no resolution/format data at all
+      // (that's the whole point of --flat-playlist) - null here means
+      // "unknown", same as a failed YouTube API enrichment, so downstream
+      // consumers (nzb.js's thumbnail-probe fallback) treat both the same
+      // way rather than needing to know which backend answered the search.
+      definition: null,
       status: 'never_downloaded',
     };
   }
@@ -362,12 +418,22 @@ class VideoSearchModule {
         'protected',
         'normalized_rating',
         'rating_source',
+        'video_resolution',
       ],
     });
     const recordByYoutubeId = new Map(existing.map(v => [v.youtubeId, v]));
     for (const r of results) {
+      // Set unconditionally, unlike the other enrichment fields below (which
+      // deliberately stay undefined for a never-downloaded result) - nzb.js's
+      // "fixed" resolution-detection check (applyResolutionDetection) needs
+      // to tell "already looked this up, genuinely unknown" (null) apart
+      // from "never went through this method at all" (undefined, e.g. its
+      // own RSS-mode branch that bypasses searchVideos), so it can skip a
+      // redundant re-lookup only in the first case.
+      r.localResolutionHeight = null;
       const record = recordByYoutubeId.get(r.youtubeId);
       if (!record) continue;
+      r.localResolutionHeight = parseResolutionHeight(record.video_resolution);
       r.status = record.removed ? 'missing' : 'downloaded';
       r.databaseId = record.id;
       r.filePath = record.filePath;
@@ -399,3 +465,4 @@ module.exports.SearchTimeoutError = SearchTimeoutError;
 module.exports.ALLOWED_COUNTS = ALLOWED_COUNTS;
 module.exports.getNzbStats = getNzbStats;
 module.exports.deleteCacheEntries = deleteCacheEntries;
+module.exports.attachLocalResolutionHeight = attachLocalResolutionHeight;

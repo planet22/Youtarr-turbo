@@ -93,6 +93,52 @@ function reasonMessage(item: NzbSearchTraceItem, trace: NzbSearchTrace): string 
   }
 }
 
+// Which nzb.resolutionDetection check produced a result's definition/
+// effectiveHeightTier - shown in the resolution chip's tooltip so a capped
+// (or uncapped) label's origin is legible without cross-referencing the
+// settings page. See nzb.js's applyResolutionDetection.
+const RESOLUTION_SOURCE_LABEL: Record<'fixed' | 'api' | 'thumb' | 'extract', string> = {
+  fixed: 'a previous download’s known resolution',
+  api: 'the YouTube Data API',
+  thumb: 'a thumbnail check',
+  extract: 'a real yt-dlp extraction',
+};
+
+// Per-item resolution cell, shown only for kept items - a rejected item was
+// never labeled with any quality at all. `effectiveHeightTier` is only
+// populated server-side for items that landed in this page's actual
+// response (see nzb.js) - a kept item that fell outside the page (paginated
+// away) has none, which is worth distinguishing from "genuinely unknown"
+// (item.definition would also be null in both cases, so effectiveHeightTier
+// presence is what's checked here).
+function resolutionCell(item: NzbSearchTraceItem, trace: NzbSearchTrace): React.ReactNode {
+  if (!item.kept) {
+    return <Typography variant="caption" color="textSecondary">—</Typography>;
+  }
+  if (item.effectiveHeightTier == null) {
+    return (
+      <Tooltip title="Not part of this page's response, so its real resolution was never checked">
+        <Typography variant="caption" color="textSecondary" style={{ whiteSpace: 'nowrap' }}>not probed</Typography>
+      </Tooltip>
+    );
+  }
+  const label = `${item.effectiveHeightTier}p`;
+  const sourceText = item.resolutionSource ? RESOLUTION_SOURCE_LABEL[item.resolutionSource] : 'an unknown check';
+  const capped = trace.configuredHeightTier != null && item.effectiveHeightTier < trace.configuredHeightTier;
+  if (!capped) {
+    return (
+      <Tooltip title={`From ${sourceText}`}>
+        <Chip size="small" variant="outlined" label={label} />
+      </Tooltip>
+    );
+  }
+  return (
+    <Tooltip title={`Source isn't actually HD (from ${sourceText}) - capped down from the configured ${trace.configuredHeightTier}p`}>
+      <Chip size="small" color="warning" variant="filled" label={label} />
+    </Tooltip>
+  );
+}
+
 type StatusSort = 'original' | 'kept' | 'rejected';
 
 const STATUS_SORT_CYCLE: Record<StatusSort, StatusSort> = {
@@ -177,6 +223,7 @@ function NzbSearchTraceDialog({ trace, onClose }: NzbSearchTraceDialogProps) {
                   </TableSortLabel>
                 </TableCell>
                 <TableCell component="th" style={{ width: 130 }}>Reason</TableCell>
+                <TableCell component="th" style={{ width: 110 }}>Resolution</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
@@ -208,6 +255,7 @@ function NzbSearchTraceDialog({ trace, onClose }: NzbSearchTraceDialogProps) {
                       </Tooltip>
                     )}
                   </TableCell>
+                  <TableCell>{resolutionCell(item, trace)}</TableCell>
                 </TableRow>
               ))}
             </TableBody>

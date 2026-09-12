@@ -37,6 +37,7 @@ config/images/*
 config/.ytdlp-cache/*
 config/ytstream-clips/*
 config/logs/*
+app/config/logs/*
 
 # misc
 .DS_Store
@@ -50,6 +51,8 @@ config/external-db.env.bak
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+ta_err.log
+xile.copy
 
 # Platform deployment testing
 docker-compose.override.*

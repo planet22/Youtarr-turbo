@@ -21,6 +21,9 @@
  */
 
 const { spawn } = require('child_process');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 const configModule = require('./configModule');
 const YtdlpCommandBuilder = require('./download/ytdlpCommandBuilder');
 const messageEmitter = require('./messageEmitter');
@@ -136,7 +139,15 @@ function runOnePreset(config, preset, watchUrl) {
     let finished = false;
     const startedAt = Date.now();
 
-    const proc = spawn('yt-dlp', args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    // yt-dlp's fragment downloader buffers fragments to disk (named
+    // "<outtmpl>-FragN") before concatenating them to stdout whenever
+    // --concurrent-fragments is in play, even though the final output goes
+    // to "-" (stdout). Giving it a scratch cwd keeps those transient files
+    // out of the app's own working directory instead of leaving them
+    // scattered (and gitignore-invisible, since they're outside the repo)
+    // wherever the server happened to be running from.
+    const scratchDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ytstream-netbench-'));
+    const proc = spawn('yt-dlp', args, { stdio: ['ignore', 'pipe', 'pipe'], cwd: scratchDir });
 
     const finish = (result) => {
       if (finished) return;
@@ -144,6 +155,7 @@ function runOnePreset(config, preset, watchUrl) {
       clearTimeout(windowTimer);
       clearTimeout(hardTimer);
       try { proc.kill('SIGKILL'); } catch { /* already gone */ }
+      fs.rm(scratchDir, { recursive: true, force: true }, () => {});
       resolve(result);
     };
 

@@ -54,6 +54,9 @@ yarn-error.log*
 ta_err.log
 xile.copy
 
+# stray backup files
+*.bak
+
 # Platform deployment testing
 docker-compose.override.*
 .vscode/*

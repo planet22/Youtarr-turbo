@@ -1,5 +1,9 @@
 # Youtarr - TURBO
 
+
+![Backend Coverage](https://img.shields.io/badge/Backend_Coverage-0%25-red)
+![Frontend Coverage](https://img.shields.io/badge/Frontend_Coverage-77%25-yellow)
+![CI Status](https://github.com/planet22/Youtarr-turbo/workflows/CI%20-%20Lint%20and%20Test/badge.svg)
 > **This is Youtarr Turbo**, a fork of upstream Youtarr (based on v1.80.0) with additional features — STRM/live-transcoded streaming, hardware acceleration, Sonarr/Radarr integration, and more. See [TURBO.md](TURBO.md) for everything this fork adds on top of what's described below.
 
 Youtarr is a self-hosted YouTube downloader that automatically downloads videos from your favorite channels and playlists. It provides metadata for multiple media servers, mirrors your subscribed YouTube playlists into Plex, Jellyfin, and Emby as native playlists, pulls watch status back from those servers so you can filter your library by what's been watched, and offers optional Plex integration for automatic library refreshes. Learn more at [youtarr.com](https://youtarr.com).

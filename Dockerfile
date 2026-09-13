@@ -75,6 +75,11 @@ WORKDIR /app
 # drawn over a video's own thumbnail for ytstream.instantStart). Referenced
 # by exact fontfile= path, not through fontconfig, so no fontconfig cache
 # setup is needed - just this file being present.
+#
+# intel-media-va-driver-non-free / libmfx-gen1.2 are Intel-only (no arm64
+# build in Debian), so they're installed only when building for amd64 —
+# QSV hardware transcode is unavailable on arm64 regardless.
+ARG TARGETARCH
 RUN if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
         sed -i '/^Components:/ s/$/ contrib non-free non-free-firmware/' /etc/apt/sources.list.d/debian.sources; \
     elif [ -f /etc/apt/sources.list ]; then \
@@ -87,12 +92,11 @@ RUN if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
     unzip \
     python3 \
     ca-certificates \
-    intel-media-va-driver-non-free \
-    libmfx-gen1.2 \
     libva2 \
     libva-drm2 \
     vainfo \
     fonts-dejavu-core \
+    $( [ "$TARGETARCH" = "amd64" ] && echo intel-media-va-driver-non-free libmfx-gen1.2 ) \
     && rm -rf /var/lib/apt/lists/*
 
 # Download the latest yt-dlp release

@@ -55,18 +55,6 @@ const REASON_GROUP_LABEL: Record<ReasonGroup, string> = {
   'episode-code': 'Season/episode code problem',
 };
 
-// Short enough to sit next to the icon in a narrow column without wrapping
-// - the full sentence (with the actual matched text/season/episode) is
-// still in the tooltip via reasonMessage below.
-const REASON_SHORT_LABEL: Record<Exclude<NzbFilterReason, null>, string> = {
-  keyword: 'missing term',
-  'excluded-term': 'excluded',
-  'wrong-season': 'wrong season',
-  'wrong-episode': 'wrong episode',
-  'no-episode-marker': 'no episode #',
-  'episode-code': 'no code',
-};
-
 // Highlighting only makes sense for reasons where matchedTerm is text that
 // genuinely appears in the title (an excluded word, a wrong season/episode
 // code) - 'keyword' carries the MISSING term (not present in the title, so
@@ -261,11 +249,8 @@ function NzbSearchTraceDialog({ trace, onClose }: NzbSearchTraceDialogProps) {
                   <TableCell>
                     {item.reason && (
                       <Tooltip title={reasonMessage(item, trace)}>
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: 'var(--muted-foreground)' }}>
+                        <span style={{ display: 'inline-flex', alignItems: 'center', color: 'var(--muted-foreground)' }}>
                           {REASON_GROUP_ICON[REASON_GROUP[item.reason]]}
-                          <Typography variant="caption" color="textSecondary" style={{ whiteSpace: 'nowrap' }}>
-                            {REASON_SHORT_LABEL[item.reason]}
-                          </Typography>
                         </span>
                       </Tooltip>
                     )}

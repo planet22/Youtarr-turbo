@@ -4,6 +4,7 @@ const logger = require('../logger');
 const { Video } = require('../models');
 const youtubeApi = require('./youtubeApi');
 const nzbDiagnosticLog = require('./nzbDiagnosticLog');
+const configModule = require('./configModule');
 
 const SEARCH_TIMEOUT_MS = 60_000;
 const ALLOWED_COUNTS = [10, 25, 50, 100];
@@ -68,8 +69,10 @@ const rawResultsCache = new Map();
 // GET /api/nzb/stats) - recorded ONLY for origin: 'nzb' calls (from
 // server/routes/nzb.js's Newznab search handler), never for the unrelated
 // manual "Find Videos" UI search, so the page reflects Sonarr/Radarr/
-// Prowlarr traffic specifically rather than a human browsing YouTube.
-const MAX_RECENT_NZB_QUERIES = 50;
+// Prowlarr traffic specifically rather than a human browsing YouTube. Row
+// cap is nzb.diagnosticLogLimits.recentQueries (Settings -> Sonarr/Radarr/
+// Prowlarr (NZB)), read live per call so a config change takes effect
+// without a restart.
 // Sonarr/Radarr/Prowlarr traffic is bursty and sparse (a handful of
 // searches per RSS sync cycle) - a 60s window mostly reads 0, which isn't a
 // useful rate to look at. An hour gives a rate that actually reflects
@@ -98,10 +101,11 @@ async function recordNzbQuery({ searchId, query, count, source, cacheHit, result
     nzbStats.recentTimestamps.shift();
   }
 
+  const max = nzbDiagnosticLog.resolveLogLimit(configModule.getConfig(), 'recentQueries');
   await nzbDiagnosticLog.recordDiagnosticEvent(
     'query',
     { searchId, query, count, source, cacheHit, resultCount, durationMs, settingsSnapshot, timestamp: now },
-    MAX_RECENT_NZB_QUERIES
+    max
   );
 }
 
@@ -175,7 +179,8 @@ async function getNzbStats() {
   // pruning only happens on the next recordNzbQuery call - filter again here
   // so a stats read during a quiet period doesn't report a stale rate.
   const windowCount = nzbStats.recentTimestamps.filter((t) => t >= cutoff).length;
-  const recentQueries = await nzbDiagnosticLog.getDiagnosticEvents('query', MAX_RECENT_NZB_QUERIES);
+  const recentQueriesMax = nzbDiagnosticLog.resolveLogLimit(configModule.getConfig(), 'recentQueries');
+  const recentQueries = await nzbDiagnosticLog.getDiagnosticEvents('query', recentQueriesMax);
   return {
     totalQueries: nzbStats.totalQueries,
     cacheHits: nzbStats.cacheHits,

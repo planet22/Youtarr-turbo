@@ -793,15 +793,19 @@ function applyLocalTitleFilter(results, query, opts = {}) {
 // about the underlying yt-dlp/API fetch, not this file's category-level
 // filtering. Recorded for every real search (query non-blank), regardless
 // of whether additionalLocalFilter is even on, so the raw candidate list is
-// always inspectable - not just the ones that got rejected.
-const MAX_SEARCH_TRACES = 20;
+// always inspectable - not just the ones that got rejected. Row cap is
+// nzb.diagnosticLogLimits.searchTraces (Settings -> Sonarr/Radarr/Prowlarr
+// (NZB)), read live per call so a config change takes effect without a
+// restart.
 
 async function recordSearchTrace(trace) {
-  await nzbDiagnosticLog.recordDiagnosticEvent('trace', trace, MAX_SEARCH_TRACES);
+  const max = nzbDiagnosticLog.resolveLogLimit(configModule.getConfig(), 'searchTraces');
+  await nzbDiagnosticLog.recordDiagnosticEvent('trace', trace, max);
 }
 
 async function getRecentSearchTraces() {
-  return nzbDiagnosticLog.getDiagnosticEvents('trace', MAX_SEARCH_TRACES);
+  const max = nzbDiagnosticLog.resolveLogLimit(configModule.getConfig(), 'searchTraces');
+  return nzbDiagnosticLog.getDiagnosticEvents('trace', max);
 }
 
 // Rolling list of NZB grabs that completed with nothing to show for it (see
@@ -811,18 +815,18 @@ async function getRecentSearchTraces() {
 // the regular Download History page has no way to surface since the job
 // itself isn't marked Error/Terminated. Deduped by job id (recordedFailedGrabJobIds)
 // so Sonarr/Radarr's repeated history polling doesn't push the same failure
-// in over and over.
-const MAX_FAILED_GRABS = 20;
+// in over and over. Row cap is nzb.diagnosticLogLimits.failedGrabs.
 // Dedup only, not the log itself (that's nzb_diagnostic_log now) - reset on
 // restart, so a job whose failure was already recorded before a restart can
 // in theory be recorded a second time by the next history poll. Harmless:
-// worst case is one duplicate row that ages out of the last-20 window like
+// worst case is one duplicate row that ages out of the capped window like
 // any other.
 const recordedFailedGrabJobIds = new Set();
 
 async function recordFailedGrab(job, message) {
   if (recordedFailedGrabJobIds.has(job.id)) return;
   recordedFailedGrabJobIds.add(job.id);
+  const max = nzbDiagnosticLog.resolveLogLimit(configModule.getConfig(), 'failedGrabs');
   await nzbDiagnosticLog.recordDiagnosticEvent('failedGrab', {
     jobId: String(job.id),
     categoryName: job.data?.nzb?.categoryName || null,
@@ -830,11 +834,12 @@ async function recordFailedGrab(job, message) {
     nzbName: job.data?.nzb?.nzbName || null,
     message,
     timestamp: Date.now(),
-  }, MAX_FAILED_GRABS);
+  }, max);
 }
 
 async function getRecentFailedGrabs() {
-  return nzbDiagnosticLog.getDiagnosticEvents('failedGrab', MAX_FAILED_GRABS);
+  const max = nzbDiagnosticLog.resolveLogLimit(configModule.getConfig(), 'failedGrabs');
+  return nzbDiagnosticLog.getDiagnosticEvents('failedGrab', max);
 }
 
 /**

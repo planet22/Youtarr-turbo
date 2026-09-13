@@ -4,6 +4,7 @@ describe('nzbThumbnailProbe', () => {
   let ytDlpRunner;
   let youtubeMetadataCache;
   let NzbResolutionCache;
+  let configModule;
 
   beforeEach(() => {
     jest.resetModules();
@@ -14,12 +15,20 @@ describe('nzbThumbnailProbe', () => {
     }));
     jest.mock('../ytDlpRunner', () => ({ fetchMetadata: jest.fn() }));
     jest.mock('../youtubeMetadataCache', () => ({ getCachedMaxHeight: jest.fn().mockResolvedValue(null) }));
+    jest.mock('../configModule', () => ({ getConfig: jest.fn(() => ({})) }));
     jest.mock('../../models', () => ({
-      NzbResolutionCache: { findByPk: jest.fn().mockResolvedValue(null), upsert: jest.fn().mockResolvedValue(undefined) },
+      NzbResolutionCache: {
+        findByPk: jest.fn().mockResolvedValue(null),
+        upsert: jest.fn().mockResolvedValue(undefined),
+        count: jest.fn().mockResolvedValue(0),
+        findAll: jest.fn().mockResolvedValue([]),
+        destroy: jest.fn().mockResolvedValue(undefined),
+      },
     }));
     axios = require('axios');
     ytDlpRunner = require('../ytDlpRunner');
     youtubeMetadataCache = require('../youtubeMetadataCache');
+    configModule = require('../configModule');
     ({ NzbResolutionCache } = require('../../models'));
     // nzbFeedModule is real (pure tier-snapping logic, only depends on the
     // already-mocked logger) - simpler and more realistic than re-mocking
@@ -200,6 +209,42 @@ describe('nzbThumbnailProbe', () => {
       expect(NzbResolutionCache.upsert).toHaveBeenCalledWith(expect.objectContaining({
         youtube_id: 'sameVideo', definition: 'hd', height_tier: 1080, source: 'extract',
       }));
+    });
+
+    test('prunes the oldest video resolution cache rows once the configured limit is exceeded', async () => {
+      configModule.getConfig.mockReturnValue({ nzb: { videoResolutionCacheLimit: 100 } });
+      NzbResolutionCache.count.mockResolvedValueOnce(102);
+      NzbResolutionCache.findAll.mockResolvedValueOnce([{ youtube_id: 'old1' }, { youtube_id: 'old2' }]);
+      axios.get.mockResolvedValueOnce(smallResponse(45000));
+      ytDlpRunner.fetchMetadata.mockResolvedValueOnce({ formats: [{ vcodec: 'avc1', height: 1080 }] });
+
+      await probe.fillUnknownDefinitions([{ youtubeId: 'newVideo', definition: null }]);
+      // cacheSet's prune runs in a fire-and-forget promise chain after the
+      // upsert resolves - flush the microtask queue before asserting.
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(NzbResolutionCache.findAll).toHaveBeenCalledWith({
+        attributes: ['youtube_id'],
+        order: [['createdAt', 'ASC']],
+        limit: 2,
+      });
+      expect(NzbResolutionCache.destroy).toHaveBeenCalledWith({ where: { youtube_id: ['old1', 'old2'] } });
+    });
+
+    test('does not prune when the video resolution cache is under the configured limit', async () => {
+      configModule.getConfig.mockReturnValue({ nzb: { videoResolutionCacheLimit: 100 } });
+      NzbResolutionCache.count.mockResolvedValueOnce(50);
+      axios.get.mockResolvedValueOnce(smallResponse(45000));
+      ytDlpRunner.fetchMetadata.mockResolvedValueOnce({ formats: [{ vcodec: 'avc1', height: 1080 }] });
+
+      await probe.fillUnknownDefinitions([{ youtubeId: 'newVideo2', definition: null }]);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(NzbResolutionCache.destroy).not.toHaveBeenCalled();
     });
 
     test('a second search for the same video reads the persisted cache row and skips both probes', async () => {

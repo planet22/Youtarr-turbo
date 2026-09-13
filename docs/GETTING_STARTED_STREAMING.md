@@ -27,7 +27,9 @@ library, but consumes near-zero disk space per video.
   from the same library folder Youtarr Turbo writes to.
 - **If you want hardware-accelerated transcoding**: the GPU device passed
   through to the Youtarr Turbo container (e.g. `--device /dev/dri` for VAAPI/QSV,
-  or the NVIDIA Container Toolkit for NVENC).
+  or the NVIDIA Container Toolkit for NVENC). If also running as a non-root
+  user (`YOUTARR_UID`/`YOUTARR_GID`), the container also needs `group_add` for
+  the device's owning groups — see [YTSTREAM.md § Hardware encoding](YTSTREAM.md#hardware-encoding-enhanced--h264).
 - **A `proxyBaseUrl` your media server can actually reach** — not
   `127.0.0.1` unless the media server runs on the exact same host as
   Youtarr Turbo.

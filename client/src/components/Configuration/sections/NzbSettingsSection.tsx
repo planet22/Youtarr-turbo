@@ -138,6 +138,24 @@ export const NzbSettingsSection: React.FC<Props> = ({
   const allResolutionChecksOff =
     !resolutionDetection.fixed && !resolutionDetection.thumb && !resolutionDetection.extract;
 
+  const diagnosticLogLimits = nzb.diagnosticLogLimits ?? {
+    recentQueries: 50,
+    searchTraces: 20,
+    failedGrabs: 20,
+  };
+  const setDiagnosticLogLimit = (key: keyof typeof diagnosticLogLimits, value: string) => {
+    const parsed = Number.parseInt(value, 10);
+    const clamped = Number.isFinite(parsed) ? Math.min(100, Math.max(1, parsed)) : 1;
+    setNzb({ diagnosticLogLimits: { ...diagnosticLogLimits, [key]: clamped } });
+  };
+
+  const videoResolutionCacheLimit = nzb.videoResolutionCacheLimit ?? 5000;
+  const setVideoResolutionCacheLimit = (value: string) => {
+    const parsed = Number.parseInt(value, 10);
+    const clamped = Number.isFinite(parsed) ? Math.min(10000, Math.max(100, parsed)) : 100;
+    setNzb({ videoResolutionCacheLimit: clamped });
+  };
+
   const updateCategory = (index: number, patch: Partial<NzbCategory>) => {
     const next = nzb.categories.slice();
     next[index] = { ...next[index], ...patch };
@@ -371,7 +389,7 @@ export const NzbSettingsSection: React.FC<Props> = ({
             extraction (when on) is used directly for every result instead of only as a
             fallback.
           </Typography>
-          <Box className="flex flex-col gap-1">
+          <Box className="flex flex-wrap items-center gap-x-6 gap-y-1">
             <Box className="flex items-center">
               <FormControlLabel
                 control={
@@ -425,6 +443,66 @@ export const NzbSettingsSection: React.FC<Props> = ({
               lower resolution.
             </Alert>
           )}
+        </Grid>
+
+        <Grid item xs={12}>
+          <Typography variant="subtitle2" className="mt-2 mb-1">
+            Diagnostic Log Limits
+          </Typography>
+          <Typography variant="body2" color="textSecondary" className="mb-2">
+            How many rows the NZB diagnostics page keeps for each log before pruning the oldest.
+            1-100 each.
+          </Typography>
+          <Box className="flex flex-wrap items-center gap-4">
+            <TextField
+              type="number"
+              label="Recent queries"
+              value={diagnosticLogLimits.recentQueries}
+              onChange={(e) => setDiagnosticLogLimit('recentQueries', e.target.value)}
+              inputProps={{ min: 1, max: 100 }}
+              helperText="Sonarr/Radarr/Prowlarr searches"
+              style={{ width: 200 }}
+            />
+            <TextField
+              type="number"
+              label="Search debug traces"
+              value={diagnosticLogLimits.searchTraces}
+              onChange={(e) => setDiagnosticLogLimit('searchTraces', e.target.value)}
+              inputProps={{ min: 1, max: 100 }}
+              helperText="Per-search candidate detail"
+              style={{ width: 200 }}
+            />
+            <TextField
+              type="number"
+              label="Failed grabs"
+              value={diagnosticLogLimits.failedGrabs}
+              onChange={(e) => setDiagnosticLogLimit('failedGrabs', e.target.value)}
+              inputProps={{ min: 1, max: 100 }}
+              helperText="Grabs that completed with nothing to show"
+              style={{ width: 200 }}
+            />
+          </Box>
+        </Grid>
+
+        <Grid item xs={12}>
+          <Typography variant="subtitle2" className="mt-2 mb-1">
+            NZB Video Cache
+          </Typography>
+          <Typography variant="body2" color="textSecondary" className="mb-2">
+            How many videos' detected resolutions (see Video Actual Resolution above) are kept
+            before the oldest are pruned. 100-10,000.
+          </Typography>
+          <Box className="flex flex-wrap items-center gap-4">
+            <TextField
+              type="number"
+              label="Max cached videos"
+              value={videoResolutionCacheLimit}
+              onChange={(e) => setVideoResolutionCacheLimit(e.target.value)}
+              inputProps={{ min: 100, max: 10000 }}
+              helperText="One row per YouTube video ID"
+              style={{ width: 200 }}
+            />
+          </Box>
         </Grid>
 
         <Grid item xs={12}>

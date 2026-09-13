@@ -440,6 +440,23 @@ export const CONFIG_FIELDS = {
         thumb: true,
         extract: true,
       } as { fixed: boolean; thumb: boolean; extract: boolean },
+      // How many rows each of the three nzb_diagnostic_log-backed logs
+      // (see server/modules/nzbDiagnosticLog.js) keeps before pruning the
+      // oldest on every write - server/routes/nzb.js's recordSearchTrace/
+      // recordFailedGrab and server/modules/videoSearchModule.js's
+      // recordNzbQuery. 1-100 each; these back the NZB diagnostics page's
+      // Recent Queries, Search Detail/Debug, and Failed Grabs tables.
+      diagnosticLogLimits: {
+        recentQueries: 50,
+        searchTraces: 20,
+        failedGrabs: 20,
+      } as { recentQueries: number; searchTraces: number; failedGrabs: number },
+      // Row cap for the nzb_resolution_cache table (nzbThumbnailProbe.js's
+      // thumb/extract resolution findings, keyed by youtube_id) - replaces
+      // the old in-memory Map this table replaced, which was capped at 5000
+      // entries via manual LRU eviction. 100-10,000; oldest rows (by
+      // createdAt) are pruned once the cap is exceeded.
+      videoResolutionCacheLimit: 5000,
       categories: [] as Array<{
         name: string;
         subfolder: string | null;

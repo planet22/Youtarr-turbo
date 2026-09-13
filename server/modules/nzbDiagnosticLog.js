@@ -1,5 +1,18 @@
 const logger = require('../logger');
 
+// Mirrors client/src/config/configSchema.ts's nzb.diagnosticLogLimits default
+// and clamp range - kept here since this is the module both call sites
+// (server/routes/nzb.js, server/modules/videoSearchModule.js) already go
+// through to read/write these logs.
+const DEFAULT_LOG_LIMITS = { recentQueries: 50, searchTraces: 20, failedGrabs: 20 };
+
+function resolveLogLimit(cfg, key) {
+  const raw = cfg?.nzb?.diagnosticLogLimits?.[key];
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return DEFAULT_LOG_LIMITS[key];
+  return Math.min(100, Math.max(1, Math.round(n)));
+}
+
 // Shared read/write/prune for the nzb_diagnostic_log table - backs the NZB
 // diagnostics page's Recent Queries (videoSearchModule.js), Search Filter
 // Debug traces, and Failed Grabs (both nzb.js) tables. Previously each of
@@ -50,4 +63,4 @@ async function getDiagnosticEvents(kind, max) {
   }
 }
 
-module.exports = { recordDiagnosticEvent, getDiagnosticEvents };
+module.exports = { recordDiagnosticEvent, getDiagnosticEvents, resolveLogLimit };

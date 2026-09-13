@@ -363,6 +363,18 @@ curl "http://localhost:3087/api/ytstream/VIDEO_ID?mode=ffmpeg&transcode=h264&har
 Docker hosts must pass through the GPU device (e.g. `--device /dev/dri` for
 VAAPI/QSV, or NVIDIA Container Toolkit for NVENC).
 
+If Youtarr is running as a non-root user (`YOUTARR_UID`/`YOUTARR_GID` in
+`docker-compose.yml`), passing the device through is not enough by itself:
+`/dev/dri/card0` and `/dev/dri/renderD128` are normally owned `root:video` and
+`root:<render-group>` and are not world-writable, so that user also needs to
+be a member of those groups to open the device at all — otherwise every
+QSV/VAAPI row in Configuration's Hardware Capabilities test fails as
+"Unsupported" even though the device is present and the drivers are
+installed. Add both groups via Compose's `group_add` (see the commented
+example in `docker-compose.yml`); the render group's GID is host-specific, so
+check it with `ls -la /dev/dri` or `getent group render` on the host rather
+than assuming a value.
+
 ## Limitations
 
 - `mode=ffmpeg` streams are not byte-range seekable the way a static file

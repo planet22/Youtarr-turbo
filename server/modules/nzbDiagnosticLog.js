@@ -63,4 +63,28 @@ async function getDiagnosticEvents(kind, max) {
   }
 }
 
-module.exports = { recordDiagnosticEvent, getDiagnosticEvents, resolveLogLimit };
+// The three kinds this table holds - see recordDiagnosticEvent's callers in
+// nzb.js/videoSearchModule.js. Settings UI's "Diagnostic Log Limits" clear
+// button resets all three together, since they're presented there as one
+// group of settings.
+const ALL_KINDS = ['query', 'trace', 'failedGrab'];
+
+/** Total rows across all three log kinds - Settings UI's row count. */
+async function countAllDiagnosticEvents() {
+  const { NzbDiagnosticLog } = require('../models');
+  return NzbDiagnosticLog.count({ where: { kind: ALL_KINDS } });
+}
+
+/** Bulk clear-all - Settings UI's "Clear Diagnostic Logs" button. */
+async function clearAllDiagnosticEvents() {
+  const { NzbDiagnosticLog } = require('../models');
+  return NzbDiagnosticLog.destroy({ where: { kind: ALL_KINDS } });
+}
+
+module.exports = {
+  recordDiagnosticEvent,
+  getDiagnosticEvents,
+  resolveLogLimit,
+  countAllDiagnosticEvents,
+  clearAllDiagnosticEvents,
+};

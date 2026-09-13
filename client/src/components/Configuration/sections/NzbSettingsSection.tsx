@@ -1,6 +1,6 @@
 import React, { useRef, useState } from 'react';
 import axios from 'axios';
-import { Eye, EyeOff, Trash2, ChevronDown, Upload } from 'lucide-react';
+import { Eye, EyeOff, Trash2, ChevronDown, Upload, AlertTriangle } from 'lucide-react';
 import {
   FormControlLabel,
   Switch,
@@ -22,10 +22,15 @@ import {
   Tooltip,
   Checkbox,
   SelectChangeEvent,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
 } from '../../ui';
 import { ConfigurationCard } from '../common/ConfigurationCard';
 import { InfoTooltip } from '../common/InfoTooltip';
 import { ConfigState } from '../types';
+import { useCacheReset } from '../hooks/useCacheReset';
 
 type NzbCategory = ConfigState['nzb']['categories'][number];
 
@@ -126,6 +131,10 @@ export const NzbSettingsSection: React.FC<Props> = ({
   const [error, setError] = useState<string | null>(null);
   const [importErrors, setImportErrors] = useState<Record<number, string | null>>({});
   const importFileInputRefs = useRef<Record<number, HTMLInputElement | null>>({});
+  const [confirmClearDiagnosticLogs, setConfirmClearDiagnosticLogs] = useState(false);
+  const [confirmClearVideoCache, setConfirmClearVideoCache] = useState(false);
+  const diagnosticLogsCache = useCacheReset(token, '/api/nzb/diagnostic-logs');
+  const videoResolutionCache = useCacheReset(token, '/api/nzb/resolution-cache');
 
   const setNzb = (patch: Partial<typeof nzb>) => {
     onConfigChange({ nzb: { ...nzb, ...patch } });
@@ -445,15 +454,15 @@ export const NzbSettingsSection: React.FC<Props> = ({
           )}
         </Grid>
 
-        <Grid item xs={12}>
+        <Grid item xs={12} className="my-2">
           <Typography variant="subtitle2" className="mt-2 mb-1">
             Diagnostic Log Limits
           </Typography>
-          <Typography variant="body2" color="textSecondary" className="mb-2">
+          <Typography variant="body2" color="textSecondary" className="mb-3">
             How many rows the NZB diagnostics page keeps for each log before pruning the oldest.
             1-100 each.
           </Typography>
-          <Box className="flex flex-wrap items-center gap-4">
+          <Box className="flex flex-wrap items-center gap-6">
             <TextField
               type="number"
               label="Recent queries"
@@ -481,18 +490,36 @@ export const NzbSettingsSection: React.FC<Props> = ({
               helperText="Grabs that completed with nothing to show"
               style={{ width: 200 }}
             />
+            <Box className="flex items-center gap-2 pl-4 border-l border-[var(--border)]">
+              <Typography variant="body2">
+                Stored rows: {diagnosticLogsCache.count === null ? '…' : diagnosticLogsCache.count}
+              </Typography>
+              <Button
+                variant="outlined"
+                color="error"
+                size="small"
+                startIcon={<Trash2 size={14} />}
+                disabled={!diagnosticLogsCache.count || diagnosticLogsCache.clearing}
+                onClick={() => setConfirmClearDiagnosticLogs(true)}
+              >
+                Clear
+              </Button>
+            </Box>
           </Box>
+          {diagnosticLogsCache.error && (
+            <Typography variant="caption" color="error">{diagnosticLogsCache.error}</Typography>
+          )}
         </Grid>
 
-        <Grid item xs={12}>
+        <Grid item xs={12} className="my-2">
           <Typography variant="subtitle2" className="mt-2 mb-1">
             NZB Video Cache
           </Typography>
-          <Typography variant="body2" color="textSecondary" className="mb-2">
+          <Typography variant="body2" color="textSecondary" className="mb-3">
             How many videos' detected resolutions (see Video Actual Resolution above) are kept
             before the oldest are pruned. 100-10,000.
           </Typography>
-          <Box className="flex flex-wrap items-center gap-4">
+          <Box className="flex flex-wrap items-center gap-6">
             <TextField
               type="number"
               label="Max cached videos"
@@ -502,7 +529,25 @@ export const NzbSettingsSection: React.FC<Props> = ({
               helperText="One row per YouTube video ID"
               style={{ width: 200 }}
             />
+            <Box className="flex items-center gap-2 pl-4 border-l border-[var(--border)]">
+              <Typography variant="body2">
+                Cached videos: {videoResolutionCache.count === null ? '…' : videoResolutionCache.count}
+              </Typography>
+              <Button
+                variant="outlined"
+                color="error"
+                size="small"
+                startIcon={<Trash2 size={14} />}
+                disabled={!videoResolutionCache.count || videoResolutionCache.clearing}
+                onClick={() => setConfirmClearVideoCache(true)}
+              >
+                Clear
+              </Button>
+            </Box>
           </Box>
+          {videoResolutionCache.error && (
+            <Typography variant="caption" color="error">{videoResolutionCache.error}</Typography>
+          )}
         </Grid>
 
         <Grid item xs={12}>
@@ -641,8 +686,8 @@ export const NzbSettingsSection: React.FC<Props> = ({
                     />
                   </Box>
                 </Grid>
-                <Grid item xs={12}>
-                  <Box className="flex items-center gap-1">
+                <Grid item xs={12} className="my-2">
+                  <Box className="flex items-start gap-3">
                     <TextField
                       fullWidth
                       multiline
@@ -716,6 +761,76 @@ export const NzbSettingsSection: React.FC<Props> = ({
           <Button variant="outlined" onClick={addCategory}>Add Category</Button>
         </Grid>
       </Grid>
+
+      <Dialog open={confirmClearDiagnosticLogs} onClose={() => setConfirmClearDiagnosticLogs(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>
+          <AlertTriangle size={20} color="var(--warning)" className="shrink-0" />
+          Clear Diagnostic Logs
+        </DialogTitle>
+        <DialogContent>
+          <div className="space-y-4">
+            <Alert severity="warning">
+              <Typography variant="body2">
+                This permanently deletes {diagnosticLogsCache.count ?? 0} stored row{diagnosticLogsCache.count === 1 ? '' : 's'} across Recent Queries, Search Detail/Debug, and Failed Grabs on the NZB diagnostics page.
+              </Typography>
+            </Alert>
+            <Typography variant="body2" color="text.secondary">
+              This action cannot be undone. New entries start accumulating again immediately as Sonarr/Radarr/Prowlarr keep searching.
+            </Typography>
+          </div>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setConfirmClearDiagnosticLogs(false)} variant="contained" color="primary" autoFocus>
+            Cancel
+          </Button>
+          <Button
+            onClick={() => {
+              setConfirmClearDiagnosticLogs(false);
+              diagnosticLogsCache.clear();
+            }}
+            variant="outlined"
+            color="error"
+            startIcon={<Trash2 size={16} />}
+          >
+            Clear
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={confirmClearVideoCache} onClose={() => setConfirmClearVideoCache(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>
+          <AlertTriangle size={20} color="var(--warning)" className="shrink-0" />
+          Clear NZB Video Cache
+        </DialogTitle>
+        <DialogContent>
+          <div className="space-y-4">
+            <Alert severity="warning">
+              <Typography variant="body2">
+                This permanently deletes {videoResolutionCache.count ?? 0} cached video resolution{videoResolutionCache.count === 1 ? '' : 's'}. Every affected video re-runs the thumbnail/extraction checks above (see Video Actual Resolution) the next time it appears in a search.
+              </Typography>
+            </Alert>
+            <Typography variant="body2" color="text.secondary">
+              This action cannot be undone.
+            </Typography>
+          </div>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setConfirmClearVideoCache(false)} variant="contained" color="primary" autoFocus>
+            Cancel
+          </Button>
+          <Button
+            onClick={() => {
+              setConfirmClearVideoCache(false);
+              videoResolutionCache.clear();
+            }}
+            variant="outlined"
+            color="error"
+            startIcon={<Trash2 size={16} />}
+          >
+            Clear
+          </Button>
+        </DialogActions>
+      </Dialog>
     </ConfigurationCard>
   );
 };

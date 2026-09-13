@@ -296,4 +296,22 @@ async function fillUnknownDefinitions(results, { useThumb = true, useExtract = t
   return needsProbe.length;
 }
 
-module.exports = { probeDefinition, probeViaExtraction, fillUnknownDefinitions };
+/** Total cached rows - Settings UI's "NZB Video Cache" count. */
+async function countResolutionCache() {
+  const { NzbResolutionCache } = require('../models');
+  return NzbResolutionCache.count();
+}
+
+/** Bulk clear-all - Settings UI's "Clear NZB Video Cache" button. */
+async function clearResolutionCache() {
+  const { NzbResolutionCache } = require('../models');
+  return NzbResolutionCache.destroy({ truncate: true });
+}
+
+module.exports = {
+  probeDefinition,
+  probeViaExtraction,
+  fillUnknownDefinitions,
+  countResolutionCache,
+  clearResolutionCache,
+};

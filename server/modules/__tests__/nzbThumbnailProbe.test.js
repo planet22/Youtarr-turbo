@@ -280,4 +280,17 @@ describe('nzbThumbnailProbe', () => {
       expect(axios.get).toHaveBeenCalledTimes(2);
     });
   });
+
+  describe('countResolutionCache / clearResolutionCache', () => {
+    test('countResolutionCache returns the table row count', async () => {
+      NzbResolutionCache.count.mockResolvedValueOnce(123);
+      await expect(probe.countResolutionCache()).resolves.toBe(123);
+    });
+
+    test('clearResolutionCache truncates the table', async () => {
+      NzbResolutionCache.destroy.mockResolvedValueOnce(undefined);
+      await probe.clearResolutionCache();
+      expect(NzbResolutionCache.destroy).toHaveBeenCalledWith({ truncate: true });
+    });
+  });
 });

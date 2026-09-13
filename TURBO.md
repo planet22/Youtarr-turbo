@@ -7,7 +7,7 @@ Youtarr-Turbo is a fork of [DialmasterOrg/Youtarr](https://github.com/Dialmaster
 ## Features (at a glance)
 
 - **TV Series library mode** — treat a channel as a real TV show: automatic Season/Episode organization (`Show/Season 2024/S2024E012 - Title.mp4`), a full `tvshow.nfo`/`season.nfo`/episode-`.nfo` set for Jellyfin/Kodi/Emby, a per-channel Python regex to decode real season/episode numbers from titles, and Sonarr-supplied season/episode overrides when grabbed through the NZB bridge — works in both regular downloads and STRM mode.
-- **Stream-only mode (STRM)** — skip downloading entirely; Youtarr writes lightweight `.strm` pointer files instead, with an in-house playback proxy (`ytstream`) that resolves and (optionally) transcodes YouTube on demand.
+- **Stream-only mode (STRM)** — skip downloading entirely; Youtarr-Turbo writes lightweight `.strm` pointer files instead, with an in-house playback proxy (`ytstream`) that resolves and (optionally) transcodes YouTube on demand.
 - **Four playback modes, two exposed in Settings** — two no-transcode "Direct" variants plus a buffered, segmented HLS mode that saves the stream as a permanent file while it plays; a non-buffered HLS mode still exists server-side for compatibility but is hidden from the picker since the buffered mode is a strict superset.
 - **Hardware-accelerated transcoding**, both for STRM playback and for a post-download re-encode step — QSV, NVENC, VAAPI, and AMF — plus three tuning benchmarks: a **hardware capabilities test** (does this encoder/codec combo work at all), a **real-time tuning test** (is it fast enough for live streaming at this resolution and quality tier), and an **HLS segment-timing test** (does this encoder honor exact keyframe timing).
 - **Fast seek-restarts at any resolution** — HLS seeks resolve a direct DASH URL and seek it natively instead of decoding-and-discarding from the start, with automatic fallback to the old method if that ever fails.
@@ -15,7 +15,7 @@ Youtarr-Turbo is a fork of [DialmasterOrg/Youtarr](https://github.com/Dialmaster
 - **Download History filtering and detail** — the download job history is searchable and filterable by source, status, and date, and surfaces terminated-channel detail, per-job skip counts, run duration, and any notes/summary text recorded on the job.
 - **Persistent list filters** — every filter and the search box on the Videos, Download History, Channel Videos, and Stream History pages remembers its value across page navigation and reloads instead of resetting to defaults, with a one-click "Clear All" in the filter panel to go back to a clean slate.
 - **Cache-on-play, including a "stealth" variant** — a STRM video that gets watched starts downloading in the background automatically, so the next play (and Plex/Jellyfin/Emby scans) get a real cached file instead of a live proxy; a Stealth cache option keeps that cached file hidden from the library folder entirely, so the video stays permanently STRM-routed through Youtarr-Turbo even once it's fully cached.
-- **Sonarr/Radarr/Prowlarr integration** — Youtarr can impersonate a Newznab indexer and a SABnzbd download client simultaneously, so YouTube videos can be searched for and "grabbed" through your existing *arr stack, with a dedicated NZB diagnostics page for search/cache/grab activity.
+- **Sonarr/Radarr/Prowlarr integration** — Youtarr-Turbo can impersonate a Newznab indexer and a SABnzbd download client simultaneously, so YouTube videos can be searched for and "grabbed" through your existing *arr stack, with a dedicated NZB diagnostics page for search/cache/grab activity.
 - **yt-dlp metadata caching** — every yt-dlp metadata extraction, regardless of which feature triggered it (streaming, downloading, STRM generation), is written to one persistent cache keyed by video ID, so any later feature that needs the same video's duration/fps/resolution/etc. reuses it instead of re-querying YouTube; the Library page can browse cached-but-untracked videos, and Settings lets you inspect or clear the cache.
 - **API Keys** for triggering single-video downloads from outside the web UI (bookmarklet, iOS/Android Shortcuts).
 - **Deeper media-server integration** — full Jellyfin/Emby connection management (not just playlist mirroring), per-subfolder library mapping for Plex and Jellyfin, and a third watched-based auto-removal strategy alongside age/space.
@@ -28,7 +28,7 @@ Everything below goes into detail on each of these, plus a full settings-page re
 
 ## TV Series library mode
 
-Upstream Youtarr-Turbo organizes everything as one-video-per-item ("Movie" library mode). Turbo adds a full parallel **Series** mode that treats a subscribed channel as a TV show — its own folder convention, filename template, NFO schema, and season/episode numbering — so Jellyfin/Kodi/Emby browse it exactly like a real TV series instead of a flat pile of clips. This works identically whether the channel is fully downloading or running as STRM-only.
+Upstream Youtarr organizes everything as one-video-per-item ("Movie" library mode). Turbo adds a full parallel **Series** mode that treats a subscribed channel as a TV show — its own folder convention, filename template, NFO schema, and season/episode numbering — so Jellyfin/Kodi/Emby browse it exactly like a real TV series instead of a flat pile of clips. This works identically whether the channel is fully downloading or running as STRM-only.
 
 ### Turning it on
 
@@ -69,7 +69,7 @@ Series-mode channels use the same content-rating system as movie-mode ones, incl
 
 ## Streaming & STRM-only mode
 
-Upstream Youtarr-Turbo only ever fully downloads videos. Turbo adds a `mediaMode` setting (`download` / `strm` / `both`) that lets Youtarr-Turbo write `.strm` shortcut files instead — a media server (Jellyfin, Plex, etc.) opens the `.strm` file and gets redirected to a playback URL, with no local copy of the video ever stored, until/unless you opt into caching it (see below).
+Upstream Youtarr only ever fully downloads videos. Turbo adds a `mediaMode` setting (`download` / `strm` / `both`) that lets Youtarr-Turbo write `.strm` shortcut files instead — a media server (Jellyfin, Plex, etc.) opens the `.strm` file and gets redirected to a playback URL, with no local copy of the video ever stored, until/unless you opt into caching it (see below).
 
 ### Where STRM files point (`strm.target`)
 

@@ -59,6 +59,7 @@ export const MODE_LABELS: Record<string, string> = {
   'direct-redirect': 'Direct (redirect)',
   'cached-file': 'Cached file',
   'probe-cache-hit': 'Probe (cached)',
+  'probe-shortcut': 'Probe (synthetic clip)',
 };
 
 /** Falls back to the raw mode string for anything not listed above, rather than mislabeling it. */
@@ -81,6 +82,7 @@ const MODE_CHIP_LABELS: Record<string, string> = {
   'direct-redirect': 'Direct (redir)',
   'cached-file': 'Cached',
   'probe-cache-hit': 'Probe',
+  'probe-shortcut': 'Probe',
 };
 
 export function formatModeChipLabel(mode: string): string {

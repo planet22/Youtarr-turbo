@@ -39,7 +39,7 @@ const logger = require('../../logger');
 const configModule = require('../configModule');
 const streamEncoderTuning = require('../streamEncoderTuning');
 const { normalizeHardwareMode, normalizeTuning, buildVideoEncoderArgs } = streamEncoderTuning;
-const { VALID_TRANSCODE, createQueryOverrideResolver } = require('./configResolution');
+const { VALID_TRANSCODE, VALID_CONTAINERS, createQueryOverrideResolver } = require('./configResolution');
 const { YTSTREAM_CLIPS_DIR } = require('./paths');
 
 function isLikelyMetadataProbeRequest(req) {
@@ -139,6 +139,25 @@ const PROBE_CLIP_CACHE_DIR = path.join(YTSTREAM_CLIPS_DIR, 'probe-shortcut');
 const PROBE_CLIP_DURATION_SECONDS = 2;
 const probeClipGenerationPromises = new Map();
 
+// Must mirror what a real hls/hls-buffer session would actually serve for
+// this `container` setting (see playbackPlan.js's own resolution and
+// getHlsContainerInfo in hlsEngine.js) - Jellyfin decides direct-play
+// eligibility from its own ffprobe pass against this exact URL, so the
+// probe clip has to report the same container/codec info real playback
+// would, or Jellyfin can never reconcile the two and keeps re-probing
+// instead of ever starting real playback.
+const PROBE_CLIP_CONTAINER_INFO = {
+  mp4: { ext: 'mp4', muxer: 'mp4', contentType: 'video/mp4' },
+  mkv: { ext: 'mkv', muxer: 'matroska', contentType: 'video/x-matroska' },
+  ts: { ext: 'ts', muxer: 'mpegts', contentType: 'video/mp2t' },
+};
+
+function resolveProbeClipContainer(container) {
+  return VALID_CONTAINERS.includes(container) && PROBE_CLIP_CONTAINER_INFO[container]
+    ? container
+    : 'mp4';
+}
+
 // Jellyfin's own ffprobe keyframe-extraction pass (for accurate seeking in
 // transcoded HLS playback) reads scattered chunks across an entire cached
 // file in one short burst - a handful of separate bare-Lavf requests a few
@@ -159,21 +178,61 @@ function shouldLogQuickServeHistory(youtubeId) {
   return true;
 }
 
+// Jellyfin's own internal player uses the same bare Lavf UA both for its
+// real ffprobe pass AND, at least in some flows, for the actual
+// playback-compatibility check it does when it thinks direct play might not
+// work - so a second (or third...) bare-Lavf request for the same video is
+// not necessarily another probe to answer with the fake clip; it can be the
+// player trying to actually play. Once we've served the synthetic clip once
+// for a video, a repeat within this window falls through to normal handling
+// instead of serving the fake clip again, so a real session gets a chance
+// to start. Harmless if this fires spuriously (worst case: skips the fast
+// path and pays for a real cold start instead) - once a real HLS session
+// actually exists for the video, hasActiveHlsSessionForVideo's own check in
+// the route already keeps this whole block from running at all, so this
+// map only ever matters for the gap before that session exists.
+const PROBE_SHORTCUT_RETRY_SUPPRESS_MS = 60_000;
+const recentlyServedFakeClipAt = new Map();
+function hasRecentlyServedFakeProbeClip(youtubeId) {
+  const last = recentlyServedFakeClipAt.get(youtubeId);
+  return !!last && Date.now() - last < PROBE_SHORTCUT_RETRY_SUPPRESS_MS;
+}
+function markFakeProbeClipServed(youtubeId) {
+  recentlyServedFakeClipAt.set(youtubeId, Date.now());
+}
+
 // Jellyfin's prober sets a video's RunTimeTicks straight from ffprobe's
 // `format.duration`, unconditionally overwriting whatever it already knew -
-// so a short probe clip gets recorded as the video's real length. FFmpeg's
-// matroska muxer always writes container duration as one fixed field: EBML
-// ID 0x4489 (Segment Info "Duration"), a 0x88 size marker (8 bytes follow),
-// then an 8-byte big-endian IEEE754 double in milliseconds (TimecodeScale
-// default 1ms/unit). Jellyfin trusts that value outright without validating
-// it against actual media length - so patching just those 8 bytes to the
-// real known duration (see resolveDurationSeconds) makes the probe response
-// accurate without encoding an extra frame.
-// Scanned for by marker (not a hardcoded offset) for resilience across
+// so a short probe clip gets recorded as the video's real length. Patching
+// the container's own duration field to the real known duration (see
+// resolveDurationSeconds) makes the probe response accurate without
+// encoding an extra frame. Jellyfin trusts that value outright without
+// validating it against actual media length.
+//
+// mkv: ffmpeg's matroska muxer always writes duration as one fixed field:
+// EBML ID 0x4489 (Segment Info "Duration"), a 0x88 size marker (8 bytes
+// follow), then an 8-byte big-endian IEEE754 double in milliseconds
+// (TimecodeScale default 1ms/unit).
+//
+// mp4: ffmpeg's (faststart) mp4 muxer writes the movie-level duration in
+// the `moov`/`mvhd` box: 4-byte box-type marker "mvhd", then 1 version byte
+// + 3 flag bytes, then (version 0) 4+4+4+4-byte
+// creation/modification/timescale/duration fields or (version 1)
+// 8+8+4+8-byte equivalents (timescale is always 32-bit either way).
+// Patching only the movie-level duration (not the per-track tkhd/mdhd
+// durations) mirrors the mkv approach above, which likewise only patches
+// the container-level field ffprobe's format.duration actually reads.
+//
+// ts: mpegts has no container-level duration field to patch (duration is
+// derived from PCR/timestamp range) - never patched, always served as
+// generated.
+//
+// Both scanned for by marker (not a hardcoded offset) for resilience across
 // ffmpeg versions; if not found, patching is silently skipped and the clip
 // is served as generated - same best-effort philosophy as the rest of this feature.
 const MATROSKA_DURATION_MARKER = Buffer.from([0x44, 0x89, 0x88]);
-const probeClipDurationOffsetCache = new Map(); // signature -> byte offset | null
+const MP4_MVHD_MARKER = Buffer.from('mvhd', 'ascii');
+const probeClipDurationPatchInfoCache = new Map(); // signature -> patch info | null
 
 function findMatroskaDurationValueOffset(buffer) {
   const markerOffset = buffer.indexOf(MATROSKA_DURATION_MARKER);
@@ -182,46 +241,69 @@ function findMatroskaDurationValueOffset(buffer) {
   return valueOffset + 8 <= buffer.length ? valueOffset : -1;
 }
 
-async function getProbeClipDurationOffset(signature, filePath) {
-  if (probeClipDurationOffsetCache.has(signature)) return probeClipDurationOffsetCache.get(signature);
-  let offset = null;
-  try {
-    const fh = await fs.promises.open(filePath, 'r');
+function findMp4MvhdDurationInfo(buffer) {
+  const markerOffset = buffer.indexOf(MP4_MVHD_MARKER);
+  if (markerOffset === -1) return null;
+  const versionOffset = markerOffset + MP4_MVHD_MARKER.length;
+  if (versionOffset >= buffer.length) return null;
+  const version = buffer[versionOffset];
+  const timescaleOffset = versionOffset + (version === 1 ? 1 + 3 + 8 + 8 : 1 + 3 + 4 + 4);
+  const durationSize = version === 1 ? 8 : 4;
+  const durationOffset = timescaleOffset + 4;
+  return durationOffset + durationSize <= buffer.length ? { timescaleOffset, durationOffset, durationSize } : null;
+}
+
+async function getProbeClipDurationPatchInfo(signature, filePath, container) {
+  if (probeClipDurationPatchInfoCache.has(signature)) return probeClipDurationPatchInfoCache.get(signature);
+  let info = null;
+  if (container === 'mkv' || container === 'mp4') {
     try {
-      const head = Buffer.alloc(65536);
-      const { bytesRead } = await fh.read(head, 0, head.length, 0);
-      const found = findMatroskaDurationValueOffset(head.subarray(0, bytesRead));
-      if (found !== -1) offset = found;
-    } finally {
-      await fh.close();
+      const fh = await fs.promises.open(filePath, 'r');
+      try {
+        const head = Buffer.alloc(65536);
+        const { bytesRead } = await fh.read(head, 0, head.length, 0);
+        const scanned = head.subarray(0, bytesRead);
+        if (container === 'mkv') {
+          const offset = findMatroskaDurationValueOffset(scanned);
+          if (offset !== -1) info = { kind: 'mkv', offset };
+        } else {
+          const mvhd = findMp4MvhdDurationInfo(scanned);
+          if (mvhd) info = { kind: 'mp4', ...mvhd };
+        }
+      } finally {
+        await fh.close();
+      }
+    } catch (err) {
+      logger.warn({ err, signature, container }, 'ytstream: failed to scan probe-shortcut clip for its container duration field');
     }
-  } catch (err) {
-    logger.warn({ err, signature }, 'ytstream: failed to scan probe-shortcut clip for its Matroska Duration field');
   }
-  probeClipDurationOffsetCache.set(signature, offset);
-  return offset;
+  probeClipDurationPatchInfoCache.set(signature, info);
+  return info;
 }
 
 /**
- * Generates (or reuses a cached) tiny standalone Matroska clip matching a
- * `transcode=h264` session's encoder settings. Matroska over MP4/WebM: its
- * muxer accepts any video/audio codec pair ffmpeg produces without MP4's
- * container-specific box signaling/moov-placement concerns, so one code
- * path works across every hardwareMode's output codec. Never throws;
- * returns null on failure.
+ * Generates (or reuses a cached) tiny standalone clip matching a
+ * `transcode=h264` session's encoder settings, muxed into the same
+ * container a real session would use (see resolveProbeClipContainer) so
+ * Jellyfin's own ffprobe pass against this URL learns the right
+ * container/codec info instead of one that a real playback response will
+ * later contradict. Never throws; returns null on failure.
  * @param {number} width - target resolution (see resolveVideoTargetResolution)
  * @param {number} height
- * @returns {Promise<{filePath: string, signature: string}|null>}
+ * @param {string} container - 'mp4' | 'mkv' | 'ts' (falls back to 'mp4')
+ * @returns {Promise<{filePath: string, signature: string, container: string}|null>}
  */
-async function ensureProbeClip({ hardwareMode, tuning, width, height }) {
-  const signature = `${normalizeHardwareMode(hardwareMode)}-${normalizeTuning(tuning)}-${width}x${height}`;
+async function ensureProbeClip({ hardwareMode, tuning, width, height, container }) {
+  const resolvedContainer = resolveProbeClipContainer(container);
+  const containerInfo = PROBE_CLIP_CONTAINER_INFO[resolvedContainer];
+  const signature = `${normalizeHardwareMode(hardwareMode)}-${normalizeTuning(tuning)}-${width}x${height}-${resolvedContainer}`;
   const dir = path.join(PROBE_CLIP_CACHE_DIR, signature);
-  const filePath = path.join(dir, 'probe.mkv');
-  if (fs.existsSync(filePath)) return { filePath, signature };
+  const filePath = path.join(dir, `probe.${containerInfo.ext}`);
+  if (fs.existsSync(filePath)) return { filePath, signature, container: resolvedContainer };
 
   if (probeClipGenerationPromises.has(signature)) {
     await probeClipGenerationPromises.get(signature).catch(() => {});
-    return fs.existsSync(filePath) ? { filePath, signature } : null;
+    return fs.existsSync(filePath) ? { filePath, signature, container: resolvedContainer } : null;
   }
 
   const generate = (async () => {
@@ -243,7 +325,11 @@ async function ensureProbeClip({ hardwareMode, tuning, width, height }) {
     if (encoder.pixFmt) args.push('-pix_fmt', encoder.pixFmt);
     args.push(...encoder.encoderArgs);
     args.push('-c:a', 'aac', '-ac', '2', '-b:a', '192k', '-ar', '48000');
-    args.push('-f', 'matroska', filePath);
+    // +faststart moves moov ahead of mdat so the small file we write to
+    // disk once (not streamed) is still a well-formed progressive-download
+    // mp4 - matches what a real fmp4/mp4 session would produce.
+    if (resolvedContainer === 'mp4') args.push('-movflags', '+faststart');
+    args.push('-f', containerInfo.muxer, filePath);
 
     logger.info({ signature, args }, 'ytstream: generating probe-shortcut clip');
     await runFfmpegOnce(args);
@@ -252,7 +338,7 @@ async function ensureProbeClip({ hardwareMode, tuning, width, height }) {
   probeClipGenerationPromises.set(signature, generate);
   try {
     await generate;
-    return fs.existsSync(filePath) ? { filePath, signature } : null;
+    return fs.existsSync(filePath) ? { filePath, signature, container: resolvedContainer } : null;
   } catch (err) {
     logger.warn({ err, signature }, 'ytstream: failed to generate probe-shortcut clip');
     return null;
@@ -268,15 +354,15 @@ async function ensureProbeClip({ hardwareMode, tuning, width, height }) {
  *   DB-first, yt-dlp-fallback-then-cached; a real network call happens at
  *   most once per not-yet-tracked video, then hits durationCache.
  */
-async function tryServeProbeClip(req, res, { hardwareMode, tuning, width, height, youtubeId, resolveDurationSeconds }) {
+async function tryServeProbeClip(req, res, { hardwareMode, tuning, width, height, container, youtubeId, resolveDurationSeconds }) {
   try {
-    const clip = await ensureProbeClip({ hardwareMode, tuning, width, height });
+    const clip = await ensureProbeClip({ hardwareMode, tuning, width, height, container });
     if (!clip) return false;
 
-    // Best-effort duration patch - see MATROSKA_DURATION_MARKER's doc
-    // comment above. Falls back to serving the clip unmodified (today's
-    // behavior) whenever the real duration can't be resolved, or the
-    // Duration field can't be located.
+    // Best-effort duration patch - see the duration-marker doc comment
+    // above. Falls back to serving the clip unmodified (today's behavior)
+    // whenever the real duration can't be resolved, or the container's
+    // duration field can't be located/patched (always true for ts).
     let body = null;
     let knownDurationSeconds = null;
     try {
@@ -285,11 +371,21 @@ async function tryServeProbeClip(req, res, { hardwareMode, tuning, width, height
       logger.warn({ err, youtubeId }, 'ytstream: could not resolve real duration for probe-shortcut clip; serving it unmodified');
     }
     if (knownDurationSeconds) {
-      const offset = await getProbeClipDurationOffset(clip.signature, clip.filePath);
-      if (offset !== null) {
+      const patchInfo = await getProbeClipDurationPatchInfo(clip.signature, clip.filePath, clip.container);
+      if (patchInfo) {
         try {
           const buffer = await fs.promises.readFile(clip.filePath);
-          buffer.writeDoubleBE(knownDurationSeconds * 1000, offset);
+          if (patchInfo.kind === 'mkv') {
+            buffer.writeDoubleBE(knownDurationSeconds * 1000, patchInfo.offset);
+          } else {
+            const timescale = buffer.readUInt32BE(patchInfo.timescaleOffset);
+            const durationUnits = Math.round(knownDurationSeconds * timescale);
+            if (patchInfo.durationSize === 8) {
+              buffer.writeBigUInt64BE(BigInt(durationUnits), patchInfo.durationOffset);
+            } else {
+              buffer.writeUInt32BE(durationUnits >>> 0, patchInfo.durationOffset);
+            }
+          }
           body = buffer;
         } catch (err) {
           logger.warn({ err, youtubeId }, 'ytstream: failed to patch probe-shortcut clip duration; serving it unmodified');
@@ -298,12 +394,13 @@ async function tryServeProbeClip(req, res, { hardwareMode, tuning, width, height
     }
 
     const size = body ? body.length : (await fs.promises.stat(clip.filePath)).size;
+    markFakeProbeClipServed(youtubeId);
     logger.info(
-      { youtubeId, servedAs: 'fake', ua: req.headers['user-agent'], size, url: req.originalUrl, patchedDurationSeconds: body ? knownDurationSeconds : null },
+      { youtubeId, servedAs: 'fake', container: clip.container, ua: req.headers['user-agent'], size, url: req.originalUrl, patchedDurationSeconds: body ? knownDurationSeconds : null },
       'ytstream: probe-shortcut detected a likely metadata-probe request; served the synthetic clip'
     );
     res.set({
-      'Content-Type': 'video/x-matroska',
+      'Content-Type': PROBE_CLIP_CONTAINER_INFO[clip.container].contentType,
       'Content-Length': String(size),
       'Cache-Control': 'no-store',
       'Accept-Ranges': 'bytes',
@@ -331,6 +428,7 @@ module.exports = {
   isLikelyMetadataProbeRequest,
   evaluateProbeShortcut,
   shouldLogQuickServeHistory,
+  hasRecentlyServedFakeProbeClip,
   ensureProbeClip,
   tryServeProbeClip,
 };

@@ -353,7 +353,10 @@ function VideosTable({
                         />
                       )}
                       {video.hasCachedVideo && (
-                        <Tooltip title="Opportunistically cached from STRM - will automatically revert to STRM when it expires. Click for details.">
+                        <Tooltip title={isTracked
+                          ? 'Opportunistically cached from STRM - will automatically revert to STRM when it expires. Click for details.'
+                          : 'Cached from a play of this video - will be deleted when it expires. Click for details.'}
+                        >
                           <Chip
                             size="small"
                             icon={<CachedVideoIcon size={14} />}

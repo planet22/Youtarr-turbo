@@ -29,6 +29,7 @@ const { streamDebug } = require('../modules/ytstream/streamDebug');
 const { loadYoutubeCookieHeader, buildBaseArgs } = require('../modules/ytstream/ytdlpArgs');
 const {
   VALID_TRANSCODE,
+  VALID_CONTAINERS,
   parseBooleanQueryFlag,
   createQueryOverrideResolver,
   getModeFieldCompatibility,
@@ -106,6 +107,7 @@ const {
   isLikelyMetadataProbeRequest,
   evaluateProbeShortcut,
   shouldLogQuickServeHistory,
+  hasRecentlyServedFakeProbeClip,
   tryServeProbeClip,
 } = require('../modules/ytstream/probeShortcut');
 
@@ -660,19 +662,98 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
         const probeQueryOverride = createQueryOverrideResolver(req, probeCfg);
         const probeQuality = probeQueryOverride('quality') || probeCfg.quality || configModule.getConfig().preferredResolution || '720';
         const { width, height } = capResolutionToHeight(sourceResolution.width, sourceResolution.height, resolveQualityHeight(probeQuality));
-        const served = await tryServeProbeClip(req, res, {
-          hardwareMode: normalizeHardwareMode(probeQueryOverride('hardware') || probeCfg.hardwareMode || 'none'),
-          tuning: normalizeTuning(probeQueryOverride('tuning') || probeCfg.tuning || 'fast'),
-          width,
-          height,
-          youtubeId,
-          resolveDurationSeconds: (id) => getVideoDurationSeconds(id, configModule.getConfig()),
-        });
-        if (served) return;
-        logger.warn(
-          { youtubeId, servedAs: 'none' },
-          'ytstream: probe-shortcut detected a likely metadata-probe request but could not serve a cached file or the synthetic clip; falling through to normal handling'
-        );
+        // Must match playbackPlan.js's own container resolution - the whole
+        // point of the probe clip is to stand in for what a real session
+        // would actually serve. Getting this wrong (e.g. always mkv,
+        // regardless of what container the real session would use) means
+        // Jellyfin's own ffprobe pass - which is how it decides whether it
+        // can direct-play this URL - learns the wrong container/codec info
+        // from the probe response, then can't reconcile that against the
+        // real playback response and loops re-probing instead of ever
+        // starting real playback.
+        const probeContainer = VALID_CONTAINERS.includes(probeQueryOverride('container'))
+          ? probeQueryOverride('container')
+          : (probeCfg.container || 'mp4');
+        const probeHardwareMode = normalizeHardwareMode(probeQueryOverride('hardware') || probeCfg.hardwareMode || 'none');
+        // Already answered one metadata-probe-looking request for this
+        // video with the synthetic clip - a repeat within the suppress
+        // window is treated as a real play attempt, not another probe (see
+        // hasRecentlyServedFakeProbeClip's doc comment: Jellyfin's internal
+        // player can send the same bare-Lavf UA for its actual playback-
+        // compatibility check, not just its ffprobe pass, and would
+        // otherwise get the fake clip forever instead of ever reaching real
+        // session creation below). No active session exists yet at this
+        // point (that's the outer `!hasActiveSessionForVideo` check above),
+        // so falling through here is what lets one get created.
+        if (hasRecentlyServedFakeProbeClip(youtubeId)) {
+          logger.info(
+            { youtubeId },
+            'ytstream: probe-shortcut already served the synthetic clip for this video recently; treating this request as real playback and falling through to normal handling'
+          );
+        } else {
+          // Same shouldLogQuickServeHistory burst-collapsing as the cache-hit
+          // branch above - this is the synthetic-clip ("fake") path itself,
+          // which previously had no Stream History row at all (log-only), so
+          // a probe-shortcut hit was invisible outside the server log.
+          const historyEntry = shouldLogQuickServeHistory(youtubeId)
+            ? {
+                streamId: crypto.randomUUID(),
+                mode: 'probe-shortcut',
+                youtubeId,
+                quality: probeQuality,
+                container: probeContainer,
+                transcode: 'h264',
+                hardwareMode: probeHardwareMode,
+                clientIp: resolveClientIp(req),
+                userAgent: req.headers['user-agent'] || null,
+                startedAt: Date.now(),
+              }
+            : null;
+          if (historyEntry) persistStreamHistoryStart(historyEntry);
+          // Live Streaming-page visibility for the fake-clip serve itself -
+          // separate from historyEntry above (that's the persisted audit
+          // row, burst-collapsed by shouldLogQuickServeHistory; this is a
+          // real-time-only blip so every actual serve shows up live, even
+          // ones within the same collapse window). trackPendingRequest
+          // never persists to StreamHistory on its own (see its doc
+          // comment), so this doesn't double up with historyEntry's own
+          // persistStreamHistoryStart/End calls - untrackStream's own
+          // persistStreamHistoryEnd call below just no-ops (no matching
+          // start row under this streamId).
+          const probeLiveStreamId = crypto.randomUUID();
+          trackPendingRequest({
+            streamId: probeLiveStreamId,
+            mode: 'probe-shortcut',
+            youtubeId,
+            quality: probeQuality,
+            container: probeContainer,
+            transcode: 'h264',
+            hardwareMode: probeHardwareMode,
+            clientIp: resolveClientIp(req),
+            userAgent: req.headers['user-agent'] || null,
+            state: 'probe',
+            startedAt: Date.now(),
+          });
+          const served = await tryServeProbeClip(req, res, {
+            hardwareMode: probeHardwareMode,
+            tuning: normalizeTuning(probeQueryOverride('tuning') || probeCfg.tuning || 'fast'),
+            width,
+            height,
+            container: probeContainer,
+            youtubeId,
+            resolveDurationSeconds: (id) => getVideoDurationSeconds(id, configModule.getConfig()),
+          });
+          untrackStream(probeLiveStreamId, served ? 'completed' : 'error', served ? null : 'failed to generate or serve the synthetic probe clip');
+          if (served) {
+            if (historyEntry) persistStreamHistoryEnd(historyEntry, 'completed', null);
+            return;
+          }
+          if (historyEntry) persistStreamHistoryEnd(historyEntry, 'error', 'failed to generate or serve the synthetic probe clip');
+          logger.warn(
+            { youtubeId, servedAs: 'none' },
+            'ytstream: probe-shortcut detected a likely metadata-probe request but could not serve a cached file or the synthetic clip; falling through to normal handling'
+          );
+        }
       }
     }
 

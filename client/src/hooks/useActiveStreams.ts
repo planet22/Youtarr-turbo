@@ -28,7 +28,7 @@ export interface StreamSegmentStatus {
 
 export interface StreamSnapshot {
   streamId: string;
-  mode: 'hls' | 'hls-buffer' | 'direct' | 'direct-redirect';
+  mode: 'hls' | 'hls-buffer' | 'direct' | 'direct-redirect' | 'probe-shortcut';
   youtubeId: string;
   title: string | null;
   quality: string;
@@ -43,8 +43,12 @@ export interface StreamSnapshot {
   // trackPendingRequest doc comment. 'requested': the request has just
   // been received, mode/format not resolved yet. 'resolving': format/
   // quality probing (yt-dlp) is in flight - the slow step this exists to
-  // make visible.
-  state: 'requested' | 'resolving' | 'starting' | 'active' | 'cached' | 'failed';
+  // make visible. 'probe': ytstream.probeShortcut is serving its synthetic
+  // cached clip in answer to a detected metadata-probe request - a real
+  // session was never allocated for this row at all (see probeShortcut.js's
+  // doc comment), so it always resolves straight to removal, never to
+  // 'starting'/'active'.
+  state: 'requested' | 'resolving' | 'starting' | 'active' | 'cached' | 'failed' | 'probe';
   /** Only meaningful when state === 'failed' - why this stream never started. */
   error: string | null;
   startedAt: number;

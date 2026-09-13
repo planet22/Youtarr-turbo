@@ -27,8 +27,17 @@ library like any other completed download.
 
 ## Step 1 — Enable and generate an API key
 
-Settings → **Sonarr/Radarr (NZB)** → toggle the integration on, then click
-**Generate Key**. It's shown once — copy it before navigating away.
+Go to **Settings → Sonarr/Radarr (NZB)** (the card on that page is titled
+"Sonarr / Radarr / Prowlarr (NZB)"). Turn on the **Enable NZB integration**
+switch, then click **Generate** next to the **NZB API Key** field. The key
+is shown once you generate it — copy it before navigating away (the button
+becomes **Regenerate** afterward, and using it invalidates the old key
+immediately).
+
+| Setting (UI) | Config Key |
+|---|---|
+| Enable NZB integration | `nzb.enabled` |
+| NZB API Key (+ Generate/Regenerate button) | `nzb.apiKey` |
 
 ```json
 "nzb": {
@@ -39,10 +48,22 @@ Settings → **Sonarr/Radarr (NZB)** → toggle the integration on, then click
 
 ## Step 2 — Configure categories
 
-Each category maps to a Sonarr/Radarr "Category" and controls where a grab
-lands and how it's imported. Below is a real two-category setup — one for
-Sonarr (TV), one for Radarr (Movies) — with excerpted rationale for each
-non-obvious field.
+Still on **Settings → Sonarr/Radarr (NZB)**, scroll down to **Categories**
+and click **Add Category** for each one you need. Each category maps to a
+Sonarr/Radarr "Category" and controls where a grab lands and how it's
+imported. Below is a real two-category setup — one for Sonarr (TV), one for
+Radarr (Movies) — with excerpted rationale for each non-obvious field.
+
+| Setting (UI) | Config Key |
+|---|---|
+| Category name | `name` |
+| Subfolder | `subfolder` |
+| Media mode | `mediaMode` |
+| Search mode | `searchMode` |
+| Import strategy | `importStrategy` |
+| Newznab categories (checkbox list) | `newznabCategoryIds` |
+| Additional local filter | `additionalLocalFilter` |
+| Exclude if title contains | `excludeTerms` |
 
 ### TV category (for Sonarr)
 
@@ -88,17 +109,21 @@ non-obvious field.
 
 ### Why these settings
 
-| Field | Value used | Rationale |
+| Setting (UI) | Value used | Rationale |
 |---|---|---|
-| `subfolder` | `"sonarr"` / `"radarr"` | Keeps grabbed content physically separated from channel-subscription downloads, so it's obvious at a glance (and in any per-subfolder library mapping) what came from an *Arr* grab versus a normal subscription. |
-| `mediaMode` | `"strm"` (both categories) | Grabs write `.strm` shortcuts instead of full files — the same disk-space tradeoff as the [streaming setup](GETTING_STARTED_STREAMING.md), applied to Sonarr/Radarr-triggered content too. Combine with `importStrategy: "untracked"` below since a `.strm` symlink-style hardlink doesn't make sense once Youtarr Turbo stops tracking the item. |
-| `importStrategy` | `"untracked"` (both categories) | Youtarr Turbo drops its own DB tracking of the video immediately after the grab, so it **only** shows up in Sonarr/Radarr's library, never duplicated in Youtarr Turbo's own video list/history. The alternative, `"hardlink"`, keeps the video in Youtarr Turbo's own library too and stages a hardlink for Sonarr/Radarr — use that instead if you still want grabbed content visible inside Youtarr Turbo as well. |
-| `searchMode` | TV: `"episode"` / Movies: `"flat"` | TV uses best-effort season/episode narrowing so Sonarr's structured per-episode search has something to match against (see the accuracy caveat below). Movies has no episode concept, so plain text search (`"flat"`) is the only sensible choice — and is generally the more *predictable* mode for either category if strict episode matching isn't critical to you. |
-| `newznabCategoryIds` | TV: `5000`-range / Movies: `2000`-range | These are the standard Newznab category ranges Sonarr/Radarr filter on — TV categories must be `5xxx`, movie categories `2xxx`, or the category simply won't appear where that app expects it. |
-| `additionalLocalFilter` | `true` (both) | Requires the search terms Sonarr/Radarr actually sent to be present in the result title as an extra sanity filter, on top of YouTube's own search relevance. |
-| `excludeTerms` | long lists per category | Rejects results whose titles contain junk substrings — trailers, reaction videos, compilations, bloopers, etc. — that would otherwise pollute a "real episode/movie" search with irrelevant YouTube uploads. Tune this list to whatever garbage your specific search terms tend to surface. |
+| Subfolder | `sonarr` / `radarr` | Keeps grabbed content physically separated from channel-subscription downloads, so it's obvious at a glance (and in any per-subfolder library mapping) what came from an *Arr* grab versus a normal subscription. |
+| Media mode | STRM only (both categories) | Grabs write `.strm` shortcuts instead of full files — the same disk-space tradeoff as the [streaming setup](GETTING_STARTED_STREAMING.md), applied to Sonarr/Radarr-triggered content too. Combine with "Hand off to Sonarr/Radarr" below since a `.strm` symlink-style hardlink doesn't make sense once Youtarr Turbo stops tracking the item. |
+| Import strategy | Hand off to Sonarr/Radarr (untracked) (both categories) | Youtarr Turbo drops its own DB tracking of the video immediately after the grab, so it **only** shows up in Sonarr/Radarr's library, never duplicated in Youtarr Turbo's own video list/history. The alternative, "Keep in Youtarr-Turbo library (hardlink)", keeps the video in Youtarr Turbo's own library too and stages a hardlink for Sonarr/Radarr — use that instead if you still want grabbed content visible inside Youtarr Turbo as well. |
+| Search mode | TV: Season/episode (best-effort) / Movies: Flat (text search) | TV uses best-effort season/episode narrowing so Sonarr's structured per-episode search has something to match against (see the accuracy caveat below). Movies has no episode concept, so plain text search is the only sensible choice — and is generally the more *predictable* mode for either category if strict episode matching isn't critical to you. |
+| Newznab categories (checkboxes) | TV: `5000`-range / Movies: `2000`-range | These are the standard Newznab category ranges Sonarr/Radarr filter on — TV categories must be `5xxx`, movie categories `2xxx`, or the category simply won't appear where that app expects it. |
+| Additional local filter | on (both) | Requires the search terms Sonarr/Radarr actually sent to be present in the result title as an extra sanity filter, on top of YouTube's own search relevance. |
+| Exclude if title contains | long lists per category | Rejects results whose titles contain junk substrings — trailers, reaction videos, compilations, bloopers, etc. — that would otherwise pollute a "real episode/movie" search with irrelevant YouTube uploads. Tune this list to whatever garbage your specific search terms tend to surface — or click **Import .txt** next to the field to load a list from a file instead of typing it in. |
 
 ### Optional: turn on debug logging while setting this up
+
+**NZB debug logging** is a switch in the header of the "Sonarr / Radarr /
+Prowlarr (NZB)" card itself, next to the card title (not down with the
+categories):
 
 ```json
 "nzb": {
@@ -106,15 +131,16 @@ non-obvious field.
 }
 ```
 
-This route's own diagnostic lines print regardless of your global
-`logLevel`, which is genuinely useful while you're first getting
-Sonarr/Radarr talking to Youtarr Turbo. Turn it back off once things are working
-— it's noisy long-term.
+This route's own diagnostic lines print regardless of your global Log Level
+setting, which is genuinely useful while you're first getting Sonarr/Radarr
+talking to Youtarr Turbo. Turn it back off once things are working — it's
+noisy long-term.
 
 ### Optional: remote path mapping
 
 If Sonarr/Radarr see the shared media volume at a different filesystem path
-than Youtarr Turbo does internally, set `remoteBasePath` so every path Youtarr Turbo
+than Youtarr Turbo does internally, fill in **Path Sonarr/Radarr sees this
+folder as** (same page, near the API key field) so every path Youtarr Turbo
 reports back has its real root swapped for the path Sonarr/Radarr expect:
 
 ```json
@@ -123,7 +149,7 @@ reports back has its real root swapped for the path Sonarr/Radarr expect:
 }
 ```
 
-Leave it `null` if both containers see the exact same path.
+Leave it blank if both containers see the exact same path.
 
 ## Step 3 — Add Youtarr Turbo as an indexer
 

@@ -65,6 +65,7 @@ export const STATE_CHIP_COLOR: Record<StreamSnapshot['state'], 'default' | 'succ
   active: 'success',
   cached: 'default',
   failed: 'error',
+  probe: 'default',
 };
 
 // Friendlier than the raw state string ("resolving" reads fine, but
@@ -77,6 +78,7 @@ export const STATE_CHIP_LABEL: Record<StreamSnapshot['state'], string> = {
   active: 'Active',
   cached: 'Cached',
   failed: 'Failed',
+  probe: 'Probe',
 };
 
 function StreamRow({

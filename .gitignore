@@ -60,6 +60,7 @@ xile.copy
 # Platform deployment testing
 docker-compose.override.*
 .vscode/*
+.claude/*
 
 # Default video download directory and README, all other files excluded
 downloads/*
@@ -95,3 +96,5 @@ client/build-storybook/
 (org)Dockerfile
 docker-compose.yaml
 Dockerfile
+client/public/logo512.af
+Thumbs.db

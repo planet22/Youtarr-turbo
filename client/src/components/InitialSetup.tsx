@@ -108,7 +108,7 @@ const InitialSetup: React.FC<InitialSetupProps> = ({ onSetupComplete }) => {
           <Alert severity="info" style={{ marginBottom: 24, borderRadius: 'var(--radius-ui)' }}>
             <AlertTitle>Setup token required</AlertTitle>
             <Typography variant="body2">
-              Find your one-time setup token in the container logs (<code>docker logs youtarr</code>)
+              Find your one-time setup token in the container logs (<code>docker logs youtarr-turbo</code>)
               or in the <code>config/setup-token</code> file inside your Youtarr-Turbo data volume.
             </Typography>
             <Typography variant="body2" style={{ marginTop: 8 }}>

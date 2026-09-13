@@ -32,7 +32,7 @@ Youtarr implements a secure authentication system to protect your instance from 
 On first launch, Youtarr generates a one-time setup token and surfaces it through two channels: your container logs and a file in your data volume. You can complete setup from localhost, your trusted LAN, a VPN, or an SSH tunnel.
 
 1. Retrieve the setup token. Either:
-   - **From container logs:** `docker logs youtarr` (look for the "Youtarr initial setup required" log entry; the token-bearing entry is emitted at `LOG_LEVEL=info`), or
+   - **From container logs:** `docker logs youtarr-turbo` (look for the "Youtarr initial setup required" log entry; the token-bearing entry is emitted at `LOG_LEVEL=info`), or
    - **From the data volume:** read `config/setup-token` on the host (mounted from the container's `/app/config/setup-token`). The file is written with mode `0600`, so if your container runs as a UID that does not match your host user (for example, the container runs as root or as `YOUTARR_UID=1000` while you log in as a different user), the read will fail with "Permission denied". Use `sudo cat /path/to/youtarr/config/setup-token`, or fall back to the container-logs path above.
 
 2. Open Youtarr in a browser, e.g. `http://localhost:3087` or `http://<your-LAN-IP>:3087`.
@@ -168,14 +168,14 @@ curl -X POST https://your-server.com/api/videos/download \
 #### Via Database (Advanced)
 ```bash
 # List active API keys
-docker exec youtarr-db mysql -u root -p123qweasd youtarr -e "
+docker exec youtarr-turbo-db mysql -u root -p123qweasd youtarr -e "
 SELECT id, name, key_prefix, created_at, last_used_at
 FROM ApiKeys
 WHERE is_active = 1;
 "
 
 # Revoke a key by ID
-docker exec youtarr-db mysql -u root -p123qweasd youtarr -e "
+docker exec youtarr-turbo-db mysql -u root -p123qweasd youtarr -e "
 UPDATE ApiKeys SET is_active = 0 WHERE id = 1;
 "
 ```
@@ -200,7 +200,7 @@ For detailed API documentation and examples (bookmarklets, mobile shortcuts, Pyt
 
 #### View Active Sessions
 ```bash
-docker exec youtarr-db mysql -u root -p123qweasd youtarr -e "
+docker exec youtarr-turbo-db mysql -u root -p123qweasd youtarr -e "
 SELECT id, session_token, username, expires_at, is_active
 FROM Sessions
 WHERE expires_at > NOW()
@@ -210,7 +210,7 @@ WHERE expires_at > NOW()
 
 #### Clear All Sessions (Force Re-login)
 ```bash
-docker exec youtarr-db mysql -u root -p123qweasd youtarr -e "
+docker exec youtarr-turbo-db mysql -u root -p123qweasd youtarr -e "
 DELETE FROM Sessions;
 "
 ```
@@ -372,7 +372,7 @@ If OAuth fails, get token manually:
 3. **Enable fail2ban** for brute force protection
 4. **Monitor access logs**:
    ```bash
-   docker logs youtarr | grep "Login"
+   docker logs youtarr-turbo | grep "Login"
    ```
 
 ## Troubleshooting
@@ -382,7 +382,7 @@ If OAuth fails, get token manually:
 **Problem**: First-time setup wizard asks for a token and you don't know where to find it.
 
 **Solutions**:
-1. **Container logs:** `docker logs youtarr | grep -A5 "initial setup required"`. The token-bearing setup log entry is emitted at `LOG_LEVEL=info` on every startup until setup completes.
+1. **Container logs:** `docker logs youtarr-turbo | grep -A5 "initial setup required"`. The token-bearing setup log entry is emitted at `LOG_LEVEL=info` on every startup until setup completes.
 2. **Data volume:** the token is also written to `config/setup-token` (mode 0600) in your data volume. From the host: `cat /path/to/youtarr/config/setup-token`. If you see "Permission denied", the container is running as a UID that does not match your host user; use `sudo cat ...` or retrieve the token from the container logs (option 1 above) instead.
 3. **Lost before setup is complete?** Stop Youtarr, delete `config/setup-token`, restart. A new token will be generated and logged.
 4. **Already completed setup and need to reset?** Stop Youtarr, remove `username` and `passwordHash` from `config/config.json`, restart, then complete setup again with the newly generated token.
@@ -398,7 +398,7 @@ If OAuth fails, get token manually:
 **Debug**:
 ```bash
 # Check if credentials exist
-docker exec youtarr cat /app/config/config.json | grep username
+docker exec youtarr-turbo cat /app/config/config.json | grep username
 ```
 
 ### Session Expired

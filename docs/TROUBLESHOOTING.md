@@ -46,7 +46,7 @@ See [Authentication - Cannot Find the Setup Token](AUTHENTICATION.md#cannot-find
    ./start.sh
    ```
 
-4. Open Youtarr in any browser. You will be prompted to create a new admin account using the one-time setup token from `docker logs youtarr` or `config/setup-token`.
+4. Open Youtarr in any browser. You will be prompted to create a new admin account using the one-time setup token from `docker logs youtarr-turbo` or `config/setup-token`.
 
 ### Session Expired
 
@@ -364,12 +364,12 @@ keep the charset arguments from the bundled `docker-compose.yml`.
 **Solution**:
 1. Ensure the database container is running (the commands below only applies if using the bundled DB):
    ```bash
-   docker ps | grep youtarr-db
+   docker ps | grep youtarr-turbo-db
    ```
 
 2. Check database logs:
    ```bash
-   docker logs youtarr-db
+   docker logs youtarr-turbo-db
    ```
 
 3. Verify database credentials in environment
@@ -387,7 +387,7 @@ value, so setting only one of them in `.env` makes the two sides disagree and th
 **Solution**: When connecting as root, set `DB_ROOT_PASSWORD` and `DB_PASSWORD` to the same value in
 `.env` (or set neither). If the database volume was already initialized with a different root password,
 either use that password or wipe the database directory and let it re-initialize (**this deletes all DB
-data**). `docker logs youtarr-db` will show `Access denied` warnings when it's a credentials problem.
+data**). `docker logs youtarr-turbo-db` will show `Access denied` warnings when it's a credentials problem.
 
 ### Access Denied for Custom Database User
 

@@ -215,10 +215,10 @@ These variables are used by docker-compose.yml but not directly by the applicati
 
 ### Container Naming
 - Container names are automatically prefixed with the directory name
-- Default containers: `youtarr`, `youtarr-db`
+- Default containers: `youtarr-turbo`, `youtarr-turbo-db`
 
 ### Network Configuration
-- Network: `youtarr-network` (internal bridge)
+- Network: `youtarr-turbo-network` (internal bridge)
 - Application port: 3087 (host) → 3011 (container)
 - Database port: 3321 inside the Docker network only
 

@@ -28,12 +28,12 @@
 
 networks:
   default:
-    name: youtarr-network
+    name: youtarr-turbo-network
 
 services:
   youtarr-db:
     image: mariadb:10.3
-    container_name: youtarr-db
+    container_name: youtarr-turbo-db
     restart: unless-stopped
     environment:
       MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-123qweasd}
@@ -57,7 +57,7 @@ services:
 
   youtarr:
     image: ${YOUTARR_IMAGE:-ghcr.io/planet22/youtarr-turbo:latest}
-    container_name: youtarr
+    container_name: youtarr-turbo
     restart: unless-stopped
     # Optional: Run as specific UID:GID for security (defaults to root if not set for backwards compatibility with existing users)
     user: "${YOUTARR_UID:-0}:${YOUTARR_GID:-0}"

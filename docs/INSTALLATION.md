@@ -41,7 +41,7 @@ Choose your preferred installation method
    Open your browser and navigate to `http://localhost:3087`
 
 4. **Complete initial setup**:
-   - On first access, you'll be prompted to create an admin account. Paste the setup token from `docker logs youtarr` or `config/setup-token` in your data volume.
+   - On first access, you'll be prompted to create an admin account. Paste the setup token from `docker logs youtarr-turbo` or `config/setup-token` in your data volume.
    - Choose a strong password (minimum 8 characters required)
    - This account will be used for all future logins and can be changed in the web UI
 
@@ -73,7 +73,7 @@ If you prefer to use standard `docker compose up` commands:
    Optionally configure other settings:
    - `YOUTARR_HOST_PORT=3087` - Change this if you need the web interface on a different host port
    - For **headless deployments** (e.g., Unraid, NAS, remote VPS), you have two options:
-     - **One-time setup token:** open the web UI from localhost, your trusted LAN, VPN, or SSH tunnel and paste the token from `docker logs youtarr` or `config/setup-token`.
+     - **One-time setup token:** open the web UI from localhost, your trusted LAN, VPN, or SSH tunnel and paste the token from `docker logs youtarr-turbo` or `config/setup-token`.
      - **Pre-set credentials via env vars:** set `AUTH_PRESET_USERNAME` and `AUTH_PRESET_PASSWORD` in your `.env` (see [Authentication](AUTHENTICATION.md)).
    - `AUTH_ENABLED=false` - Only if behind external authentication (VPN, reverse proxy)
    - `TRUST_PROXY=false` - Recommended when exposing Youtarr directly without a reverse proxy. Leave unset for the current backwards-compatible default.
@@ -95,7 +95,7 @@ If you prefer to use standard `docker compose up` commands:
 5. **Access the web interface**:
    - Navigate to `http://localhost:3087` (or your server's LAN IP)
    - If you set preset credentials in .env, use those to log in
-   - If not, you'll be prompted to complete the setup wizard using the one-time token from `docker logs youtarr` or `config/setup-token`
+   - If not, you'll be prompted to complete the setup wizard using the one-time token from `docker logs youtarr-turbo` or `config/setup-token`
    - Configure Plex (and optionally Jellyfin or Emby for playlist sync) and other settings from the Settings page
 
 > **Important**: Ensure the path you assign to `YOUTUBE_OUTPUT_DIR` already exists on the host and is writable before starting the stack. Otherwise Docker will create it as root-owned and the container may not be able to write downloads.
@@ -115,7 +115,7 @@ Most users should use Method 1 or 2 above for the best experience and easiest up
 See [AUTHENTICATION.md](AUTHENTICATION.md)
 
 ### Important Notes:
-- Initial setup requires the one-time setup token from `docker logs youtarr` or `config/setup-token`; plain HTTP setup is intended for localhost, private LAN, VPN, or SSH tunnel access only
+- Initial setup requires the one-time setup token from `docker logs youtarr-turbo` or `config/setup-token`; plain HTTP setup is intended for localhost, private LAN, VPN, or SSH tunnel access only
 - If you need to reset your admin password, see the [Troubleshooting Guide](TROUBLESHOOTING.md#reset-admin-password)
 
 ## Configuration

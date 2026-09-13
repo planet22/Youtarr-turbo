@@ -489,13 +489,13 @@ docker compose down -v
 
 ```bash
 # Application container
-docker exec -it youtarr bash
+docker exec -it youtarr-turbo bash
 
 # Database container
-docker exec -it youtarr-db bash
+docker exec -it youtarr-turbo-db bash
 
 # Direct database access
-docker exec -it youtarr-db mysql -u root -p123qweasd youtarr
+docker exec -it youtarr-turbo-db mysql -u root -p123qweasd youtarr
 ```
 
 ## Environment Variables
@@ -643,10 +643,10 @@ Once your network storage is mounted on the host, configure it using `YOUTUBE_OU
 mount | grep nas
 
 # Test access from container
-docker exec youtarr ls -la /usr/src/app/data
+docker exec youtarr-turbo ls -la /usr/src/app/data
 
 # Check permissions
-docker exec youtarr touch /usr/src/app/data/test.txt
+docker exec youtarr-turbo touch /usr/src/app/data/test.txt
 ```
 
 **Slow Performance**:
@@ -669,12 +669,12 @@ docker exec youtarr touch /usr/src/app/data/test.txt
 
 **Backup database**:
 ```bash
-docker exec youtarr-db mysqldump -u root -p123qweasd youtarr > backup.sql
+docker exec youtarr-turbo-db mysqldump -u root -p123qweasd youtarr > backup.sql
 ```
 
 **Restore database**:
 ```bash
-docker exec -i youtarr-db mysql -u root -p123qweasd youtarr < backup.sql
+docker exec -i youtarr-turbo-db mysql -u root -p123qweasd youtarr < backup.sql
 ```
 
 **Backup all data**:
@@ -701,7 +701,7 @@ The application container includes health checks:
 
 ## Network Configuration
 
-- Internal network: `youtarr-network`
+- Internal network: `youtarr-turbo-network`
 - Container communication uses internal hostnames
 - External access through mapped ports
 
@@ -725,7 +725,7 @@ When Youtarr and Plex run on different machines:
 #### Testing Plex Connection
 ```bash
 # From Youtarr container
-docker exec youtarr curl -I http://your-plex-server:32400/web
+docker exec youtarr-turbo curl -I http://your-plex-server:32400/web
 
 # Should return HTTP 200 or 301
 ```

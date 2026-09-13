@@ -313,7 +313,7 @@ With recent updates, migrations are idempotent and self-healing:
 2. If errors persist, manually check:
    ```bash
    # Connect to database
-   docker exec -it youtarr-db mysql -u root -p123qweasd youtarr
+   docker exec -it youtarr-turbo-db mysql -u root -p123qweasd youtarr
 
    # Check SequelizeMeta
    SELECT * FROM SequelizeMeta;
@@ -326,7 +326,7 @@ With recent updates, migrations are idempotent and self-healing:
 #### Cannot Connect to Database
 1. **Check container status**:
    ```bash
-   docker ps | grep youtarr-db
+   docker ps | grep youtarr-turbo-db
    ```
 
 2. **Test connection**:
@@ -337,7 +337,7 @@ With recent updates, migrations are idempotent and self-healing:
 
 3. **Check logs**:
    ```bash
-   docker logs youtarr-db
+   docker logs youtarr-turbo-db
    ```
 
 #### Authentication Failures

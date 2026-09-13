@@ -253,7 +253,7 @@ if [[ "$DB_RUNNING" == "false" ]]; then
     MAX_WAIT=60
     WAITED=0
     while [[ $WAITED -lt $MAX_WAIT ]]; do
-        if docker exec youtarr-db mysqladmin ping -h localhost -P "$DB_PORT" -u "$DB_USER" -p"$DB_PASSWORD" &>/dev/null; then
+        if docker exec youtarr-turbo-db mysqladmin ping -h localhost -P "$DB_PORT" -u "$DB_USER" -p"$DB_PASSWORD" &>/dev/null; then
             break
         fi
         sleep 2
@@ -274,7 +274,7 @@ fi
 
 # Perform database dump
 yt_info "Dumping database..."
-if docker exec youtarr-db mysqldump \
+if docker exec youtarr-turbo-db mysqldump \
     --single-transaction \
     -P "$DB_PORT" \
     -u "$DB_USER" \

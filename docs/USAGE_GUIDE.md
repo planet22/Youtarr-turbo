@@ -553,10 +553,10 @@ The script must be run inside the Docker container:
 
 ```bash
 # Preview what would change (no database writes) — run this first!
-docker exec youtarr node scripts/backfill-ratings.js --dry-run
+docker exec youtarr-turbo node scripts/backfill-ratings.js --dry-run
 
 # Run for real (consider using screen/tmux for large libraries)
-docker exec -it youtarr node scripts/backfill-ratings.js
+docker exec -it youtarr-turbo node scripts/backfill-ratings.js
 ```
 
 **`--dry-run` flag** — Previews changes without modifying the database and shows how many videos need backfilling. Always run this first.

@@ -186,7 +186,7 @@ vi docker-compose.yml
 - Portable across all platforms (Synology, QNAP, macOS, Linux)
 - No UID/GID configuration needed
 
-**Note about data location:** The named volume data is stored by Docker in `/volume/@docker/volumes/` on Synology. You can back it up using `docker exec youtarr-db mysqldump` (see Backup section).
+**Note about data location:** The named volume data is stored by Docker in `/volume/@docker/volumes/` on Synology. You can back it up using `docker exec youtarr-turbo-db mysqldump` (see Backup section).
 
 ---
 
@@ -223,7 +223,7 @@ vi docker-compose.yml
 ```yaml
   youtarr-db:
     image: linuxserver/mariadb:latest
-    container_name: youtarr-db
+    container_name: youtarr-turbo-db
     restart: unless-stopped
     environment:
       MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-123qweasd}
@@ -247,7 +247,7 @@ vi docker-compose.yml
       retries: 5
       start_period: 30s
     networks:
-      - youtarr-network
+      - youtarr-turbo-network
 ```
 
 **3. Database directory:**
@@ -778,7 +778,7 @@ If you have existing data in `./database/` that you want to preserve:
    # Try to start just the database temporarily to dump data
    docker compose up -d youtarr-db
    sleep 30
-   docker exec youtarr-db mysqldump -u <db_user> -p'<db_password>' <db_name> > /volume1/backups/youtarr-backup.sql
+   docker exec youtarr-turbo-db mysqldump -u <db_user> -p'<db_password>' <db_name> > /volume1/backups/youtarr-backup.sql
    # Replace <db_user>, <db_password>, and <db_name> with the values from your .env file (defaults: root / 123qweasd / youtarr).
    docker compose down
    ```
@@ -795,7 +795,7 @@ If you have existing data in `./database/` that you want to preserve:
    ```bash
    # Wait for database to be healthy
    sleep 30
-   docker exec -i youtarr-db mysql -u <db_user> -p'<db_password>' <db_name> < /volume1/backups/youtarr-backup.sql
+   docker exec -i youtarr-turbo-db mysql -u <db_user> -p'<db_password>' <db_name> < /volume1/backups/youtarr-backup.sql
    # Replace <db_user>, <db_password>, and <db_name> with the values from your .env file.
    docker compose restart youtarr
    ```
@@ -853,7 +853,7 @@ cp -r /volume1/docker/Youtarr/config /volume1/backups/youtarr/config-$(date +%Y%
 
 # Backup database (with containers running).
 # Replace <db_user>, <db_password>, and <db_name> with the values from your .env file.
-docker exec youtarr-db mysqldump -u <db_user> -p'<db_password>' <db_name> > /volume1/backups/youtarr/database-$(date +%Y%m%d).sql
+docker exec youtarr-turbo-db mysqldump -u <db_user> -p'<db_password>' <db_name> > /volume1/backups/youtarr/database-$(date +%Y%m%d).sql
 ```
 
 **Optional file-level backups**
@@ -889,7 +889,7 @@ docker exec youtarr-db mysqldump -u <db_user> -p'<db_password>' <db_name> > /vol
      ```bash
      docker compose up -d youtarr-db
      sleep 30
-     docker exec -i youtarr-db mysql -u <db_user> -p'<db_password>' <db_name> < /volume1/backups/youtarr/database-YYYYMMDD.sql
+     docker exec -i youtarr-turbo-db mysql -u <db_user> -p'<db_password>' <db_name> < /volume1/backups/youtarr/database-YYYYMMDD.sql
      docker compose restart youtarr
      ```
 

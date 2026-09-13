@@ -12,7 +12,7 @@ import {
   modeChipColor,
 } from '../utils';
 import { useStreamRowActions } from '../hooks/useStreamRowActions';
-import { STATE_CHIP_COLOR } from './StreamsTable';
+import { STATE_CHIP_COLOR, STATE_CHIP_LABEL } from './StreamsTable';
 import { SegmentActivityStrip } from './SegmentActivityGrid';
 import StreamCardLayout, { StreamCardStat } from './StreamCardLayout';
 import StreamFormatChips from './StreamFormatChips';
@@ -37,7 +37,13 @@ function StreamCard({ stream, token, onStopped, onOpenSegments }: StreamCardProp
           <Tooltip title={formatModeLabel(stream.mode)}>
             <Chip size="small" label={formatModeChipLabel(stream.mode)} color={modeChipColor(stream.mode)} variant="filled" />
           </Tooltip>
-          <Chip size="small" label={stream.state} color={STATE_CHIP_COLOR[stream.state]} variant="filled" />
+          {stream.state === 'failed' && stream.error ? (
+            <Tooltip title={stream.error}>
+              <Chip size="small" label={STATE_CHIP_LABEL[stream.state]} color={STATE_CHIP_COLOR[stream.state]} variant="filled" />
+            </Tooltip>
+          ) : (
+            <Chip size="small" label={STATE_CHIP_LABEL[stream.state]} color={STATE_CHIP_COLOR[stream.state]} variant="filled" />
+          )}
         </>
       }
     >

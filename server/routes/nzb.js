@@ -102,8 +102,15 @@ function getResolutionDetectionConfig(cfg) {
  *   post offset/limit slice) - see fillUnknownDefinitions's own doc comment
  *   for why this never runs against the larger raw candidate set.
  * @param {ReturnType<typeof getResolutionDetectionConfig>} resolutionDetection
+ * @returns {Promise<{durationMs: number, queryCount: number}>} timing/volume
+ *   for the NZB diagnostics page's per-search trace (see recordSearchTrace's
+ *   call site below) - durationMs covers this whole function (the "fixed"
+ *   local-DB lookup included, not just the thumb/extract probes), queryCount
+ *   is however many items fillUnknownDefinitions actually had to resolve
+ *   (i.e. weren't already settled by the API or "fixed" tiers above).
  */
 async function applyResolutionDetection(results, resolutionDetection) {
+  const startedAt = Date.now();
   if (resolutionDetection.fixed) {
     const needsLocalLookup = results.filter((r) => r.localResolutionHeight === undefined);
     if (needsLocalLookup.length > 0) {
@@ -129,10 +136,12 @@ async function applyResolutionDetection(results, resolutionDetection) {
     }
   }
 
-  await nzbThumbnailProbe.fillUnknownDefinitions(results, {
+  const queryCount = await nzbThumbnailProbe.fillUnknownDefinitions(results, {
     useThumb: resolutionDetection.thumb,
     useExtract: resolutionDetection.extract,
   });
+
+  return { durationMs: Date.now() - startedAt, queryCount: queryCount || 0 };
 }
 
 // SABnzbd's timeleft is "H:MM:SS" (no zero-padded hours).
@@ -488,7 +497,11 @@ async function reconcileMovedUntrackedVideo(videoRow) {
     if (matchedJob?.data?.nzb) {
       matchedJob.data.nzb.untracked = true;
       matchedJob.data.nzb.untrackedAt = Date.now();
-      await jobModule.saveJobOnly(matchedJobId, matchedJob);
+      // skipVideoPersistence: the Video/JobVideo rows for this job were just
+      // deleted above - matchedJob.data.videos still holds the stale, now-
+      // deleted video object, so a normal saveJobOnly would immediately
+      // resurrect it.
+      await jobModule.saveJobOnly(matchedJobId, matchedJob, { skipVideoPersistence: true });
     }
   } catch (err) {
     logger.warn(
@@ -599,7 +612,11 @@ async function handleHistoryDeleteRequest(jobIds) {
       } else {
         logger.info({ jobId }, 'nzb: hid history entry in response to delete request (hardlink strategy - library video untouched)');
       }
-      await jobModule.saveJobOnly(jobId, job);
+      // skipVideoPersistence: for 'untracked'-strategy videos,
+      // untrackFromYoutarrLibrary above just deleted this job's Video/
+      // JobVideo rows - job.data.videos still holds the stale, now-deleted
+      // video object, so a normal saveJobOnly would immediately resurrect it.
+      await jobModule.saveJobOnly(jobId, job, { skipVideoPersistence: true });
     } catch (err) {
       logger.warn({ err, jobId }, 'nzb: failed to process history delete request');
     }
@@ -1148,7 +1165,8 @@ module.exports = function createNzbRoutes() {
         // probing one about to be discarded would be wasted work. See
         // applyResolutionDetection's doc comment for the fixed/api/thumb/
         // extract fallback chain this runs.
-        await applyResolutionDetection(results, getResolutionDetectionConfig(cfg));
+        const { durationMs: resolutionMs, queryCount: resolutionQueryCount } =
+          await applyResolutionDetection(results, getResolutionDetectionConfig(cfg));
 
         // Attach the resolution info just determined onto the matching trace
         // items, so the diagnostics dialog can show, per kept item, the
@@ -1181,6 +1199,8 @@ module.exports = function createNzbRoutes() {
           offset,
           limit,
           configuredHeightTier,
+          resolutionMs,
+          resolutionQueryCount,
           items: traceItems,
         });
 

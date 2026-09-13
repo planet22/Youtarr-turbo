@@ -15,9 +15,9 @@
  * window (or until a byte cap, whichever comes first), so this is
  * comparable across presets and to server/routes/ytstream.js's own
  * buildBaseArgs (this module intentionally re-derives that small arg set
- * rather than importing it, since buildBaseArgs is a closure private to
- * ytstream.js's route factory - see that file's own doc comment on why it
- * isn't exported).
+ * rather than importing it, since buildBaseArgs is still a closure private
+ * to ytstream.js's route factory - see that file's own doc comment on why
+ * it isn't exported yet).
  */
 
 const { spawn } = require('child_process');
@@ -28,12 +28,7 @@ const configModule = require('./configModule');
 const YtdlpCommandBuilder = require('./download/ytdlpCommandBuilder');
 const messageEmitter = require('./messageEmitter');
 const logger = require('../logger');
-
-// Mirrors ytstream.js's own DEFAULT_PLAYER_CLIENT - kept as a local literal
-// (not imported) for the same reason buildArgsForPreset re-derives the rest
-// of buildBaseArgs: that file's constant is private to its route-factory
-// module and not part of any exported surface.
-const DEFAULT_PLAYER_CLIENT = 'default,-tv';
+const { DEFAULT_PLAYER_CLIENT } = require('./ytstream/configResolution');
 
 // id/label pairs are shown as-is in the UI; httpChunkSizeMiB/concurrentFragments
 // of 0 (and concurrentFragments of 1) mean "don't pass this flag" - same

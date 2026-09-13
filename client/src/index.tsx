@@ -22,6 +22,7 @@ import App from './App';
 import { ThemeEngineProvider } from './contexts/ThemeEngineContext';
 import WebSocketProvider from './providers/WebSocketProvider';
 import { TooltipProvider } from './components/ui/tooltip';
+import ConnectionLostOverlay from './components/ConnectionLostOverlay';
 
 const root = ReactDOM.createRoot(
   document.getElementById('root') as HTMLElement
@@ -30,6 +31,7 @@ root.render(
   <React.StrictMode>
     <ThemeEngineProvider>
       <WebSocketProvider>
+        <ConnectionLostOverlay />
         <TooltipProvider>
           <App />
         </TooltipProvider>

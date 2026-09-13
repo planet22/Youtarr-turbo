@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const logger = require('../logger');
+const { resolveQualityHeight } = require('./ytstream/formatSelection');
 
 /**
  * Maps a yt-dlp codec tag (e.g. "avc1.640028", "mp4a.40.2", "vp09.00.10.08")
@@ -24,23 +25,6 @@ function mapCodec(ytdlpCodec) {
   if (/^ac-?3/.test(codec)) return 'ac3';
   const match = codec.match(/^[a-z0-9]+/);
   return match ? match[0] : null;
-}
-
-/**
- * Maps a `strm.quality`/`ytstream.quality` value to a max-height cap, same
- * mapping `resolveQualityHeight` in server/routes/ytstream.js uses. Kept as
- * an independent copy rather than importing from the route module, which is
- * a request-handling factory, not a shared library.
- * @param {string} quality
- * @returns {number|null} null means "no cap" (best)
- */
-function resolveQualityHeight(quality) {
-  const q = String(quality || '720').toLowerCase().trim();
-  if (q === 'best' || q === 'max' || q === 'maximum') return null;
-  if (q === '720' || q === 'broad' || q === 'compat') return 720;
-  if (q === '1080' || q === 'balanced') return 1080;
-  const height = Number.parseInt(q, 10);
-  return Number.isFinite(height) && height > 0 ? height : 720;
 }
 
 /**

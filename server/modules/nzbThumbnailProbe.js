@@ -2,6 +2,7 @@ const axios = require('axios');
 const logger = require('../logger');
 const ytDlpRunner = require('./ytDlpRunner');
 const nzbFeedModule = require('./nzbFeedModule');
+const youtubeMetadataCache = require('./youtubeMetadataCache');
 const createConcurrencyLimiter = require('./subscriptionImport/concurrencyLimiter');
 
 /**
@@ -111,28 +112,65 @@ async function probeViaExtraction(youtubeId) {
 }
 
 // Per-video resolution essentially never changes (barring a rare re-upload),
-// so once genuinely determined it's cached indefinitely (size-capped, not
-// time-limited) rather than re-probed on every search - Sonarr/Radarr/
-// Prowlarr repeatedly re-poll the same and overlapping queries (see
-// videoSearchModule.js's own rawResultsCache for the same reasoning applied
-// to whole search result sets), and the same popular video can surface
-// across many different queries. Deliberately keyed independent of that
-// query-level cache, and never stores an inconclusive/unconfirmed outcome -
-// see fillUnknownDefinitions below for which outcomes qualify.
-const MAX_CACHE_ENTRIES = 5000;
-const resolutionCache = new Map();
-
-function cacheGet(youtubeId) {
-  return resolutionCache.get(youtubeId) || null;
+// so once genuinely determined it's cached indefinitely rather than
+// re-probed on every search - Sonarr/Radarr/Prowlarr repeatedly re-poll the
+// same and overlapping queries (see videoSearchModule.js's own
+// rawResultsCache for the same reasoning applied to whole search result
+// sets), and the same popular video can surface across many different
+// queries. Persisted in its own `nzb_resolution_cache` table (see the
+// create-nzb-resolution-cache migration's doc comment) rather than an
+// in-memory Map, so it survives a restart, and deliberately NOT in
+// youtube_metadata_cache - see getFromLibraryMetadataCache below for why.
+// Never stores an inconclusive/unconfirmed outcome - see
+// fillUnknownDefinitions below for which outcomes qualify.
+async function cacheGet(youtubeId) {
+  try {
+    const { NzbResolutionCache } = require('../models');
+    const row = await NzbResolutionCache.findByPk(youtubeId);
+    if (!row) return null;
+    return { definition: row.definition, heightTier: row.height_tier, source: row.source };
+  } catch (err) {
+    logger.warn({ err, youtubeId }, 'nzb: resolution cache lookup failed');
+    return null;
+  }
 }
 
 function cacheSet(youtubeId, value) {
-  if (!resolutionCache.has(youtubeId) && resolutionCache.size >= MAX_CACHE_ENTRIES) {
-    // Map preserves insertion order - the first key is the oldest entry.
-    const oldestKey = resolutionCache.keys().next().value;
-    resolutionCache.delete(oldestKey);
-  }
-  resolutionCache.set(youtubeId, value);
+  const { NzbResolutionCache } = require('../models');
+  NzbResolutionCache.upsert({
+    youtube_id: youtubeId,
+    definition: value.definition,
+    height_tier: value.heightTier,
+    source: value.source,
+  }).catch((err) => {
+    logger.warn({ err, youtubeId }, 'nzb: failed to persist resolution cache entry');
+  });
+}
+
+/**
+ * Read-only check of the SHARED youtube_metadata_cache table (see
+ * youtubeMetadataCache.js) - the single place any real yt-dlp extraction
+ * Youtarr has ever run for this video (a download, an ytstream live
+ * warm-up, STRM materialization) already gets persisted. If a full
+ * extraction already happened for another reason, that's authoritative and
+ * free - no need for this module's own thumb/extract probes at all.
+ * Deliberately never WRITES here: Sonarr/Radarr/Prowlarr's NZB searches
+ * probe far more videos than are ever downloaded or played, and this table
+ * doubles as the Library page's "untracked" bucket (videosModule.js's
+ * _getUntrackedCandidates) - writing every searched-but-untouched video's
+ * metadata here would flood that view. See cacheGet/cacheSet above for
+ * where an nzb-probed result (thumb/extract) actually gets persisted
+ * instead.
+ * @param {string} youtubeId
+ * @returns {Promise<{definition: 'hd'|'sd', heightTier: number}|null>}
+ */
+async function getFromLibraryMetadataCache(youtubeId) {
+  const maxHeight = await youtubeMetadataCache.getCachedMaxHeight(youtubeId);
+  if (!maxHeight) return null;
+  return {
+    definition: maxHeight >= 720 ? 'hd' : 'sd',
+    heightTier: nzbFeedModule.resolveQualityTier(String(maxHeight)),
+  };
 }
 
 /**
@@ -153,15 +191,36 @@ function cacheSet(youtubeId, value) {
  * thumbnail probe (a genuine placeholder image) is trusted outright and
  * never re-verified - only "hd" (which can be a false positive) or an
  * inconclusive probe reaches the extraction step.
+ *
+ * Ahead of all of that (regardless of the useThumb/useExtract toggles,
+ * same as this module's own persisted cache), each item first checks the
+ * shared youtube_metadata_cache table via getFromLibraryMetadataCache - a
+ * real extraction Youtarr already has on file from downloading or
+ * streaming this exact video, read-only, never re-probed.
  * @param {Array<{youtubeId: string, definition?: string|null}>} results
  * @param {{useThumb?: boolean, useExtract?: boolean}} [options]
+ * @returns {Promise<number>} how many items actually needed a resolution
+ *   lookup here (already had no `definition` from the API/fixed tiers) -
+ *   surfaced by nzb.js's applyResolutionDetection as the NZB diagnostics
+ *   page's "Resolution" query count, regardless of whether each one was
+ *   answered from a cache or a real probe.
  */
 async function fillUnknownDefinitions(results, { useThumb = true, useExtract = true } = {}) {
   const needsProbe = results.filter((r) => r.definition == null && r.youtubeId);
-  if (needsProbe.length === 0 || (!useThumb && !useExtract)) return;
+  if (needsProbe.length === 0) return 0;
 
   await Promise.all(needsProbe.map(async (r) => {
-    const cached = cacheGet(r.youtubeId);
+    const fromLibrary = await getFromLibraryMetadataCache(r.youtubeId);
+    if (fromLibrary) {
+      r.definition = fromLibrary.definition;
+      r.actualHeightTier = fromLibrary.heightTier;
+      r.resolutionSource = 'metadataCache';
+      return;
+    }
+
+    if (!useThumb && !useExtract) return;
+
+    const cached = await cacheGet(r.youtubeId);
     if (cached) {
       r.definition = cached.definition;
       r.actualHeightTier = cached.heightTier;
@@ -204,6 +263,8 @@ async function fillUnknownDefinitions(results, { useThumb = true, useExtract = t
       r.resolutionSource = 'thumb';
     }
   }));
+
+  return needsProbe.length;
 }
 
 module.exports = { probeDefinition, probeViaExtraction, fillUnknownDefinitions };

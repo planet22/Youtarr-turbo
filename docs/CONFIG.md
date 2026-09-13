@@ -10,12 +10,17 @@ These settings can be changed from the Settings pages in the web UI.
 - [Jellyfin Integration](#jellyfin-integration)
 - [Emby Integration](#emby-integration)
 - [Watch Status Sync](#watch-status-sync)
+- [TV Series Library Mode](#tv-series-library-mode)
+- [Media Mode & STRM](#media-mode--strm)
+- [Streaming (ytstream)](#streaming-ytstream)
+- [Sonarr/Radarr Integration (NZB)](#sonarrradarr-integration-nzb)
 - [YouTube Data API](#youtube-data-api-optional)
 - [SponsorBlock Settings](#sponsorblock-settings)
 - [Kodi, Emby and Jellyfin Compatibility](#kodi-emby-and-jellyfin-compatibility)
 - [Cookie Config](#cookie-config)
 - [Notifications](#notifications)
 - [Download Performance](#download-performance)
+- [Post-Download Transcode](#post-download-transcode)
 - [Advanced Settings](#advanced-settings)
 - [Auto-Removal Settings](#auto-removal-settings)
 - [API Keys & External Access](#api-keys--external-access)
@@ -102,6 +107,14 @@ Configuration can be modified through:
   - `h265`: Better compression, requires modern devices
   - `default`: YouTube picks the stream, typically VP9 or AV1 above 1080p. Best compression, but older devices may need to transcode. (VP9 and AV1 are not selectable values for this key; they are just what YouTube serves when no codec preference is forced.)
 
+### Default Library Mode
+- **Config Key**: `defaultLibraryMode`
+- **Type**: `string`
+- **Default**: `"movie"`
+- **Options**: `"movie"`, `"series"`
+- **Description**: Global default for how downloaded videos are organized/named. `"movie"` is Youtarr's traditional behavior. `"series"` treats each channel like a TV series: videos are assigned a `season` (the calendar year of upload) and an `episode` number (ordinal within that year) and named using the Episode Filename Template below, for Jellyfin/Plex/Emby "Shows" libraries. See [TV Series Library Mode](#tv-series-library-mode).
+- **Note**: Can be overridden per-channel or per-playlist (`library_mode` column; NULL inherits this global default). See [DATABASE.md](DATABASE.md).
+
 ### Default Subfolder
 - **Config Key**: `defaultSubfolder`
 - **Type**: `string`
@@ -142,6 +155,27 @@ Configuration can be modified through:
   - **Plex YouTube-Agent** (`%(upload_date>%Y_%m_%d)s %(title).64B`): `2025_10_17 ESCAPING 99 Nights ... [Cbq15X05wyY].mp4` (compatible with [Absolute-Series-Scanner](https://github.com/ZeroQI/Absolute-Series-Scanner) and [YouTube-Agent.bundle](https://github.com/ZeroQI/YouTube-Agent.bundle))
   - **Title only** (`%(title).64B`): `ESCAPING 99 Nights ... [Cbq15X05wyY].mp4`
 - **UI**: A live preview in **Settings -> Core Settings -> File Structure Settings** shows the rendered folder and file names against a sample video, with length warnings (yellow > 110 chars, red > 130 chars on the rendered name).
+
+## TV Series Library Mode
+
+When a channel/playlist is in `series` library mode (see `defaultLibraryMode` above), downloaded videos are numbered and named as TV episodes instead of Youtarr's default movie-style naming.
+
+### Episode Filename Template
+- **Config Key**: `episodeFilenamePrefix`
+- **Type**: `string`
+- **Default**: `"S%(season)02dE%(episode)03d - %(title).64s"`
+- **Description**: Filename template for series-mode videos, applied instead of `videoFilenamePrefix`. Supports `%(title)s`, `%(season)d` / `%(season)0Nd`, `%(episode)0Nd`, `%(channel)s`. A locked `" [id].ext"` suffix is always appended.
+- **Note**: Uses Youtarr's own placeholder syntax, not yt-dlp's — the episode number is only known after checking the database (see `season`/`episode` columns on `Videos` in [DATABASE.md](DATABASE.md)), not at yt-dlp invocation time.
+
+### TV Series Output Subfolder
+- **Config Key**: `seriesOutputSubfolder`
+- **Type**: `string`
+- **Default**: `""` (empty — series-mode channels land in the same location as movie mode)
+- **Description**: Default subfolder for series-mode channels/playlists that have no subfolder of their own already set. Point a separate media-server "Shows" library at this subfolder to keep TV Series content separate from Movies.
+- **Note**: Only applies to channels/playlists using TV Series library mode. Only affects new downloads.
+
+### Per-Channel Season/Episode Regex
+Not a global `config.json` field — set per-channel via the channel's `season_episode_regex` column (see [DATABASE.md](DATABASE.md)). Optional regex with `(?P<season>)`/`(?P<episode>)` named groups to decode season/episode from a video title, instead of the default (upload year as season, chronological order within the year as episode).
 
 ### Enable Subtitles
 - **Config Key**: `subtitlesEnabled`
@@ -268,6 +302,12 @@ These fields are required only when you want Youtarr to mirror playlists to Jell
 - **Default**: `[]`
 - **Description**: Library IDs that contain your Youtarr videos. Optional and safe to leave blank; Youtarr matches downloaded videos to Jellyfin items across all of your libraries.
 
+### Jellyfin Subfolder Library Mappings
+- **Config Key**: `jellyfinSubfolderLibraryMappings`
+- **Type**: `Array<{ subfolder: string | null, libraryId: string }>`
+- **Default**: `[]`
+- **Description**: Per-subfolder Jellyfin library targeting, same shape and fallback behavior as `plexSubfolderLibraryMappings` above.
+
 ## Emby Integration
 
 These fields work like the Jellyfin fields above, with `emby*` names. They're required only when you want Youtarr to mirror playlists to Emby as native playlists; channel downloads work without them. See [Media Server Playlists](MEDIA_SERVER_PLAYLISTS.md) for setup details.
@@ -292,6 +332,62 @@ These fields work like the Jellyfin fields above, with `emby*` names. They're re
 | `watchStatusWatchedRule` | `string` | `"any"` | When a video counts as "Watched" in listings: `"any"` (any synced user watched it) or `"primary"` (only the Plex owner / configured Jellyfin/Emby user). |
 
 Sync is one-way (server -> Youtarr). Non-owner Plex users come from the server's play history, which records plays but not in-progress positions: any play marks the video watched for that user. User names are stored in the `media_server_users` table so the video modal can show who watched what. The history pull is incremental via a durable cursor in the `watch_status_sync_cursors` table; deleting that table's `plex` row forces a full history re-scan on the next sync (useful after repairing a path mismatch that had prevented videos from matching).
+
+## Media Mode & STRM
+
+### Media Mode
+- **Config Key**: `mediaMode`
+- **Type**: `string`
+- **Default**: `"download"`
+- **Options**: `"download"`, `"strm"`, `"both"`
+- **Description**: `"download"` is Youtarr's traditional full-file download behavior. `"strm"` writes a `.strm` shortcut (plus NFO/thumbnail) instead of downloading the video, for on-demand playback via Jellyfin/Emby/Kodi. `"both"` downloads the media file **and** writes a `.strm` pointing at the proxy/YouTube.
+- **Note**: Can be overridden per-channel or per-playlist (`media_mode` column; NULL inherits this global default). See [STRM.md](STRM.md) and [DATABASE.md](DATABASE.md).
+
+### STRM Settings
+- **Config Key**: `strm` (object)
+- **Default**:
+```json
+"strm": {
+  "target": "ytstream",
+  "proxyBaseUrl": "",
+  "writeNfo": true,
+  "writeThumbnail": true,
+  "writeMediaInfoCache": true,
+  "cacheOnPlay": false,
+  "cacheOnPlayExpiryHours": null,
+  "quality": null
+}
+```
+
+| Field | Values | Notes |
+|---|---|---|
+| `target` | `"youtube"` \| `"ytstream"` | `youtube`: `.strm` points straight at the YouTube watch URL. `ytstream` (default): `.strm` points at Youtarr's own `/api/ytstream/:id` route — see [YTSTREAM.md](YTSTREAM.md). |
+| `proxyBaseUrl` | `string` | Base URL for `target: "ytstream"` `.strm` files. Must be reachable by the media server/clients, not `127.0.0.1` unless they run on the same host. |
+| `writeNfo` / `writeThumbnail` | `boolean` | Write NFO metadata / thumbnail image alongside the `.strm`. |
+| `writeMediaInfoCache` | `boolean` | Cache probed media info (resolution/duration/etc.) for the STRM item so it doesn't need re-probing on every scan. |
+| `cacheOnPlay` | `boolean` | When true, the first play of a `.strm` item triggers a background full download that then serves locally; see `cacheOnPlayExpiryHours`. |
+| `cacheOnPlayExpiryHours` | `number \| null` | Hours after a cache-on-play download finishes before the nightly sweep (2:10 AM) reverts the video back to STRM, freeing disk space. `null`/`0` = never auto-revert. Only ever applies to a video cache-on-play itself materialized, never a genuine/forced download. |
+| `quality` | `string \| null` | Overrides the resolution baked into `ytstream`-target `.strm` URLs. `null` falls back to `preferredResolution`. |
+
+## Streaming (ytstream)
+
+- **Config Key**: `ytstream` (object)
+- **Description**: Server-side playback/transcode settings for the `/api/ytstream/:youtubeId` route used by `strm.target: "ytstream"` `.strm` files (and any direct caller). Covers stream mode (`defaultMode`: `direct`/`direct-redirect`/`hls`/`hls-buffer`), container/quality/transcode selection, hardware encode/decode backends, network tuning (chunk size, concurrent fragments, throttle/socket timeouts), HLS segment storage and caching behavior (`hotSwapToCache`, `serveCachedFile`, `hlsStorageLocation`, `backfillMissingSegments`, `finalizeToMp4`, `stealthCache`), and history retention (`historyRetentionDays`, default 90 — see the `stream_history` table in [DATABASE.md](DATABASE.md)).
+- **Full field reference**: [YTSTREAM.md § Config (config.json)](YTSTREAM.md#config-configjson).
+- **Note**: `calculatedLength` was renamed from `fakeLength`; old configs are migrated automatically at startup.
+
+## Sonarr/Radarr Integration (NZB)
+
+- **Config Key**: `nzb` (object)
+- **Description**: Makes Youtarr act as a Newznab-compatible search indexer and SABnzbd-compatible download client so Sonarr/Radarr/Prowlarr can search and "grab" YouTube videos through Youtarr. See [NZB.md](NZB.md) for setup and integration details, and the `nzb_diagnostic_log` / `nzb_resolution_cache` tables in [DATABASE.md](DATABASE.md).
+- **Top-level fields**:
+  - `enabled` (`boolean`, default `false`) — turns the `/nzb` routes on.
+  - `apiKey` (`string`) — shared key for both the Newznab indexer and SABnzbd download-client endpoints; stored/displayed in plaintext (a service-integration token, not a login credential).
+  - `remoteBasePath` (`string | null`, default `null`) — when Sonarr/Radarr see the shared media volume at a different path than Youtarr does internally, every path Youtarr reports back has its real data-root prefix swapped for this value. `null` = report paths unchanged.
+  - `searchCacheMinutes` (`number`, default `10`) — how long a raw search result set is reused before a repeat query re-fetches; avoids a redundant yt-dlp run/API call for Sonarr/Radarr's own repeat polling. `0` disables caching.
+  - `debugLogging` (`boolean`, default `false`) — this route's own diagnostic lines print regardless of the global Log Level, without turning on every other module's debug output.
+  - `resolutionDetection` (`{ fixed, thumb, extract }`, all default `true`) — which methods are tried, in order, to determine a search result's real resolution: `fixed` (a previously-downloaded video's own recorded resolution, free/exact), `thumb` (maxresdefault-thumbnail heuristic, cheap but can false-positive "hd"), `extract` (a real yt-dlp extraction, authoritative but slower — only used to confirm/correct an uncertain `thumb` result unless both other methods are off).
+  - `categories` (`array`) — one entry per Sonarr/Radarr "Category": `name`, `subfolder`, `mediaMode` (`download`/`strm`/`both`), `searchMode` (`flat`/`episode`), `importStrategy` (`hardlink`: video stays in Youtarr's own library, a hardlink is staged for Sonarr/Radarr to import; `untracked`: Youtarr drops its own DB tracking immediately so the video never appears in Youtarr's own list/history), `newznabCategoryIds` (array of Newznab category id strings a search can match under), `additionalLocalFilter` + `excludeTerms` (require search terms actually present in the title / reject junk substrings like "advert"), `postEncode` (per-category gate on the global post-download transcode — see [Post-Download Transcode](#post-download-transcode)).
 
 ## YouTube Data API (Optional)
 
@@ -560,7 +656,49 @@ The old `discordWebhookUrl` and `notificationService` fields are automatically r
 - **Description**: Delay between YouTube API requests (seconds)
 - **Note**: Corresponds to yt-dlp `--sleep-requests` setting.
 
+### Queue Manager UI
+- **Config Key**: `downloadQueueManagerEnabled`
+- **Type**: `boolean`
+- **Default**: `false`
+- **Description**: Replaces the simple queued-jobs chip list on the Download Activity page with a reorderable/deletable table plus a queue-pause button.
+- **Note**: Purely a client presentation choice; does not change download behavior.
+
+## Post-Download Transcode
+
+Optional ffmpeg re-encode of the already-downloaded file, run once after yt-dlp finishes (and after SponsorBlock cutting, before NFO/AtomicParsley/file moves). Distinct from `videoCodec`/`preferredResolution`, which only influence *which* format yt-dlp selects at download time — this converts the resulting file to a codec YouTube may not have served directly (e.g. HEVC, or a smaller AV1 file), using the same hardware-encoder backends as STRM/ytstream playback transcoding when available, with automatic fallback to software encoding on failure.
+
+### Transcode Video Codec
+- **Config Key**: `downloadTranscodeVideoCodec`
+- **Type**: `string`
+- **Default**: `"off"`
+- **Options**: `"off"`, `"h264"`, `"hevc"`, `"av1"`
+- **Description**: Target video codec for the post-download transcode. `"off"` (default) leaves yt-dlp's own output untouched.
+
+### Transcode Hardware Mode
+- **Config Key**: `downloadTranscodeHardwareMode`
+- **Type**: `string`
+- **Default**: `"none"`
+- **Options**: `"none"`, `"qsv"`, `"nvenc"`, `"vaapi"`, `"amf"`
+- **Description**: Hardware encoder backend to try first for the post-download transcode; falls back to the matching software encoder (`libx264`/`libx265`/`libsvtav1`) on failure.
+
+### Transcode Audio Codec
+- **Config Key**: `downloadTranscodeAudioCodec`
+- **Type**: `string`
+- **Default**: `"copy"`
+- **Options**: `"copy"`, `"aac"`, `"opus"`
+- **Description**: Audio handling for the post-download transcode. `"copy"` leaves the existing audio stream untouched (no re-encode).
+
+### Per-Category Transcode Gate (NZB)
+Not a global setting — each Sonarr/Radarr NZB category has its own `postEncode` boolean (see [Sonarr/Radarr Integration (NZB)](#sonarrradarr-integration-nzb)) that can *narrow* (never override) the global `downloadTranscodeVideoCodec` setting for grabs in that category specifically, e.g. transcoding Movies but not TV Series. Never applies to STRM cache-on-play downloads, which are never transcoded.
+
 ## Advanced Settings
+
+### Log Level
+- **Config Key**: `logLevel`
+- **Type**: `string`
+- **Default**: `""` (empty)
+- **Options**: `""`, `"warn"`, `"info"`, `"debug"`
+- **Description**: Overrides the server's log verbosity. Empty defers to the `LOG_LEVEL` environment variable (see [ENVIRONMENT_VARIABLES.md](ENVIRONMENT_VARIABLES.md)) as the startup default; an explicit value here takes effect immediately and live, no restart needed.
 
 ### Proxy
 - **Config Key**: `proxy`
@@ -697,6 +835,18 @@ volumes:
 - **Default**: `0` (disabled)
 - **Description**: The N most recently downloaded videos are excluded from every auto-removal strategy (age, watched, and free-space)
 - **Note**: Videos marked as Protected are always excluded from auto-removal, independent of this setting, and do not count toward the N (each keep-recent slot goes to a video that would otherwise be removable). Videos of channels protected at the channel level are treated the same way.
+
+### Preserve STRM Fallback
+- **Config Key**: `autoRemovalPreserveStrmFallback`
+- **Type**: `boolean`
+- **Default**: `true`
+- **Description**: When removing a video that has an archived `.strm`/`.strmtool.json` backup pair (written by STRM cache-on-play), revert it back to STRM playback instead of fully deleting the library entry — only the large media file is removed.
+
+### Minimum File Size for Removal
+- **Config Key**: `autoRemovalMinFileSizeKB`
+- **Type**: `number`
+- **Default**: `1`
+- **Description**: Safety floor: a video whose tracked file is smaller than this (in KB) is never selected as an age/watched/space removal candidate. Protects bare `.strm` rows (a few dozen bytes) from being "cleaned up" for ~0 bytes of actual savings.
 
 ### Per-Channel Auto-Removal Settings
 Two more guards live in each channel's settings dialog (the Auto-Removal tab), not in `config.json`:

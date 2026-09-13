@@ -111,7 +111,8 @@ const CircularProgress = React.forwardRef<HTMLSpanElement, CircularProgressProps
             stroke="currentColor"
             strokeWidth={thickness}
             strokeLinecap="round"
-            strokeDasharray={strokeDash ?? `${circumference * 0.75} ${circumference * 0.25}`}
+            strokeDasharray={variant === 'determinate' ? strokeDash : undefined}
+            className={variant === 'indeterminate' ? 'animate-[circular-dash_1.5s_ease-in-out_infinite]' : undefined}
           />
         </svg>
       </span>

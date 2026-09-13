@@ -54,6 +54,24 @@ function computeExpiresAt(fromTimestamp, ttlHours) {
   return new Date(new Date(fromTimestamp).getTime() + hours * 60 * 60 * 1000).toISOString();
 }
 
+/**
+ * An untracked candidate's "most recent activity" timestamp, for sorting/
+ * display - NOT simply "prefer cachedMetadataAt", which silently buries a
+ * freshly hls-buffer-cached video behind its own much older metadata-probe
+ * date whenever both exist on the same candidate (metadata gets cached the
+ * first time a video is ever looked at, which can predate a much later
+ * cache-on-play/hls-buffer fetch by months). Always the later of the two.
+ * @param {{cachedMetadataAt: string|null, cachedVideoAt: string|null}} candidate
+ * @returns {number} epoch ms, or NaN if neither timestamp is set
+ */
+function mostRecentUntrackedActivityMs(candidate) {
+  const metadataMs = candidate.cachedMetadataAt ? new Date(candidate.cachedMetadataAt).getTime() : NaN;
+  const videoMs = candidate.cachedVideoAt ? new Date(candidate.cachedVideoAt).getTime() : NaN;
+  if (Number.isNaN(metadataMs)) return videoMs;
+  if (Number.isNaN(videoMs)) return metadataMs;
+  return Math.max(metadataMs, videoMs);
+}
+
 class VideosModule {
   constructor() {
     this._backfillRunning = false;
@@ -328,7 +346,7 @@ class VideosModule {
           ...untrackedCandidates.map((c) => ({
             kind: 'untracked',
             id: c.youtubeId,
-            sortKey: new Date(c.cachedMetadataAt || c.cachedVideoAt).getTime(),
+            sortKey: mostRecentUntrackedActivityMs(c),
             candidate: c,
           })),
         ];
@@ -777,11 +795,7 @@ class VideosModule {
       );
     }
     const dir = String(sortOrder).toLowerCase() === 'asc' ? 1 : -1;
-    candidates.sort((a, b) => {
-      const aTime = new Date(a.cachedMetadataAt || a.cachedVideoAt).getTime();
-      const bTime = new Date(b.cachedMetadataAt || b.cachedVideoAt).getTime();
-      return dir * (aTime - bTime);
-    });
+    candidates.sort((a, b) => dir * (mostRecentUntrackedActivityMs(a) - mostRecentUntrackedActivityMs(b)));
     return candidates.slice(0, UNTRACKED_BUCKET_CAP);
   }
 
@@ -835,7 +849,9 @@ class VideosModule {
         is_strm: false,
         watchedBy: [],
         isTracked: false,
-        timeCreated: candidate.cachedMetadataAt || candidate.cachedVideoAt,
+        timeCreated: Number.isNaN(mostRecentUntrackedActivityMs(candidate))
+          ? null
+          : new Date(mostRecentUntrackedActivityMs(candidate)).toISOString(),
         hasCachedMetadata: candidate.hasCachedMetadata,
         cachedMetadataAt: candidate.cachedMetadataAt,
         cachedMetadataAgo: formatRelativeTimeAgo(candidate.cachedMetadataAt),

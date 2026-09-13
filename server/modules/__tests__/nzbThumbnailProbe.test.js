@@ -2,6 +2,8 @@ describe('nzbThumbnailProbe', () => {
   let probe;
   let axios;
   let ytDlpRunner;
+  let youtubeMetadataCache;
+  let NzbResolutionCache;
 
   beforeEach(() => {
     jest.resetModules();
@@ -11,8 +13,14 @@ describe('nzbThumbnailProbe', () => {
       info: jest.fn(), warn: jest.fn(), debug: jest.fn(), error: jest.fn(),
     }));
     jest.mock('../ytDlpRunner', () => ({ fetchMetadata: jest.fn() }));
+    jest.mock('../youtubeMetadataCache', () => ({ getCachedMaxHeight: jest.fn().mockResolvedValue(null) }));
+    jest.mock('../../models', () => ({
+      NzbResolutionCache: { findByPk: jest.fn().mockResolvedValue(null), upsert: jest.fn().mockResolvedValue(undefined) },
+    }));
     axios = require('axios');
     ytDlpRunner = require('../ytDlpRunner');
+    youtubeMetadataCache = require('../youtubeMetadataCache');
+    ({ NzbResolutionCache } = require('../../models'));
     // nzbFeedModule is real (pure tier-snapping logic, only depends on the
     // already-mocked logger) - simpler and more realistic than re-mocking
     // its snapping rules here.
@@ -102,7 +110,36 @@ describe('nzbThumbnailProbe', () => {
       expect(axios.get).not.toHaveBeenCalled();
     });
 
-    test('does nothing when both useThumb and useExtract are off', async () => {
+    test('uses a real yt-dlp extraction already on file in the shared library metadata cache, without probing at all', async () => {
+      youtubeMetadataCache.getCachedMaxHeight.mockResolvedValueOnce(1080);
+      const results = [{ youtubeId: 'downloadedBefore', definition: null }];
+      await probe.fillUnknownDefinitions(results);
+
+      expect(results[0].definition).toBe('hd');
+      expect(results[0].actualHeightTier).toBe(1080);
+      expect(results[0].resolutionSource).toBe('metadataCache');
+      expect(axios.get).not.toHaveBeenCalled();
+      expect(ytDlpRunner.fetchMetadata).not.toHaveBeenCalled();
+      expect(NzbResolutionCache.upsert).not.toHaveBeenCalled();
+    });
+
+    test('a low max height from the shared library metadata cache is reported as sd', async () => {
+      youtubeMetadataCache.getCachedMaxHeight.mockResolvedValueOnce(480);
+      const results = [{ youtubeId: 'downloadedBefore', definition: null }];
+      await probe.fillUnknownDefinitions(results);
+      expect(results[0].definition).toBe('sd');
+      expect(results[0].resolutionSource).toBe('metadataCache');
+    });
+
+    test('checks the shared library metadata cache even when both useThumb and useExtract are off', async () => {
+      youtubeMetadataCache.getCachedMaxHeight.mockResolvedValueOnce(1080);
+      const results = [{ youtubeId: 'downloadedBefore', definition: null }];
+      await probe.fillUnknownDefinitions(results, { useThumb: false, useExtract: false });
+      expect(results[0].definition).toBe('hd');
+      expect(results[0].resolutionSource).toBe('metadataCache');
+    });
+
+    test('does nothing when both useThumb and useExtract are off and nothing is in the library metadata cache', async () => {
       const results = [{ youtubeId: 'unknown1', definition: null }];
       await probe.fillUnknownDefinitions(results, { useThumb: false, useExtract: false });
       expect(axios.get).not.toHaveBeenCalled();
@@ -154,28 +191,43 @@ describe('nzbThumbnailProbe', () => {
       expect(results[0].definition).toBeNull();
     });
 
-    test('caches a confirmed extraction result so a second search for the same video skips both probes', async () => {
+    test('a confirmed extraction result is persisted to the nzb resolution cache table, not the shared library metadata cache', async () => {
       axios.get.mockResolvedValueOnce(smallResponse(45000));
       ytDlpRunner.fetchMetadata.mockResolvedValueOnce({ formats: [{ vcodec: 'avc1', height: 1080 }] });
+      const results = [{ youtubeId: 'sameVideo', definition: null }];
+      await probe.fillUnknownDefinitions(results);
 
-      const firstPass = [{ youtubeId: 'sameVideo', definition: null }];
-      await probe.fillUnknownDefinitions(firstPass);
-      expect(firstPass[0].definition).toBe('hd');
+      expect(NzbResolutionCache.upsert).toHaveBeenCalledWith(expect.objectContaining({
+        youtube_id: 'sameVideo', definition: 'hd', height_tier: 1080, source: 'extract',
+      }));
+    });
 
-      const secondPass = [{ youtubeId: 'sameVideo', definition: null }];
-      await probe.fillUnknownDefinitions(secondPass);
+    test('a second search for the same video reads the persisted cache row and skips both probes', async () => {
+      NzbResolutionCache.findByPk.mockResolvedValueOnce({ definition: 'hd', height_tier: 1080, source: 'extract' });
+      const results = [{ youtubeId: 'sameVideo', definition: null }];
+      await probe.fillUnknownDefinitions(results);
 
-      expect(axios.get).toHaveBeenCalledTimes(1);
-      expect(ytDlpRunner.fetchMetadata).toHaveBeenCalledTimes(1);
-      expect(secondPass[0].definition).toBe('hd');
-      expect(secondPass[0].actualHeightTier).toBe(1080);
-      expect(secondPass[0].resolutionSource).toBe('extract');
+      expect(axios.get).not.toHaveBeenCalled();
+      expect(ytDlpRunner.fetchMetadata).not.toHaveBeenCalled();
+      expect(results[0].definition).toBe('hd');
+      expect(results[0].actualHeightTier).toBe(1080);
+      expect(results[0].resolutionSource).toBe('extract');
+    });
+
+    test('returns how many items needed a resolution lookup, for the NZB diagnostics page\'s query count', async () => {
+      const results = [
+        { youtubeId: 'a', definition: 'hd' }, // already settled, not counted
+        { youtubeId: 'b', definition: null },
+        { youtubeId: 'c', definition: null },
+      ];
+      await expect(probe.fillUnknownDefinitions(results, { useThumb: false, useExtract: false })).resolves.toBe(2);
     });
 
     test('does not cache an unconfirmed "hd" (thumbnail-only) result - a later search retries it', async () => {
       axios.get.mockResolvedValue(smallResponse(45000));
       const firstPass = [{ youtubeId: 'sameVideo', definition: null }];
       await probe.fillUnknownDefinitions(firstPass, { useExtract: false });
+      expect(NzbResolutionCache.upsert).not.toHaveBeenCalled();
 
       const secondPass = [{ youtubeId: 'sameVideo', definition: null }];
       await probe.fillUnknownDefinitions(secondPass, { useExtract: false });

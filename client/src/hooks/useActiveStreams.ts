@@ -38,7 +38,15 @@ export interface StreamSnapshot {
   clientIp: string;
   userAgent: string | null;
   viewerCount?: number;
-  state: 'starting' | 'active' | 'cached' | 'failed';
+  // 'requested'/'resolving' only ever appear briefly, before a session is
+  // assigned (or a request is served directly) - see activeStreams.js's
+  // trackPendingRequest doc comment. 'requested': the request has just
+  // been received, mode/format not resolved yet. 'resolving': format/
+  // quality probing (yt-dlp) is in flight - the slow step this exists to
+  // make visible.
+  state: 'requested' | 'resolving' | 'starting' | 'active' | 'cached' | 'failed';
+  /** Only meaningful when state === 'failed' - why this stream never started. */
+  error: string | null;
   startedAt: number;
   bytesTransferred: number;
   bytesPerSecond: number;

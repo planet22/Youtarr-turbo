@@ -198,11 +198,18 @@ class JobModule {
             videoData.fileSize = resolvedStats?.size !== undefined ? resolvedStats.size.toString() : null;
             videoData.removed = false;
           } else {
-            // File not found, but we still want to record the expected metadata location
+            // File not found on disk (e.g. an nzb importStrategy:'untracked'
+            // video whose file Sonarr/Radarr already moved away before this
+            // recovery ran) - still record the expected metadata location,
+            // but removed must be true here, not false. Claiming false for a
+            // file that was never actually verified is exactly what used to
+            // resurrect an already-untracked video as "Missing" on every
+            // restart that hit this path (see reconcileMovedUntrackedVideo
+            // in nzb.js, which relies on removed reflecting real file state).
             const assumedPath = actualFilePath || `${fallbackBasePath}.mp4`;
             videoData.filePath = assumedPath;
             videoData.fileSize = null;
-            videoData.removed = false;
+            videoData.removed = true;
           }
 
           // Upsert video into Videos table and ensure JobVideo relationship exists
@@ -666,7 +673,15 @@ class JobModule {
   }
 
   // Save a single job and its video data to the database
-  async saveJobOnly(jobId, jobDataOriginal) {
+  // skipVideoPersistence: true for callers that only want to persist a
+  // status/aux_data change on the job row (e.g. nzb.js's
+  // reconcileMovedUntrackedVideo/handleHistoryDeleteRequest stamping
+  // untracked/historyRemoved onto a job right after deliberately deleting
+  // that job's Video/JobVideo rows) - job.data.videos on an in-memory job
+  // still holds the original, now-stale video object, so re-running the
+  // upsert loop below would immediately resurrect the row this same call is
+  // trying to record the removal of.
+  async saveJobOnly(jobId, jobDataOriginal, { skipVideoPersistence = false } = {}) {
     const jobData = { ...jobDataOriginal };
 
     // Extract video data if present (download jobs); non-download jobs may not have data
@@ -684,6 +699,10 @@ class JobModule {
         await jobInstance.update(jobData);
       } else {
         jobInstance = await Job.create(jobData);
+      }
+
+      if (skipVideoPersistence) {
+        return;
       }
 
       // Process videos for this job only (download jobs)

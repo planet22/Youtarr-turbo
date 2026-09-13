@@ -97,9 +97,10 @@ function reasonMessage(item: NzbSearchTraceItem, trace: NzbSearchTrace): string 
 // effectiveHeightTier - shown in the resolution chip's tooltip so a capped
 // (or uncapped) label's origin is legible without cross-referencing the
 // settings page. See nzb.js's applyResolutionDetection.
-const RESOLUTION_SOURCE_LABEL: Record<'fixed' | 'api' | 'thumb' | 'extract', string> = {
+const RESOLUTION_SOURCE_LABEL: Record<'fixed' | 'api' | 'metadataCache' | 'thumb' | 'extract', string> = {
   fixed: 'a previous download’s known resolution',
   api: 'the YouTube Data API',
+  metadataCache: 'a real extraction already on file (downloaded or streamed before)',
   thumb: 'a thumbnail check',
   extract: 'a real yt-dlp extraction',
 };
@@ -123,7 +124,7 @@ function resolutionCell(item: NzbSearchTraceItem, trace: NzbSearchTrace): React.
     );
   }
   const label = `${item.effectiveHeightTier}p`;
-  const sourceText = item.resolutionSource ? RESOLUTION_SOURCE_LABEL[item.resolutionSource] : 'an unknown check';
+  const sourceText = item.resolutionSource ? RESOLUTION_SOURCE_LABEL[item.resolutionSource] : 'fixed from config';
   const capped = trace.configuredHeightTier != null && item.effectiveHeightTier < trace.configuredHeightTier;
   if (!capped) {
     return (
@@ -230,10 +231,24 @@ function NzbSearchTraceDialog({ trace, onClose }: NzbSearchTraceDialogProps) {
               {sortedItems.map(({ item, index }) => (
                 <TableRow hover key={`${item.youtubeId}-${index}`}>
                   <TableCell style={{ maxWidth: 360 }}>
-                    <HighlightedTitle
-                      title={item.title}
-                      matchedTerm={HIGHLIGHTABLE_REASONS.has(item.reason) ? item.matchedTerm : null}
-                    />
+                    {item.youtubeId ? (
+                      <a
+                        href={`https://www.youtube.com/watch?v=${encodeURIComponent(item.youtubeId)}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{ color: 'inherit' }}
+                      >
+                        <HighlightedTitle
+                          title={item.title}
+                          matchedTerm={HIGHLIGHTABLE_REASONS.has(item.reason) ? item.matchedTerm : null}
+                        />
+                      </a>
+                    ) : (
+                      <HighlightedTitle
+                        title={item.title}
+                        matchedTerm={HIGHLIGHTABLE_REASONS.has(item.reason) ? item.matchedTerm : null}
+                      />
+                    )}
                   </TableCell>
                   <TableCell>
                     <Chip

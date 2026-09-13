@@ -11,10 +11,11 @@ import {
   Chip,
   Button,
   Box,
+  Tooltip,
 } from '../../ui';
 import { useMediaQuery } from '../../../hooks/useMediaQuery';
 import { NzbRecentQuery, NzbSearchTrace } from '../../../hooks/useNzbStats';
-import { formatDurationMs, formatRelativeTime } from '../utils';
+import { formatDurationMs, formatRelativeTime, formatResolutionBreakdown, formatResolutionStats } from '../utils';
 import NzbSettingsIcons from './NzbSettingsIcons';
 import NzbSearchTraceDialog from './NzbSearchTraceDialog';
 import { COMPACT_CHIP_STYLE } from './nzbMobileStyles';
@@ -72,6 +73,18 @@ function NzbRecentQueriesMobileList({ queries, onSelect, findTrace }: NzbRecentQ
               variant="filled"
               style={COMPACT_CHIP_STYLE}
             />
+            {(() => {
+              const chip = (
+                <Chip
+                  size="small"
+                  label={`Resolution: ${formatResolutionStats(trace?.resolutionMs, trace?.resolutionQueryCount)}`}
+                  variant="outlined"
+                  style={COMPACT_CHIP_STYLE}
+                />
+              );
+              const breakdown = formatResolutionBreakdown(trace?.items);
+              return breakdown ? <Tooltip title={breakdown}><span>{chip}</span></Tooltip> : chip;
+            })()}
           </Box>
           <Box style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginTop: 6 }}>
             <NzbSettingsIcons settings={q.settingsSnapshot} />
@@ -91,6 +104,28 @@ function NzbRecentQueriesMobileList({ queries, onSelect, findTrace }: NzbRecentQ
 // rendered blank rather than omitted, keeping every column position lined
 // up between the two stacked tables. The last column reuses that same
 // width for a "View" link into the matching search trace, when one exists.
+// Resolution is this table's one extra column (applyResolutionDetection's
+// own timing/count, only known via the matching trace - see
+// formatResolutionStats) - NzbCachedQueriesTable adds a same-width blank
+// column of its own to keep every column after it lined up too.
+//
+// tableLayout: 'fixed' on both tables is load-bearing, not cosmetic: with
+// the browser's default "auto" table layout, a column's rendered width is
+// driven by its own content, not the `width` set here - so this table's
+// blank leading column (genuinely empty in every row) would collapse below
+// NzbCachedQueriesTable's real Checkbox in the same slot, throwing every
+// later column out of alignment between the two stacked tables. Fixed
+// layout makes the header row's widths authoritative instead.
+//
+// The TableContainer below also always reserves scrollbar space
+// (overflowY: 'scroll', not 'auto') for the same reason: this table
+// typically has enough rows to need its own scrollbar while
+// NzbCachedQueriesTable often doesn't (it's usually empty or has a
+// handful of entries) - a scrollbar eats ~15-17px of width from whichever
+// table has one, and with only Query left unsized, that table's Query
+// column silently absorbs the difference, shifting every column after it
+// out of alignment with the other table. Reserving the gutter always
+// keeps both tables' available width identical regardless of row count.
 function NzbRecentQueriesTable({ queries, traces }: NzbRecentQueriesTableProps) {
   const isMobile = useMediaQuery('(max-width: 767px)');
   const [selected, setSelected] = useState<NzbSearchTrace | null>(null);
@@ -108,25 +143,34 @@ function NzbRecentQueriesTable({ queries, traces }: NzbRecentQueriesTableProps) 
       {isMobile ? (
         <NzbRecentQueriesMobileList queries={queries} onSelect={setSelected} findTrace={findTrace} />
       ) : (
-      <TableContainer style={{ maxHeight: 420, overflowY: 'auto' }}>
-        <Table size="small">
+      <TableContainer style={{ maxHeight: 420, overflowY: 'scroll' }}>
+        <Table size="small" style={{ tableLayout: 'fixed' }}>
           <TableHead style={{ position: 'sticky', top: 0, zIndex: 1, backgroundColor: 'var(--card)' }}>
             <TableRow>
-              <TableCell style={{ width: 42 }} />
+              <TableCell style={{ width: 40 }} />
               <TableCell component="th">Query</TableCell>
-              <TableCell component="th" style={{ width: 70 }}>Count</TableCell>
-              <TableCell component="th" style={{ width: 140 }}>Source</TableCell>
-              <TableCell component="th" style={{ width: 90 }}>Results</TableCell>
-              <TableCell component="th" style={{ width: 100 }}>Cache</TableCell>
-              <TableCell component="th" style={{ width: 100 }}>When</TableCell>
-              <TableCell component="th" style={{ width: 90 }}>Duration</TableCell>
-              <TableCell component="th" style={{ width: 60 }} />
+              <TableCell component="th" style={{ width: 56 }}>Count</TableCell>
+              <TableCell component="th" style={{ width: 128 }}>Source</TableCell>
+              <TableCell component="th" style={{ width: 56 }}>Results</TableCell>
+              <TableCell component="th" style={{ width: 72 }}>Cache</TableCell>
+              <TableCell component="th" style={{ width: 92, whiteSpace: 'nowrap' }}>When</TableCell>
+              <TableCell component="th" style={{ width: 68, whiteSpace: 'nowrap' }}>
+                <Tooltip title="How long the underlying yt-dlp/API search fetch took (cache hit or a real fetch) - not including resolution detection below">
+                  <span>Search</span>
+                </Tooltip>
+              </TableCell>
+              <TableCell component="th" style={{ width: 112, whiteSpace: 'nowrap' }}>
+                <Tooltip title="How long applyResolutionDetection took for this search, and how many items needed a resolution lookup - a separate step that runs after the search above completes">
+                  <span>Resolution</span>
+                </Tooltip>
+              </TableCell>
+              <TableCell component="th" style={{ width: 64 }} />
             </TableRow>
           </TableHead>
           <TableBody>
             {queries.length === 0 && (
               <TableRow>
-                <TableCell colSpan={9}>
+                <TableCell colSpan={10}>
                   <Typography variant="body2" color="textSecondary" style={{ padding: '8px 0' }}>
                     No NZB queries yet - once Sonarr, Radarr, or Prowlarr search Youtarr-Turbo, they'll show up here.
                   </Typography>
@@ -138,11 +182,11 @@ function NzbRecentQueriesTable({ queries, traces }: NzbRecentQueriesTableProps) 
               return (
               <TableRow hover key={`${q.timestamp}-${index}`}>
                 <TableCell />
-                <TableCell style={{ maxWidth: 320, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                <TableCell style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {q.query || <em>(blank / RSS mode)</em>}
                 </TableCell>
                 <TableCell>{q.count}</TableCell>
-                <TableCell>
+                <TableCell style={{ overflow: 'hidden' }}>
                   <NzbSettingsIcons settings={q.settingsSnapshot} />
                 </TableCell>
                 <TableCell>{q.resultCount}</TableCell>
@@ -154,8 +198,15 @@ function NzbRecentQueriesTable({ queries, traces }: NzbRecentQueriesTableProps) 
                     variant="filled"
                   />
                 </TableCell>
-                <TableCell>{formatRelativeTime(q.timestamp)}</TableCell>
-                <TableCell>{formatDurationMs(q.durationMs)}</TableCell>
+                <TableCell style={{ whiteSpace: 'nowrap' }}>{formatRelativeTime(q.timestamp)}</TableCell>
+                <TableCell style={{ whiteSpace: 'nowrap' }}>{formatDurationMs(q.durationMs)}</TableCell>
+                <TableCell style={{ whiteSpace: 'nowrap' }}>
+                  {(() => {
+                    const text = formatResolutionStats(trace?.resolutionMs, trace?.resolutionQueryCount);
+                    const breakdown = formatResolutionBreakdown(trace?.items);
+                    return breakdown ? <Tooltip title={breakdown}><span>{text}</span></Tooltip> : text;
+                  })()}
+                </TableCell>
                 <TableCell>
                   {trace && <Button size="small" onClick={() => setSelected(trace)}>View</Button>}
                 </TableCell>

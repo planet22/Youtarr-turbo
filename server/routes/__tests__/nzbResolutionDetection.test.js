@@ -110,4 +110,20 @@ describe('nzb.js applyResolutionDetection', () => {
     await nzb.applyResolutionDetection(results, { fixed: true, thumb: false, extract: true });
     expect(nzbThumbnailProbe.fillUnknownDefinitions).toHaveBeenCalledWith(results, { useThumb: false, useExtract: true });
   });
+
+  test('returns durationMs and the queryCount fillUnknownDefinitions reports, for the diagnostics page\'s Resolution column', async () => {
+    nzbThumbnailProbe.fillUnknownDefinitions.mockResolvedValueOnce(3);
+    const results = [{ youtubeId: 'a', localResolutionHeight: null }];
+    const outcome = await nzb.applyResolutionDetection(results, { fixed: true, thumb: true, extract: true });
+    expect(outcome.queryCount).toBe(3);
+    expect(typeof outcome.durationMs).toBe('number');
+    expect(outcome.durationMs).toBeGreaterThanOrEqual(0);
+  });
+
+  test('reports queryCount 0 when fillUnknownDefinitions resolves nothing (e.g. every item already settled)', async () => {
+    nzbThumbnailProbe.fillUnknownDefinitions.mockResolvedValueOnce(undefined);
+    const results = [{ youtubeId: 'a', definition: 'hd', localResolutionHeight: null }];
+    const outcome = await nzb.applyResolutionDetection(results, { fixed: true, thumb: true, extract: true });
+    expect(outcome.queryCount).toBe(0);
+  });
 });

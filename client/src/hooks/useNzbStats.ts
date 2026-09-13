@@ -67,10 +67,13 @@ export interface NzbSearchTraceItem {
   // Which check in nzb.resolutionDetection's fallback chain actually
   // decided `definition`/`effectiveHeightTier` - 'fixed' (a previously-
   // downloaded video's real recorded resolution), 'api' (YouTube Data API's
-  // contentDetails.definition), 'thumb' (the maxresdefault-thumbnail
-  // heuristic), 'extract' (a real yt-dlp extraction), or null when nothing
+  // contentDetails.definition), 'metadataCache' (a real yt-dlp extraction
+  // Youtarr already had on file from downloading or streaming this video -
+  // see server/modules/nzbThumbnailProbe.js's getFromLibraryMetadataCache),
+  // 'thumb' (the maxresdefault-thumbnail heuristic), 'extract' (a real
+  // yt-dlp extraction run just for this search), or null when nothing
   // determined anything.
-  resolutionSource?: 'fixed' | 'api' | 'thumb' | 'extract' | null;
+  resolutionSource?: 'fixed' | 'api' | 'metadataCache' | 'thumb' | 'extract' | null;
 }
 
 export interface NzbSearchTrace {
@@ -90,6 +93,13 @@ export interface NzbSearchTrace {
   // per-result SD capping - the ceiling each item's effectiveHeightTier is
   // measured against. Absent on traces recorded before this field existed.
   configuredHeightTier?: number;
+  // How long nzb.js's applyResolutionDetection took for this search, and how
+  // many of its items actually needed a resolution lookup (weren't already
+  // settled by the YouTube API or a previously-downloaded video's own known
+  // resolution) - see server/routes/nzb.js's applyResolutionDetection doc
+  // comment. Absent on traces recorded before this field existed.
+  resolutionMs?: number;
+  resolutionQueryCount?: number;
   items: NzbSearchTraceItem[];
 }
 

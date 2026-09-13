@@ -3,6 +3,7 @@ import React from 'react';
 
 type WebSocketContextType = {
   socket: WebSocket | null;
+  isConnected: boolean;
   subscribe: (filter: (message: any) => boolean, callback: (data: any) => void) => void;
   unsubscribe: (callback: (data: any) => void) => void;
 };

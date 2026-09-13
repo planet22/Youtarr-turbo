@@ -182,6 +182,23 @@ h6 {
   }
 }
 
+/* Grows/shrinks the CircularProgress arc so its ends read as a swirling
+   taper instead of a static wedge with visible flat-looking cut ends. */
+@keyframes circular-dash {
+  0% {
+    stroke-dasharray: 1px, 200px;
+    stroke-dashoffset: 0px;
+  }
+  50% {
+    stroke-dasharray: 89px, 200px;
+    stroke-dashoffset: -35px;
+  }
+  100% {
+    stroke-dasharray: 89px, 200px;
+    stroke-dashoffset: -124px;
+  }
+}
+
 @keyframes pulse {
   0%, 100% {
     opacity: 1;

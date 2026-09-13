@@ -6,7 +6,7 @@ import { StreamSnapshot } from '../../../hooks/useActiveStreams';
 import { YOUTUBE_URL_BASE } from '../../shared/VideoModal/constants';
 import { formatBytesPerSecond, parseClientLabel, isLikelyProbeRequest, formatModeLabel, formatModeChipLabel, modeChipColor } from '../utils';
 import { useStreamRowActions } from '../hooks/useStreamRowActions';
-import { STATE_CHIP_COLOR } from './StreamsTable';
+import { STATE_CHIP_COLOR, STATE_CHIP_LABEL } from './StreamsTable';
 import { SegmentActivityStrip } from './SegmentActivityGrid';
 import StreamFormatChips from './StreamFormatChips';
 import { SHARED_STATUS_CHIP_SMALL_STYLE, SHARED_COMPACT_CHIP_OVERRIDES } from '../../shared/chipStyles';
@@ -68,7 +68,13 @@ function StreamListRow({
           <Tooltip title={formatModeLabel(stream.mode)}>
             <Chip size="small" label={formatModeChipLabel(stream.mode)} color={modeChipColor(stream.mode)} variant="filled" style={COMPACT_CHIP_STYLE} />
           </Tooltip>
-          <Chip size="small" label={stream.state} color={STATE_CHIP_COLOR[stream.state]} variant="filled" style={COMPACT_CHIP_STYLE} />
+          {stream.state === 'failed' && stream.error ? (
+            <Tooltip title={stream.error}>
+              <Chip size="small" label={STATE_CHIP_LABEL[stream.state]} color={STATE_CHIP_COLOR[stream.state]} variant="filled" style={COMPACT_CHIP_STYLE} />
+            </Tooltip>
+          ) : (
+            <Chip size="small" label={STATE_CHIP_LABEL[stream.state]} color={STATE_CHIP_COLOR[stream.state]} variant="filled" style={COMPACT_CHIP_STYLE} />
+          )}
         </Box>
 
         <StreamFormatChips

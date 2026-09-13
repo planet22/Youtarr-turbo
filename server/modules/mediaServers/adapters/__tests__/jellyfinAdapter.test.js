@@ -45,7 +45,9 @@ describe('JellyfinAdapter', () => {
     expect(result).toEqual({ ok: true, version: '10.9.2' });
     expect(axios.get).toHaveBeenCalledWith(
       'http://jf:8096/System/Info',
-      expect.objectContaining({ headers: { 'X-Emby-Token': 'KEY' } })
+      expect.objectContaining({
+        headers: { Authorization: expect.stringMatching(/^MediaBrowser .*Token="KEY"/) },
+      })
     );
   });
 

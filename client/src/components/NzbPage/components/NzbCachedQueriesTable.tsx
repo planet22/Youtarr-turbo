@@ -109,6 +109,19 @@ function NzbCachedQueriesMobileList({
   );
 }
 
+// Column widths/order are shared with NzbRecentQueriesTable - a cached entry
+// is just the current state of the search-result cache, not a past request,
+// so it has no per-search duration or resolution timing/count; the two
+// blank columns after Expires in (width 68, width 112) exist purely to keep
+// the delete action lined up with that table's Search/Resolution columns.
+// tableLayout: 'fixed' is load-bearing here too - see NzbRecentQueriesTable's
+// own comment for why "auto" layout would let these two tables drift apart.
+// Same reasoning for this TableContainer's overflowY: 'scroll' (always
+// reserves scrollbar space) instead of 'auto' - this table is often empty
+// or short while NzbRecentQueriesTable usually has enough rows to need a
+// scrollbar; without both reserving the gutter unconditionally, whichever
+// table lacks a scrollbar gets ~15-17px more room that its unsized Query
+// column silently absorbs, throwing every later column out of alignment.
 function NzbCachedQueriesTable({ entries, onDelete }: NzbCachedQueriesTableProps) {
   const isMobile = useMediaQuery('(max-width: 767px)');
   const [selected, setSelected] = useState<string[]>([]);
@@ -178,11 +191,11 @@ function NzbCachedQueriesTable({ entries, onDelete }: NzbCachedQueriesTableProps
           onDeleteOne={handleDeleteOne}
         />
       ) : (
-      <TableContainer style={{ maxHeight: 420, overflowY: 'auto' }}>
-        <Table size="small">
+      <TableContainer style={{ maxHeight: 420, overflowY: 'scroll' }}>
+        <Table size="small" style={{ tableLayout: 'fixed' }}>
           <TableHead style={{ position: 'sticky', top: 0, zIndex: 1, backgroundColor: 'var(--card)' }}>
             <TableRow>
-              <TableCell style={{ width: 42 }}>
+              <TableCell style={{ width: 40 }}>
                 <Checkbox
                   indeterminate={someSelected}
                   checked={allSelected}
@@ -191,19 +204,20 @@ function NzbCachedQueriesTable({ entries, onDelete }: NzbCachedQueriesTableProps
                 />
               </TableCell>
               <TableCell component="th">Query</TableCell>
-              <TableCell component="th" style={{ width: 70 }}>Count</TableCell>
-              <TableCell component="th" style={{ width: 140 }}>Source</TableCell>
-              <TableCell component="th" style={{ width: 90 }}>Results</TableCell>
-              <TableCell component="th" style={{ width: 100 }}>Cached</TableCell>
-              <TableCell component="th" style={{ width: 100 }}>Expires in</TableCell>
-              <TableCell style={{ width: 90 }} />
-              <TableCell component="th" style={{ width: 60 }} />
+              <TableCell component="th" style={{ width: 56 }}>Count</TableCell>
+              <TableCell component="th" style={{ width: 128 }}>Source</TableCell>
+              <TableCell component="th" style={{ width: 56 }}>Results</TableCell>
+              <TableCell component="th" style={{ width: 72 }}>Cached</TableCell>
+              <TableCell component="th" style={{ width: 92, whiteSpace: 'nowrap' }}>Expires in</TableCell>
+              <TableCell style={{ width: 68 }} />
+              <TableCell style={{ width: 112 }} />
+              <TableCell component="th" style={{ width: 64 }} />
             </TableRow>
           </TableHead>
           <TableBody>
             {entries.length === 0 && (
               <TableRow>
-                <TableCell colSpan={9}>
+                <TableCell colSpan={10}>
                   <Typography variant="body2" color="textSecondary" style={{ padding: '8px 0' }}>
                     Nothing cached right now - either caching is disabled (Settings, "Search result cache"), or nothing has been searched recently.
                   </Typography>
@@ -217,16 +231,17 @@ function NzbCachedQueriesTable({ entries, onDelete }: NzbCachedQueriesTableProps
                   <TableCell>
                     <Checkbox checked={isSelected} onChange={(e) => toggleOne(entry.key, e.target.checked)} />
                   </TableCell>
-                  <TableCell style={{ maxWidth: 320, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  <TableCell style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {entry.query || <em>(blank / RSS mode)</em>}
                   </TableCell>
                   <TableCell>{entry.count}</TableCell>
-                  <TableCell>
+                  <TableCell style={{ overflow: 'hidden' }}>
                     <NzbSettingsIcons settings={entry.settingsSnapshot} />
                   </TableCell>
                   <TableCell>{entry.resultCount}</TableCell>
-                  <TableCell>{formatRelativeTime(entry.cachedAt)}</TableCell>
-                  <TableCell>{formatCountdown(entry.expiresInMs)}</TableCell>
+                  <TableCell style={{ whiteSpace: 'nowrap' }}>{formatRelativeTime(entry.cachedAt)}</TableCell>
+                  <TableCell style={{ whiteSpace: 'nowrap' }}>{formatCountdown(entry.expiresInMs)}</TableCell>
+                  <TableCell />
                   <TableCell />
                   <TableCell>
                     <Tooltip title="Delete cached entry">

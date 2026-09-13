@@ -9,6 +9,7 @@ const {
   MediaServerUnavailableError,
 } = require('./baseAdapter');
 const logger = require('../../../logger');
+const { version: APP_VERSION } = require('../../../../package.json');
 
 // Jellyfin/Emby report playback position in ticks (100ns units).
 const TICKS_PER_MS = 10000;
@@ -23,7 +24,16 @@ class JellyfinAdapter extends BaseAdapter {
     this.allUsers = config.jellyfinWatchStatusAllUsers !== false;
   }
 
-  _headers() { return { 'X-Emby-Token': this.apiKey }; }
+  // Jellyfin 12 stopped parsing the legacy X-Emby-Token / X-MediaBrowser-Token
+  // headers and the ?api_key= query param - only the standard `Authorization:
+  // MediaBrowser ...` scheme is accepted now. That scheme has always been
+  // valid (it's the one jellyfin-web itself sends), so using it exclusively
+  // stays compatible with pre-12 servers too.
+  _headers() {
+    return {
+      Authorization: `MediaBrowser Client="Youtarr", Device="Youtarr", DeviceId="youtarr", Version="${APP_VERSION}", Token="${this.apiKey}"`,
+    };
+  }
 
   async testConnection() {
     try {

@@ -16,6 +16,7 @@ const WatchStatusSyncCursor = require('./watchstatussynccursor');
 const StreamHistory = require('./streamhistory');
 const YoutubeMetadataCache = require('./youtubemetadatacache');
 const NzbDiagnosticLog = require('./nzbdiagnosticlog');
+const NzbResolutionCache = require('./nzbresolutioncache');
 
 Job.hasMany(JobVideo, { foreignKey: 'job_id', as: 'jobVideos' });
 Job.hasMany(JobVideoDownload, { foreignKey: 'job_id', as: 'jobVideoDownloads' });
@@ -54,4 +55,5 @@ module.exports = {
   StreamHistory,
   YoutubeMetadataCache,
   NzbDiagnosticLog,
+  NzbResolutionCache,
 };

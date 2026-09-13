@@ -59,10 +59,24 @@ export const TIGHT_CELL_STYLE: React.CSSProperties = { padding: '2px 4px' };
 // Shared with StreamCard's State chip (grid view), so both views color a
 // given state identically.
 export const STATE_CHIP_COLOR: Record<StreamSnapshot['state'], 'default' | 'success' | 'warning' | 'error'> = {
+  requested: 'default',
+  resolving: 'warning',
   starting: 'warning',
   active: 'success',
   cached: 'default',
   failed: 'error',
+};
+
+// Friendlier than the raw state string ("resolving" reads fine, but
+// "requested"/"starting" benefit from a bit more context) - shared by the
+// table, grid-card, and mobile-list State chip everywhere it's shown.
+export const STATE_CHIP_LABEL: Record<StreamSnapshot['state'], string> = {
+  requested: 'Received',
+  resolving: 'Resolving',
+  starting: 'Starting',
+  active: 'Active',
+  cached: 'Cached',
+  failed: 'Failed',
 };
 
 function StreamRow({
@@ -173,7 +187,13 @@ function StreamRow({
         )}
       </TableCell>
       <TableCell>
-        <Chip size="small" label={stream.state} color={STATE_CHIP_COLOR[stream.state]} variant="filled" />
+        {stream.state === 'failed' && stream.error ? (
+          <Tooltip title={stream.error}>
+            <Chip size="small" label={STATE_CHIP_LABEL[stream.state]} color={STATE_CHIP_COLOR[stream.state]} variant="filled" />
+          </Tooltip>
+        ) : (
+          <Chip size="small" label={STATE_CHIP_LABEL[stream.state]} color={STATE_CHIP_COLOR[stream.state]} variant="filled" />
+        )}
       </TableCell>
       <TableCell>
         <Tooltip title="Stop stream">

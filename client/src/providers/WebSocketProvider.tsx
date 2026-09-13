@@ -70,6 +70,7 @@ const WebSocketProvider: React.FC<WebSocketProviderProps> = ({ children }) => {
   // Informational only: nothing may drive effects off this state, or a swap
   // mid-reconnect tears down the fresh socket.
   const [socket, setSocket] = useState<WebSocket | null>(null);
+  const [isConnected, setIsConnected] = useState(false);
 
   const socketRef = useRef<WebSocket | null>(null);
   const retriesRef = useRef(0);
@@ -124,6 +125,7 @@ const WebSocketProvider: React.FC<WebSocketProviderProps> = ({ children }) => {
 
     ws.onopen = () => {
       retriesRef.current = 0;
+      setIsConnected(true);
       if (hasConnectedOnceRef.current) {
         // Synthetic local message: WS replay only carries final states, so
         // data hooks re-probe REST state when the connection comes back.
@@ -153,6 +155,7 @@ const WebSocketProvider: React.FC<WebSocketProviderProps> = ({ children }) => {
       // must not see the closed instance as a live connection
       socketRef.current = null;
       setSocket(null);
+      setIsConnected(false);
       const delay = calculateBackoff(retriesRef.current);
       reconnectTimerRef.current = setTimeout(connect, delay);
     };
@@ -213,8 +216,8 @@ const WebSocketProvider: React.FC<WebSocketProviderProps> = ({ children }) => {
   }, [connect]);
 
   const contextValue = useMemo(
-    () => ({ socket, subscribe, unsubscribe }),
-    [socket, subscribe, unsubscribe]
+    () => ({ socket, isConnected, subscribe, unsubscribe }),
+    [socket, isConnected, subscribe, unsubscribe]
   );
 
   return (

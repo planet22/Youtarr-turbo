@@ -24,21 +24,19 @@ const crypto = require('crypto');
 const logger = require('../logger');
 const configModule = require('../modules/configModule');
 const ytDlpRunner = require('../modules/ytDlpRunner');
-const streamEncoderTuning = require('../modules/streamEncoderTuning');
 const { streamDebug } = require('../modules/ytstream/streamDebug');
 const { loadYoutubeCookieHeader, buildBaseArgs } = require('../modules/ytstream/ytdlpArgs');
 const {
   VALID_TRANSCODE,
-  VALID_CONTAINERS,
   parseBooleanQueryFlag,
   createQueryOverrideResolver,
   getModeFieldCompatibility,
 } = require('../modules/ytstream/configResolution');
 const {
   resolveQualityHeight,
+  capResolutionToHeight,
   getDirectFormatSelector,
   getDashFormatSelectors,
-  capResolutionToHeight,
 } = require('../modules/ytstream/formatSelection');
 const { HLS_UNTRACKED_BUFFER_CACHE_DIR } = require('../modules/ytstream/paths');
 const {
@@ -56,8 +54,6 @@ const {
 const {
   init: initPlaybackPlan,
   getVideoDurationSeconds,
-  clearDurationCache,
-  clearAllDurationCache,
   resolvePlaybackPlan,
 } = require('../modules/ytstream/playbackPlan');
 const {
@@ -71,13 +67,11 @@ const {
   buildHlsSessionKey,
   rewriteHlsPlaylistUrls,
   getOrCreateHlsSession,
+  getOrCreateHlsSessionForProbe,
   hasActiveHlsSessionForVideo,
   isHlsSessionActive,
   createHlsAssetRouteHandler,
 } = require('../modules/ytstream/hlsEngine');
-
-/** Matches ManagedTranscodeHardwareModes in the reference plugin. */
-const { normalizeHardwareMode, normalizeTuning } = streamEncoderTuning;
 
 // fps/duration/formats metadata cache, shared with the download and
 // STRM-materialization pipelines and with resolveMaxAvailableHeight
@@ -101,14 +95,18 @@ const {
 } = require('../modules/ytstream/untrackedBufferCache');
 
 const { resolveVideoTargetResolution } = require('../modules/ytstream/videoResolution');
+const { buildHlsTopLevelPlaylistResponse } = require('../modules/ytstream/hlsMasterPlaylist');
 const { resolveActualServedFileInfo } = require('../modules/ytstream/cacheFinalize');
 
 const {
   isLikelyMetadataProbeRequest,
   evaluateProbeShortcut,
   shouldLogQuickServeHistory,
-  hasRecentlyServedFakeProbeClip,
-  tryServeProbeClip,
+  // hasRecentlyServedFakeProbeClip - only needed by the old synthetic-clip
+  // suppression logic, now commented out: a repeat probe now just re-hits
+  // the same real session tryServeInstantHlsPlaylist created/reused, no
+  // special-casing needed.
+  tryServeInstantHlsPlaylist,
 } = require('../modules/ytstream/probeShortcut');
 
 const {
@@ -192,7 +190,7 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
         logger.warn({ err }, 'ytstream: failed to resolve titles for /streams');
       }
     }
-    await fillMissingTitlesFromMetadataCache(youtubeIds, titleById, models);
+    await fillMissingTitlesFromMetadataCache(youtubeIds, titleById);
     res.json({ streams: streams.map((s) => ({ ...s, title: titleById[s.youtubeId] || null })) });
   });
 
@@ -283,7 +281,7 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
           logger.warn({ err }, 'ytstream: failed to resolve titles for /history');
         }
       }
-      await fillMissingTitlesFromMetadataCache(youtubeIds, titleById, models);
+      await fillMissingTitlesFromMetadataCache(youtubeIds, titleById);
       res.json({
         rows: rows.map((r) => ({
           streamId: r.stream_id,
@@ -332,29 +330,15 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
     }
   });
 
-  // Manual re-cache trigger for youtube_metadata_cache (duration_seconds/
-  // raw_info_json - see the raw_info_json migration's doc comment).
-  // Nothing here ever expires on its own (duration/fps are immutable facts
-  // about the video, deliberately no TTL), so this is the only way to force
-  // a stale-for-some-OTHER-reason row (e.g. it was written before a field
-  // this table now also captures existed, or is just suspected wrong) to be
-  // relearned - clears both the in-memory caches and the DB row; the next
-  // play re-runs a live yt-dlp lookup and repopulates it, same as if this
-  // video had never been cached at all.
-  // Shared by the single- and bulk-clear routes below so both ways of
-  // triggering a clear (one row from the Library page's cache icon, many
-  // rows from its bulk-action toolbar) run identical logic.
-  async function clearMetadataCacheEntry(youtubeId) {
-    clearDurationCache(youtubeId);
-    youtubeMetadataCache.clearCachedEntry(youtubeId);
-    if (!models || !models.YoutubeMetadataCache) return 0;
-    return models.YoutubeMetadataCache.destroy({ where: { youtube_id: youtubeId } });
-  }
-
+  // Manual re-cache trigger for youtube_metadata_cache. Nothing here ever
+  // expires on its own (duration/fps are immutable facts about the video,
+  // deliberately no TTL), so this is the only way to force a stale-for-
+  // some-OTHER-reason row to be relearned - the next play re-runs a live
+  // yt-dlp lookup and repopulates it, same as if never cached at all.
   router.delete('/api/ytstream/:youtubeId/metadata-cache', authMiddleware, async (req, res) => {
     const { youtubeId } = req.params;
     try {
-      const deleted = await clearMetadataCacheEntry(youtubeId);
+      const deleted = await youtubeMetadataCache.deleteEntry(youtubeId);
       res.json({ success: true, deleted });
     } catch (err) {
       logger.error({ err, youtubeId }, 'ytstream: failed to clear youtube_metadata_cache entry');
@@ -370,7 +354,7 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
     const failed = [];
     for (const youtubeId of youtubeIds) {
       try {
-        deleted += await clearMetadataCacheEntry(youtubeId);
+        deleted += await youtubeMetadataCache.deleteEntry(youtubeId);
       } catch (err) {
         logger.warn({ err, youtubeId }, 'ytstream: failed to clear one youtube_metadata_cache entry in bulk request');
         failed.push(youtubeId);
@@ -385,51 +369,18 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
   // dialog's "Show raw JSON" toggle only.
   router.get('/api/ytstream/:youtubeId/metadata-cache/detail', authMiddleware, async (req, res) => {
     const { youtubeId } = req.params;
-    if (!models || !models.YoutubeMetadataCache) {
-      return res.status(404).json({ error: 'Not cached' });
-    }
     try {
-      const row = await models.YoutubeMetadataCache.findByPk(youtubeId);
-      if (!row) {
+      const detail = await youtubeMetadataCache.getCacheDetail(youtubeId);
+      if (!detail) {
         return res.status(404).json({ error: 'Not cached' });
       }
-      let info = null;
-      if (row.raw_info_json) {
-        try {
-          info = JSON.parse(row.raw_info_json);
-        } catch (err) {
-          logger.warn({ err, youtubeId }, 'ytstream: failed to parse cached raw_info_json');
-        }
-      }
-      const retentionDays = youtubeMetadataCache.YOUTUBE_METADATA_CACHE_RETENTION_DAYS;
-      const expiresAt = row.last_accessed_at
-        ? new Date(new Date(row.last_accessed_at).getTime() + retentionDays * 24 * 60 * 60 * 1000).toISOString()
-        : null;
-      const detail = {
+      res.json({
         youtubeId,
-        durationSeconds: row.duration_seconds,
-        fetchedAt: row.fetched_at,
-        fetchedAgo: formatRelativeTimeAgo(row.fetched_at),
-        lastAccessedAt: row.last_accessed_at,
-        lastAccessedAgo: formatRelativeTimeAgo(row.last_accessed_at),
-        expiresAt,
-        title: info?.title ?? null,
-        uploader: info?.uploader ?? info?.channel ?? null,
-        resolution: info && info.width && info.height ? `${info.width}x${info.height}` : null,
-        fps: info?.fps ?? null,
-        uploadDate: info?.upload_date ?? null,
-        // False for a row written by the cheap calculatedLength duration-only
-        // probe (ytstream.js's getVideoDurationSeconds) that this video has
-        // never actually streamed/downloaded/materialized past - see
-        // youtubeMetadataCache.js's cacheRawInfoJson doc comment. Lets the
-        // client tell "nothing here yet" apart from "something broke"
-        // without an extra raw=true round trip.
-        hasRawInfoJson: Boolean(row.raw_info_json),
-      };
-      if (req.query.raw === 'true') {
-        detail.rawInfoJson = info;
-      }
-      res.json(detail);
+        ...detail,
+        fetchedAgo: formatRelativeTimeAgo(detail.fetchedAt),
+        lastAccessedAgo: formatRelativeTimeAgo(detail.lastAccessedAt),
+        rawInfoJson: req.query.raw === 'true' ? detail.rawInfoJson : undefined,
+      });
     } catch (err) {
       logger.error({ err, youtubeId }, 'ytstream: failed to read metadata cache detail');
       res.status(500).json({ error: 'Failed to read cached metadata' });
@@ -452,7 +403,6 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
   });
 
   router.delete('/api/ytstream/metadata-cache', authMiddleware, async (req, res) => {
-    clearAllDurationCache();
     try {
       await youtubeMetadataCache.clearAll();
       res.json({ success: true });
@@ -594,6 +544,40 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
       },
       'ytstream: incoming request'
     );
+    // Snapshot of every ytstream config field that actually branches a
+    // decision somewhere below (mode/quality resolution, probe-shortcut,
+    // master-playlist wrapping, hls-buffer network tuning, caching) - read
+    // once, up front, so a later log line ("why did this session end up X")
+    // can be matched back to exactly what was configured AT REQUEST TIME,
+    // without having to guess or re-check current Settings (which may have
+    // since changed).
+    {
+      const requestYtCfg = configModule.getConfig().ytstream || {};
+      streamDebug(
+        {
+          youtubeId: req.params.youtubeId,
+          defaultMode: requestYtCfg.defaultMode,
+          container: requestYtCfg.container,
+          transcode: requestYtCfg.transcode,
+          quality: requestYtCfg.quality,
+          qualityStrictness: requestYtCfg.qualityStrictness,
+          hardwareMode: requestYtCfg.hardwareMode,
+          tuning: requestYtCfg.tuning,
+          calculatedLength: requestYtCfg.calculatedLength,
+          hlsMasterPlaylist: requestYtCfg.hlsMasterPlaylist !== false,
+          probeShortcut: requestYtCfg.probeShortcut === true,
+          hotSwapToCache: requestYtCfg.hotSwapToCache === true,
+          serveCachedFile: requestYtCfg.serveCachedFile === true,
+          forceServerSettings: requestYtCfg.forceServerSettings === true,
+          hlsStorageLocation: requestYtCfg.hlsStorageLocation,
+          httpChunkSizeMiB: requestYtCfg.httpChunkSizeMiB,
+          concurrentFragments: requestYtCfg.concurrentFragments,
+          throttledRateKBps: requestYtCfg.throttledRateKBps,
+          socketTimeoutSeconds: requestYtCfg.socketTimeoutSeconds,
+        },
+        'ytstream: resolved ytstream config at request time'
+      );
+    }
     const { youtubeId } = req.params;
     if (!/^[A-Za-z0-9_-]{6,20}$/.test(youtubeId)) {
       return res.status(400).send('Invalid video id');
@@ -619,7 +603,8 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
     // 15-45s+ a real cold start costs, and cached (getVideoDurationSeconds)
     // so it's never repeated.
     {
-      if (!hasActiveSessionForVideo && evaluateProbeShortcut(req, configModule.getConfig()).wouldFire) {
+      const probeShortcutEval = evaluateProbeShortcut(req, configModule.getConfig());
+      if (!hasActiveSessionForVideo && probeShortcutEval.wouldFire) {
         const existingCachedFilePath = await findExistingCachedVideoFilePath(youtubeId, models);
         if (existingCachedFilePath) {
           logger.info(
@@ -657,103 +642,79 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
           // stat) - fall back to the synthetic clip below rather than fail
           // the probe outright.
         }
-        const sourceResolution = await resolveVideoTargetResolution(youtubeId, models);
+        // Resolved via the exact same resolvePlaybackPlan the real request
+        // uses below (not a separate hand-rolled re-derivation) - the only
+        // way to GUARANTEE this produces the identical sessionKey a real
+        // playback request for this video will, so the two always end up as
+        // one session, never two. Safe/cheap for this probe-only case: the
+        // one potentially-expensive step inside (resolveVideoCodec's live
+        // yt-dlp codec check) only runs for transcode=copy, which
+        // evaluateProbeShortcut has already ruled out (transcode=h264
+        // required to reach here) - the remaining cost (quality auto-cap) is
+        // cache-first and identical to what real playback pays anyway.
+        const probePlan = await resolvePlaybackPlan(youtubeId, req, configModule.getConfig(), { probe: true });
         const probeCfg = configModule.getConfig().ytstream || {};
-        const probeQueryOverride = createQueryOverrideResolver(req, probeCfg);
-        const probeQuality = probeQueryOverride('quality') || probeCfg.quality || configModule.getConfig().preferredResolution || '720';
-        const { width, height } = capResolutionToHeight(sourceResolution.width, sourceResolution.height, resolveQualityHeight(probeQuality));
-        // Must match playbackPlan.js's own container resolution - the whole
-        // point of the probe clip is to stand in for what a real session
-        // would actually serve. Getting this wrong (e.g. always mkv,
-        // regardless of what container the real session would use) means
-        // Jellyfin's own ffprobe pass - which is how it decides whether it
-        // can direct-play this URL - learns the wrong container/codec info
-        // from the probe response, then can't reconcile that against the
-        // real playback response and loops re-probing instead of ever
-        // starting real playback.
-        const probeContainer = VALID_CONTAINERS.includes(probeQueryOverride('container'))
-          ? probeQueryOverride('container')
-          : (probeCfg.container || 'mp4');
-        const probeHardwareMode = normalizeHardwareMode(probeQueryOverride('hardware') || probeCfg.hardwareMode || 'none');
-        // Already answered one metadata-probe-looking request for this
-        // video with the synthetic clip - a repeat within the suppress
-        // window is treated as a real play attempt, not another probe (see
-        // hasRecentlyServedFakeProbeClip's doc comment: Jellyfin's internal
-        // player can send the same bare-Lavf UA for its actual playback-
-        // compatibility check, not just its ffprobe pass, and would
-        // otherwise get the fake clip forever instead of ever reaching real
-        // session creation below). No active session exists yet at this
-        // point (that's the outer `!hasActiveSessionForVideo` check above),
-        // so falling through here is what lets one get created.
-        if (hasRecentlyServedFakeProbeClip(youtubeId)) {
-          logger.info(
-            { youtubeId },
-            'ytstream: probe-shortcut already served the synthetic clip for this video recently; treating this request as real playback and falling through to normal handling'
-          );
-        } else {
-          // Same shouldLogQuickServeHistory burst-collapsing as the cache-hit
-          // branch above - this is the synthetic-clip ("fake") path itself,
-          // which previously had no Stream History row at all (log-only), so
-          // a probe-shortcut hit was invisible outside the server log.
-          const historyEntry = shouldLogQuickServeHistory(youtubeId)
-            ? {
-                streamId: crypto.randomUUID(),
-                mode: 'probe-shortcut',
-                youtubeId,
-                quality: probeQuality,
-                container: probeContainer,
-                transcode: 'h264',
-                hardwareMode: probeHardwareMode,
-                clientIp: resolveClientIp(req),
-                userAgent: req.headers['user-agent'] || null,
-                startedAt: Date.now(),
-              }
-            : null;
-          if (historyEntry) persistStreamHistoryStart(historyEntry);
-          // Live Streaming-page visibility for the fake-clip serve itself -
-          // separate from historyEntry above (that's the persisted audit
-          // row, burst-collapsed by shouldLogQuickServeHistory; this is a
-          // real-time-only blip so every actual serve shows up live, even
-          // ones within the same collapse window). trackPendingRequest
-          // never persists to StreamHistory on its own (see its doc
-          // comment), so this doesn't double up with historyEntry's own
-          // persistStreamHistoryStart/End calls - untrackStream's own
-          // persistStreamHistoryEnd call below just no-ops (no matching
-          // start row under this streamId).
-          const probeLiveStreamId = crypto.randomUUID();
-          trackPendingRequest({
-            streamId: probeLiveStreamId,
-            mode: 'probe-shortcut',
+        streamDebug(
+          {
             youtubeId,
-            quality: probeQuality,
-            container: probeContainer,
-            transcode: 'h264',
-            hardwareMode: probeHardwareMode,
-            clientIp: resolveClientIp(req),
-            userAgent: req.headers['user-agent'] || null,
-            state: 'probe',
-            startedAt: Date.now(),
-          });
-          const served = await tryServeProbeClip(req, res, {
-            hardwareMode: probeHardwareMode,
-            tuning: normalizeTuning(probeQueryOverride('tuning') || probeCfg.tuning || 'fast'),
-            width,
-            height,
-            container: probeContainer,
-            youtubeId,
-            resolveDurationSeconds: (id) => getVideoDurationSeconds(id, configModule.getConfig()),
-          });
-          untrackStream(probeLiveStreamId, served ? 'completed' : 'error', served ? null : 'failed to generate or serve the synthetic probe clip');
-          if (served) {
-            if (historyEntry) persistStreamHistoryEnd(historyEntry, 'completed', null);
-            return;
-          }
-          if (historyEntry) persistStreamHistoryEnd(historyEntry, 'error', 'failed to generate or serve the synthetic probe clip');
-          logger.warn(
-            { youtubeId, servedAs: 'none' },
-            'ytstream: probe-shortcut detected a likely metadata-probe request but could not serve a cached file or the synthetic clip; falling through to normal handling'
-          );
+            mode: probePlan.mode,
+            quality: probePlan.quality,
+            qualityStrictness: probePlan.qualityStrictness,
+            qualityCapped: probePlan.qualityCapped,
+            transcode: probePlan.transcode,
+            container: probePlan.container,
+            hardwareMode: probePlan.hardwareMode,
+            tuning: probePlan.tuning,
+            calculatedLength: probePlan.calculatedLength,
+          },
+          'ytstream: probe-shortcut resolved plan (same resolvePlaybackPlan the real request below would use, for the same sessionKey)'
+        );
+
+        // Same shouldLogQuickServeHistory burst-collapsing used by the
+        // cache-hit branch above - Jellyfin's own ffprobe keyframe-
+        // extraction pass can send a handful of bare-Lavf requests for the
+        // same video a few hundred ms apart.
+        const historyEntry = shouldLogQuickServeHistory(youtubeId)
+          ? {
+              streamId: crypto.randomUUID(),
+              mode: 'probe-shortcut',
+              youtubeId,
+              quality: probePlan.quality,
+              container: probePlan.container,
+              transcode: probePlan.transcode,
+              hardwareMode: probePlan.hardwareMode,
+              clientIp: resolveClientIp(req),
+              userAgent: req.headers['user-agent'] || null,
+              startedAt: Date.now(),
+            }
+          : null;
+        if (historyEntry) persistStreamHistoryStart(historyEntry);
+        const served = await tryServeInstantHlsPlaylist(req, res, {
+          youtubeId,
+          mode: probePlan.mode,
+          quality: probePlan.quality,
+          qualityStrictness: probePlan.qualityStrictness,
+          transcode: probePlan.transcode,
+          hardwareMode: probePlan.hardwareMode,
+          tuning: probePlan.tuning,
+          container: probePlan.container,
+          playerClient: probeCfg.playerClient,
+          config: configModule.getConfig(),
+          clientIp: resolveClientIp(req),
+          userAgent: req.headers['user-agent'] || null,
+          buildSessionKey: buildHlsSessionKey,
+          getOrCreateSession: getOrCreateHlsSessionForProbe,
+          rewritePlaylistUrls: rewriteHlsPlaylistUrls,
+        });
+        if (served) {
+          if (historyEntry) persistStreamHistoryEnd(historyEntry, 'completed', null);
+          return;
         }
+        if (historyEntry) persistStreamHistoryEnd(historyEntry, 'error', 'failed to serve the instant HLS playlist');
+        logger.warn(
+          { youtubeId, servedAs: 'none' },
+          'ytstream: probe-shortcut detected a likely metadata-probe request but could not serve a cached file or the instant HLS playlist; falling through to normal handling'
+        );
       }
     }
 
@@ -945,6 +906,10 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
       calculatedLength,
       hotSwapToCache,
     } = plan;
+    streamDebug(
+      { youtubeId, mode, quality, qualityStrictness, qualityCapped: plan.qualityCapped, transcode, container, hardwareMode, tuning, calculatedLength },
+      'ytstream: real playback resolved plan (same resolvePlaybackPlan the probe-shortcut path above would use, for the same sessionKey)'
+    );
 
     // mode=direct: resolves a URL and proxies it, no retry beyond
     // resolveDirectUrl's own extraction-error retry. On a 403 (a vprv=1
@@ -1074,8 +1039,29 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
             },
             'ytstream: HLS session ready; serving playlist'
           );
+          // ytstream.hlsMasterPlaylist (default on): wrap the real media
+          // playlist in a thin master (BANDWIDTH/RESOLUTION) instead of
+          // serving it directly - see hlsMasterPlaylist.js's own doc
+          // comment. The nested playlist.m3u8 URL the master points to is
+          // already served correctly by createHlsAssetRouteHandler reading
+          // session.dir/playlist.m3u8 raw (relative segment URIs resolve
+          // fine there without needing rewriteHlsPlaylistUrls).
+          const topLevelPlaylist = await buildHlsTopLevelPlaylistResponse({
+            enabled: ytCfg.hlsMasterPlaylist !== false,
+            youtubeId,
+            quality,
+            transcode,
+            hardwareMode,
+            models,
+            mediaPlaylistUrl: `${session.baseUrl}playlist.m3u8`,
+            rewrittenMediaPlaylist: playlist,
+            resolveVideoTargetResolution,
+            capResolutionToHeight,
+            resolveQualityHeight,
+          });
           res.set({ 'Content-Type': 'application/vnd.apple.mpegurl', 'Cache-Control': 'no-store' });
-          return res.status(200).send(playlist);
+          streamDebug({ youtubeId, sessionKey, topLevelPlaylist }, 'ytstream: real playback - top-level playlist content being served');
+          return res.status(200).send(topLevelPlaylist);
         } catch (err) {
           logger.error(
             { youtubeId, sessionKey, waitMs: Date.now() - waitStarted, clientGoneWhileWaiting, err: err.message },
@@ -1170,7 +1156,7 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
       let wouldCall;
       const ffmpegModeBlocked = (plan.mode === 'hls' || plan.mode === 'hls-buffer') && !plan.ffmpegAvailable;
       if (plan.probeShortcut.wouldFire) {
-        wouldCall = 'tryServeProbeClip(...) [probeShortcut - real request never reaches the mode/quality logic above]';
+        wouldCall = 'tryServeInstantHlsPlaylist(...) [probeShortcut - real request never reaches the mode/quality logic above]';
       } else if (ffmpegModeBlocked) {
         wouldCall = `502 - mode=${plan.mode} requires ffmpeg, which is unavailable on this host (no fallback to a different mode)`;
       } else if (plan.mode === 'hls' || plan.mode === 'hls-buffer') {

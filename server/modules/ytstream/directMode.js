@@ -21,6 +21,7 @@ const { UPSTREAM_USER_AGENT, buildBaseArgs } = require('./ytdlpArgs');
 const { getDirectFormatSelector } = require('./formatSelection');
 const { RETRY_PLAYER_CLIENT, isRetryableExtractionError } = require('./configResolution');
 const { persistStreamHistoryStart, persistStreamHistoryEnd } = require('./activeStreams');
+const { streamDebug } = require('./streamDebug');
 
 function isManifestUrl(url) {
   const u = String(url || '').toLowerCase();
@@ -47,6 +48,7 @@ async function resolveDirectUrl(youtubeId, config, quality, forcedPlayerClient, 
   };
 
   let stdout;
+  let usedRetryClient = false;
   try {
     stdout = await runOnce(forcedPlayerClient);
   } catch (err) {
@@ -55,6 +57,7 @@ async function resolveDirectUrl(youtubeId, config, quality, forcedPlayerClient, 
         { youtubeId, err: err.message },
         `ytstream: direct resolve hit a client/session error, retrying once with player_client=${RETRY_PLAYER_CLIENT}`
       );
+      usedRetryClient = true;
       stdout = await runOnce(RETRY_PLAYER_CLIENT);
     } else {
       throw err;
@@ -72,7 +75,10 @@ async function resolveDirectUrl(youtubeId, config, quality, forcedPlayerClient, 
   }
 
   const manifest = urls.find(isManifestUrl);
-  if (manifest) return manifest;
+  if (manifest) {
+    streamDebug({ youtubeId, usedRetryClient, urlCount: urls.length, urlType: 'manifest' }, 'ytstream: resolveDirectUrl resolved a manifest URL');
+    return manifest;
+  }
 
   if (urls.length > 1) {
     logger.warn(
@@ -81,6 +87,7 @@ async function resolveDirectUrl(youtubeId, config, quality, forcedPlayerClient, 
     );
   }
 
+  streamDebug({ youtubeId, usedRetryClient, urlCount: urls.length, urlType: 'plain' }, 'ytstream: resolveDirectUrl resolved a plain URL');
   return urls[0];
 }
 
@@ -162,6 +169,7 @@ function proxyDirectStream(targetUrl, req, res, cookieHeader, redirectsLeft = 5)
 
       if ([301, 302, 303, 307, 308].includes(status) && upstreamRes.headers.location && redirectsLeft > 0) {
         upstreamRes.resume();
+        streamDebug({ status, location: upstreamRes.headers.location, redirectsLeft }, 'ytstream: proxyDirectStream following upstream redirect');
         proxyDirectStream(new URL(upstreamRes.headers.location, parsed).href, req, res, cookieHeader, redirectsLeft - 1)
           .then(resolve)
           .catch(reject);
@@ -176,6 +184,7 @@ function proxyDirectStream(targetUrl, req, res, cookieHeader, redirectsLeft = 5)
         return;
       }
 
+      streamDebug({ status, contentType: upstreamRes.headers['content-type'], contentLength: upstreamRes.headers['content-length'] }, 'ytstream: proxyDirectStream piping upstream response to client');
       res.status(status);
       ['content-type', 'content-length', 'content-range', 'accept-ranges', 'cache-control', 'etag', 'last-modified']
         .forEach((h) => {

@@ -143,7 +143,7 @@ yt_section "Staging Backup"
 
 # Check if containers are running
 DB_RUNNING=false
-if docker ps --format '{{.Names}}' | grep -q '^youtarr-db$'; then
+if docker ps --format '{{.Names}}' | grep -q '^youtarr-turbo-db$'; then
     DB_RUNNING=true
     yt_info "Database container is running."
 else

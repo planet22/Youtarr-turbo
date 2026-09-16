@@ -11,6 +11,7 @@
 const fs = require('fs');
 const path = require('path');
 const logger = require('../../logger');
+const { streamDebug } = require('./streamDebug');
 
 // Used only when a video's real resolution can't be resolved yet - a plain
 // 16:9 fallback, not a target.
@@ -33,20 +34,29 @@ const HLS_PLACEHOLDER_FALLBACK_HEIGHT = 720;
  */
 async function resolveVideoTargetResolution(youtubeId, models) {
   const fallback = { width: HLS_PLACEHOLDER_FALLBACK_WIDTH, height: HLS_PLACEHOLDER_FALLBACK_HEIGHT };
-  if (!models || !models.Video) return fallback;
+  if (!models || !models.Video) {
+    streamDebug({ youtubeId, source: 'fallback', reason: 'no Video model injected' }, 'ytstream: resolveVideoTargetResolution');
+    return fallback;
+  }
   try {
     const video = await models.Video.findOne({
       where: { youtubeId },
       attributes: ['filePath', 'video_resolution'],
     });
-    if (!video) return fallback;
+    if (!video) {
+      streamDebug({ youtubeId, source: 'fallback', reason: 'no Video row (untracked)' }, 'ytstream: resolveVideoTargetResolution');
+      return fallback;
+    }
 
     if (video.video_resolution) {
       const match = /^(\d+)x(\d+)$/.exec(String(video.video_resolution).trim());
       if (match) {
         const width = Number(match[1]);
         const height = Number(match[2]);
-        if (width > 0 && height > 0) return { width, height };
+        if (width > 0 && height > 0) {
+          streamDebug({ youtubeId, source: 'Video.video_resolution', width, height }, 'ytstream: resolveVideoTargetResolution');
+          return { width, height };
+        }
       }
     }
 
@@ -59,10 +69,12 @@ async function resolveVideoTargetResolution(youtubeId, models) {
           ? cache.mediaStreams.find((s) => s.Type === 1) // MediaStreamType.Video
           : null;
         if (videoStream && videoStream.Width && videoStream.Height) {
+          streamDebug({ youtubeId, source: 'strmtool.json', width: videoStream.Width, height: videoStream.Height }, 'ytstream: resolveVideoTargetResolution');
           return { width: videoStream.Width, height: videoStream.Height };
         }
       }
     }
+    streamDebug({ youtubeId, source: 'fallback', reason: 'no video_resolution and no usable .strmtool.json', filePath: video.filePath }, 'ytstream: resolveVideoTargetResolution');
   } catch (err) {
     logger.warn({ err, youtubeId }, 'ytstream: failed to resolve target resolution for placeholder/probe clip; using fallback');
   }

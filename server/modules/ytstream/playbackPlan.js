@@ -30,34 +30,20 @@ const {
   VALID_MODES,
   VALID_CONTAINERS,
   VALID_TRANSCODE,
+  DEFAULT_PLAYER_CLIENT,
   parseBooleanQueryFlag,
   createQueryOverrideResolver,
   getModeFieldCompatibility,
 } = require('./configResolution');
 const { isFfmpegAvailable } = require('./processRegistry');
 const { evaluateProbeShortcut } = require('./probeShortcut');
-
-// In-memory cache of video durations for calculatedLength's Content-Length
-// estimate. Durations don't change, so entries never expire.
-const durationCache = new Map();
-
-// In-flight dedup for getVideoDurationSeconds's live yt-dlp fallback -
-// without it, an early warm-up call and the real calculatedLength lookup
-// moments later would each spawn their own yt-dlp process for the same
-// video for no benefit.
-const durationLookupPromises = new Map();
+const { streamDebug } = require('./streamDebug');
 
 // In-memory cache of resolved video codecs, for transcode=copy's
 // auto-upgrade-to-h264 check (resolveVideoCodec). Keyed by
 // youtubeId|quality|playerClient since the DASH format yt-dlp selects (and
 // so its codec) depends on both. Never expires within a process lifetime.
 const codecCache = new Map();
-
-// In-memory cache of each video's true best-available height (what a
-// height-uncapped `-f bv*` would select), so resolveEffectiveQualityHeight
-// never requests a height above a video's real max. Never expires within a
-// process lifetime.
-const maxAvailableHeightCache = new Map();
 
 let models = null;
 
@@ -67,104 +53,71 @@ function init(params) {
 }
 
 /**
+ * This video's full yt-dlp extraction (same shape as a direct `yt-dlp -j`
+ * call). Caching (including in-flight dedup) is entirely
+ * youtubeMetadataCache's job - this just supplies the ytstream-specific
+ * live-fetch (player_client override) for it to call on a cache miss.
+ * Prefer this over a one-off yt-dlp call whenever what's needed is a fact
+ * about the video itself (duration, height, fps, ...) rather than a
+ * request-specific answer like a format selector's codec.
+ * @returns {Promise<object>} parsed yt-dlp -j output
+ * @throws if nothing is cached and the live extraction fails
+ */
+async function getVideoInfo(youtubeId, config, playerClient) {
+  streamDebug({ youtubeId, playerClient }, 'ytstream: getVideoInfo called');
+  const info = await youtubeMetadataCache.getOrFetchRawInfoJson(youtubeId, async () => {
+    // fetchMetadata's generic arg-builder has no player_client opinion of
+    // its own - replicate buildBaseArgs' precedence for it here.
+    const resolvedPlayerClient = playerClient || (config.ytstream || {}).playerClient || DEFAULT_PLAYER_CLIENT;
+    logger.info({ youtubeId, playerClient: resolvedPlayerClient }, 'ytstream: resolving full video metadata via yt-dlp');
+    return ytDlpRunner.fetchMetadata(
+      `https://youtube.com/watch?v=${youtubeId}`,
+      30000,
+      { extractorArgs: `youtube:player_client=${resolvedPlayerClient}` }
+    );
+  });
+  streamDebug({ youtubeId, duration: info?.duration, formatCount: Array.isArray(info?.formats) ? info.formats.length : 0 }, 'ytstream: getVideoInfo resolved');
+  return info;
+}
+
+/**
  * Duration lookup for `ytstream.calculatedLength`'s synthetic Content-Length.
- * Checks the library DB first (skips a yt-dlp round trip in the common
- * case), then the persistent youtube_metadata_cache table (for untracked
- * videos - no Video row to read a duration from, but played at least
- * once before), falling back to a dedicated `--print duration` yt-dlp
- * call only when neither has it. The in-memory durationCache Map above
- * this still short-circuits all of that within one server process's
- * uptime; youtube_metadata_cache exists so an untracked video's duration
- * survives a server restart AND survives its own on-disk cache being
- * purged, rather than costing a fresh yt-dlp call on every first replay.
+ * Checks the library DB first (a real download's own recorded duration),
+ * then youtube_metadata_cache (for untracked videos), falling back to
+ * getVideoInfo only when neither has it.
  */
 async function getVideoDurationSeconds(youtubeId, config) {
-  if (durationCache.has(youtubeId)) return durationCache.get(youtubeId);
-  if (durationLookupPromises.has(youtubeId)) {
-    return durationLookupPromises.get(youtubeId);
-  }
-
-  const lookup = (async () => {
-    if (models && models.Video) {
-      try {
-        const existing = await models.Video.findOne({
-          where: { youtubeId },
-          attributes: ['duration'],
-        });
-        const dbSeconds = existing ? Number(existing.duration) : NaN;
-        if (Number.isFinite(dbSeconds) && dbSeconds > 0) {
-          logger.info({ youtubeId, seconds: dbSeconds }, 'ytstream: resolved duration for calculatedLength from the database');
-          durationCache.set(youtubeId, dbSeconds);
-          return dbSeconds;
-        }
-      } catch (err) {
-        logger.warn({ err, youtubeId }, 'ytstream: DB duration lookup failed for calculatedLength; falling back to yt-dlp');
-      }
-    }
-
-    if (models && models.YoutubeMetadataCache) {
-      try {
-        const cached = await models.YoutubeMetadataCache.findByPk(youtubeId);
-        if (cached && Number.isFinite(Number(cached.duration_seconds)) && cached.duration_seconds > 0) {
-          logger.info({ youtubeId, seconds: cached.duration_seconds }, 'ytstream: resolved duration for calculatedLength from the persistent untracked-video metadata cache');
-          durationCache.set(youtubeId, cached.duration_seconds);
-          // Fire-and-forget - a stale last_accessed_at just means this row
-          // might get swept a bit early, never a correctness issue.
-          cached.update({ last_accessed_at: new Date() }).catch((err) => {
-            logger.warn({ err, youtubeId }, 'ytstream: failed to bump youtube_metadata_cache last_accessed_at');
-          });
-          return cached.duration_seconds;
-        }
-      } catch (err) {
-        logger.warn({ err, youtubeId }, 'ytstream: youtube_metadata_cache lookup failed for calculatedLength; falling back to yt-dlp');
-      }
-    }
-
-    const args = [
-      ...buildBaseArgs(config),
-      '--skip-download',
-      '--print', '%(duration)s',
-      '--no-playlist',
-      '--no-warnings',
-      `https://youtube.com/watch?v=${youtubeId}`,
-    ];
-    logger.info({ youtubeId }, 'ytstream: resolving duration for calculatedLength Content-Length estimate via yt-dlp');
-    const stdout = await ytDlpRunner.run(args, { timeoutMs: 30000 });
-    const seconds = Number.parseFloat(String(stdout).trim());
-    if (!Number.isFinite(seconds) || seconds <= 0) {
-      throw new Error(`Could not determine video duration for calculatedLength: ${String(stdout).slice(0, 200)}`);
-    }
-    durationCache.set(youtubeId, seconds);
-    if (models && models.YoutubeMetadataCache) {
-      const now = new Date();
-      models.YoutubeMetadataCache.upsert({
-        youtube_id: youtubeId,
-        duration_seconds: Math.round(seconds),
-        fetched_at: now,
-        last_accessed_at: now,
-      }).catch((err) => {
-        logger.warn({ err, youtubeId }, 'ytstream: failed to persist duration into youtube_metadata_cache');
+  streamDebug({ youtubeId }, 'ytstream: getVideoDurationSeconds called');
+  if (models && models.Video) {
+    try {
+      const existing = await models.Video.findOne({
+        where: { youtubeId },
+        attributes: ['duration'],
       });
+      const dbSeconds = existing ? Number(existing.duration) : NaN;
+      if (Number.isFinite(dbSeconds) && dbSeconds > 0) {
+        logger.info({ youtubeId, seconds: dbSeconds }, 'ytstream: resolved duration for calculatedLength from the database');
+        return dbSeconds;
+      }
+      streamDebug({ youtubeId, hasVideoRow: !!existing }, 'ytstream: no usable duration in the Video table; checking metadata cache next');
+    } catch (err) {
+      logger.warn({ err, youtubeId }, 'ytstream: DB duration lookup failed for calculatedLength; falling back to yt-dlp');
     }
-    return seconds;
-  })();
-
-  durationLookupPromises.set(youtubeId, lookup);
-  try {
-    return await lookup;
-  } finally {
-    durationLookupPromises.delete(youtubeId);
   }
-}
 
-/** Invalidates one video's cached duration - see the metadata-cache-clear routes. */
-function clearDurationCache(youtubeId) {
-  durationCache.delete(youtubeId);
-}
+  const cachedDuration = await youtubeMetadataCache.getCachedDurationSeconds(youtubeId);
+  if (cachedDuration) {
+    logger.info({ youtubeId, seconds: cachedDuration }, 'ytstream: resolved duration for calculatedLength from the persistent untracked-video metadata cache');
+    return cachedDuration;
+  }
+  streamDebug({ youtubeId }, 'ytstream: no cached duration; falling back to getVideoInfo (live yt-dlp on a cache miss)');
 
-/** Invalidates every cached duration - see the bulk metadata-cache-clear route. */
-function clearAllDurationCache() {
-  durationCache.clear();
+  const info = await getVideoInfo(youtubeId, config);
+  const seconds = Number(info.duration);
+  if (!Number.isFinite(seconds) || seconds <= 0) {
+    throw new Error(`Could not determine video duration for calculatedLength: ${JSON.stringify(info).slice(0, 200)}`);
+  }
+  return seconds;
 }
 
 /**
@@ -181,7 +134,11 @@ function clearAllDurationCache() {
  */
 async function resolveVideoCodec(youtubeId, quality, config, playerClient, qualityStrictness) {
   const cacheKey = `${youtubeId}|${quality}|${playerClient || ''}|${qualityStrictness || 'fallback'}`;
-  if (codecCache.has(cacheKey)) return codecCache.get(cacheKey);
+  if (codecCache.has(cacheKey)) {
+    const cached = codecCache.get(cacheKey);
+    streamDebug({ youtubeId, quality, playerClient, qualityStrictness, codec: cached }, 'ytstream: resolveVideoCodec cache hit');
+    return cached;
+  }
 
   const { videoFormat } = getDashFormatSelectors(quality, qualityStrictness);
   const args = [
@@ -196,46 +153,38 @@ async function resolveVideoCodec(youtubeId, quality, config, playerClient, quali
   logger.info({ youtubeId, quality, playerClient }, 'ytstream: probing selected format\'s video codec for transcode=copy compatibility check');
   const stdout = await ytDlpRunner.run(args, { timeoutMs: 30000 });
   const codec = String(stdout).trim().split(/\r?\n/)[0] || '';
+  streamDebug({ youtubeId, quality, playerClient, qualityStrictness, videoFormat, codec }, 'ytstream: resolveVideoCodec resolved via live yt-dlp probe');
   codecCache.set(cacheKey, codec);
   return codec;
 }
 
 /**
+ * Cache-only check for a video's true best-available height - never spawns
+ * yt-dlp. Used by resolveMaxAvailableHeight below and by the probe-shortcut
+ * resolution lookup in server/routes/ytstream.js.
+ * @returns {Promise<number|null>}
+ */
+async function peekCachedMaxHeight(youtubeId) {
+  const height = await youtubeMetadataCache.getCachedMaxHeight(youtubeId);
+  streamDebug({ youtubeId, height }, 'ytstream: peekCachedMaxHeight result');
+  return height;
+}
+
+/**
  * The height `-f bv*` (no height ceiling) would actually select — this
- * video's true best-available resolution. Best-effort: any failure
- * returns null ("unknown, don't cap") rather than blocking playback.
+ * video's true best-available resolution. Best-effort: any failure returns
+ * null ("unknown, don't cap") rather than blocking playback.
  */
 async function resolveMaxAvailableHeight(youtubeId, config, playerClient) {
-  const cacheKey = `${youtubeId}|${playerClient || ''}`;
-  if (maxAvailableHeightCache.has(cacheKey)) return maxAvailableHeightCache.get(cacheKey);
-
-  // Same info as the live `-f bv*` probe below (the true best-available
-  // height), already sitting in youtubeMetadataCache's raw_info_json blob
-  // whenever this video's metadata was cached by any producer (a prior
-  // stream, a real download, or STRM generation) - skips the live yt-dlp
-  // process entirely on a cache hit, same win as the fps correction.
-  const cachedHeight = await youtubeMetadataCache.getCachedMaxHeight(youtubeId);
-  if (cachedHeight) {
-    maxAvailableHeightCache.set(cacheKey, cachedHeight);
-    return cachedHeight;
-  }
+  const cached = await peekCachedMaxHeight(youtubeId);
+  if (cached) return cached;
+  streamDebug({ youtubeId, playerClient }, 'ytstream: no cached best-available height; resolving via getVideoInfo (live yt-dlp on a cache miss)');
 
   try {
-    const args = [
-      ...buildBaseArgs(config, { playerClient }),
-      '-f', 'bv*',
-      '--print', '%(height)s',
-      '--skip-download',
-      '--no-playlist',
-      '--no-warnings',
-      `https://youtube.com/watch?v=${youtubeId}`,
-    ];
-    logger.info({ youtubeId, playerClient }, 'ytstream: resolving true best-available height for quality auto-cap');
-    const stdout = await ytDlpRunner.run(args, { timeoutMs: 30000 });
-    const height = Number.parseInt(String(stdout).trim().split(/\r?\n/)[0], 10);
-    const result = Number.isFinite(height) && height > 0 ? height : null;
-    maxAvailableHeightCache.set(cacheKey, result);
-    return result;
+    await getVideoInfo(youtubeId, config, playerClient);
+    const height = await youtubeMetadataCache.getCachedMaxHeight(youtubeId);
+    streamDebug({ youtubeId, height }, 'ytstream: resolveMaxAvailableHeight resolved after live extraction');
+    return height;
   } catch (err) {
     logger.warn({ err, youtubeId }, 'ytstream: failed to resolve best-available height; skipping quality auto-cap for this request');
     return null;
@@ -638,11 +587,11 @@ async function resolvePlaybackPlan(youtubeId, req, config, { probe }) {
 
 module.exports = {
   init,
+  getVideoInfo,
   getVideoDurationSeconds,
-  clearDurationCache,
-  clearAllDurationCache,
   resolveVideoCodec,
   resolveMaxAvailableHeight,
+  peekCachedMaxHeight,
   resolveEffectiveQualityHeight,
   resolvePlaybackPlan,
 };

@@ -1,1 +1,18 @@
 client/public/mockServiceWorker.js linguist-generated=true
+
+# This repo is worked on from Windows checkouts with core.autocrlf=true.
+# Without an override, that flips every text file to CRLF on checkout,
+# which both breaks tools that expect LF (see the .sh rule below) and
+# floods `npm run lint` with linebreak-style noise on any touched file -
+# a known, repeatedly-confirmed-pre-existing condition on this checkout,
+# not a real code issue. `text=auto eol=lf` normalizes every file git
+# detects as text to LF, in the repo and on checkout, regardless of
+# core.autocrlf; binary files are left alone by git's own detection.
+* text=auto eol=lf
+
+# Shell scripts are exec'd directly (shebang) inside Linux containers -
+# some are even bind-mounted straight from the host (docker-compose.yaml's
+# docker-entrypoint override). A CRLF shebang line breaks that exec with
+# "no such file or directory", so force LF regardless of core.autocrlf.
+# (Redundant with the blanket rule above now, kept for the explanation.)
+*.sh text eol=lf

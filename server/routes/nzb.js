@@ -13,6 +13,8 @@ const nzbDiagnosticLog = require('../modules/nzbDiagnosticLog');
 const { nzbDownloadJobLabel } = require('../modules/download/jobTypes');
 const ChannelVideo = require('../models/channelvideo');
 const Video = require('../models/video');
+const { parseAuxData } = require('../modules/jobAuxData');
+const archiveModule = require('../modules/archiveModule');
 const { formatBytes } = require('../modules/notifications/utils');
 
 /**
@@ -331,7 +333,6 @@ async function untrackFromYoutarrLibrary(job, videoRow) {
   }
   if (videoRow?.youtubeId) {
     try {
-      const archiveModule = require('../modules/archiveModule');
       await archiveModule.removeVideoFromArchive(videoRow.youtubeId);
     } catch (err) {
       logger.warn({ err, youtubeId: videoRow.youtubeId }, 'nzb: failed to remove untracked video from yt-dlp archive');
@@ -385,7 +386,6 @@ async function untrackFromYoutarrLibrary(job, videoRow) {
 async function reconcileMovedUntrackedVideo(videoRow) {
   if (!videoRow?.id) return false;
   const { JobVideo, Job, VideoWatchStatus } = require('../models');
-  const { parseAuxData } = require('../modules/jobAuxData');
 
   const jobVideos = await JobVideo.findAll({ where: { video_id: videoRow.id } });
   if (!jobVideos.length) {
@@ -477,7 +477,6 @@ async function reconcileMovedUntrackedVideo(videoRow) {
 
   if (videoRow.youtubeId) {
     try {
-      const archiveModule = require('../modules/archiveModule');
       await archiveModule.removeVideoFromArchive(videoRow.youtubeId);
     } catch (err) {
       logger.warn(

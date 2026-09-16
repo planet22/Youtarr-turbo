@@ -15,7 +15,7 @@ Youtarr ships four Compose files so each supported runtime can layer the right o
 | `docker-compose.yml` | Production defaults with the bundled MariaDB container. Used by `./start.sh`. |
 | `docker-compose.dev.yml` | Development mode: mounts `./server/` and migrations into the container, runs the backend with `node --watch` for hot reload, and uses a separate `youtarr-db-dev` database with its own named volume. Used by `./scripts/start-dev.sh`. See [DEVELOPMENT.md](DEVELOPMENT.md). |
 | `docker-compose.arm.yml` | Named-volume database override. The filename is historical: it was originally added for ARM systems, but it is also useful on Docker Desktop and NAS/virtualized filesystems. Layered on top of `docker-compose.yml` via `-f`. |
-| `docker-compose.external-db.yml` | Runs Youtarr against an external MariaDB/MySQL instance instead of the bundled database. Used by `./start-with-external-db.sh`. |
+| `docker-compose.external-db.yml` | Runs Youtarr against an external MariaDB/MySQL instance instead of the bundled database. Used by `./start-with-external-db.sh` (layered via `-f` on top of `docker-compose.yml`), and also usable standalone - see the "Using an external database" section below. Deliberately self-contained (full `youtarr` service block, not a thin override like `docker-compose.arm.yml`) so the standalone path keeps working. |
 
 ## Container Details
 

@@ -34,13 +34,17 @@
 const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
-const { pipeline } = require('stream/promises');
+// const { pipeline } = require('stream/promises'); // only used by the commented-out tryServeProbeClip below
 const logger = require('../../logger');
 const configModule = require('../configModule');
 const streamEncoderTuning = require('../streamEncoderTuning');
 const { normalizeHardwareMode, normalizeTuning, buildVideoEncoderArgs } = streamEncoderTuning;
 const { VALID_TRANSCODE, VALID_CONTAINERS, createQueryOverrideResolver } = require('./configResolution');
 const { YTSTREAM_CLIPS_DIR } = require('./paths');
+const { streamDebug } = require('./streamDebug');
+const { resolveVideoTargetResolution } = require('./videoResolution');
+const { resolveQualityHeight, capResolutionToHeight } = require('./formatSelection');
+const { buildHlsTopLevelPlaylistResponse } = require('./hlsMasterPlaylist');
 
 function isLikelyMetadataProbeRequest(req) {
   return /^Lavf\//i.test(String(req.headers['user-agent'] || ''));
@@ -152,10 +156,26 @@ const PROBE_CLIP_CONTAINER_INFO = {
   ts: { ext: 'ts', muxer: 'mpegts', contentType: 'video/mp2t' },
 };
 
+// `ytstream.probeShortcutContainerOverride` (config.json only - not exposed
+// in Settings UI, debug-only escape hatch): when set to a valid container,
+// forces every probe clip to that container regardless of what the real
+// session negotiated, so a specific container's duration-patch path
+// (findMp4MvhdDurationInfo/findMatroskaDurationValueOffset et al) can be
+// forced on/off for testing without editing code each time - see the mp4-
+// duration investigation notes above getProbeClipDurationPatchInfo. null
+// (default) uses the real session's own `container` setting, same as before
+// this override existed.
 function resolveProbeClipContainer(container) {
-  return VALID_CONTAINERS.includes(container) && PROBE_CLIP_CONTAINER_INFO[container]
+  const override = (configModule.getConfig().ytstream || {}).probeShortcutContainerOverride;
+  if (override && VALID_CONTAINERS.includes(override) && PROBE_CLIP_CONTAINER_INFO[override]) {
+    streamDebug({ requestedContainer: container, override }, 'ytstream: resolveProbeClipContainer using probeShortcutContainerOverride');
+    return override;
+  }
+  const resolved = VALID_CONTAINERS.includes(container) && PROBE_CLIP_CONTAINER_INFO[container]
     ? container
     : 'mp4';
+  streamDebug({ requestedContainer: container, resolved }, 'ytstream: resolveProbeClipContainer using the real session container (no override set)');
+  return resolved;
 }
 
 // Jellyfin's own ffprobe keyframe-extraction pass (for accurate seeking in
@@ -197,6 +217,8 @@ function hasRecentlyServedFakeProbeClip(youtubeId) {
   const last = recentlyServedFakeClipAt.get(youtubeId);
   return !!last && Date.now() - last < PROBE_SHORTCUT_RETRY_SUPPRESS_MS;
 }
+// Only called by the commented-out tryServeProbeClip below.
+// eslint-disable-next-line no-unused-vars
 function markFakeProbeClipServed(youtubeId) {
   recentlyServedFakeClipAt.set(youtubeId, Date.now());
 }
@@ -214,24 +236,44 @@ function markFakeProbeClipServed(youtubeId) {
 // follow), then an 8-byte big-endian IEEE754 double in milliseconds
 // (TimecodeScale default 1ms/unit).
 //
-// mp4: ffmpeg's (faststart) mp4 muxer writes the movie-level duration in
-// the `moov`/`mvhd` box: 4-byte box-type marker "mvhd", then 1 version byte
-// + 3 flag bytes, then (version 0) 4+4+4+4-byte
-// creation/modification/timescale/duration fields or (version 1)
-// 8+8+4+8-byte equivalents (timescale is always 32-bit either way).
-// Patching only the movie-level duration (not the per-track tkhd/mdhd
-// durations) mirrors the mkv approach above, which likewise only patches
-// the container-level field ffprobe's format.duration actually reads.
+// mp4: ffmpeg's (faststart) mp4 muxer writes duration in three places, and
+// which one a given ffprobe build's mov demuxer actually trusts for
+// `format.duration` isn't guaranteed - so all three get patched, best-effort,
+// for the best shot at Jellyfin picking up the real duration:
+//
+// - `moov`/`mvhd` (movie-level, one per file): 4-byte box-type marker
+//   "mvhd", then 1 version byte + 3 flag bytes, then (version 0) 4+4+4+4-byte
+//   creation/modification/timescale/duration fields or (version 1)
+//   8+8+4+8-byte equivalents (timescale is always 32-bit either way).
+// - `moov`/`trak`/`tkhd` (one per track - typically two here, video+audio):
+//   same version+flags header, then creation/modification/track_ID/reserved
+//   (4+4+4+4 for version 0, 8+8+4+4 for version 1), then a duration field
+//   expressed in the file's MOVIE timescale (mvhd's) - tkhd has no
+//   timescale field of its own.
+// - `moov`/`trak`/`mdia`/`mdhd` (one per track): identical layout to mvhd
+//   (creation/modification/timescale/duration), but each track's timescale
+//   can differ from the movie's and from each other (e.g. video vs audio
+//   sample rate).
+//
+// NOT patched: the per-track sample tables (`stts` et al) that some ffprobe
+// builds derive `format.duration` from regardless of the header fields
+// above - faking those would mean lying about how many samples exist
+// without matching real encoded data, risking corruption for anything that
+// tries to actually decode the file rather than just read its metadata.
+// If Jellyfin's duration is still wrong after this fuller patch, that's the
+// likely reason (see the memory/investigation notes for this feature).
 //
 // ts: mpegts has no container-level duration field to patch (duration is
 // derived from PCR/timestamp range) - never patched, always served as
 // generated.
 //
-// Both scanned for by marker (not a hardcoded offset) for resilience across
+// All scanned for by marker (not a hardcoded offset) for resilience across
 // ffmpeg versions; if not found, patching is silently skipped and the clip
 // is served as generated - same best-effort philosophy as the rest of this feature.
 const MATROSKA_DURATION_MARKER = Buffer.from([0x44, 0x89, 0x88]);
 const MP4_MVHD_MARKER = Buffer.from('mvhd', 'ascii');
+const MP4_TKHD_MARKER = Buffer.from('tkhd', 'ascii');
+const MP4_MDHD_MARKER = Buffer.from('mdhd', 'ascii');
 const probeClipDurationPatchInfoCache = new Map(); // signature -> patch info | null
 
 function findMatroskaDurationValueOffset(buffer) {
@@ -241,10 +283,24 @@ function findMatroskaDurationValueOffset(buffer) {
   return valueOffset + 8 <= buffer.length ? valueOffset : -1;
 }
 
-function findMp4MvhdDurationInfo(buffer) {
-  const markerOffset = buffer.indexOf(MP4_MVHD_MARKER);
-  if (markerOffset === -1) return null;
-  const versionOffset = markerOffset + MP4_MVHD_MARKER.length;
+function findAllMarkerOffsets(buffer, marker) {
+  const offsets = [];
+  let from = 0;
+  for (;;) {
+    const idx = buffer.indexOf(marker, from);
+    if (idx === -1) break;
+    offsets.push(idx);
+    from = idx + 1;
+  }
+  return offsets;
+}
+
+// Shared by mvhd and mdhd - both are version(1)+flags(3), creation_time,
+// modification_time, timescale, duration (32-bit fields for version 0,
+// 64-bit creation/modification/duration for version 1; timescale is always
+// 32-bit). tkhd's layout differs - see findMp4TkhdDurationInfos.
+function findMp4TimescaleDurationBox(buffer, markerOffset, markerLength) {
+  const versionOffset = markerOffset + markerLength;
   if (versionOffset >= buffer.length) return null;
   const version = buffer[versionOffset];
   const timescaleOffset = versionOffset + (version === 1 ? 1 + 3 + 8 + 8 : 1 + 3 + 4 + 4);
@@ -253,6 +309,46 @@ function findMp4MvhdDurationInfo(buffer) {
   return durationOffset + durationSize <= buffer.length ? { timescaleOffset, durationOffset, durationSize } : null;
 }
 
+function findMp4MvhdDurationInfo(buffer) {
+  const markerOffset = buffer.indexOf(MP4_MVHD_MARKER);
+  if (markerOffset === -1) return null;
+  return findMp4TimescaleDurationBox(buffer, markerOffset, MP4_MVHD_MARKER.length);
+}
+
+function findMp4MdhdDurationInfos(buffer) {
+  return findAllMarkerOffsets(buffer, MP4_MDHD_MARKER)
+    .map((markerOffset) => findMp4TimescaleDurationBox(buffer, markerOffset, MP4_MDHD_MARKER.length))
+    .filter(Boolean);
+}
+
+// tkhd: version(1)+flags(3), creation_time, modification_time, track_ID(4),
+// reserved(4), then duration - no timescale field of its own (expressed in
+// the movie's timescale, patched using patchInfo.mvhd.timescaleOffset).
+function findMp4TkhdDurationInfos(buffer) {
+  return findAllMarkerOffsets(buffer, MP4_TKHD_MARKER)
+    .map((markerOffset) => {
+      const versionOffset = markerOffset + MP4_TKHD_MARKER.length;
+      if (versionOffset >= buffer.length) return null;
+      const version = buffer[versionOffset];
+      const durationOffset = versionOffset + (version === 1 ? 1 + 3 + 8 + 8 + 4 + 4 : 1 + 3 + 4 + 4 + 4 + 4);
+      const durationSize = version === 1 ? 8 : 4;
+      return durationOffset + durationSize <= buffer.length ? { durationOffset, durationSize } : null;
+    })
+    .filter(Boolean);
+}
+
+// writeMp4DurationField/getProbeClipDurationPatchInfo below are only called
+// by the commented-out tryServeProbeClip below.
+// eslint-disable-next-line no-unused-vars
+function writeMp4DurationField(buffer, { durationOffset, durationSize }, durationUnits) {
+  if (durationSize === 8) {
+    buffer.writeBigUInt64BE(BigInt(durationUnits), durationOffset);
+  } else {
+    buffer.writeUInt32BE(durationUnits >>> 0, durationOffset);
+  }
+}
+
+// eslint-disable-next-line no-unused-vars
 async function getProbeClipDurationPatchInfo(signature, filePath, container) {
   if (probeClipDurationPatchInfoCache.has(signature)) return probeClipDurationPatchInfoCache.get(signature);
   let info = null;
@@ -268,7 +364,14 @@ async function getProbeClipDurationPatchInfo(signature, filePath, container) {
           if (offset !== -1) info = { kind: 'mkv', offset };
         } else {
           const mvhd = findMp4MvhdDurationInfo(scanned);
-          if (mvhd) info = { kind: 'mp4', ...mvhd };
+          if (mvhd) {
+            info = {
+              kind: 'mp4',
+              mvhd,
+              tkhds: findMp4TkhdDurationInfos(scanned),
+              mdhds: findMp4MdhdDurationInfos(scanned),
+            };
+          }
         }
       } finally {
         await fh.close();
@@ -348,78 +451,172 @@ async function ensureProbeClip({ hardwareMode, tuning, width, height, container 
 }
 
 /**
+ * SUPERSEDED 2026-09-14 - kept commented out, not deleted, per the
+ * investigation in the probeShortcut project memory (search
+ * "MAJOR CORRECTION"): this fake flat-file clip lies about container SHAPE
+ * to Jellyfin (a standalone mp4/mkv file), not just duration/codec, and
+ * Jellyfin caches that shape at the library-item level. Later, when
+ * Jellyfin does a non-Direct-Play transcode, it opens the real (genuinely
+ * HLS-shaped) ytstream URL with the wrong demuxer and fails outright - this
+ * is what broke Apple clients. See tryServeInstantHlsPlaylist below for the
+ * replacement, which serves a real playlist instead so Jellyfin's probe
+ * learns the correct Container:hls.
+ *
  * @returns {Promise<boolean>} true if a response was sent (caller must
  *   return immediately without falling through to normal handling).
  * @param {(youtubeId: string) => Promise<number>} resolveDurationSeconds -
  *   DB-first, yt-dlp-fallback-then-cached; a real network call happens at
  *   most once per not-yet-tracked video, then hits durationCache.
  */
-async function tryServeProbeClip(req, res, { hardwareMode, tuning, width, height, container, youtubeId, resolveDurationSeconds }) {
+// async function tryServeProbeClip(req, res, { hardwareMode, tuning, width, height, container, youtubeId, resolveDurationSeconds }) {
+//   try {
+//     const clip = await ensureProbeClip({ hardwareMode, tuning, width, height, container });
+//     if (!clip) return false;
+//
+//     // Best-effort duration patch - see the duration-marker doc comment
+//     // above. Falls back to serving the clip unmodified (today's behavior)
+//     // whenever the real duration can't be resolved, or the container's
+//     // duration field can't be located/patched (always true for ts).
+//     let body = null;
+//     let knownDurationSeconds = null;
+//     try {
+//       knownDurationSeconds = await resolveDurationSeconds(youtubeId);
+//     } catch (err) {
+//       logger.warn({ err, youtubeId }, 'ytstream: could not resolve real duration for probe-shortcut clip; serving it unmodified');
+//     }
+//     if (knownDurationSeconds) {
+//       const patchInfo = await getProbeClipDurationPatchInfo(clip.signature, clip.filePath, clip.container);
+//       if (patchInfo) {
+//         try {
+//           const buffer = await fs.promises.readFile(clip.filePath);
+//           if (patchInfo.kind === 'mkv') {
+//             buffer.writeDoubleBE(knownDurationSeconds * 1000, patchInfo.offset);
+//             streamDebug({ youtubeId, knownDurationSeconds }, 'ytstream: probe-shortcut patched mkv Segment Info Duration');
+//           } else {
+//             // mp4: patch mvhd (movie-level), every track's tkhd (movie
+//             // timescale), and every track's mdhd (its own timescale) - see
+//             // the doc comment above findMp4TimescaleDurationBox for why all
+//             // three, and what's deliberately NOT patched (sample tables).
+//             const movieTimescale = buffer.readUInt32BE(patchInfo.mvhd.timescaleOffset);
+//             const movieDurationUnits = Math.round(knownDurationSeconds * movieTimescale);
+//             writeMp4DurationField(buffer, patchInfo.mvhd, movieDurationUnits);
+//             for (const tkhd of patchInfo.tkhds) {
+//               writeMp4DurationField(buffer, tkhd, movieDurationUnits);
+//             }
+//             for (const mdhd of patchInfo.mdhds) {
+//               const trackTimescale = buffer.readUInt32BE(mdhd.timescaleOffset);
+//               writeMp4DurationField(buffer, mdhd, Math.round(knownDurationSeconds * trackTimescale));
+//             }
+//             streamDebug(
+//               { youtubeId, knownDurationSeconds, movieTimescale, tkhdCount: patchInfo.tkhds.length, mdhdCount: patchInfo.mdhds.length },
+//               'ytstream: probe-shortcut patched mp4 mvhd/tkhd/mdhd duration fields'
+//             );
+//           }
+//           body = buffer;
+//         } catch (err) {
+//           logger.warn({ err, youtubeId }, 'ytstream: failed to patch probe-shortcut clip duration; serving it unmodified');
+//         }
+//       }
+//     }
+//
+//     const size = body ? body.length : (await fs.promises.stat(clip.filePath)).size;
+//     markFakeProbeClipServed(youtubeId);
+//     logger.info(
+//       { youtubeId, servedAs: 'fake', container: clip.container, ua: req.headers['user-agent'], size, url: req.originalUrl, patchedDurationSeconds: body ? knownDurationSeconds : null },
+//       'ytstream: probe-shortcut detected a likely metadata-probe request; served the synthetic clip'
+//     );
+//     res.set({
+//       'Content-Type': PROBE_CLIP_CONTAINER_INFO[clip.container].contentType,
+//       'Content-Length': String(size),
+//       'Cache-Control': 'no-store',
+//       'Accept-Ranges': 'bytes',
+//     });
+//     if (body) {
+//       res.end(body);
+//     } else {
+//       // pipeline(), not a bare .pipe() + manual Promise - a client that
+//       // disconnects before reading the whole clip otherwise leaves this
+//       // await (and the whole request/response) hanging forever.
+//       try {
+//         await pipeline(fs.createReadStream(clip.filePath), res);
+//       } catch (err) {
+//         if (err.code !== 'ERR_STREAM_PREMATURE_CLOSE') throw err;
+//       }
+//     }
+//     return true;
+//   } catch (err) {
+//     logger.warn({ err }, 'ytstream: failed to serve probe-shortcut clip; falling back to normal request handling');
+//     return false;
+//   }
+// }
+
+/**
+ * Replacement for tryServeProbeClip above: instead of faking a flat-file
+ * clip, gets/creates the SAME real hls/hls-buffer session a genuine
+ * playback request for these exact params would use (buildSessionKey
+ * mirrors the route's own sessionKey math) and serves its already-written
+ * VOD playlist immediately, via getOrCreateSession (see
+ * getOrCreateHlsSessionForProbe in hlsEngine.js), without waiting for a
+ * real segment to exist. Since calculatedLength is forced on for every HLS
+ * session, that playlist is already the complete, real, correctly-typed
+ * (Container:hls) response - no synthetic clip, no duration patching
+ * needed. The encode this kicks off keeps running in the background and is
+ * reused by a real playback request for the same params (or reaped idle if
+ * nothing ever fetches a segment).
+ *
+ * hlsEngine.js's session helpers are passed in (buildSessionKey,
+ * getOrCreateSession, rewritePlaylistUrls) rather than required directly,
+ * to avoid a circular require - hlsEngine.js already requires playbackPlan.js,
+ * which requires this module for evaluateProbeShortcut.
+ *
+ * @returns {Promise<boolean>} true if a response was sent.
+ */
+async function tryServeInstantHlsPlaylist(req, res, {
+  youtubeId, mode, quality, qualityStrictness, transcode, hardwareMode, tuning, container, playerClient, config, models,
+  clientIp, userAgent, buildSessionKey, getOrCreateSession, rewritePlaylistUrls,
+}) {
   try {
-    const clip = await ensureProbeClip({ hardwareMode, tuning, width, height, container });
-    if (!clip) return false;
-
-    // Best-effort duration patch - see the duration-marker doc comment
-    // above. Falls back to serving the clip unmodified (today's behavior)
-    // whenever the real duration can't be resolved, or the container's
-    // duration field can't be located/patched (always true for ts).
-    let body = null;
-    let knownDurationSeconds = null;
-    try {
-      knownDurationSeconds = await resolveDurationSeconds(youtubeId);
-    } catch (err) {
-      logger.warn({ err, youtubeId }, 'ytstream: could not resolve real duration for probe-shortcut clip; serving it unmodified');
-    }
-    if (knownDurationSeconds) {
-      const patchInfo = await getProbeClipDurationPatchInfo(clip.signature, clip.filePath, clip.container);
-      if (patchInfo) {
-        try {
-          const buffer = await fs.promises.readFile(clip.filePath);
-          if (patchInfo.kind === 'mkv') {
-            buffer.writeDoubleBE(knownDurationSeconds * 1000, patchInfo.offset);
-          } else {
-            const timescale = buffer.readUInt32BE(patchInfo.timescaleOffset);
-            const durationUnits = Math.round(knownDurationSeconds * timescale);
-            if (patchInfo.durationSize === 8) {
-              buffer.writeBigUInt64BE(BigInt(durationUnits), patchInfo.durationOffset);
-            } else {
-              buffer.writeUInt32BE(durationUnits >>> 0, patchInfo.durationOffset);
-            }
-          }
-          body = buffer;
-        } catch (err) {
-          logger.warn({ err, youtubeId }, 'ytstream: failed to patch probe-shortcut clip duration; serving it unmodified');
-        }
-      }
-    }
-
-    const size = body ? body.length : (await fs.promises.stat(clip.filePath)).size;
-    markFakeProbeClipServed(youtubeId);
-    logger.info(
-      { youtubeId, servedAs: 'fake', container: clip.container, ua: req.headers['user-agent'], size, url: req.originalUrl, patchedDurationSeconds: body ? knownDurationSeconds : null },
-      'ytstream: probe-shortcut detected a likely metadata-probe request; served the synthetic clip'
-    );
-    res.set({
-      'Content-Type': PROBE_CLIP_CONTAINER_INFO[clip.container].contentType,
-      'Content-Length': String(size),
-      'Cache-Control': 'no-store',
-      'Accept-Ranges': 'bytes',
+    const isBufferMode = mode === 'hls-buffer';
+    const sessionKey = buildSessionKey({
+      youtubeId, quality, qualityStrictness, transcode, hardwareMode, tuning, container,
+      playerClient, calculatedLength: true, buffer: isBufferMode,
     });
-    if (body) {
-      res.end(body);
-    } else {
-      // pipeline(), not a bare .pipe() + manual Promise - a client that
-      // disconnects before reading the whole clip otherwise leaves this
-      // await (and the whole request/response) hanging forever.
-      try {
-        await pipeline(fs.createReadStream(clip.filePath), res);
-      } catch (err) {
-        if (err.code !== 'ERR_STREAM_PREMATURE_CLOSE') throw err;
-      }
-    }
+    const baseUrl = `${req.protocol}://${req.get('host')}/api/ytstream/${encodeURIComponent(youtubeId)}/hls/${sessionKey}/`;
+
+    const session = await getOrCreateSession(sessionKey, {
+      youtubeId, quality, qualityStrictness, transcode, hardwareMode, tuning, container, config, baseUrl,
+      seekSeconds: null, calculatedLength: true, hotSwapToCache: false, bufferEnabled: isBufferMode, clientIp, userAgent,
+    });
+
+    const rawPlaylist = await fs.promises.readFile(session.playlistPath, 'utf8');
+    const playlist = rewritePlaylistUrls(rawPlaylist, session.baseUrl);
+    logger.info(
+      { youtubeId, sessionKey, ua: req.headers['user-agent'], url: req.originalUrl },
+      'ytstream: probe-shortcut detected a likely metadata-probe request; served the real HLS playlist instantly (session encode continues in the background)'
+    );
+    // ytstream.hlsMasterPlaylist (default on) - see hlsMasterPlaylist.js's
+    // own doc comment; same decision point the real playback path uses
+    // (server/routes/ytstream.js), so a probe and the real play that
+    // follows it always get the same top-level response shape.
+    const topLevelPlaylist = await buildHlsTopLevelPlaylistResponse({
+      enabled: (config.ytstream || {}).hlsMasterPlaylist !== false,
+      youtubeId,
+      quality,
+      transcode,
+      hardwareMode,
+      models,
+      mediaPlaylistUrl: `${session.baseUrl}playlist.m3u8`,
+      rewrittenMediaPlaylist: playlist,
+      resolveVideoTargetResolution,
+      capResolutionToHeight,
+      resolveQualityHeight,
+    });
+    res.set({ 'Content-Type': 'application/vnd.apple.mpegurl', 'Cache-Control': 'no-store' });
+    streamDebug({ youtubeId, sessionKey, topLevelPlaylist }, 'ytstream: probe-shortcut - top-level playlist content being served');
+    res.send(topLevelPlaylist);
     return true;
   } catch (err) {
-    logger.warn({ err }, 'ytstream: failed to serve probe-shortcut clip; falling back to normal request handling');
+    logger.warn({ err, youtubeId }, 'ytstream: failed to serve instant HLS playlist for probe; falling back to normal request handling');
     return false;
   }
 }
@@ -430,5 +627,5 @@ module.exports = {
   shouldLogQuickServeHistory,
   hasRecentlyServedFakeProbeClip,
   ensureProbeClip,
-  tryServeProbeClip,
+  tryServeInstantHlsPlaylist,
 };

@@ -1,6 +1,7 @@
 const axios = require('axios');
 const configModule = require('./configModule');
 const logger = require('../logger');
+const { describeHttpError } = require('./mediaServers/adapters/baseAdapter');
 
 // Plex HTTP request timeout in milliseconds.
 // Any call to the local Plex server should complete within a few seconds on
@@ -95,7 +96,7 @@ class PlexModule {
       logger.info({ libraryId: resolvedLibraryId }, 'Plex library refresh initiated successfully');
       return response;
     } catch (error) {
-      logger.error({ err: error }, 'Failed to refresh Plex library');
+      logger.error({ err: describeHttpError(error) }, 'Failed to refresh Plex library');
       if (error.code === 'ECONNREFUSED') {
         logger.warn('Could not connect to Plex server - continuing without refresh');
       } else if (error.code === 'ECONNABORTED') {
@@ -147,7 +148,7 @@ class PlexModule {
 
       return libraries;
     } catch (error) {
-      logger.error({ err: error }, 'Failed to get Plex libraries');
+      logger.error({ err: describeHttpError(error) }, 'Failed to get Plex libraries');
       if (error.code === 'ECONNREFUSED') {
         logger.warn('Could not connect to Plex server - returning empty library list');
       } else if (error.code === 'ECONNABORTED') {
@@ -181,7 +182,7 @@ class PlexModule {
       const claimed = typeof container.claimed === 'boolean' ? container.claimed : null;
       return { claimed, machineIdentifier: container.machineIdentifier || null };
     } catch (error) {
-      logger.warn({ err: error }, 'Failed to read Plex server identity');
+      logger.warn({ err: describeHttpError(error) }, 'Failed to read Plex server identity');
       return { claimed: null, machineIdentifier: null };
     }
   }

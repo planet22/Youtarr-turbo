@@ -5,6 +5,10 @@ const express = require('express');
 const parseFilterMode = (value) =>
   value === 'only' || value === 'exclude' ? value : 'off';
 
+// Upper bound on how many youtubeIds a single bulk-ignore request may
+// process, to avoid an unbounded batch of archive-file writes.
+const MAX_BULK_IGNORE_YOUTUBE_IDS = 500;
+
 /**
  * Creates channel routes
  * @param {Object} deps - Dependencies
@@ -825,7 +829,7 @@ module.exports = function createChannelRoutes({ verifyToken, channelModule, arch
     req.log.info({ channelId: req.params.channelId }, 'Getting channel videos');
     const channelId = req.params.channelId;
     const page = parseInt(req.query.page) || 1;
-    const pageSize = parseInt(req.query.pageSize) || 50;
+    const pageSize = Math.min(parseInt(req.query.pageSize) || 50, 200);
     const searchQuery = req.query.searchQuery || '';
     const sortBy = req.query.sortBy || 'date';
     const sortOrder = req.query.sortOrder || 'desc';
@@ -846,12 +850,18 @@ module.exports = function createChannelRoutes({ verifyToken, channelModule, arch
     // Filters" preview (see ChannelVideos.tsx's filter-bar toggle) - only
     // ever computed for the returned page, never the whole catalog.
     const applyChannelFilters = req.query.applyChannelFilters === 'true' || req.query.applyChannelFilters === '1';
-    const result = await channelModule.getChannelVideos(channelId, page, pageSize, downloadedFilter, searchQuery, sortBy, sortOrder, tabType, minDuration, maxDuration, dateFrom, dateTo, protectedFilter, missingFilter, ignoredFilter, watchedFilter, applyChannelFilters);
 
-    if (Array.isArray(result)) {
-      res.status(200).json({ videos: result });
-    } else {
-      res.status(200).json(result);
+    try {
+      const result = await channelModule.getChannelVideos(channelId, page, pageSize, downloadedFilter, searchQuery, sortBy, sortOrder, tabType, minDuration, maxDuration, dateFrom, dateTo, protectedFilter, missingFilter, ignoredFilter, watchedFilter, applyChannelFilters);
+
+      if (Array.isArray(result)) {
+        res.status(200).json({ videos: result });
+      } else {
+        res.status(200).json(result);
+      }
+    } catch (error) {
+      req.log.error({ err: error, channelId }, 'Failed to get channel videos');
+      res.status(500).json({ error: 'Failed to get channel videos' });
     }
   });
 
@@ -904,7 +914,7 @@ module.exports = function createChannelRoutes({ verifyToken, channelModule, arch
     req.log.info({ channelId: req.params.channelId }, 'Fetching all videos for channel');
     const channelId = req.params.channelId;
     const page = parseInt(req.query.page) || 1;
-    const pageSize = parseInt(req.query.pageSize) || 50;
+    const pageSize = Math.min(parseInt(req.query.pageSize) || 50, 200);
     const downloadedFilter = parseFilterMode(req.query.downloadedFilter);
     const tabType = req.query.tabType || 'videos';
 
@@ -1301,26 +1311,33 @@ module.exports = function createChannelRoutes({ verifyToken, channelModule, arch
         error: 'youtubeIds must be a non-empty array'
       });
     }
+    if (youtubeIds.length > MAX_BULK_IGNORE_YOUTUBE_IDS) {
+      return res.status(400).json({
+        success: false,
+        error: `youtubeIds array exceeds maximum of ${MAX_BULK_IGNORE_YOUTUBE_IDS}`
+      });
+    }
 
     req.log.info({ channelId, count: youtubeIds.length }, 'Bulk ignoring channel videos');
 
     try {
-      const results = await Promise.all(
-        youtubeIds.map(async (youtubeId) => {
-          const channelVideo = await ChannelVideo.findOne({
-            where: { channel_id: channelId, youtube_id: youtubeId }
-          });
+      const channelVideos = await ChannelVideo.findAll({
+        where: { channel_id: channelId, youtube_id: youtubeIds }
+      });
+      const foundIds = new Set(channelVideos.map((cv) => cv.youtube_id));
 
-          if (channelVideo) {
-            await channelVideo.update({
-              ignored: true,
-              ignored_at: new Date()
-            });
-            await archiveModule.addVideoToArchive(youtubeId);
-            return { youtubeId, success: true };
-          }
-          return { youtubeId, success: false, reason: 'not found' };
-        })
+      if (foundIds.size > 0) {
+        await ChannelVideo.update(
+          { ignored: true, ignored_at: new Date() },
+          { where: { channel_id: channelId, youtube_id: Array.from(foundIds) } }
+        );
+        await Promise.all(Array.from(foundIds).map((youtubeId) => archiveModule.addVideoToArchive(youtubeId)));
+      }
+
+      const results = youtubeIds.map((youtubeId) =>
+        foundIds.has(youtubeId)
+          ? { youtubeId, success: true }
+          : { youtubeId, success: false, reason: 'not found' }
       );
 
       const successCount = results.filter(r => r.success).length;

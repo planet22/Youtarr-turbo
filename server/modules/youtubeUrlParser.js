@@ -1,7 +1,24 @@
 /**
- * Pure YouTube URL parsing helpers. No side effects and no heavy
+ * Pure YouTube URL/ID parsing helpers. No side effects and no heavy
  * dependencies, so it is safe to require from any module or test.
  */
+
+// Canonical shape of a YouTube video ID. Single source of truth so it isn't
+// re-typed slightly differently across modules.
+const YOUTUBE_ID_PATTERN = /^[a-zA-Z0-9_-]{11}$/;
+
+function isValidYoutubeId(value) {
+  return typeof value === 'string' && YOUTUBE_ID_PATTERN.test(value);
+}
+
+// Matches yt-dlp's "[youtube] <id>: ..." log-line prefix, used to recover a
+// video ID from stderr/error text when no other context is available.
+const YOUTUBE_LOG_LINE_ID_PATTERN = /\[youtube\]\s+([a-zA-Z0-9_-]{11}):/;
+
+function extractVideoIdFromYtdlpLogLine(message = '') {
+  const match = String(message).match(YOUTUBE_LOG_LINE_ID_PATTERN);
+  return match ? match[1] : null;
+}
 
 /**
  * Normalize a YouTube URL to extract video ID and canonical URL
@@ -36,22 +53,20 @@ function normalizeUrlToVideoId(url) {
     hostname === 'music.youtube.com'
   );
 
-  const idPattern = /^[a-zA-Z0-9_-]{11}$/;
-
   if (hostname === 'youtu.be') {
     const candidate = pathSegments[0];
-    if (candidate && idPattern.test(candidate)) {
+    if (isValidYoutubeId(candidate)) {
       videoId = candidate;
     }
   } else if (isYoutubeDomain) {
     if (pathSegments[0] === 'watch') {
       const candidate = parsedUrl.searchParams.get('v');
-      if (candidate && idPattern.test(candidate)) {
+      if (isValidYoutubeId(candidate)) {
         videoId = candidate;
       }
     } else if (pathSegments[0] === 'shorts' || pathSegments[0] === 'embed' || pathSegments[0] === 'live') {
       const candidate = pathSegments[1];
-      if (candidate && idPattern.test(candidate)) {
+      if (isValidYoutubeId(candidate)) {
         videoId = candidate;
       }
     }
@@ -67,4 +82,9 @@ function normalizeUrlToVideoId(url) {
   };
 }
 
-module.exports = { normalizeUrlToVideoId };
+module.exports = {
+  normalizeUrlToVideoId,
+  YOUTUBE_ID_PATTERN,
+  isValidYoutubeId,
+  extractVideoIdFromYtdlpLogLine,
+};

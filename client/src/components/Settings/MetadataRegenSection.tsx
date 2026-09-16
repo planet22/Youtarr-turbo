@@ -28,6 +28,7 @@ export function MetadataRegenSection({ token }: MetadataRegenSectionProps) {
       <Typography variant="body2" color="text.secondary">
         Last run: {formatDateTime(lastRun.completedAt)}. Regenerated {lastRun.regenerated} of{' '}
         {lastRun.scanned} video(s)
+        {lastRun.strmToolRegenerated > 0 && `, ${lastRun.strmToolRegenerated} .strmtool.json sidecar(s)`}
         {lastRun.skippedNoCache > 0 && `, ${lastRun.skippedNoCache} skipped (no cached metadata)`}
         {lastRun.errors > 0 && ` (${lastRun.errors} error(s))`}.
         {lastRun.status === 'timed-out' && ' (timed out; click to continue)'}
@@ -49,9 +50,13 @@ export function MetadataRegenSection({ token }: MetadataRegenSectionProps) {
           cached metadata - use this after an NFO field or format change so existing videos pick
           up the new content, rather than only ever getting it on their next download. Any
           manual rating override or TV Series library mode season/episode already stored for a
-          video is preserved. Only touches videos with cached metadata already on disk - it does
-          not fetch anything fresh from YouTube, so some older or STRM-only videos may be skipped
-          until something else (e.g. opening the video&apos;s detail page) caches their metadata.
+          video is preserved. For STRM videos, also regenerates the .strmtool.json sidecar (used
+          by the StrmTool Jellyfin plugin) from the same cached metadata - useful after a change
+          to Streaming settings that affects how a .strm plays (e.g. switching Playback mode)
+          without needing to re-materialize every .strm file. Only touches videos with cached
+          metadata already on disk - it does not fetch anything fresh from YouTube, so some older
+          or STRM-only videos may be skipped until something else (e.g. opening the video&apos;s
+          detail page) caches their metadata.
         </Typography>
 
         <div>

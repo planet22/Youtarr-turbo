@@ -1834,6 +1834,19 @@ class VideosModule {
    * deliberately does NOT fetch fresh metadata for uncached videos, to
    * avoid a full-library yt-dlp fetch spree (same reasoning as
    * backfillResolutionTags).
+   *
+   * Also regenerates each STRM video's `.strmtool.json` sidecar (see
+   * strmMediaInfoCache.js) from that same cached info.json - reusing it
+   * for both files, no extra cost. Picks up the CURRENT `ytstream`/`strm`
+   * config (e.g. `container` now correctly resolving to `hls` for
+   * hls/hls-buffer, fixed 2026-09-14 - see docs/YTSTREAM.md's Probe
+   * shortcut section), not whatever was true when the .strm was originally
+   * materialized. Unlike NFO (which Sonarr/Radarr owns for an NZB grab and
+   * strmMaterializer therefore skips - see its skipMediaSidecarFiles doc
+   * comment), `.strmtool.json` is a Jellyfin-plugin-only cache no external
+   * tool manages, so it's safe to regenerate for every STRM video
+   * regardless of how it was imported. Never touches the `.strm` file
+   * itself - only its sidecar.
    */
   async regenerateVideoMetadataFiles(arg = {}) {
     const opts = typeof arg === 'number' ? { timeLimit: arg } : arg;
@@ -1847,6 +1860,12 @@ class VideosModule {
     this._metadataRegenRunning = true;
 
     const nfoGenerator = require('./nfoGenerator');
+    const strmGenerator = require('./strmGenerator');
+    const strmMediaInfoCache = require('./strmMediaInfoCache');
+    const cfg = configModule.getConfig();
+    const strmCfg = cfg.strm || {};
+    const canRegenerateStrmTool = strmCfg.target !== 'youtube' && strmCfg.writeMediaInfoCache !== false;
+    const ytstreamParams = canRegenerateStrmTool ? strmGenerator.resolveYtstreamParams(cfg, {}) : null;
     const startTime = Date.now();
     const startedAtIso = new Date(startTime).toISOString();
     const logProgress = (message) => {
@@ -1864,6 +1883,7 @@ class VideosModule {
     let totalSkippedNoCache = 0;
     let totalSkippedNoFile = 0;
     let totalErrors = 0;
+    let totalStrmToolRegenerated = 0;
     let result;
 
     try {
@@ -1881,7 +1901,7 @@ class VideosModule {
         const videos = await Video.findAll({
           attributes: [
             'id', 'youtubeId', 'filePath', 'youTubeChannelName',
-            'season', 'episode', 'normalized_rating', 'rating_source',
+            'season', 'episode', 'normalized_rating', 'rating_source', 'is_strm',
           ],
           limit: CHUNK_SIZE,
           offset,
@@ -1928,6 +1948,15 @@ class VideosModule {
             totalErrors++;
             logger.warn({ err, youtubeId: video.youtubeId }, 'Failed to regenerate NFO file');
           }
+
+          if (canRegenerateStrmTool && video.is_strm === true) {
+            try {
+              const cachePath = strmMediaInfoCache.writeMediaInfoCacheFile(video.filePath, jsonData, ytstreamParams);
+              if (cachePath) totalStrmToolRegenerated++;
+            } catch (err) {
+              logger.warn({ err, youtubeId: video.youtubeId }, 'Failed to regenerate .strmtool.json sidecar');
+            }
+          }
         }
 
         offset += CHUNK_SIZE;
@@ -1938,7 +1967,7 @@ class VideosModule {
 
       const elapsed = Math.round((Date.now() - startTime) / 1000);
       logger.info({
-        elapsed, totalScanned, totalRegenerated, totalSkippedNoCache, totalSkippedNoFile, totalErrors,
+        elapsed, totalScanned, totalRegenerated, totalSkippedNoCache, totalSkippedNoFile, totalErrors, totalStrmToolRegenerated,
       }, 'Metadata regeneration completed');
 
       result = {
@@ -1947,6 +1976,7 @@ class VideosModule {
         skippedNoCache: totalSkippedNoCache,
         skippedNoFile: totalSkippedNoFile,
         errors: totalErrors,
+        strmToolRegenerated: totalStrmToolRegenerated,
         timeElapsed: elapsed,
         trigger,
         startedAt: startedAtIso,
@@ -1964,6 +1994,7 @@ class VideosModule {
           skippedNoCache: totalSkippedNoCache,
           skippedNoFile: totalSkippedNoFile,
           errors: totalErrors,
+          strmToolRegenerated: totalStrmToolRegenerated,
           timeElapsed: elapsed,
           trigger,
           startedAt: startedAtIso,
@@ -1978,6 +2009,7 @@ class VideosModule {
         regenerated: totalRegenerated,
         skippedNoCache: totalSkippedNoCache,
         skippedNoFile: totalSkippedNoFile,
+        strmToolRegenerated: totalStrmToolRegenerated,
         errors: totalErrors,
         timeElapsed: elapsed,
         trigger,

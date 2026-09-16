@@ -29,6 +29,7 @@ const YtdlpCommandBuilder = require('./download/ytdlpCommandBuilder');
 const messageEmitter = require('./messageEmitter');
 const logger = require('../logger');
 const { DEFAULT_PLAYER_CLIENT } = require('./ytstream/configResolution');
+const { isValidYoutubeId } = require('./youtubeUrlParser');
 
 // id/label pairs are shown as-is in the UI; httpChunkSizeMiB/concurrentFragments
 // of 0 (and concurrentFragments of 1) mean "don't pass this flag" - same
@@ -64,8 +65,6 @@ function isBenchmarkRunning() {
   return running;
 }
 
-const VIDEO_ID_RE = /^[\w-]{11}$/;
-
 /**
  * Accepts a bare 11-char YouTube video ID or a full URL (any yt-dlp-
  * recognized form) and returns something safe to pass as yt-dlp's URL
@@ -80,7 +79,7 @@ function normalizeUrl(input) {
   if (!trimmed) {
     throw new Error('A YouTube URL or video ID is required');
   }
-  if (VIDEO_ID_RE.test(trimmed)) {
+  if (isValidYoutubeId(trimmed)) {
     return `https://youtube.com/watch?v=${trimmed}`;
   }
   return trimmed;

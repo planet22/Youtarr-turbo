@@ -216,7 +216,10 @@ describe('plexModule', () => {
       const result = await plexModule.refreshLibrary();
 
       expect(result).toBeNull();
-      expect(logger.error).toHaveBeenCalledWith({ err: error }, 'Failed to refresh Plex library');
+      expect(logger.error).toHaveBeenCalledWith(
+        { err: { status: null, code: 'ECONNREFUSED', message: 'Connection refused' } },
+        'Failed to refresh Plex library'
+      );
       expect(logger.warn).toHaveBeenCalledWith('Could not connect to Plex server - continuing without refresh');
     });
 
@@ -227,7 +230,10 @@ describe('plexModule', () => {
       const result = await plexModule.refreshLibrary();
 
       expect(result).toBeNull();
-      expect(logger.error).toHaveBeenCalledWith({ err: error }, 'Failed to refresh Plex library');
+      expect(logger.error).toHaveBeenCalledWith(
+        { err: { status: null, code: null, message: 'Network error' } },
+        'Failed to refresh Plex library'
+      );
     });
 
     test('skips refresh when libraryId is non-numeric', async () => {
@@ -529,7 +535,10 @@ describe('plexModule', () => {
       const result = await plexModule.getLibrariesWithParams('192.168.1.10', 'token', '32400');
 
       expect(result).toEqual([]);
-      expect(logger.error).toHaveBeenCalledWith({ err: error }, 'Failed to get Plex libraries');
+      expect(logger.error).toHaveBeenCalledWith(
+        { err: { status: null, code: 'ECONNREFUSED', message: 'Connection refused' } },
+        'Failed to get Plex libraries'
+      );
       expect(logger.warn).toHaveBeenCalledWith('Could not connect to Plex server - returning empty library list');
     });
 
@@ -540,7 +549,10 @@ describe('plexModule', () => {
       const result = await plexModule.getLibrariesWithParams('192.168.1.10', 'token', '32400');
 
       expect(result).toEqual([]);
-      expect(logger.error).toHaveBeenCalledWith({ err: error }, 'Failed to get Plex libraries');
+      expect(logger.error).toHaveBeenCalledWith(
+        { err: { status: null, code: null, message: 'Network timeout' } },
+        'Failed to get Plex libraries'
+      );
     });
 
     test('uses PLEX_URL from environment', async () => {

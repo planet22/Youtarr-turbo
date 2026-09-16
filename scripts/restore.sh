@@ -215,7 +215,7 @@ fi
 
 # Check if containers are running
 CONTAINERS_RUNNING=false
-if docker ps --format '{{.Names}}' | grep -qE '^youtarr(-db)?$'; then
+if docker ps --format '{{.Names}}' | grep -qE '^youtarr-turbo(-db)?$'; then
     CONTAINERS_RUNNING=true
     yt_error "Youtarr containers are still running!"
     yt_detail "Stop them first with: ./stop.sh"

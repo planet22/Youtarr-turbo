@@ -34,6 +34,7 @@
 const fs = require('fs');
 const logger = require('../../logger');
 const messageEmitter = require('../messageEmitter');
+const youtubeMetadataCache = require('../youtubeMetadataCache');
 const { streamDebug } = require('./streamDebug');
 const { killAllChildProcesses } = require('./processRegistry');
 
@@ -168,33 +169,19 @@ function computeSegmentStatus(session) {
 
 /**
  * Fills in `titleById` (in place) for any youtubeId still missing a title
- * after the Video-table lookup, from youtube_metadata_cache's cached yt-dlp
- * info blob - the fallback source for videos not (or no longer) in the
- * library: an NZB-only grab that was only ever streamed/buffered, or a video
- * whose Video row has since been removed (e.g. via Obliterate). Without this,
- * those rows permanently showed the bare YouTube id instead of a title, even
- * though the title was sitting right there in the metadata cache.
+ * after the Video-table lookup, from youtube_metadata_cache - the fallback
+ * source for videos not (or no longer) in the library: an NZB-only grab
+ * that was only ever streamed/buffered, or a video whose Video row has
+ * since been removed (e.g. via Obliterate). Without this, those rows
+ * permanently showed the bare YouTube id instead of a title, even though
+ * the title was sitting right there in the metadata cache.
  */
-async function fillMissingTitlesFromMetadataCache(youtubeIds, titleById, lookupModels) {
+async function fillMissingTitlesFromMetadataCache(youtubeIds, titleById) {
   const missing = youtubeIds.filter((id) => !titleById[id]);
-  if (!missing.length || !lookupModels || !lookupModels.YoutubeMetadataCache) return;
-  try {
-    const rows = await lookupModels.YoutubeMetadataCache.findAll({
-      where: { youtube_id: missing },
-      attributes: ['youtube_id', 'raw_info_json'],
-    });
-    for (const row of rows) {
-      if (!row.raw_info_json) continue;
-      try {
-        const info = JSON.parse(row.raw_info_json);
-        if (info && info.title) titleById[row.youtube_id] = info.title;
-      } catch (err) {
-        logger.warn({ err, youtubeId: row.youtube_id }, 'ytstream: failed to parse cached raw_info_json for title fallback');
-      }
-    }
-  } catch (err) {
-    logger.warn({ err }, 'ytstream: failed to resolve fallback titles from metadata cache');
-  }
+  if (!missing.length) return;
+  const titles = await youtubeMetadataCache.getCachedTitles(missing);
+  streamDebug({ requested: missing.length, found: Object.keys(titles).length }, 'ytstream: fillMissingTitlesFromMetadataCache resolved titles from the metadata cache');
+  Object.assign(titleById, titles);
 }
 
 // Stream History: persisted audit trail for ytstream playback sessions,

@@ -43,10 +43,10 @@ jest.mock('../../modules/download/ytdlpCommandBuilder', () => ({
 }));
 
 jest.mock('../../modules/youtubeMetadataCache', () => ({
-  clearCachedEntry: jest.fn(),
+  deleteEntry: jest.fn(),
+  getCacheDetail: jest.fn(),
   countCached: jest.fn(),
   clearAll: jest.fn(),
-  YOUTUBE_METADATA_CACHE_RETENTION_DAYS: 365,
 }));
 const youtubeMetadataCache = require('../../modules/youtubeMetadataCache');
 
@@ -412,23 +412,20 @@ describe('DELETE /api/ytstream/history', () => {
 
 describe('metadata-cache routes', () => {
   test('DELETE /:youtubeId/metadata-cache clears the in-memory cache and the DB row', async () => {
-    const models = buildModels();
-    models.YoutubeMetadataCache.destroy.mockResolvedValue(1);
-    const handler = getHandler('delete', '/api/ytstream/:youtubeId/metadata-cache', models);
+    youtubeMetadataCache.deleteEntry.mockResolvedValue(1);
+    const handler = getHandler('delete', '/api/ytstream/:youtubeId/metadata-cache', buildModels());
     const req = { params: { youtubeId: 'vid1' } };
     const res = mockRes();
     await handler(req, res);
-    expect(youtubeMetadataCache.clearCachedEntry).toHaveBeenCalledWith('vid1');
-    expect(models.YoutubeMetadataCache.destroy).toHaveBeenCalledWith({ where: { youtube_id: 'vid1' } });
+    expect(youtubeMetadataCache.deleteEntry).toHaveBeenCalledWith('vid1');
     expect(res.json).toHaveBeenCalledWith({ success: true, deleted: 1 });
   });
 
   test('DELETE /metadata-cache/bulk clears every id and reports partial failures', async () => {
-    const models = buildModels();
-    models.YoutubeMetadataCache.destroy
+    youtubeMetadataCache.deleteEntry
       .mockResolvedValueOnce(1)
       .mockRejectedValueOnce(new Error('boom'));
-    const handler = getHandler('delete', '/api/ytstream/metadata-cache/bulk', models);
+    const handler = getHandler('delete', '/api/ytstream/metadata-cache/bulk', buildModels());
     const req = { body: { youtubeIds: ['ok-id', 'bad-id'] } };
     const res = mockRes();
     await handler(req, res);
@@ -436,8 +433,8 @@ describe('metadata-cache routes', () => {
   });
 
   test('GET /:youtubeId/metadata-cache/detail 404s when nothing is cached', async () => {
-    const models = buildModels();
-    const handler = getHandler('get', '/api/ytstream/:youtubeId/metadata-cache/detail', models);
+    youtubeMetadataCache.getCacheDetail.mockResolvedValue(null);
+    const handler = getHandler('get', '/api/ytstream/:youtubeId/metadata-cache/detail', buildModels());
     const req = { params: { youtubeId: 'vid1' }, query: {} };
     const res = mockRes();
     await handler(req, res);
@@ -445,14 +442,20 @@ describe('metadata-cache routes', () => {
   });
 
   test('GET /:youtubeId/metadata-cache/detail parses raw_info_json and omits it unless raw=true', async () => {
-    const models = buildModels();
-    models.YoutubeMetadataCache.findByPk.mockResolvedValue({
-      duration_seconds: 600,
-      fetched_at: new Date('2026-01-01'),
-      last_accessed_at: new Date('2026-01-02'),
-      raw_info_json: JSON.stringify({ title: 'Hello', uploader: 'Chan', width: 1920, height: 1080, fps: 30 }),
+    youtubeMetadataCache.getCacheDetail.mockResolvedValue({
+      durationSeconds: 600,
+      fetchedAt: new Date('2026-01-01'),
+      lastAccessedAt: new Date('2026-01-02'),
+      expiresAt: null,
+      title: 'Hello',
+      uploader: 'Chan',
+      resolution: '1920x1080',
+      fps: 30,
+      uploadDate: null,
+      hasRawInfoJson: true,
+      rawInfoJson: { title: 'Hello', uploader: 'Chan', width: 1920, height: 1080, fps: 30 },
     });
-    const handler = getHandler('get', '/api/ytstream/:youtubeId/metadata-cache/detail', models);
+    const handler = getHandler('get', '/api/ytstream/:youtubeId/metadata-cache/detail', buildModels());
     const req = { params: { youtubeId: 'vid1' }, query: {} };
     const res = mockRes();
     await handler(req, res);
@@ -464,12 +467,11 @@ describe('metadata-cache routes', () => {
   });
 
   test('GET /:youtubeId/metadata-cache/detail includes rawInfoJson when raw=true', async () => {
-    const models = buildModels();
-    models.YoutubeMetadataCache.findByPk.mockResolvedValue({
-      duration_seconds: 600,
-      raw_info_json: JSON.stringify({ title: 'Hello' }),
+    youtubeMetadataCache.getCacheDetail.mockResolvedValue({
+      durationSeconds: 600,
+      rawInfoJson: { title: 'Hello' },
     });
-    const handler = getHandler('get', '/api/ytstream/:youtubeId/metadata-cache/detail', models);
+    const handler = getHandler('get', '/api/ytstream/:youtubeId/metadata-cache/detail', buildModels());
     const req = { params: { youtubeId: 'vid1' }, query: { raw: 'true' } };
     const res = mockRes();
     await handler(req, res);

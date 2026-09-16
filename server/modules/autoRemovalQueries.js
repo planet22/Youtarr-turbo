@@ -180,3 +180,4 @@ ${havingClause}        ORDER BY timeCreated ASC
 }
 
 module.exports = new AutoRemovalQueries();
+module.exports.DOWNLOAD_TIME_SQL = DOWNLOAD_TIME_SQL;

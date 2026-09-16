@@ -55,6 +55,7 @@ interface Props {
 export const DEFAULT_YTSTREAM: YtstreamConfig = {
   defaultMode: 'direct',
   container: 'mp4',
+  probeShortcutContainerOverride: null,
   transcode: '',
   quality: null,
   qualityStrictness: 'fallback',
@@ -68,9 +69,11 @@ export const DEFAULT_YTSTREAM: YtstreamConfig = {
   throttledRateKBps: 0,
   socketTimeoutSeconds: 0,
   calculatedLength: false,
+  hlsMasterPlaylist: true,
   hotSwapToCache: false,
   serveCachedFile: false,
   probeShortcut: false,
+  probeResolveTrueResolution: false,
   forceServerSettings: false,
   historyRetentionDays: 90,
   hlsStorageLocation: 'tmp',
@@ -573,9 +576,10 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
         </Grid>
       )}
 
-      {/* Cache on play / Hot-swap / Probe shortcut: grouped as their own
-          Switch row, not intermingled with the Select dropdowns above. */}
-      <Grid item xs={12} md={4}>
+      {/* Cache on play / Hot-swap / Probe shortcut / HLS master playlist:
+          grouped as their own Switch row (md=3 so all four fit on one
+          line), not intermingled with the Select dropdowns above. */}
+      <Grid item xs={12} md={3}>
         <Box className="flex items-center gap-1">
           <FormControlLabel
             control={
@@ -600,7 +604,7 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
       {/* Always disabled currently: its only 'optional' case is mode=hls,
           hidden from the picker above. Kept visible, not hidden - live
           again the moment hls returns, no further wiring needed. */}
-      <Grid item xs={12} md={4}>
+      <Grid item xs={12} md={3}>
         <Box className="flex items-center gap-1">
           <FormControlLabel
             control={
@@ -622,7 +626,7 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
         </Box>
       </Grid>
 
-      <Grid item xs={12} md={4}>
+      <Grid item xs={12} md={3}>
         {/* No forcedFieldStyle: probeShortcut has no query-string override
             path (see evaluateProbeShortcut) and is never in a .strm URL. */}
         <Box className="flex items-center gap-1">
@@ -638,9 +642,31 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
           />
           <InfoTooltip
             text={
-              'A media server\'s metadata probe (Jellyfin\'s ffprobe, etc.) hitting a .strm can trigger real work against YouTube just to read codec info. Every .strm this app writes carries a marker that lets the server detect a probe regardless of this setting; the toggle controls only what happens once one is detected: on serves a tiny cached clip instead, off treats it like any other request.'
+              'A media server\'s metadata probe (Jellyfin\'s ffprobe, etc.) hitting a .strm triggers a real HLS session the same as playback would (the probe response is the session\'s own real playlist, served before any segment is encoded). Every .strm this app writes carries a marker that lets the server detect a probe regardless of this setting; the toggle controls only whether a detected probe gets this fast instant-playlist response (on) or is treated like any other request (off, full mode/quality resolution runs first).'
               + (modeCompat.probeShortcut?.reason ? ` For the current Playback mode (${mode}): ${modeCompat.probeShortcut.reason}` : '')
               + ' Existing .strm files need to be rewritten (re-download, or a channel resync) to pick up the marker.'
+            }
+            onMobileClick={onMobileTooltipClick}
+          />
+        </Box>
+      </Grid>
+
+      <Grid item xs={12} md={3}>
+        <Box className="flex items-center gap-1">
+          <FormControlLabel
+            control={
+              <Switch
+                checked={ytstream.hlsMasterPlaylist ?? true}
+                onChange={(e) => setYtstream({ hlsMasterPlaylist: e.target.checked })}
+                disabled={disabled || modeCompat.hlsMasterPlaylist?.status !== 'optional'}
+              />
+            }
+            label="HLS master playlist"
+          />
+          <InfoTooltip
+            text={
+              'Wraps the real media playlist in a thin HLS master playlist (BANDWIDTH + RESOLUTION) instead of serving it directly - the more broadly-compatible HLS shape, and it stops Jellyfin guessing a ~20 Mbps default bandwidth that can force needless transcoding. BANDWIDTH is a heuristic estimate (encodes are quality-targeted, not fixed-bitrate); RESOLUTION comes from the same source-resolution lookup the encoder itself uses. CODECS is never declared, since the exact profile/level varies per hardware encoder.'
+              + (modeCompat.hlsMasterPlaylist?.reason ? ` For the current Playback mode (${mode}): ${modeCompat.hlsMasterPlaylist.reason}` : '')
             }
             onMobileClick={onMobileTooltipClick}
           />

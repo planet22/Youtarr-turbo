@@ -43,11 +43,15 @@ export interface StreamSnapshot {
   // trackPendingRequest doc comment. 'requested': the request has just
   // been received, mode/format not resolved yet. 'resolving': format/
   // quality probing (yt-dlp) is in flight - the slow step this exists to
-  // make visible. 'probe': ytstream.probeShortcut is serving its synthetic
-  // cached clip in answer to a detected metadata-probe request - a real
-  // session was never allocated for this row at all (see probeShortcut.js's
-  // doc comment), so it always resolves straight to removal, never to
-  // 'starting'/'active'.
+  // make visible. 'probe': a real hls/hls-buffer session was created to
+  // answer a detected metadata probe (ytstream.probeShortcut - see
+  // probeShortcut.js's tryServeInstantHlsPlaylist), distinguishing "Jellyfin
+  // just asked for this, no one may actually be watching" from genuine
+  // playback, since the underlying session is otherwise identical to a real
+  // one. Transitions to 'starting'/'active'/'cached' like any other session
+  // the moment real activity happens (a segment actually gets served,
+  // whether by the probe's own codec-detection fetch or real playback) -
+  // it is not a permanent label.
   state: 'requested' | 'resolving' | 'starting' | 'active' | 'cached' | 'failed' | 'probe';
   /** Only meaningful when state === 'failed' - why this stream never started. */
   error: string | null;

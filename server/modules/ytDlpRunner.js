@@ -178,12 +178,16 @@ class YtDlpRunner {
    * Fetch video metadata using yt-dlp
    * @param {string} url - YouTube URL to fetch metadata for
    * @param {number} timeoutMs - Timeout in milliseconds
+   * @param {Object} options - Extra buildMetadataFetchArgs options (e.g.
+   *   `extractorArgs` for a player_client override) - merged with the
+   *   `skipSleepRequests: true` every single-video metadata fetch already
+   *   uses. Optional; existing 2-arg callers are unaffected.
    * @returns {Promise<Object>} - Parsed JSON metadata
    */
-  async fetchMetadata(url, timeoutMs = 60000) {
+  async fetchMetadata(url, timeoutMs = 60000, options = {}) {
     const YtdlpCommandBuilder = require('./download/ytdlpCommandBuilder');
     // Skip sleep-requests for single metadata fetches - no rate limiting needed
-    const args = YtdlpCommandBuilder.buildMetadataFetchArgs(url, { skipSleepRequests: true });
+    const args = YtdlpCommandBuilder.buildMetadataFetchArgs(url, { ...options, skipSleepRequests: true });
 
     try {
       const stdout = await this.run(args, { timeoutMs });

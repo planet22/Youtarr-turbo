@@ -1,22 +1,5 @@
 #!/bin/bash
 
-# Trap signals for graceful shutdown
-trap 'handle_shutdown' SIGTERM SIGINT
-
-handle_shutdown() {
-    echo "Received shutdown signal, stopping Node.js server gracefully..."
-
-    # Stop Node.js server if it's running
-    if [ ! -z "$NODE_PID" ]; then
-        echo "Stopping Node.js server (PID: $NODE_PID)..."
-        kill -TERM "$NODE_PID" 2>/dev/null
-        wait "$NODE_PID" 2>/dev/null
-    fi
-
-    echo "Shutdown complete."
-    exit 0
-}
-
 echo "Waiting for database to be ready..."
 
 MAX_TRIES=30
@@ -51,20 +34,6 @@ while [ $TRIES -lt $MAX_TRIES ]; do
     sleep 2
 done
 
-# echo "Starting Node.js server..."
-# node /app/server/server.js &
-#NODE_PID=$!
-#echo "Node.js server started with PID: $NODE_PID"
-
-# Wait for Node.js process
-# This keeps the script running and allows trap to work
-#wait "$NODE_PID"
-
-# If we get here, Node crashed without signal
-#echo "Node.js server exited unexpectedly"
-#exit 1
-
-# Replace everything from "Starting Node.js server..." to the end with this:
 echo "Starting application with arguments: $@"
 
 # If no command was passed by docker-compose, fall back to production mode
@@ -74,16 +43,3 @@ else
     # Automatically swaps process ID 1 over to the docker-compose command (like node --watch)
     exec "$@"
 fi
-
-# echo "Starting Node.js server..."
-# node /app/server/server.js &
-# NODE_PID=$!
-# echo "Node.js server started with PID: $NODE_PID"
-
-# # Wait for Node.js process
-# # This keeps the script running and allows trap to work
-# wait "$NODE_PID"
-
-# # If we get here, Node crashed without signal
-# echo "Node.js server exited unexpectedly"
-# exit 1

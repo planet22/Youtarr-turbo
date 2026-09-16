@@ -16,6 +16,8 @@ describe('VideosModule', () => {
   let mockExecFile;
   let mockChannel;
   let mockChannelThumbnails;
+  let mockStrmGenerator;
+  let mockStrmMediaInfoCache;
 
   beforeEach(() => {
     jest.resetModules();
@@ -86,6 +88,14 @@ describe('VideosModule', () => {
       writeEpisodeNfoFile: jest.fn()
     };
 
+    mockStrmGenerator = {
+      resolveYtstreamParams: jest.fn().mockReturnValue({ mode: 'direct', quality: '1080', container: 'mp4', transcode: 'copy' })
+    };
+
+    mockStrmMediaInfoCache = {
+      writeMediaInfoCacheFile: jest.fn()
+    };
+
     mockMessageEmitter = {
       emitMessage: jest.fn()
     };
@@ -133,6 +143,10 @@ describe('VideosModule', () => {
     jest.doMock('../videoValidationModule', () => mockVideoValidationModule);
 
     jest.doMock('../nfoGenerator', () => mockNfoGenerator);
+
+    jest.doMock('../strmGenerator', () => mockStrmGenerator);
+
+    jest.doMock('../strmMediaInfoCache', () => mockStrmMediaInfoCache);
 
     jest.doMock('../messageEmitter', () => mockMessageEmitter);
 
@@ -1852,6 +1866,61 @@ describe('VideosModule', () => {
         })
       );
       expect(VideosModule._metadataRegenRunning).toBe(false);
+    });
+
+    test('also regenerates the .strmtool.json sidecar for a STRM video, from the same cached metadata', async () => {
+      mockVideo.count.mockResolvedValueOnce(1);
+      mockVideo.findAll.mockResolvedValueOnce([
+        {
+          id: 1,
+          youtubeId: 'abc123',
+          filePath: '/test/output/dir/Video [abc123].strm',
+          season: null,
+          is_strm: true
+        }
+      ]);
+      const cachedMeta = { title: 'Video' };
+      mockFs.readFile.mockResolvedValueOnce(JSON.stringify(cachedMeta));
+      mockNfoGenerator.writeVideoNfoFile.mockReturnValue(true);
+      mockStrmMediaInfoCache.writeMediaInfoCacheFile.mockReturnValue('/test/output/dir/Video [abc123].strmtool.json');
+
+      const result = await VideosModule.regenerateVideoMetadataFiles({ trigger: 'manual' });
+
+      expect(mockStrmMediaInfoCache.writeMediaInfoCacheFile).toHaveBeenCalledWith(
+        '/test/output/dir/Video [abc123].strm',
+        expect.objectContaining({ title: 'Video' }),
+        expect.objectContaining({ mode: 'direct' })
+      );
+      expect(result).toEqual(expect.objectContaining({ strmToolRegenerated: 1 }));
+    });
+
+    test('does not touch the .strmtool.json sidecar for a real (non-STRM) download', async () => {
+      mockVideo.count.mockResolvedValueOnce(1);
+      mockVideo.findAll.mockResolvedValueOnce([
+        { id: 1, youtubeId: 'abc123', filePath: '/test/output/dir/Video [abc123].mp4', season: null, is_strm: false }
+      ]);
+      mockFs.readFile.mockResolvedValueOnce(JSON.stringify({ title: 'Video' }));
+      mockNfoGenerator.writeVideoNfoFile.mockReturnValue(true);
+
+      const result = await VideosModule.regenerateVideoMetadataFiles({ trigger: 'manual' });
+
+      expect(mockStrmMediaInfoCache.writeMediaInfoCacheFile).not.toHaveBeenCalled();
+      expect(result).toEqual(expect.objectContaining({ strmToolRegenerated: 0 }));
+    });
+
+    test('skips the .strmtool.json sidecar entirely when strm.target is "youtube" (no ytstream URL to cache media info for)', async () => {
+      mockConfigModule.getConfig.mockReturnValue({ strm: { target: 'youtube' } });
+      mockVideo.count.mockResolvedValueOnce(1);
+      mockVideo.findAll.mockResolvedValueOnce([
+        { id: 1, youtubeId: 'abc123', filePath: '/test/output/dir/Video [abc123].strm', season: null, is_strm: true }
+      ]);
+      mockFs.readFile.mockResolvedValueOnce(JSON.stringify({ title: 'Video' }));
+      mockNfoGenerator.writeVideoNfoFile.mockReturnValue(true);
+
+      const result = await VideosModule.regenerateVideoMetadataFiles({ trigger: 'manual' });
+
+      expect(mockStrmMediaInfoCache.writeMediaInfoCacheFile).not.toHaveBeenCalled();
+      expect(result).toEqual(expect.objectContaining({ strmToolRegenerated: 0 }));
     });
   });
 

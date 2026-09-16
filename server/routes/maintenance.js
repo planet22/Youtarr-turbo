@@ -156,8 +156,8 @@ function createMaintenanceRoutes({ verifyToken, videosModule, configModule, jobM
    * @swagger
    * /api/maintenance/regenerate-metadata:
    *   post:
-   *     summary: Fully regenerate the .nfo file for every already-downloaded/STRM'd video from its cached .info.json
-   *     description: Unlike the resolution-tag backfill (which only patches one tag into the existing file), this rewrites the whole .nfo - useful after an NFO template/field change so existing files pick up the new format. DB-frozen fields (rating override, season/episode) are merged back in first so they're never dropped just because the cached .info.json predates them. Skips videos with no downloaded file or no cached metadata.
+   *     summary: Fully regenerate the .nfo file (and, for STRM videos, the .strmtool.json sidecar) for every already-downloaded/STRM'd video from its cached .info.json
+   *     description: Unlike the resolution-tag backfill (which only patches one tag into the existing file), this rewrites the whole .nfo - useful after an NFO template/field change so existing files pick up the new format. DB-frozen fields (rating override, season/episode) are merged back in first so they're never dropped just because the cached .info.json predates them. For STRM videos, also regenerates the .strmtool.json sidecar (server/modules/strmMediaInfoCache.js) from the same cached data, picking up the current ytstream/strm config rather than whatever was true when the .strm was materialized. Skips videos with no downloaded file or no cached metadata.
    *     tags: [Maintenance]
    *     responses:
    *       202:

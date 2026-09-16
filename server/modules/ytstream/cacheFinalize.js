@@ -156,8 +156,10 @@ async function findExistingCachedVideoFilePath(youtubeId, models) {
     try {
       const video = await models.Video.findOne({ where: { youtubeId }, attributes: ['is_strm', 'filePath'] });
       if (video && video.is_strm === false && video.filePath && fs.existsSync(video.filePath)) {
+        streamDebug({ youtubeId, filePath: video.filePath }, 'ytstream: findExistingCachedVideoFilePath found a real downloaded library file');
         return video.filePath;
       }
+      streamDebug({ youtubeId, hasVideoRow: !!video, isStrm: video?.is_strm }, 'ytstream: findExistingCachedVideoFilePath found nothing');
     } catch (err) {
       logger.warn({ err, youtubeId }, 'ytstream: findExistingCachedVideoFilePath DB lookup failed; treating as no cached file');
     }

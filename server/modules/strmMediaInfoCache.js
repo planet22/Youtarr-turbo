@@ -105,7 +105,18 @@ class StrmMediaInfoCache {
       data.runTimeTicks = Math.round(meta.duration * 10_000_000);
     }
 
-    const container = ytstreamParams.container || (videoFormat && videoFormat.ext) || null;
+    // mode=hls/hls-buffer serve a genuine HLS playlist (m3u8 + segments),
+    // never a flat file - declaring the real session's own `container`
+    // setting (mp4/mkv/ts) here would be the exact same lie the old
+    // probe-shortcut synthetic clip told Jellyfin (see probeShortcut.js's
+    // doc comment/MAJOR CORRECTION note): this plugin trusts this cache
+    // file INSTEAD OF ever probing the .strm URL, so a wrong value here
+    // can't be corrected later by a real probe the way the ffprobe path
+    // can - Jellyfin would cache "flat file" permanently and fail outright
+    // the moment it tries a non-Direct-Play transcode against the real
+    // (HLS-shaped) URL.
+    const isHlsMode = ytstreamParams.mode === 'hls' || ytstreamParams.mode === 'hls-buffer';
+    const container = isHlsMode ? 'hls' : (ytstreamParams.container || (videoFormat && videoFormat.ext) || null);
     if (container) data.container = container;
 
     return data;

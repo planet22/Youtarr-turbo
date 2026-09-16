@@ -277,8 +277,7 @@ class VideoValidationModule {
       // Check for members-only video error
       else if (ytDlpRunner.isMembersOnlyError(error.message)) {
         // Extract video ID from error message if possible, or use the one we parsed from URL
-        const videoIdMatch = error.message.match(/\[youtube\]\s+([a-zA-Z0-9_-]{11}):/);
-        const extractedVideoId = videoIdMatch ? videoIdMatch[1] : videoId;
+        const extractedVideoId = youtubeUrlParser.extractVideoIdFromYtdlpLogLine(error.message) || videoId;
 
         // Return a valid response indicating it's members-only
         const membersOnlyResponse = {

@@ -639,6 +639,7 @@ class VideoDeletionModule {
    */
   async getVideosOlderThanThreshold(ageInDays, excludeIds = [], minFileSizeBytes = 0) {
     const { Sequelize, sequelize } = require('../db.js');
+    const { DOWNLOAD_TIME_SQL } = require('./autoRemovalQueries');
 
     try {
       const excludeClause = excludeIds && excludeIds.length > 0
@@ -656,7 +657,7 @@ class VideoDeletionModule {
           Videos.youTubeVideoName,
           Videos.youTubeChannelName,
           Videos.fileSize,
-          COALESCE(Videos.last_downloaded_at, Jobs.timeCreated, STR_TO_DATE(Videos.originalDate, '%Y%m%d')) AS timeCreated
+          ${DOWNLOAD_TIME_SQL} AS timeCreated
         FROM Videos
         LEFT JOIN JobVideos ON Videos.id = JobVideos.video_id
         LEFT JOIN Jobs ON Jobs.id = JobVideos.job_id
@@ -664,8 +665,8 @@ class VideoDeletionModule {
         WHERE Videos.removed = 0
           AND Videos.protected = 0
           AND COALESCE(ProtChannel.auto_removal_protected, 0) = 0
-          AND COALESCE(Videos.last_downloaded_at, Jobs.timeCreated, STR_TO_DATE(Videos.originalDate, '%Y%m%d')) IS NOT NULL
-          AND COALESCE(Videos.last_downloaded_at, Jobs.timeCreated, STR_TO_DATE(Videos.originalDate, '%Y%m%d')) < DATE_SUB(NOW(), INTERVAL :ageInDays DAY)
+          AND ${DOWNLOAD_TIME_SQL} IS NOT NULL
+          AND ${DOWNLOAD_TIME_SQL} < DATE_SUB(NOW(), INTERVAL :ageInDays DAY)
 ${excludeClause}${minSizeClause}        ORDER BY timeCreated ASC
       `;
 
@@ -698,6 +699,7 @@ ${excludeClause}${minSizeClause}        ORDER BY timeCreated ASC
    */
   async getOldestVideos(limit, excludeIds = [], minFileSizeBytes = 0) {
     const { Sequelize, sequelize } = require('../db.js');
+    const { DOWNLOAD_TIME_SQL } = require('./autoRemovalQueries');
 
     try {
       const excludeClause = excludeIds && excludeIds.length > 0
@@ -714,13 +716,13 @@ ${excludeClause}${minSizeClause}        ORDER BY timeCreated ASC
           Videos.youTubeVideoName,
           Videos.youTubeChannelName,
           Videos.fileSize,
-          COALESCE(Videos.last_downloaded_at, Jobs.timeCreated, STR_TO_DATE(Videos.originalDate, '%Y%m%d')) AS timeCreated
+          ${DOWNLOAD_TIME_SQL} AS timeCreated
         FROM Videos
         LEFT JOIN JobVideos ON Videos.id = JobVideos.video_id
         LEFT JOIN Jobs ON Jobs.id = JobVideos.job_id
         WHERE Videos.removed = 0
           AND Videos.protected = 0
-          AND COALESCE(Videos.last_downloaded_at, Jobs.timeCreated, STR_TO_DATE(Videos.originalDate, '%Y%m%d')) IS NOT NULL
+          AND ${DOWNLOAD_TIME_SQL} IS NOT NULL
 ${excludeClause}${minSizeClause}        ORDER BY timeCreated ASC
         LIMIT :limit
       `;

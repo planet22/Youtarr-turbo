@@ -112,6 +112,16 @@ function getModeFieldCompatibility({ mode, transcode }) {
         reason: 'Skips a real yt-dlp/ffmpeg session for a detected metadata probe, serving a tiny cached clip in the right codec instead.',
       };
 
+  fields.hlsMasterPlaylist = isHlsFamily
+    ? {
+      status: 'optional',
+      reason: 'Wraps the real media playlist in a thin HLS master playlist (BANDWIDTH/RESOLUTION) instead of serving it directly.',
+    }
+    : {
+      status: 'ignored',
+      reason: `${mode} mode never produces an m3u8 playlist to wrap.`,
+    };
+
   const encodeFieldsIgnoredReason = 'This mode never runs an ffmpeg encode - there\'s nothing here for Container/Transcode/Hardware encoder/Encoding tuning to apply to.';
   fields.container = !isHlsFamily
     ? { status: 'ignored', reason: encodeFieldsIgnoredReason }

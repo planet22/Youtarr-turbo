@@ -1,5 +1,6 @@
 const logger = require('../../logger');
 const ytDlpRunner = require('../ytDlpRunner');
+const youtubeUrlParser = require('../youtubeUrlParser');
 
 function isExpectedYtdlpSkipMessage(message = '') {
   const normalized = String(message);
@@ -28,8 +29,7 @@ function isMembersOnlyMessage(message = '') {
 }
 
 function extractYoutubeIdFromYtdlpError(message = '') {
-  const match = String(message).match(/\[youtube\]\s+([a-zA-Z0-9_-]{11}):/);
-  return match ? match[1] : null;
+  return youtubeUrlParser.extractVideoIdFromYtdlpLogLine(message);
 }
 
 function extractChannelIdFromYtdlpError(message = '') {

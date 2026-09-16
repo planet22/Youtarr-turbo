@@ -13,6 +13,7 @@ const path = require('path');
 const logger = require('../../logger');
 const configModule = require('../configModule');
 const { HLS_UNTRACKED_BUFFER_CACHE_DIR } = require('./paths');
+const { streamDebug } = require('./streamDebug');
 
 function getUntrackedBufferCachePath(youtubeId) {
   return path.join(HLS_UNTRACKED_BUFFER_CACHE_DIR, `${youtubeId}.ts`);
@@ -34,9 +35,14 @@ function getUntrackedBufferCacheMp4Path(youtubeId) {
  */
 function findWarmUntrackedBufferCache(youtubeId) {
   const mp4Path = getUntrackedBufferCacheMp4Path(youtubeId);
-  if (fs.existsSync(mp4Path)) return mp4Path;
+  if (fs.existsSync(mp4Path)) {
+    streamDebug({ youtubeId, filePath: mp4Path }, 'ytstream: findWarmUntrackedBufferCache found a warm .mp4');
+    return mp4Path;
+  }
   const tsPath = getUntrackedBufferCachePath(youtubeId);
-  return fs.existsSync(tsPath) ? tsPath : null;
+  const found = fs.existsSync(tsPath) ? tsPath : null;
+  streamDebug({ youtubeId, filePath: found }, found ? 'ytstream: findWarmUntrackedBufferCache found a warm .ts' : 'ytstream: findWarmUntrackedBufferCache found nothing');
+  return found;
 }
 
 /**

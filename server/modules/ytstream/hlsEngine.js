@@ -31,6 +31,7 @@ const youtubeMetadataCache = require('../youtubeMetadataCache');
 const streamEncoderTuning = require('../streamEncoderTuning');
 const { normalizeHardwareMode, normalizeTuning, buildVideoEncoderArgs } = streamEncoderTuning;
 const { streamDebug } = require('./streamDebug');
+const { maybeSaveDebugPlaylistCopy } = require('./debugPlaylistCopy');
 const { buildBaseArgs } = require('./ytdlpArgs');
 const { resolveQualityHeight, getDashFormatSelectors } = require('./formatSelection');
 const { RETRY_PLAYER_CLIENT, isRetryableExtractionError } = require('./configResolution');
@@ -1447,6 +1448,50 @@ async function maybeHotSwapToCache(session) {
 }
 
 /**
+ * ytstream.bufferStartAfterSegments support: the 3 fresh-fetch call sites
+ * in createHlsSessionInternal call this instead of startHlsBufferFetch
+ * directly. threshold<=0 keeps the original immediate-start behavior
+ * exactly as it was; threshold>0 defers to maybeStartDeferredBufferFetch
+ * below, triggered from ensureHlsSegmentAvailable as real segment requests
+ * come in.
+ */
+function maybeDeferBufferFetch(session) {
+  if (session.bufferStartAfterSegments > 0) {
+    session.bufferFetchPending = true;
+  } else {
+    startHlsBufferFetch(session);
+  }
+}
+
+/**
+ * ytstream.bufferStartAfterSegments support (see the `if (bufferEnabled)`
+ * setup in createHlsSessionInternal for the config resolution/doc comment):
+ * called on every segment request for a session whose hls-buffer fetch was
+ * deferred (session.bufferFetchPending true), tracks distinct segment
+ * indices seen, and starts the real fetch once the threshold is reached.
+ * A no-op for every other session (bufferFetchPending falsy - buffer
+ * disabled, threshold 0, or already started).
+ */
+function maybeStartDeferredBufferFetch(session, targetIndex) {
+  if (!session.bufferFetchPending) return;
+  if (!session.requestedSegmentIndexes) session.requestedSegmentIndexes = new Set();
+  session.requestedSegmentIndexes.add(targetIndex);
+  if (session.requestedSegmentIndexes.size >= session.bufferStartAfterSegments) {
+    session.bufferFetchPending = false;
+    logger.info(
+      {
+        sessionKey: session.key,
+        youtubeId: session.youtubeId,
+        requestedSegments: session.requestedSegmentIndexes.size,
+        threshold: session.bufferStartAfterSegments,
+      },
+      'ytstream: deferred hls-buffer fetch threshold reached - starting now'
+    );
+    startHlsBufferFetch(session);
+  }
+}
+
+/**
  * calculatedLength only: the playlist declares every segment upfront, but
  * only a forward-encoding window exists on disk at any moment. Called
  * when a requested segment is missing — gives the running pass a brief
@@ -1454,6 +1499,7 @@ async function maybeHotSwapToCache(session) {
  * restarts the forward encode at that segment's boundary.
  */
 async function ensureHlsSegmentAvailable(session, targetIndex, filePath) {
+  maybeStartDeferredBufferFetch(session, targetIndex);
   if (fs.existsSync(filePath)) return true;
   logger.debug(
     { sessionKey: session.key, targetIndex, activePassStartIndex: session.activePassStartIndex, passGeneration: session.passGeneration || 0 },
@@ -1465,6 +1511,20 @@ async function ensureHlsSegmentAvailable(session, targetIndex, filePath) {
     await new Promise((resolve) => setTimeout(resolve, HLS_READY_POLL_INTERVAL_MS));
   }
   if (fs.existsSync(filePath)) return true;
+
+  // Concurrent requests for DIFFERENT not-yet-encoded segments (e.g. a
+  // player prefetching several segments in parallel, which a VOD+ENDLIST
+  // calculatedLength playlist invites) can each reach this point before
+  // any of them has actually redirected the pass. Only one target can win
+  // - record which one THIS call is waiting for, synchronously, before any
+  // async work below, so a later concurrent call for a different index is
+  // detectable by every earlier waiter's poll loop, however far along it
+  // is. Confirmed live: without this, a losing waiter polled
+  // fs.existsSync for the full HLS_SEEK_RESTART_READY_TIMEOUT_MS (4
+  // minutes) for a file the pass had already been redirected away from
+  // and would never produce - far past any real client's read timeout,
+  // so it looked like the request had simply hung forever.
+  session.latestSeekTargetIndex = targetIndex;
 
   // The pass currently running is already working toward this exact
   // segment - most commonly targetIndex 0 while the session's initial
@@ -1481,6 +1541,13 @@ async function ensureHlsSegmentAvailable(session, targetIndex, filePath) {
     while (Date.now() < coldStartDeadline) {
       if (fs.existsSync(filePath)) return true;
       if (session.destroying) return false;
+      if (session.latestSeekTargetIndex !== targetIndex) {
+        logger.info(
+          { sessionKey: session.key, targetIndex, latestSeekTargetIndex: session.latestSeekTargetIndex },
+          'ytstream: seek wait abandoned - a concurrent request for a different segment claimed the encode pass'
+        );
+        return false;
+      }
       await new Promise((resolve) => setTimeout(resolve, HLS_READY_POLL_INTERVAL_MS));
     }
     return fs.existsSync(filePath);
@@ -1502,6 +1569,13 @@ async function ensureHlsSegmentAvailable(session, targetIndex, filePath) {
   while (Date.now() < readyDeadline) {
     if (fs.existsSync(filePath)) { targetReady = true; break; }
     if (session.destroying) return false;
+    if (session.latestSeekTargetIndex !== targetIndex) {
+      logger.info(
+        { sessionKey: session.key, targetIndex, latestSeekTargetIndex: session.latestSeekTargetIndex },
+        'ytstream: seek-restart wait abandoned - a concurrent request for a different segment superseded this target before it was produced'
+      );
+      return false;
+    }
     await new Promise((resolve) => setTimeout(resolve, HLS_READY_POLL_INTERVAL_MS));
   }
   if (!targetReady) targetReady = fs.existsSync(filePath);
@@ -1716,6 +1790,17 @@ async function createHlsSessionInternal(sessionKey, { youtubeId, quality, qualit
   };
 
   if (bufferEnabled) {
+    // ytstream.bufferStartAfterSegments (default 3, 0 = old behavior):
+    // delays the network-bound hls-buffer fetch (startHlsBufferFetch) until
+    // this many DISTINCT segments have actually been requested, instead of
+    // starting the instant the session exists - a metadata probe (Jellyfin/
+    // StrmTool) only ever requests segment 0 (occasionally 1), so this
+    // skips a full background download for every probe that never becomes
+    // real playback. See maybeStartDeferredBufferFetch, the 3 call sites
+    // below that now go through it, and ensureHlsSegmentAvailable's hook.
+    session.bufferStartAfterSegments = (config.ytstream && config.ytstream.bufferStartAfterSegments != null)
+      ? Number(config.ytstream.bufferStartAfterSegments)
+      : 3;
     try {
       const video = await models.Video.findOne({
         where: { youtubeId },
@@ -1791,7 +1876,7 @@ async function createHlsSessionInternal(sessionKey, { youtubeId, quality, qualit
               { sessionKey, youtubeId, hiddenCachePath, bufferStealth: session.bufferStealth, bufferHybridPromote: session.bufferHybridPromote },
               'ytstream: starting hidden hls-buffer fetch (stealth/hybrid staging)'
             );
-            startHlsBufferFetch(session);
+            maybeDeferBufferFetch(session);
           }
         } else {
           const targetDir = path.dirname(video.filePath);
@@ -1809,7 +1894,7 @@ async function createHlsSessionInternal(sessionKey, { youtubeId, quality, qualit
           session.bufferDir = bufferDir;
           session.bufferTempPath = path.join(bufferDir, 'buffer.ts');
           session.bufferFinalPath = path.join(targetDir, `${fileStem}.ts`);
-          startHlsBufferFetch(session);
+          maybeDeferBufferFetch(session);
         }
         // Both startHlsBufferFetch calls above are fire-and-forget - not
         // awaited - so a fresh fetch gets every bit of this function's
@@ -1857,7 +1942,7 @@ async function createHlsSessionInternal(sessionKey, { youtubeId, quality, qualit
           session.bufferTempPath = path.join(bufferDir, 'buffer.ts');
           session.bufferFinalPath = untrackedCachePath;
           session.bufferUntracked = true;
-          startHlsBufferFetch(session);
+          maybeDeferBufferFetch(session);
         }
         logger.info(
           {
@@ -1911,6 +1996,7 @@ async function createHlsSessionInternal(sessionKey, { youtubeId, quality, qualit
       segmentDurationSeconds: session.playlistSegmentDurationSeconds,
     });
     fs.writeFileSync(playlistPath, fullPlaylist);
+    maybeSaveDebugPlaylistCopy({ youtubeId, kind: 'media', content: fullPlaylist });
   }
 
   trackStream({

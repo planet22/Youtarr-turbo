@@ -80,6 +80,7 @@ export const DEFAULT_YTSTREAM: YtstreamConfig = {
   backfillMissingSegments: false,
   finalizeToMp4: false,
   stealthCache: false,
+  bufferStartAfterSegments: 3,
   debugLogging: false,
   forceKeyframesByHardwareMode: {},
 };

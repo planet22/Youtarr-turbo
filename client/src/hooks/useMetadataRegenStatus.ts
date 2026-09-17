@@ -13,8 +13,16 @@ export interface MetadataRegenLastRun {
   skippedNoCache: number;
   skippedNoFile: number;
   errors: number;
-  /** Count of STRM videos whose .strmtool.json sidecar was also regenerated. */
+  /** Count of STRM videos whose .strmtool.json sidecar was rewritten (full rebuild, or a stale container patched). */
   strmToolRegenerated: number;
+  /**
+   * Count of STRM videos with no cached metadata (folded into skippedNoCache)
+   * whose EXISTING .strmtool.json was still checked and found to already
+   * have the correct container - not left untouched, just nothing to write.
+   * Without this, skippedNoCache alone reads as "nothing happened" for
+   * these videos, which isn't true.
+   */
+  strmToolAlreadyCorrect: number;
   errorMessage?: string | null;
 }
 

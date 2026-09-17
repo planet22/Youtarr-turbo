@@ -1862,10 +1862,19 @@ class VideosModule {
     const nfoGenerator = require('./nfoGenerator');
     const strmGenerator = require('./strmGenerator');
     const strmMediaInfoCache = require('./strmMediaInfoCache');
+    const youtubeMetadataCache = require('./youtubeMetadataCache');
     const cfg = configModule.getConfig();
     const strmCfg = cfg.strm || {};
     const canRegenerateStrmTool = strmCfg.target !== 'youtube' && strmCfg.writeMediaInfoCache !== false;
     const ytstreamParams = canRegenerateStrmTool ? strmGenerator.resolveYtstreamParams(cfg, {}) : null;
+    // Diagnostic (temporary) - totalStrmToolRegenerated has come back 0 on
+    // real runs with no clear reason from the summary log alone; this
+    // exposes the actual gate values so the next run settles whether
+    // canRegenerateStrmTool is really false, or something downstream of it.
+    logger.info(
+      { strmTarget: strmCfg.target, strmWriteMediaInfoCache: strmCfg.writeMediaInfoCache, canRegenerateStrmTool },
+      'Metadata regeneration: .strmtool.json regen gate'
+    );
     const startTime = Date.now();
     const startedAtIso = new Date(startTime).toISOString();
     const logProgress = (message) => {
@@ -1884,6 +1893,18 @@ class VideosModule {
     let totalSkippedNoFile = 0;
     let totalErrors = 0;
     let totalStrmToolRegenerated = 0;
+    // Videos whose .strmtool.json was checked (via updateContainerOnly, the
+    // no-cached-metadata fallback) and found to already have the correct
+    // container - distinct from totalSkippedNoCache, which only means the
+    // NFO couldn't be rebuilt. Surfaced separately so the UI doesn't imply
+    // these videos were left untouched when they were in fact verified.
+    let totalStrmToolAlreadyCorrect = 0;
+    // Diagnostic (temporary) - settles whether totalStrmToolRegenerated
+    // matching totalRegenerated exactly means "that's genuinely all the
+    // is_strm videos in this library" or "the no-cached-metadata fallback
+    // isn't actually reaching STRM videos" - independent of cache
+    // availability, so it's the ground truth either way.
+    let totalStrmVideosScanned = 0;
     let result;
 
     try {
@@ -1912,6 +1933,7 @@ class VideosModule {
         for (const video of videos) {
           checkTimeLimit();
           totalScanned++;
+          if (video.is_strm) totalStrmVideosScanned++;
 
           if (!video.filePath) {
             totalSkippedNoFile++;
@@ -1924,8 +1946,37 @@ class VideosModule {
             const content = await fs.readFile(infoPath, 'utf8');
             jsonData = JSON.parse(content);
           } catch {
-            totalSkippedNoCache++;
-            continue;
+            // No on-disk info.json - STRM materialization
+            // (strmMaterializer.js) never writes one, but every yt-dlp
+            // metadata fetch anywhere in the app (STRM materialize, real
+            // downloads, URL validation, ytstream sessions, the video
+            // modal) caches the same full extraction into the
+            // youtube_metadata_cache DB table via
+            // youtubeMetadataCache.cacheRawInfoJson - try that before
+            // falling back to a container-only patch.
+            const dbCached = await youtubeMetadataCache.getCachedRawInfoJson(video.youtubeId);
+            if (dbCached && dbCached.data) {
+              jsonData = dbCached.data;
+            } else {
+              totalSkippedNoCache++;
+              // Truly no cached metadata anywhere (DB row expired/never
+              // written) - the NFO can't be rebuilt, but .strmtool.json's
+              // container field is derived purely from the global
+              // ytstream config (see strmMediaInfoCache.js's
+              // _resolveContainer), never per-video metadata - patch it
+              // in place on the existing sidecar rather than skipping
+              // entirely.
+              if (canRegenerateStrmTool && video.is_strm) {
+                try {
+                  const outcome = strmMediaInfoCache.updateContainerOnly(video.filePath, ytstreamParams);
+                  if (outcome === 'written') totalStrmToolRegenerated++;
+                  else if (outcome === 'already-correct') totalStrmToolAlreadyCorrect++;
+                } catch (err) {
+                  logger.warn({ err, youtubeId: video.youtubeId }, 'Failed to patch .strmtool.json container without cached metadata');
+                }
+              }
+              continue;
+            }
           }
 
           jsonData.normalized_rating = video.normalized_rating;
@@ -1949,7 +2000,7 @@ class VideosModule {
             logger.warn({ err, youtubeId: video.youtubeId }, 'Failed to regenerate NFO file');
           }
 
-          if (canRegenerateStrmTool && video.is_strm === true) {
+          if (canRegenerateStrmTool && video.is_strm) {
             try {
               const cachePath = strmMediaInfoCache.writeMediaInfoCacheFile(video.filePath, jsonData, ytstreamParams);
               if (cachePath) totalStrmToolRegenerated++;
@@ -1968,6 +2019,7 @@ class VideosModule {
       const elapsed = Math.round((Date.now() - startTime) / 1000);
       logger.info({
         elapsed, totalScanned, totalRegenerated, totalSkippedNoCache, totalSkippedNoFile, totalErrors, totalStrmToolRegenerated,
+        totalStrmToolAlreadyCorrect, totalStrmVideosScanned,
       }, 'Metadata regeneration completed');
 
       result = {
@@ -1977,6 +2029,7 @@ class VideosModule {
         skippedNoFile: totalSkippedNoFile,
         errors: totalErrors,
         strmToolRegenerated: totalStrmToolRegenerated,
+        strmToolAlreadyCorrect: totalStrmToolAlreadyCorrect,
         timeElapsed: elapsed,
         trigger,
         startedAt: startedAtIso,
@@ -1995,6 +2048,7 @@ class VideosModule {
           skippedNoFile: totalSkippedNoFile,
           errors: totalErrors,
           strmToolRegenerated: totalStrmToolRegenerated,
+          strmToolAlreadyCorrect: totalStrmToolAlreadyCorrect,
           timeElapsed: elapsed,
           trigger,
           startedAt: startedAtIso,
@@ -2010,6 +2064,7 @@ class VideosModule {
         skippedNoCache: totalSkippedNoCache,
         skippedNoFile: totalSkippedNoFile,
         strmToolRegenerated: totalStrmToolRegenerated,
+        strmToolAlreadyCorrect: totalStrmToolAlreadyCorrect,
         errors: totalErrors,
         timeElapsed: elapsed,
         trigger,

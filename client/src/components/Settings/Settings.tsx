@@ -514,7 +514,7 @@ export function Settings({ token }: SettingsProps) {
                 <MaintenanceSection token={token} />
                 <ResolutionTagBackfillSection token={token} />
                 <ChannelImageRegenSection token={token} />
-                <MetadataRegenSection token={token} />
+                <MetadataRegenSection token={token} config={config} onConfigChange={handleConfigChange} />
                 <CompactHistorySection token={token} />
               </>
             }

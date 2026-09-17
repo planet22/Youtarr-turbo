@@ -26,20 +26,8 @@
  * it - CODECS is omitted for that case, same as before.
  */
 const { streamDebug } = require('./streamDebug');
-
-// Real encodes are CRF/QP-quality-targeted (see streamEncoderTuning.js), not
-// fixed-bitrate, so there is no measured bandwidth to report - these are
-// rough per-resolution-tier estimates, generous enough to avoid Jellyfin's
-// own much cruder ~20 Mbps default guess forcing unnecessary transcoding,
-// but not a precise contract. Sorted ascending by maxHeight; the first tier
-// whose maxHeight covers the target height wins.
-const VIDEO_BANDWIDTH_BPS_BY_HEIGHT_TIER = [
-  { maxHeight: 480, bps: 1_500_000 },
-  { maxHeight: 720, bps: 3_000_000 },
-  { maxHeight: 1080, bps: 5_000_000 },
-  { maxHeight: 1440, bps: 8_000_000 },
-  { maxHeight: Infinity, bps: 15_000_000 },
-];
+const { estimateVideoBandwidthBps } = require('./videoBandwidthEstimate');
+const { maybeSaveDebugPlaylistCopy } = require('./debugPlaylistCopy');
 
 // Matches the real AAC audio settings every h264 encode pass uses (see
 // buildVideoEncoderArgs callers in probeShortcut.js/hlsEngine.js: '-c:a aac
@@ -80,9 +68,7 @@ const AAC_LC_CODEC_TAG = 'mp4a.40.2';
  * @returns {number} estimated total (video + audio) bandwidth in bits/sec.
  */
 function estimateHlsBandwidthBps(height) {
-  const tier = VIDEO_BANDWIDTH_BPS_BY_HEIGHT_TIER.find((t) => height <= t.maxHeight)
-    || VIDEO_BANDWIDTH_BPS_BY_HEIGHT_TIER[VIDEO_BANDWIDTH_BPS_BY_HEIGHT_TIER.length - 1];
-  return tier.bps + AUDIO_BANDWIDTH_BPS;
+  return estimateVideoBandwidthBps(height) + AUDIO_BANDWIDTH_BPS;
 }
 
 /**
@@ -151,6 +137,7 @@ async function buildHlsTopLevelPlaylistResponse({
 }) {
   if (!enabled) {
     streamDebug({ youtubeId, enabled: false }, 'ytstream: hlsMasterPlaylist disabled - serving the real media playlist directly at the top level');
+    maybeSaveDebugPlaylistCopy({ youtubeId, kind: 'media', content: rewrittenMediaPlaylist });
     return rewrittenMediaPlaylist;
   }
   const sourceResolution = await resolveVideoTargetResolution(youtubeId, models);
@@ -161,11 +148,14 @@ async function buildHlsTopLevelPlaylistResponse({
     { youtubeId, enabled: true, quality, transcode, sourceResolution, width, height, bandwidthBps, codecs, mediaPlaylistUrl },
     'ytstream: hlsMasterPlaylist enabled - wrapping the real media playlist in a master'
   );
-  return buildHlsMasterPlaylist({ width, height, bandwidthBps, codecs, mediaPlaylistUrl });
+  const masterPlaylist = buildHlsMasterPlaylist({ width, height, bandwidthBps, codecs, mediaPlaylistUrl });
+  maybeSaveDebugPlaylistCopy({ youtubeId, kind: 'master', content: masterPlaylist });
+  return masterPlaylist;
 }
 
 module.exports = {
   estimateHlsBandwidthBps,
+  estimateVideoBandwidthBps,
   resolveHlsCodecsString,
   buildHlsMasterPlaylist,
   buildHlsTopLevelPlaylistResponse,

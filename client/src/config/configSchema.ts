@@ -400,6 +400,17 @@ export const CONFIG_FIELDS = {
       // Jellyfin only ever sees the .strm replaced by the finished .mp4,
       // never the intermediate .ts.
       stealthCache: false as boolean,
+      // mode=hls-buffer only, config.json-only (no Settings UI, same
+      // pattern as probeShortcutContainerOverride above) - delays starting
+      // the network-bound hls-buffer fetch (server/modules/ytstream/
+      // hlsEngine.js's startHlsBufferFetch) until this many DISTINCT
+      // segments have actually been requested, instead of the instant the
+      // session is created. A metadata probe (Jellyfin/StrmTool) only ever
+      // requests segment 0 (occasionally 1), so this avoids spinning up a
+      // full background download for every probe that never becomes real
+      // playback. 0 keeps the original always-start-immediately behavior
+      // exactly as it was.
+      bufferStartAfterSegments: 3 as number,
       // This file's own per-request/per-segment diagnostic lines (segment
       // serves, playlist polls, buffer-fetch progress ticks, etc.) are too
       // high-volume for logger.info by default, but gating them behind the

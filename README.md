@@ -6,11 +6,9 @@
 ![CI Status](https://github.com/planet22/Youtarr-turbo/workflows/CI%20-%20Lint%20and%20Test/badge.svg)
 > **This is Youtarr Turbo**, a fork of upstream Youtarr (based on v1.80.0) with additional features — STRM/live-transcoded streaming, hardware acceleration, Sonarr/Radarr integration, and more. See [TURBO.md](TURBO.md) for everything this fork adds on top of what's described below.
 
-Youtarr is a self-hosted YouTube downloader that automatically downloads videos from your favorite channels and playlists. It provides metadata for multiple media servers, mirrors your subscribed YouTube playlists into Plex, Jellyfin, and Emby as native playlists, pulls watch status back from those servers so you can filter your library by what's been watched, and offers optional Plex integration for automatic library refreshes. Learn more at [youtarr.com](https://youtarr.com).
+Youtarr is a self-hosted YouTube downloader that automatically downloads videos from your favorite channels and playlists. It provides metadata for multiple media servers, mirrors your subscribed YouTube playlists into Plex, Jellyfin, and Emby as native playlists, pulls watch status back from those servers so you can filter your library by what's been watched, and offers optional Plex integration for automatic library refreshes.
 
 > **Quick guides:** [Streaming (STRM + ytstream)](docs/GETTING_STARTED_STREAMING.md) · [Sonarr/Radarr via NZB](docs/GETTING_STARTED_NZB.md) · [Channel & Playlist Settings](docs/GETTING_STARTED_CHANNELS_PLAYLISTS.md)
-
-> **Like Youtarr?** Consider [supporting the project on Patreon](https://www.patreon.com/c/ChrisDial) to help keep it free and actively developed!
 
 https://github.com/user-attachments/assets/a80548fc-bcf9-4ad0-889c-dbd5aac250ee
 
@@ -46,7 +44,6 @@ https://github.com/user-attachments/assets/a80548fc-bcf9-4ad0-889c-dbd5aac250ee
 - **Secure Access**: Built-in authentication with admin controls
 - **REST API**: Full API with interactive [Swagger/OpenAPI documentation](http://localhost:3087/swagger) for automation and integrations
 - **Platform Flexible**: Configurable storage paths and guides for deployment to multiple platforms and architectures
-- **Unraid Ready**: Community Applications template (via DialmasterOrg repo) with headless-friendly credential presets
 - **Powered by yt-dlp**: Uses [yt-dlp](https://github.com/yt-dlp/yt-dlp) under the hood for YouTube integration and downloads
 - **Content Ratings**: Add per-video and per-channel content ratings (normalized to common media-server values like `G`, `PG`, `PG-13`, `R`, `NC-17`, `TV-*`). Ratings can be set per-download, via channel defaults, or derived from yt-dlp metadata; they show up as badges and can be used for automated policies.
 
@@ -97,7 +94,6 @@ You'll need Docker, Docker Compose, Git, and a Bash shell (Git Bash on Windows).
 ### Help & Support
 - [Troubleshooting Guide](docs/TROUBLESHOOTING.md) - Common issues and solutions
 - [GitHub Issues](https://github.com/planet22/Youtarr-turbo/issues) - Report bugs or request features
-- [Discord Server](https://discord.gg/68rvWnYMtD) - Join the community for help and discussion
 
 ## Contributing
 

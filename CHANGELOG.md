@@ -1,5 +1,13 @@
 # Changelog
 
+## [v0.0.1](https://github.com/planet22/Youtarr-turbo/releases/tag/v0.0.1) - 2026-09-16
+
+### [0.0.1](https://github.com/planet22/Youtarr-turbo/compare/v0.0.0...v0.0.1) (2026-09-16)
+
+
+
+
+
 All notable changes to Youtarr-Turbo are documented here.
 
 ## 1.2.0 (2026-09-03 – present)

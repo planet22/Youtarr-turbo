@@ -1,5 +1,23 @@
 # Changelog
 
+## [v0.2.0](https://github.com/planet22/Youtarr-turbo/releases/tag/v0.2.0) - 2026-09-19
+
+## [0.2.0](https://github.com/planet22/Youtarr-turbo/compare/vv0.1.0...v0.2.0) (2026-09-19)
+
+
+### Features
+
+* **ytstream:** add youtubeHlsProxy and youtubeHlsStreamCheck modules ([c743bf1](https://github.com/planet22/Youtarr-turbo/commit/c743bf1a50685d1ea01e5b509c1f79237f15023f))
+
+
+### Documentation
+
+* update CHANGELOG for v0.1.0 [skip ci] ([36a65db](https://github.com/planet22/Youtarr-turbo/commit/36a65db02a3d6bbe50b2c594be37225592b98dde))
+
+
+
+
+
 ## [v0.1.0](https://github.com/planet22/Youtarr-turbo/releases/tag/v0.1.0) - 2026-09-17
 
 ## [0.1.0](https://github.com/planet22/Youtarr-turbo/compare/vv0.0.1...v0.1.0) (2026-09-17)

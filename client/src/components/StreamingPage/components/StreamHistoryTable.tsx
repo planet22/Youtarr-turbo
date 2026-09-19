@@ -15,7 +15,7 @@ import {
   Checkbox,
 } from '../../ui';
 import { Storage as CachedVideoIcon } from '../../../lib/icons';
-import { formatFileSize } from '../../../utils/formatters';
+import { formatByteSize } from '../../../utils/formatters';
 import { StreamHistoryRow } from '../../../hooks/useStreamHistory';
 import { YOUTUBE_URL_BASE } from '../../shared/VideoModal/constants';
 import { parseClientLabel, formatModeLabel, formatModeChipLabel, modeChipColor } from '../utils';
@@ -230,7 +230,7 @@ function StreamHistoryRowView({
         })()}
       </TableCell>
       <TableCell style={{ whiteSpace: 'nowrap' }}>{formatDuration(row)}</TableCell>
-      <TableCell style={{ whiteSpace: 'nowrap' }}>{formatFileSize(row.bytesTransferred) || '0MB'}</TableCell>
+      <TableCell style={{ whiteSpace: 'nowrap' }}>{formatByteSize(row.bytesTransferred ?? 0)}</TableCell>
       <TableCell>
         {row.errorMessage ? (
           <Tooltip title={row.errorMessage}>{chipElement}</Tooltip>

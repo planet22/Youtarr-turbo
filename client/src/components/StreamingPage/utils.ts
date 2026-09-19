@@ -1,11 +1,22 @@
+import { formatByteSize } from '../../utils/formatters';
+
 /**
- * formatFileSize (utils/formatters.ts) isn't rate-aware and returns '' for
- * falsy input — wrong for a live-updating MB/s column where 0 is a normal,
- * meaningful value (e.g. right after a stream starts).
+ * Live throughput with the shared B/KB/MB/GB scaling. Unlike formatFileSize
+ * (utils/formatters.ts) it renders 0 as "0 B/s": zero is a normal, meaningful
+ * value for a live-updating rate column (e.g. right after a stream starts).
  */
 export function formatBytesPerSecond(bytesPerSecond: number): string {
-  const mbps = bytesPerSecond / (1024 * 1024);
-  return `${mbps.toFixed(2)} MB/s`;
+  return `${formatByteSize(Math.max(0, Math.round(bytesPerSecond)))}/s`;
+}
+
+/** A stream's total for display; "~" marks an estimate (segments routed through Youtarr are not really counted). */
+export function formatStreamTotal(stream: { bytesTransferred?: number | null; bytesEstimated?: boolean }): string {
+  return `${stream.bytesEstimated ? '~' : ''}${formatByteSize(stream.bytesTransferred ?? 0)}`;
+}
+
+/** A stream's throughput for display, "~"-prefixed when it is an estimate. */
+export function formatStreamRate(stream: { bytesPerSecond: number; bytesEstimated?: boolean }): string {
+  return `${stream.bytesEstimated ? '~' : ''}${formatBytesPerSecond(stream.bytesPerSecond)}`;
 }
 
 /**
@@ -60,6 +71,7 @@ export const MODE_LABELS: Record<string, string> = {
   'cached-file': 'Cached file',
   'probe-cache-hit': 'Probe (cached)',
   'probe-shortcut': 'Probe (synthetic clip)',
+  'byterange-cache-hit': 'Byte-range (cached file)',
 };
 
 /** Falls back to the raw mode string for anything not listed above, rather than mislabeling it. */
@@ -83,6 +95,7 @@ const MODE_CHIP_LABELS: Record<string, string> = {
   'cached-file': 'Cached',
   'probe-cache-hit': 'Probe',
   'probe-shortcut': 'Probe',
+  'byterange-cache-hit': 'Cached',
 };
 
 export function formatModeChipLabel(mode: string): string {
@@ -102,7 +115,7 @@ export const ACTUAL_FILE_MODES = new Set(['probe-cache-hit', 'cached-file']);
 
 /** Color-codes the Mode chip so the shortcut/passthrough modes stand out from the modes that run a live encode. */
 export function modeChipColor(mode: string): ChipColor {
-  if (ACTUAL_FILE_MODES.has(mode)) return 'success';
+  if (ACTUAL_FILE_MODES.has(mode) || mode === 'byterange-cache-hit') return 'success';
   if (mode === 'hls' || mode === 'hls-buffer') return 'info';
   return 'default';
 }

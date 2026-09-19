@@ -40,6 +40,14 @@ export interface VideoListContainerProps<IdType extends string | number> {
   renderContent: (viewMode: VideoListViewMode) => React.ReactNode;
   loadingSkeleton?: React.ReactNode;
   customEmptyMessage?: React.ReactNode;
+  // Opt-in, default false (every existing consumer keeps today's exact
+  // behavior): when true and the active view is 'table', keeps calling
+  // renderContent('table') even at itemCount === 0 instead of substituting
+  // VideoListEmptyState - lets a table's own header stay visible with an
+  // empty body, for a page whose table itself renders a friendlier empty
+  // row inline (see StreamingPage's StreamsTable). Grid/list views are
+  // unaffected either way.
+  keepContentHeaderWhenEmpty?: boolean;
 
   paginationMode?: PaginationMode;
   pagination?: React.ReactNode;
@@ -67,6 +75,7 @@ function VideoListContainer<IdType extends string | number>({
   isError,
   errorMessage,
   renderContent,
+  keepContentHeaderWhenEmpty = false,
   loadingSkeleton,
   customEmptyMessage,
   paginationMode = 'pages',
@@ -90,6 +99,7 @@ function VideoListContainer<IdType extends string | number>({
   const hasFilters = activeCount > 0;
   const hasSearch = Boolean(state.search);
   const hasContent = itemCount > 0;
+  const showEmptyState = !hasContent && !(keepContentHeaderWhenEmpty && state.viewMode === 'table');
 
   return (
     <div data-testid="video-list-container">
@@ -121,6 +131,8 @@ function VideoListContainer<IdType extends string | number>({
           else state.setFilterPanelOpen(false);
         }}
         customFilters={customFilters}
+        hasSearch={hasSearch}
+        onClearSearch={state.clearSearch}
       />
 
       {tabsSlot && <div>{tabsSlot}</div>}
@@ -145,7 +157,7 @@ function VideoListContainer<IdType extends string | number>({
           minHeight: hasContent ? undefined : 240,
         }}
       >
-        {!hasContent ? (
+        {showEmptyState ? (
           <VideoListEmptyState
             isLoading={isLoading}
             isError={isError}

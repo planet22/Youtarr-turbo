@@ -1,13 +1,13 @@
 import React from 'react';
 import { Box, Chip, Tooltip, IconButton, Typography, Link } from '../../ui';
 import { Stop as StopIcon, Search as ProbeIcon } from '../../../lib/icons';
-import { formatFileSize } from '../../../utils/formatters';
 import { StreamSnapshot } from '../../../hooks/useActiveStreams';
 import { YOUTUBE_URL_BASE } from '../../shared/VideoModal/constants';
-import { formatBytesPerSecond, parseClientLabel, isLikelyProbeRequest, formatModeLabel, formatModeChipLabel, modeChipColor } from '../utils';
+import { formatStreamRate, formatStreamTotal, parseClientLabel, isLikelyProbeRequest, formatModeLabel, formatModeChipLabel, modeChipColor } from '../utils';
 import { useStreamRowActions } from '../hooks/useStreamRowActions';
 import { STATE_CHIP_COLOR, STATE_CHIP_LABEL } from './StreamsTable';
-import { SegmentActivityStrip } from './SegmentActivityGrid';
+import { SegmentActivityStrip, segmentVariantForMode } from './SegmentActivityGrid';
+import { ByteRangeProgressStrip } from './ByteRangeProgressGrid';
 import StreamFormatChips from './StreamFormatChips';
 import { SHARED_STATUS_CHIP_SMALL_STYLE, SHARED_COMPACT_CHIP_OVERRIDES } from '../../shared/chipStyles';
 
@@ -16,6 +16,7 @@ export interface StreamsListMobileProps {
   token: string | null;
   onStopped: (streamId: string) => void;
   onOpenSegments: (streamId: string) => void;
+  onOpenByteRange?: (streamId: string) => void;
 }
 
 const COMPACT_CHIP_STYLE: React.CSSProperties = {
@@ -29,11 +30,13 @@ function StreamListRow({
   token,
   onStopped,
   onOpenSegments,
+  onOpenByteRange,
 }: {
   stream: StreamSnapshot;
   token: string | null;
   onStopped: (id: string) => void;
   onOpenSegments: (streamId: string) => void;
+  onOpenByteRange?: (streamId: string) => void;
 }) {
   const { elapsed, stopping, handleStop } = useStreamRowActions(stream, token, onStopped);
 
@@ -101,11 +104,19 @@ function StreamListRow({
 
         <Box style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
           <Typography variant="caption" style={{ fontSize: '0.65rem', color: 'var(--muted-foreground)' }}>
-            {elapsed} · {formatBytesPerSecond(stream.bytesPerSecond)} · {formatFileSize(stream.bytesTransferred) || '0MB'}
+            {elapsed} · {formatStreamRate(stream)} · {formatStreamTotal(stream)}
           </Typography>
           <Box style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
             {stream.segments && (
-              <SegmentActivityStrip segments={stream.segments} onClick={() => onOpenSegments(stream.streamId)} />
+              <SegmentActivityStrip segments={stream.segments} variant={segmentVariantForMode(stream.mode)} onClick={() => onOpenSegments(stream.streamId)} />
+            )}
+            {!stream.segments && stream.mode === 'hls-byterange' && onOpenByteRange && (
+              <ByteRangeProgressStrip
+                youtubeId={stream.youtubeId}
+                sessionKey={stream.streamId}
+                token={token}
+                onClick={() => onOpenByteRange(stream.streamId)}
+              />
             )}
             <Tooltip title="Stop stream">
               <span>
@@ -121,7 +132,7 @@ function StreamListRow({
   );
 }
 
-function StreamsListMobile({ streams, token, onStopped, onOpenSegments }: StreamsListMobileProps) {
+function StreamsListMobile({ streams, token, onStopped, onOpenSegments, onOpenByteRange }: StreamsListMobileProps) {
   return (
     <Box>
       {streams.map((stream) => (
@@ -131,6 +142,7 @@ function StreamsListMobile({ streams, token, onStopped, onOpenSegments }: Stream
           token={token}
           onStopped={onStopped}
           onOpenSegments={onOpenSegments}
+          onOpenByteRange={onOpenByteRange}
         />
       ))}
     </Box>

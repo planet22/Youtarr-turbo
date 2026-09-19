@@ -161,11 +161,62 @@ describe('GET /api/ytstream/mode-compatibility', () => {
     expect(body.backfillMissingSegments.status).toBe('optional');
   });
 
+  test('mode=youtube-hls: every encode-related field is ignored (nothing is encoded or wrapped locally)', () => {
+    const res = call({ mode: 'youtube-hls', transcode: 'h264' });
+    const body = res.json.mock.calls[0][0];
+    expect(body.container.status).toBe('ignored');
+    expect(body.transcode.status).toBe('ignored');
+    expect(body.hardwareMode.status).toBe('ignored');
+    expect(body.tuning.status).toBe('ignored');
+    expect(body.calculatedLength.status).toBe('ignored');
+    expect(body.hlsMasterPlaylist.status).toBe('ignored');
+  });
+
+  test.each(['hls-byterange', 'download-cache', 'youtube-hls'])('mode=%s: cacheOnPlay is ignored (experimental modes are intercepted before cache-on-play runs)', (mode) => {
+    const res = call({ mode, transcode: 'copy' });
+    const body = res.json.mock.calls[0][0];
+    expect(body.cacheOnPlay.status).toBe('ignored');
+  });
+
   test('defaults to mode=direct when no query params are given', () => {
     const res = call({});
     const body = res.json.mock.calls[0][0];
     expect(body.calculatedLength.status).toBe('ignored');
     expect(body.container.status).toBe('ignored');
+  });
+});
+
+describe('youtube-hls proxy routes (playlists and segment redirects)', () => {
+  const runHandler = (routePath, params) => {
+    const handler = getHandler('get', routePath);
+    const res = mockRes();
+    res.redirect = jest.fn();
+    res.send = res.send || jest.fn();
+    handler({ params, headers: {} }, res);
+    return res;
+  };
+
+  test('registers a public playlist route', () => {
+    expect(() => getHandler('get', '/api/ytstream/:youtubeId/yth/:key/:file')).not.toThrow();
+  });
+
+  test('registers a public segment route', () => {
+    expect(() => getHandler('get', '/api/ytstream/:youtubeId/yth/:key/:kind/:file')).not.toThrow();
+  });
+
+  test('answers 404 for a playlist that was never registered', () => {
+    const res = runHandler('/api/ytstream/:youtubeId/yth/:key/:file', { youtubeId: 'abc123XYZ_', key: 'ythp-00000000000000000000', file: 'video.m3u8' });
+    expect(res.status).toHaveBeenCalledWith(404);
+  });
+
+  test('rejects a malformed key with 400', () => {
+    const res = runHandler('/api/ytstream/:youtubeId/yth/:key/:file', { youtubeId: 'abc123XYZ_', key: '../secret', file: 'video.m3u8' });
+    expect(res.status).toHaveBeenCalledWith(400);
+  });
+
+  test('never redirects a segment request for an unregistered playlist', () => {
+    const res = runHandler('/api/ytstream/:youtubeId/yth/:key/:kind/:file', { youtubeId: 'abc123XYZ_', key: 'ythp-00000000000000000000', kind: 'video', file: 's0.ts' });
+    expect(res.redirect).not.toHaveBeenCalled();
   });
 });
 
@@ -211,6 +262,71 @@ describe('GET /api/ytstream/:youtubeId/simulate', () => {
     expect(body.plan.transcode).toBe('copy');
     expect(body.plan.quality).toBe('720');
     expect(body.wouldCall).toMatch(/serveDirect/);
+  });
+
+  describe('experimental modes (their own dry run, never resolvePlaybackPlan)', () => {
+    const configFor = (ytstream) => configModule.getConfig.mockReturnValue({ ytstream, preferredResolution: '720' });
+
+    test('mode=youtube-hls reports itself as experimental with what it would call', async () => {
+      configFor({ defaultMode: 'youtube-hls', quality: '1080', audioLanguage: 'de' });
+      const res = await call({});
+      const body = res.json.mock.calls[0][0];
+      expect([body.experimental, body.mode]).toEqual([true, 'youtube-hls']);
+      expect(body.wouldCall).toMatch(/getPlaylist/);
+    });
+
+    test('mode=youtube-hls shows the configured routing mode', async () => {
+      configFor({ defaultMode: 'youtube-hls', quality: '1080', youtubeHlsProxy: 'serve' });
+      const body = (await call({})).json.mock.calls[0][0];
+      expect(body.settings.hlsProxy).toBe('serve');
+      expect(body.wouldCall).toMatch(/redirects \(302\)/);
+    });
+
+    test('mode=youtube-hls treats an unknown routing value as off', async () => {
+      configFor({ defaultMode: 'youtube-hls', quality: '1080', youtubeHlsProxy: 'bogus' });
+      expect((await call({})).json.mock.calls[0][0].settings.hlsProxy).toBe('off');
+    });
+
+    test('mode=youtube-hls shows the configured audio language and the settings it ignores', async () => {
+      configFor({ defaultMode: 'youtube-hls', quality: '1080', audioLanguage: 'de' });
+      const body = (await call({})).json.mock.calls[0][0];
+      expect(body.settings.audioLanguage).toBe('de');
+      expect(body.ignoredSettings).toEqual(expect.arrayContaining(['container', 'transcode']));
+    });
+
+    test('mode=youtube-hls without probe does no network work and says the playlist is not cached yet', async () => {
+      configFor({ defaultMode: 'youtube-hls', quality: '480' });
+      const body = (await call({ probe: undefined })).json.mock.calls[0][0];
+      expect([body.playlistCached, body.choice]).toEqual([false, undefined]);
+    });
+
+    test('mode=hls-byterange reports the session key and starting a fresh encode when nothing is cached', async () => {
+      configFor({ defaultMode: 'hls-byterange', quality: '1080', byteRangeDeliverAsFile: true });
+      const body = (await call({})).json.mock.calls[0][0];
+      expect(body.sessionKey).toMatch(/^[a-f0-9]{20}$/);
+      expect(body.wouldCall).toMatch(/fresh encode/);
+    });
+
+    test('mode=hls-byterange reflects Matroska when the container is mkv', async () => {
+      configFor({ defaultMode: 'hls-byterange', quality: '1080', byteRangeDeliverAsFile: true, container: 'mkv' });
+      const body = (await call({})).json.mock.calls[0][0];
+      expect(body.settings.container).toBe('mkv');
+    });
+
+    test('the response never includes the full config or the caller identity', async () => {
+      configFor({ defaultMode: 'hls-byterange', quality: '1080', byteRangeDeliverAsFile: true });
+      const body = (await call({})).json.mock.calls[0][0];
+      expect(Object.keys(body.requested)).not.toEqual(expect.arrayContaining(['config']));
+      expect(Object.keys(body.requested)).not.toEqual(expect.arrayContaining(['clientIp']));
+    });
+
+    test('a normal mode still gets the plan-based dry run', async () => {
+      configFor({ defaultMode: 'hls' });
+      spawnSync.mockReturnValue({ error: null, status: 0 });
+      const body = (await call({})).json.mock.calls[0][0];
+      expect(body.plan.mode).toBe('hls');
+      expect(body.experimental).toBeUndefined();
+    });
   });
 
   test('an invalid requested mode falls back to the currently configured default, not hardcoded direct', async () => {
@@ -317,7 +433,7 @@ describe('GET /api/ytstream/streams', () => {
     const req = {};
     const res = mockRes();
     await handler(req, res);
-    expect(res.json).toHaveBeenCalledWith({ streams: [] });
+    expect(res.json).toHaveBeenCalledWith({ streams: [], byteRangeSessions: { total: 0, encoding: 0, finished: 0 } });
     expect(models.Video.findAll).not.toHaveBeenCalled();
   });
 });
@@ -628,5 +744,38 @@ describe('GET /api/ytstream/:youtubeId/formats', () => {
     const res = mockRes();
     await handler(req, res);
     expect(res.status).toHaveBeenCalledWith(502);
+  });
+});
+
+describe('GET /api/ytstream/:youtubeId/byterange-hls/:sessionKey/progress', () => {
+  let server;
+  let baseUrl;
+
+  beforeAll(async () => {
+    const router = createYtStreamRoutes({
+      verifyToken: (req, res, next) => next(),
+      getClientAddress: (req) => req.socket?.remoteAddress || '127.0.0.1',
+      models: buildModels(),
+    });
+    const app = express();
+    app.use(router);
+    await new Promise((resolve) => { server = app.listen(0, '127.0.0.1', resolve); });
+    baseUrl = `http://127.0.0.1:${server.address().port}`;
+  });
+
+  afterAll(async () => {
+    await new Promise((resolve) => server.close(resolve));
+  });
+
+  test('is reached instead of being swallowed by the :filename asset route (unknown session is a 404 with a JSON error, not a 400)', async () => {
+    const response = await fetch(`${baseUrl}/api/ytstream/abc123XYZ_/byterange-hls/${'a'.repeat(20)}/progress`);
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({ error: 'Session not found or expired' });
+  });
+
+  test('rejects a malformed session key with a JSON 400', async () => {
+    const response = await fetch(`${baseUrl}/api/ytstream/abc123XYZ_/byterange-hls/not-a-key/progress`);
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: 'Invalid session key' });
   });
 });

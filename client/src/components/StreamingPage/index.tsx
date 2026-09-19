@@ -6,13 +6,19 @@ import { VideoListContainer, useVideoListState, type SortConfig, type VideoListV
 import StreamsTable from './components/StreamsTable';
 import StreamCard from './components/StreamCard';
 import StreamsListMobile from './components/StreamsListMobile';
-import { SegmentActivityDialog } from './components/SegmentActivityGrid';
+import { SegmentActivityDialog, segmentVariantForMode } from './components/SegmentActivityGrid';
+import { ByteRangeProgressDialog } from './components/ByteRangeProgressGrid';
+import { StreamingSettingsLine } from './components/StreamingSettingsLine';
 
 interface StreamingPageProps {
   token: string | null;
 }
 
 type SortKey = 'startedAt' | 'bytesPerSecond' | 'bytesTransferred';
+
+// Session counts change without a stream event when an encode finishes, so
+// the count is re-read on a slow timer as well.
+const SESSION_COUNT_REFRESH_MS = 10000;
 
 const SORT_OPTIONS = [
   { key: 'startedAt', label: 'Started' },
@@ -29,7 +35,7 @@ function StreamingPage({ token }: StreamingPageProps) {
     initialViewMode: isMobile ? 'list' : 'table',
     searchStorageKey: 'youtarr:activeStreamsSearch',
   });
-  const { streams, loading, refetch } = useActiveStreams(token);
+  const { streams, byteRangeSessions, loading, refetch } = useActiveStreams(token);
   const [sortKey, setSortKey] = useState<SortKey>('startedAt');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
 
@@ -39,12 +45,21 @@ function StreamingPage({ token }: StreamingPageProps) {
   // VideoModal state.
   const [selectedStreamId, setSelectedStreamId] = useState<string | null>(null);
   const selectedStream = selectedStreamId ? streams.find((s) => s.streamId === selectedStreamId) || null : null;
+  // Separate state for the mode=hls-byterange popup (its own dialog, not
+  // SegmentActivityDialog - there's no segment grid for that mode).
+  const [selectedByteRangeStreamId, setSelectedByteRangeStreamId] = useState<string | null>(null);
+  const selectedByteRangeStream = selectedByteRangeStreamId ? streams.find((s) => s.streamId === selectedByteRangeStreamId) || null : null;
 
   const handleStopped = useCallback(() => {
     // The streamStopped broadcast already removes the row from state; this
     // is just a safety-net refetch in case the broadcast is ever missed
     // (e.g. a reconnecting socket).
     refetch();
+  }, [refetch]);
+
+  useEffect(() => {
+    const timer = setInterval(refetch, SESSION_COUNT_REFRESH_MS);
+    return () => clearInterval(timer);
   }, [refetch]);
 
   const filteredAndSorted = useMemo(() => {
@@ -75,6 +90,11 @@ function StreamingPage({ token }: StreamingPageProps) {
       <Typography variant={isMobile ? 'h6' : 'h5'} align="center">
         Live Streams ({streams.length} active)
       </Typography>
+      {byteRangeSessions && byteRangeSessions.total > 0 && (
+        <Typography variant="body2" color="textSecondary" align="center">
+          Byte-range sessions held: {byteRangeSessions.total} ({byteRangeSessions.encoding} encoding, {byteRangeSessions.finished} finished, freed after 1 min idle once cached or when stopped)
+        </Typography>
+      )}
     </div>
   );
 
@@ -101,6 +121,7 @@ function StreamingPage({ token }: StreamingPageProps) {
         itemCount={filteredAndSorted.length}
         isLoading={loading}
         isError={false}
+        keepContentHeaderWhenEmpty
         renderContent={(mode) => {
           if (mode === 'grid') {
             return (
@@ -112,6 +133,7 @@ function StreamingPage({ token }: StreamingPageProps) {
                       token={token}
                       onStopped={handleStopped}
                       onOpenSegments={setSelectedStreamId}
+                      onOpenByteRange={setSelectedByteRangeStreamId}
                     />
                   </Grid>
                 ))}
@@ -125,6 +147,7 @@ function StreamingPage({ token }: StreamingPageProps) {
                 token={token}
                 onStopped={handleStopped}
                 onOpenSegments={setSelectedStreamId}
+                onOpenByteRange={setSelectedByteRangeStreamId}
               />
             );
           }
@@ -134,17 +157,30 @@ function StreamingPage({ token }: StreamingPageProps) {
               token={token}
               onStopped={handleStopped}
               onOpenSegments={setSelectedStreamId}
+              onOpenByteRange={setSelectedByteRangeStreamId}
             />
           );
         }}
         isMobile={isMobile}
       />
 
+      <StreamingSettingsLine token={token} />
+
       <SegmentActivityDialog
         open={selectedStream !== null}
         onClose={() => setSelectedStreamId(null)}
         title={selectedStream?.title || selectedStream?.youtubeId || ''}
         segments={selectedStream?.segments ?? null}
+        variant={selectedStream ? segmentVariantForMode(selectedStream.mode) : 'encode'}
+      />
+
+      <ByteRangeProgressDialog
+        open={selectedByteRangeStream !== null}
+        onClose={() => setSelectedByteRangeStreamId(null)}
+        title={selectedByteRangeStream?.title || selectedByteRangeStream?.youtubeId || ''}
+        youtubeId={selectedByteRangeStream?.youtubeId || ''}
+        sessionKey={selectedByteRangeStream?.streamId || ''}
+        token={token}
       />
     </>
   );

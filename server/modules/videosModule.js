@@ -577,6 +577,9 @@ class VideosModule {
         for (const video of videos) {
           const entry = video.is_strm ? stealthCacheByYoutubeId.get(video.youtubeId) : null;
           video.hasStealthCache = Boolean(entry);
+          // Byte-range stealth cache only: an encode cut off early leaves a
+          // partial file the Library page marks as not a full copy.
+          video.stealthCachePartial = Boolean(entry && entry.partial);
           // Real facts about the hidden cache file itself - the Library
           // page's size column shows this instead of the "STRM" placeholder
           // for a stealth-cached row (still genuinely STRM - hasStealthCache/
@@ -769,6 +772,7 @@ class VideosModule {
         existing.cachedVideoAt = entry.mtime;
         existing.cachedVideoFilePath = entry.filePath;
         existing.cachedVideoFileSize = entry.size;
+        existing.cachedVideoPartial = entry.partial === true;
       } else if (!bareCandidateUnverifiable && !trackedIdSet.has(entry.youtubeId)) {
         const entryMs = new Date(entry.mtime).getTime();
         if (addedFromMs !== null && entryMs < addedFromMs) continue;
@@ -783,6 +787,7 @@ class VideosModule {
           cachedVideoAt: entry.mtime,
           cachedVideoFilePath: entry.filePath,
           cachedVideoFileSize: entry.size,
+          cachedVideoPartial: entry.partial === true,
         });
       }
     }
@@ -860,6 +865,7 @@ class VideosModule {
         cachedVideoAt: candidate.cachedVideoAt,
         cachedVideoAgo: formatRelativeTimeAgo(candidate.cachedVideoAt),
         cachedVideoExpiresAt: computeExpiresAt(candidate.cachedVideoAt, cacheOnPlayExpiryHours),
+        cachedVideoPartial: candidate.cachedVideoPartial === true,
       };
     });
   }

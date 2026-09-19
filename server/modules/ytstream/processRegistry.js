@@ -89,10 +89,29 @@ function isFfmpegAvailable() {
   return available;
 }
 
+// Same only-cache-true reasoning as ffmpegAvailableCache above. ffprobe
+// ships alongside ffmpeg in every normal install, but is a separate binary;
+// byteRangeHlsMode's resume feature needs it to measure cached durations.
+let ffprobeAvailableCache = null;
+
+function isFfprobeAvailable() {
+  if (ffprobeAvailableCache === true) return true;
+  let available;
+  try {
+    const result = spawnSync('ffprobe', ['-version'], { timeout: 5000 });
+    available = !result.error && result.status === 0;
+  } catch {
+    available = false;
+  }
+  if (available) ffprobeAvailableCache = true;
+  return available;
+}
+
 module.exports = {
   activeChildProcesses,
   registerChildProcess,
   killChildProcess,
   killAllChildProcesses,
   isFfmpegAvailable,
+  isFfprobeAvailable,
 };

@@ -178,7 +178,7 @@ export const CONFIG_FIELDS = {
   // what a full download would use unless explicitly overridden here.
   ytstream: {
     default: {
-      defaultMode: 'direct' as 'direct' | 'direct-redirect' | 'hls' | 'hls-buffer',
+      defaultMode: 'direct' as 'direct' | 'direct-redirect' | 'hls' | 'hls-buffer' | 'hls-byterange' | 'download-cache' | 'youtube-hls',
       // mkv is ffmpeg-mode only (see YtstreamSettingsSection's Container select)
       container: 'mp4' as 'mp4' | 'ts' | 'mkv',
       // Debug-only escape hatch, not exposed in Settings UI (same pattern as
@@ -421,6 +421,33 @@ export const CONFIG_FIELDS = {
       // Level, without touching any other module's verbosity; when off,
       // they behave exactly as before (visible only at Log Level=debug).
       debugLogging: false as boolean,
+      // mode=hls-byterange only (server/modules/ytstream/byteRangeHlsMode.js).
+      // false (default): the mode's own well-supported behavior - the
+      // top-level URL returns an HLS manifest (#EXT-X-MAP/#EXT-X-BYTERANGE
+      // into one growing fMP4 file). true (experimental, opt-in): skips the
+      // manifest entirely and serves that growing file directly via plain
+      // HTTP Range requests - real risk here (a native player like AVPlayer
+      // infers duration from Content-Length/probing when there's no
+      // manifest to read it from instead, and a still-growing file's
+      // changing declared size is a known source of playback failures) -
+      // off by default for exactly that reason.
+      byteRangeDeliverAsFile: false as boolean,
+      // mode=hls-byterange with byteRangeDeliverAsFile only. When a cached
+      // encode was cut off early (idle timeout, forced stop), resume from
+      // where it stopped and stitch the new tail onto it instead of
+      // re-encoding from byte 0. Off: a partial cache entry is ignored and
+      // a fresh from-zero encode runs (always safe).
+      byteRangeResumeCache: false as boolean,
+      // mode=youtube-hls only. Which audio track to serve when the video has
+      // dubbed languages ('en', 'de', 'pt-BR'...). Empty = the original
+      // language. A language the video doesn't offer falls back to that.
+      audioLanguage: '' as string,
+      // mode=youtube-hls only. Where the player gets its playlists/segments:
+      // 'off' - straight from YouTube (only the master comes from here);
+      // 'proxy' - Youtarr also serves the video/audio playlists (plays become
+      // visible); 'serve' - additionally every segment request goes through
+      // Youtarr, which redirects to YouTube (position + estimated data rate).
+      youtubeHlsProxy: 'off' as 'off' | 'proxy' | 'serve',
       // Per-hardware-mode result of the "Test HLS segment timing" check
       // (server/modules/streamTuningBenchmark.js's testSegmentTiming) -
       // only ever set by that test itself, never manually. true for a mode

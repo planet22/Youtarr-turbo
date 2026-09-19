@@ -72,6 +72,41 @@ describe('StrmMediaInfoCache', () => {
       });
       expect(data.container).toBe('mp4');
     });
+
+    it('declares "hls" for mode=hls-byterange by default (byteRangeDeliverAsFile off - a genuine manifest is served)', () => {
+      const data = writeAndParse('/media/video', baseMeta, {
+        mode: 'hls-byterange', quality: '1080', container: 'mp4', transcode: 'h264',
+      });
+      expect(data.container).toBe('hls');
+    });
+
+    it('declares "mp4" for mode=hls-byterange when byteRangeDeliverAsFile is on (a genuine flat file is served directly, not a manifest)', () => {
+      const data = writeAndParse('/media/video', baseMeta, {
+        mode: 'hls-byterange', quality: '1080', container: 'mp4', transcode: 'h264', byteRangeDeliverAsFile: true,
+      });
+      expect(data.container).toBe('mp4');
+    });
+
+    it('declares "mkv" for mode=hls-byterange plain file with container mkv', () => {
+      const data = writeAndParse('/media/video', baseMeta, {
+        mode: 'hls-byterange', quality: '1080', container: 'mkv', transcode: 'copy', byteRangeDeliverAsFile: true,
+      });
+      expect(data.container).toBe('mkv');
+    });
+
+    it('declares "hls" for mode=youtube-hls regardless of the configured container setting (the YouTube playlist is served)', () => {
+      const data = writeAndParse('/media/video', baseMeta, {
+        mode: 'youtube-hls', quality: '1080', container: 'mkv', transcode: 'copy',
+      });
+      expect(data.container).toBe('hls');
+    });
+
+    it('declares "mp4" for mode=download-cache regardless of the configured container setting (that mode always serves a real mp4)', () => {
+      const data = writeAndParse('/media/video', baseMeta, {
+        mode: 'download-cache', quality: '1080', container: 'mkv', transcode: 'h264',
+      });
+      expect(data.container).toBe('mp4');
+    });
   });
 
   describe('bitrate estimation', () => {

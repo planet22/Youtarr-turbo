@@ -19,11 +19,10 @@ import {
 import {
   AlertCircle as ErrorOutlineIcon,
   Trash2 as DeleteIcon,
-  Ghost as StealthCacheIcon,
 } from 'lucide-react';
-import { Database as MetadataCacheIcon, Storage as CachedVideoIcon, ClearCache as ClearCacheIcon, Shield as ProtectSpacerIcon } from '../../../lib/icons';
+import { Database as MetadataCacheIcon, ClearCache as ClearCacheIcon, Shield as ProtectSpacerIcon } from '../../../lib/icons';
 import { formatDuration, formatYTDate } from '../../../utils';
-import { formatAddedDateTime, formatFileSize, formatExpiresIn } from '../../../utils/formatters';
+import { formatAddedDateTime, formatExpiresIn } from '../../../utils/formatters';
 import { getDisplayPath } from '../../../utils/paths';
 import { getMediaTypeInfo } from '../../../utils/videoStatus';
 import { getEnabledChannelId } from '../../../utils/enabledChannels';
@@ -35,6 +34,7 @@ import ThumbnailClickOverlay from '../../shared/ThumbnailClickOverlay';
 import AvailabilityChip from '../../shared/AvailabilityChip';
 import { SHARED_STATUS_CHIP_SMALL_STYLE, SHARED_THEMED_CHIP_SMALL_STYLE } from '../../shared/chipStyles';
 import ChannelNameDisplay from './ChannelNameDisplay';
+import CacheStatusChip from './CacheStatusChip';
 import WatchedChip from '../../shared/WatchedChip';
 
 export interface VideosTableProps {
@@ -352,33 +352,22 @@ function VideosTable({
                           onVideoChipClick={isTracked ? () => onStrmChipClick(video) : undefined}
                         />
                       )}
-                      {video.hasCachedVideo && (
-                        <Tooltip title={isTracked
-                          ? 'Opportunistically cached from STRM - will automatically revert to STRM when it expires. Click for details.'
-                          : 'Cached from a play of this video - will be deleted when it expires. Click for details.'}
-                        >
-                          <Chip
-                            size="small"
-                            icon={<CachedVideoIcon size={14} />}
-                            label={formatExpiresIn(video.cachedVideoExpiresAt) ?? 'Cached'}
-                            variant="outlined"
-                            onClick={() => onOpenCacheDetail(video.youtubeId, 'video')}
-                            style={{ ...SHARED_THEMED_CHIP_SMALL_STYLE, cursor: 'pointer' }}
-                          />
-                        </Tooltip>
-                      )}
-                      {video.hasStealthCache && (
-                        <Tooltip title="Stealth-cached — playback served locally via Youtarr; still STRM, hidden from media server scans. Click for details.">
-                          <Chip
-                            size="small"
-                            icon={<StealthCacheIcon size={14} color="#9c27b0" />}
-                            label={video.stealthCacheFileSize ? formatFileSize(video.stealthCacheFileSize) : 'Cached'}
-                            variant="outlined"
-                            onClick={() => onOpenCacheDetail(video.youtubeId, 'video')}
-                            style={{ ...SHARED_THEMED_CHIP_SMALL_STYLE, borderColor: '#9c27b0', color: '#9c27b0', cursor: 'pointer' }}
-                          />
-                        </Tooltip>
-                      )}
+                      <CacheStatusChip
+                        video={video}
+                        kind="cached"
+                        isTracked={isTracked}
+                        iconSize={14}
+                        style={SHARED_THEMED_CHIP_SMALL_STYLE}
+                        onClick={() => onOpenCacheDetail(video.youtubeId, 'video')}
+                      />
+                      <CacheStatusChip
+                        video={video}
+                        kind="stealth"
+                        isTracked={isTracked}
+                        iconSize={14}
+                        style={SHARED_THEMED_CHIP_SMALL_STYLE}
+                        onClick={() => onOpenCacheDetail(video.youtubeId, 'video')}
+                      />
                       {video.removed || !(video.filePath || video.hasCachedVideo || video.hasStealthCache) ? '-' : null}
                     </Stack>
                   </TableCell>

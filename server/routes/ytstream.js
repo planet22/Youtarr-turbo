@@ -40,12 +40,18 @@ const {
 } = require('../modules/ytstream/formatSelection');
 const { HLS_UNTRACKED_BUFFER_CACHE_DIR } = require('../modules/ytstream/paths');
 const {
+  getByteRangeCacheTotals,
+  clearByteRangeCache,
+  deleteByteRangeCacheForVideo,
+} = require('../modules/ytstream/byteRangeCacheIndex');
+const {
   fillMissingTitlesFromMetadataCache,
   persistStreamHistoryStart,
   persistStreamHistoryEnd,
   snapshotStream,
   trackPendingRequest,
   updateStream,
+  createBytesCounter,
   failStreamThenUntrack,
   untrackStream,
   getStream: getActiveStream,
@@ -114,6 +120,24 @@ const {
   findExistingCachedVideoFilePath,
 } = require('../modules/ytstream/cacheFinalize');
 
+// Two experimental playback modes, deliberately standalone (own session/
+// cache bookkeeping, no shared code with hlsEngine.js/playbackPlan.js) so
+// they can never regress mode=direct/direct-redirect/hls/hls-buffer - see
+// each module's own doc comment. Intercepted at the very top of the main
+// route handler below, before any of the existing mode/probe/cache logic
+// runs, for the same reason.
+const {
+  handleByteRangeHlsRequest,
+  handleByteRangeHlsAsset,
+  getSessionProgress: getByteRangeSessionProgress,
+  getSessionCounts: getByteRangeSessionCounts,
+  describeByteRangeRun,
+} = require('../modules/ytstream/byteRangeHlsMode');
+const { handleDownloadCacheRequest } = require('../modules/ytstream/downloadCacheMode');
+const { handleYoutubeHlsRequest, describeRun: describeYoutubeHlsRun, recordProxyActivity } = require('../modules/ytstream/youtubeHlsMode');
+const { createProxyHandlers: createYoutubeHlsProxyHandlers, normalizeProxyMode: normalizeHlsProxyMode } = require('../modules/ytstream/youtubeHlsProxy');
+const EXPERIMENTAL_MODES = ['hls-byterange', 'download-cache', 'youtube-hls'];
+
 function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
   logger.info('Initializing YouTube direct/ffmpeg stream routes');
   initHlsEngine({ models });
@@ -153,7 +177,7 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
 
   const router = express.Router();
 
-  router.use(['/api/ytstream/:youtubeId', '/api/ytstream/:youtubeId/formats', '/api/ytstream/:youtubeId/hls/:sessionKey/:filename'], (req, res, next) => {
+  router.use(['/api/ytstream/:youtubeId', '/api/ytstream/:youtubeId/formats', '/api/ytstream/:youtubeId/hls/:sessionKey/:filename', '/api/ytstream/:youtubeId/byterange-hls/:sessionKey/:filename'], (req, res, next) => {
     res.set({
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'GET, OPTIONS, HEAD',
@@ -191,7 +215,13 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
       }
     }
     await fillMissingTitlesFromMetadataCache(youtubeIds, titleById);
-    res.json({ streams: streams.map((s) => ({ ...s, title: titleById[s.youtubeId] || null })) });
+    res.json({
+      streams: streams.map((s) => ({ ...s, title: titleById[s.youtubeId] || null })),
+      // Sessions the byte-range mode is still holding (encoding, or finished
+      // and waiting to be reaped) - can exceed `streams` if an entry was
+      // untracked without tearing its session down.
+      byteRangeSessions: getByteRangeSessionCounts(),
+    });
   });
 
   /**
@@ -441,6 +471,10 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
           } catch (err) { /* removed mid-scan - ignore */ }
         }
       }
+      // mode=hls-byterange's hidden stealth cache counts toward the same total.
+      const byteRangeTotals = await getByteRangeCacheTotals();
+      fileCount += byteRangeTotals.fileCount;
+      totalBytes += byteRangeTotals.totalBytes;
       res.json({ fileCount, totalBytes });
     } catch (err) {
       logger.error({ err }, 'ytstream: failed to read untracked buffer cache stats');
@@ -467,6 +501,9 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
           }
         }
       }
+      const byteRangeCleared = await clearByteRangeCache();
+      deletedFiles += byteRangeCleared.deletedFiles;
+      freedBytes += byteRangeCleared.freedBytes;
       logger.info({ deletedFiles, freedBytes }, 'ytstream: untracked buffer cache cleared');
       res.json({ success: true, deletedFiles, freedBytes });
     } catch (err) {
@@ -505,6 +542,14 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
     let freedBytes = 0;
     const failed = [];
     for (const youtubeId of youtubeIds) {
+      try {
+        const byteRangeResult = await deleteByteRangeCacheForVideo(youtubeId);
+        deletedFiles += byteRangeResult.deletedFiles;
+        freedBytes += byteRangeResult.freedBytes;
+      } catch (err) {
+        logger.warn({ err, youtubeId }, 'ytstream: failed to delete byte-range cache entries in bulk request');
+        failed.push(youtubeId);
+      }
       // findWarmUntrackedBufferCache (not getUntrackedBufferCachePath, which
       // is always `.ts`) so this catches a finalizeToMp4'd `.mp4` too - same
       // both-extensions lookup the per-video delete route above already uses.
@@ -525,6 +570,55 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
     }
     res.json({ success: true, deletedFiles, freedBytes, failed });
   });
+
+  /**
+   * The mode and parameters of an experimental-mode request (hls-byterange,
+   * download-cache, youtube-hls), or null for any other mode. Shared by the
+   * real route and the simulate dry run so both read the settings the same way.
+   */
+  function resolveExperimentalRequest(req, youtubeId) {
+    const ytCfgForExperimentalModes = configModule.getConfig().ytstream || {};
+    const queryOverrideForExperimentalModes = createQueryOverrideResolver(req, ytCfgForExperimentalModes);
+    const mode = String(
+      queryOverrideForExperimentalModes('mode') || ytCfgForExperimentalModes.defaultMode || ''
+    ).toLowerCase();
+    if (!EXPERIMENTAL_MODES.includes(mode)) return null;
+    const params = {
+      youtubeId,
+      config: configModule.getConfig(),
+      quality: String(
+        queryOverrideForExperimentalModes('quality') || ytCfgForExperimentalModes.quality || configModule.getConfig().preferredResolution || '720'
+      ),
+      qualityStrictness: String(queryOverrideForExperimentalModes('qualityStrictness') || ytCfgForExperimentalModes.qualityStrictness || 'fallback').toLowerCase(),
+      transcode: VALID_TRANSCODE.includes(queryOverrideForExperimentalModes('transcode'))
+        ? queryOverrideForExperimentalModes('transcode')
+        : (ytCfgForExperimentalModes.transcode || 'copy'),
+      hardwareMode: queryOverrideForExperimentalModes('hardware') || ytCfgForExperimentalModes.hardwareMode || 'none',
+      tuning: queryOverrideForExperimentalModes('tuning') || ytCfgForExperimentalModes.tuning || 'fast',
+      playerClient: ytCfgForExperimentalModes.playerClient,
+      // mode=youtube-hls only: the audio language to serve when the video
+      // has dubs ('' = the original) - see youtubeHlsMode.js chooseRendition.
+      audioLanguage: String(queryOverrideForExperimentalModes('audioLanguage') || ytCfgForExperimentalModes.audioLanguage || '').trim().slice(0, 16),
+      // mode=youtube-hls only: off / proxy / serve - see youtubeHlsProxy.js.
+      hlsProxy: normalizeHlsProxyMode(queryOverrideForExperimentalModes('hlsProxy') || ytCfgForExperimentalModes.youtubeHlsProxy),
+      // mode=hls-byterange + deliverAsFile only: 'mkv' writes Matroska
+      // instead of fMP4 - see byteRangeHlsMode.js. Anything else is mp4.
+      container: String(queryOverrideForExperimentalModes('container') || ytCfgForExperimentalModes.container || 'mp4').toLowerCase(),
+      clientIp: resolveClientIp(req),
+      userAgent: req.headers['user-agent'] || null,
+      // mode=hls-byterange only - see byteRangeHlsMode.js's own doc
+      // comment for the tradeoff. Must match whatever strmGenerator.js
+      // baked into this same video's .strm URL (resolveYtstreamParams'
+      // byteRangeDeliverAsFile) - see strmMediaInfoCache.js's
+      // _resolveContainer, which declares the container field based on
+      // that exact same value.
+      deliverAsFile: parseBooleanQueryFlag(queryOverrideForExperimentalModes('deliverAsFile') ?? ytCfgForExperimentalModes.byteRangeDeliverAsFile),
+      // Only meaningful with deliverAsFile - see byteRangeHlsMode.js's
+      // getOrCreateSession.
+      resumeCache: parseBooleanQueryFlag(queryOverrideForExperimentalModes('resumeCache') ?? ytCfgForExperimentalModes.byteRangeResumeCache),
+    };
+    return { mode, params };
+  }
 
   router.get('/api/ytstream/:youtubeId', async (req, res) => {
     // debug (not info): fires on every single request to this route,
@@ -583,6 +677,39 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
       return res.status(400).send('Invalid video id');
     }
 
+    // Experimental modes (hls-byterange, download-cache): intercepted here,
+    // before ANY of the existing probe-shortcut/cache-on-play/mode
+    // resolution below runs, and handed off entirely to their own
+    // standalone modules - see byteRangeHlsMode.js/downloadCacheMode.js.
+    // Deliberately duplicates just enough of resolvePlaybackPlan's
+    // mode/quality/transcode precedence logic (query overrides, respecting
+    // forceServerSettings) rather than calling it, so these two modes stay
+    // fully decoupled from playbackPlan.js.
+    {
+      const experimental = resolveExperimentalRequest(req, youtubeId);
+      if (experimental) {
+        const requestedModeForExperimentalCheck = experimental.mode;
+        const experimentalParams = experimental.params;
+        logger.info(
+          { youtubeId, mode: requestedModeForExperimentalCheck, quality: experimentalParams.quality, transcode: experimentalParams.transcode, hardwareMode: experimentalParams.hardwareMode },
+          'ytstream: dispatching to an experimental playback mode'
+        );
+        try {
+          if (requestedModeForExperimentalCheck === 'hls-byterange') {
+            await handleByteRangeHlsRequest(req, res, experimentalParams);
+          } else if (requestedModeForExperimentalCheck === 'youtube-hls') {
+            await handleYoutubeHlsRequest(req, res, experimentalParams);
+          } else {
+            await handleDownloadCacheRequest(req, res, experimentalParams);
+          }
+        } catch (err) {
+          logger.error({ err, youtubeId, mode: requestedModeForExperimentalCheck }, 'ytstream: experimental playback mode threw unexpectedly');
+          if (!res.headersSent) res.status(502).send('Experimental playback mode failed');
+        }
+        return;
+      }
+    }
+
     // Shared by every cached-file-direct-serve check below - see
     // serveCachedFile's own comment for why this only applies to a fresh
     // playback attempt, never mid-session: a calculatedLength session
@@ -629,10 +756,11 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
                 clientIp: resolveClientIp(req),
                 userAgent: req.headers['user-agent'] || null,
                 startedAt: Date.now(),
+                bytesTransferred: 0,
               }
             : null;
           if (historyEntry) persistStreamHistoryStart(historyEntry);
-          const servedReal = await tryServeCachedVideoFile(req, res, existingCachedFilePath);
+          const servedReal = await tryServeCachedVideoFile(req, res, existingCachedFilePath, historyEntry ? createBytesCounter(historyEntry) : undefined);
           if (servedReal) {
             if (historyEntry) persistStreamHistoryEnd(historyEntry, 'completed', null);
             return;
@@ -762,10 +890,11 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
                   clientIp: resolveClientIp(req),
                   userAgent: req.headers['user-agent'] || null,
                   startedAt: Date.now(),
+                  bytesTransferred: 0,
                 }
               : null;
             if (historyEntry) persistStreamHistoryStart(historyEntry);
-            const served = await tryServeCachedVideoFile(req, res, cachedVideo.filePath);
+            const served = await tryServeCachedVideoFile(req, res, cachedVideo.filePath, historyEntry ? createBytesCounter(historyEntry) : undefined);
             if (served) {
               if (historyEntry) persistStreamHistoryEnd(historyEntry, 'completed', null);
               return;
@@ -930,6 +1059,7 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
         clientIp: resolveClientIp(req),
         userAgent: req.headers['user-agent'] || null,
         startedAt: Date.now(),
+        bytesTransferred: 0,
       };
       persistStreamHistoryStart(historyEntry);
       try {
@@ -938,7 +1068,7 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
         const cookieHeader = loadYoutubeCookieHeader(cookiesPath);
         logger.info({ youtubeId, quality }, 'ytstream: proxying direct upstream stream (Simple mode)');
         res.set({ 'Content-Type': 'video/mp4', 'Cache-Control': 'no-store', 'Accept-Ranges': 'bytes' });
-        await proxyDirectStream(url, req, res, cookieHeader);
+        await proxyDirectStream(url, req, res, cookieHeader, undefined, createBytesCounter(historyEntry));
         persistStreamHistoryEnd(historyEntry, 'completed', null);
       } catch (err) {
         persistStreamHistoryEnd(historyEntry, 'error', err.message);
@@ -1145,6 +1275,17 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
     try {
       const config = configModule.getConfig();
       const probe = /^(1|true|yes)$/i.test(String(req.query.probe || ''));
+      // Experimental modes never go through resolvePlaybackPlan (the real route
+      // hands them to their own modules first), so they get their own dry run.
+      const experimental = resolveExperimentalRequest(req, youtubeId);
+      if (experimental) {
+        const settings = Object.fromEntries(Object.entries(experimental.params).filter(([key]) => !['config', 'clientIp', 'userAgent'].includes(key)));
+        let details;
+        if (experimental.mode === 'youtube-hls') details = await describeYoutubeHlsRun(experimental.params, { probe });
+        else if (experimental.mode === 'hls-byterange') details = describeByteRangeRun(experimental.params);
+        else details = { wouldCall: 'handleDownloadCacheRequest(...) - downloads the whole video, then serves the finished file' };
+        return res.json({ youtubeId, probed: probe, experimental: true, mode: experimental.mode, requested: settings, ...details });
+      }
       const plan = await resolvePlaybackPlan(youtubeId, req, config, { probe });
 
       const isDirectFamilyMode = plan.mode === 'direct' || plan.mode === 'direct-redirect';
@@ -1211,6 +1352,32 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
   // Serves an HLS session's playlist/init/segment files as ordinary static
   // files - see hlsEngine.js's createHlsAssetRouteHandler doc comment.
   router.get('/api/ytstream/:youtubeId/hls/:sessionKey/:filename', createHlsAssetRouteHandler({ resolveClientIp }));
+
+  // mode=youtube-hls with ytstream.youtubeHlsProxy = proxy/serve: the media
+  // playlists (and, for serve, a 302 redirect per segment) come from here.
+  // Public like the HLS asset route above (players send no token); they only
+  // ever serve or redirect to playlists this server resolved itself - see
+  // youtubeHlsProxy.js.
+  const youtubeHlsProxyHandlers = createYoutubeHlsProxyHandlers({ resolveClientIp, onActivity: recordProxyActivity });
+  router.get('/api/ytstream/:youtubeId/yth/:key/:file', youtubeHlsProxyHandlers.handlePlaylist);
+  router.get('/api/ytstream/:youtubeId/yth/:key/:kind/:file', youtubeHlsProxyHandlers.handleSegment);
+
+  // Registered before the generic :filename asset route below, which would
+  // otherwise match "progress" as a filename and reject it with a 400.
+  /** Live progress for the Streaming page's byte-range progress popup - see byteRangeHlsMode.js's getSessionProgress. */
+  router.get('/api/ytstream/:youtubeId/byterange-hls/:sessionKey/progress', authMiddleware, (req, res) => {
+    const { sessionKey } = req.params;
+    if (!/^[a-f0-9]{20}$/.test(sessionKey)) {
+      return res.status(400).json({ error: 'Invalid session key' });
+    }
+    const progress = getByteRangeSessionProgress(sessionKey);
+    if (!progress) {
+      return res.status(404).json({ error: 'Session not found or expired' });
+    }
+    return res.json(progress);
+  });
+
+  router.get('/api/ytstream/:youtubeId/byterange-hls/:sessionKey/:filename', handleByteRangeHlsAsset);
 
   return router;
 }

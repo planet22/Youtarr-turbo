@@ -1,6 +1,6 @@
 import React from 'react';
 import { Chip, Tooltip, Box, Typography, Checkbox } from '../../ui';
-import { formatFileSize } from '../../../utils/formatters';
+import { formatByteSize } from '../../../utils/formatters';
 import { StreamHistoryRow } from '../../../hooks/useStreamHistory';
 import { parseClientLabel, formatModeLabel, formatModeChipLabel, modeChipColor } from '../utils';
 import { resultChipFor, formatStarted, formatDuration } from './StreamHistoryTable';
@@ -66,7 +66,7 @@ function StreamHistoryCard({ row, isSelected, onToggleSelect }: StreamHistoryCar
       <Box className="grid grid-cols-2 gap-x-2 gap-y-1">
         <StreamCardStat label="Started" value={formatStarted(row.startedAt)} />
         <StreamCardStat label="Duration" value={formatDuration(row)} />
-        <StreamCardStat label="Total" value={formatFileSize(row.bytesTransferred) || '0MB'} />
+        <StreamCardStat label="Total" value={formatByteSize(row.bytesTransferred ?? 0)} />
       </Box>
     </StreamCardLayout>
   );

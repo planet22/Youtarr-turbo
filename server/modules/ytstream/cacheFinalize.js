@@ -49,7 +49,7 @@ async function resolveActualServedFileInfo(youtubeId, filePath, models) {
  * @returns {Promise<boolean>} true if a response was sent (caller must
  *   return immediately without falling through to normal handling).
  */
-async function tryServeCachedVideoFile(req, res, filePath) {
+async function tryServeCachedVideoFile(req, res, filePath, onBytesSent = undefined) {
   // ytstream.finalizeToMp4: prefer an already-finalized .mp4 remux over the
   // raw .ts whenever one exists (never triggers ffmpeg here - only a peek;
   // see tsRemuxCache.js). Avoids ever handing a real player (or Jellyfin's
@@ -84,7 +84,9 @@ async function tryServeCachedVideoFile(req, res, filePath) {
     // wrapping Promise (and this whole await, and the caller's history-end
     // write) hung forever - see stream_history rows stuck "in progress".
     try {
-      await pipeline(fs.createReadStream(filePath), res);
+      const source = fs.createReadStream(filePath);
+      if (onBytesSent) source.on('data', (chunk) => onBytesSent(chunk.length));
+      await pipeline(source, res);
     } catch (err) {
       if (err.code !== 'ERR_STREAM_PREMATURE_CLOSE') {
         logger.warn({ err, filePath }, 'ytstream: serveCachedFile stream failed');
@@ -127,7 +129,9 @@ async function tryServeCachedVideoFile(req, res, filePath) {
   // before reading the whole range leaves this await (and the caller's
   // history-end write) hanging indefinitely.
   try {
-    await pipeline(fs.createReadStream(filePath, { start, end }), res);
+    const source = fs.createReadStream(filePath, { start, end });
+    if (onBytesSent) source.on('data', (chunk) => onBytesSent(chunk.length));
+    await pipeline(source, res);
   } catch (err) {
     if (err.code !== 'ERR_STREAM_PREMATURE_CLOSE') {
       logger.warn({ err, filePath }, 'ytstream: serveCachedFile ranged stream failed');

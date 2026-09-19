@@ -200,6 +200,42 @@ class JellyfinAdapter extends BaseAdapter {
     };
   }
 
+  // Plugin and scheduled-task management. Both API groups require an
+  // administrator; an API key counts as one.
+  async listPlugins() {
+    const res = await axios.get(`${this.url}/Plugins`, { headers: this._headers(), timeout: REQUEST_TIMEOUT_MS });
+    return res.data || [];
+  }
+
+  async getPluginConfiguration(pluginId) {
+    const res = await axios.get(`${this.url}/Plugins/${encodeURIComponent(pluginId)}/Configuration`, {
+      headers: this._headers(),
+      timeout: REQUEST_TIMEOUT_MS,
+    });
+    return res.data || {};
+  }
+
+  // Replaces the plugin's whole configuration object, so callers must send
+  // back every field they read, not just the ones they changed.
+  async setPluginConfiguration(pluginId, configuration) {
+    await axios.post(`${this.url}/Plugins/${encodeURIComponent(pluginId)}/Configuration`, configuration, {
+      headers: this._headers(),
+      timeout: REQUEST_TIMEOUT_MS,
+    });
+  }
+
+  async listScheduledTasks() {
+    const res = await axios.get(`${this.url}/ScheduledTasks`, { headers: this._headers(), timeout: REQUEST_TIMEOUT_MS });
+    return res.data || [];
+  }
+
+  async startScheduledTask(taskId) {
+    await axios.post(`${this.url}/ScheduledTasks/Running/${encodeURIComponent(taskId)}`, null, {
+      headers: this._headers(),
+      timeout: REQUEST_TIMEOUT_MS,
+    });
+  }
+
   async createPlaylist(name, itemIds, opts = {}) {
     const body = {
       Name: name,

@@ -150,7 +150,27 @@ class StrmMediaInfoCache {
    * @private
    */
   _resolveContainer(ytstreamParams, fallbackContainer) {
+    // mode=hls-byterange (byteRangeHlsMode.js) has TWO delivery styles for
+    // the same underlying encode - see that module's own doc comment.
+    // byteRangeDeliverAsFile=false (default): a genuine m3u8 playlist, not
+    // a flat file - same "genuine playlist" reasoning as hls/hls-buffer
+    // above. byteRangeDeliverAsFile=true: the opposite - a genuine flat,
+    // Range-servable file is served directly, same as download-cache.
+    // Getting either branch backwards for this mode reproduces the exact
+    // Container-misdetection bug this whole investigation started from.
+    if (ytstreamParams.mode === 'hls-byterange') {
+      if (!ytstreamParams.byteRangeDeliverAsFile) return 'hls';
+      // Plain file: fMP4, or Matroska when Container is set to mkv.
+      return ytstreamParams.container === 'mkv' ? 'mkv' : 'mp4';
+    }
+    // mode=youtube-hls (youtubeHlsMode.js) serves YouTube's own m3u8 playlist.
+    if (ytstreamParams.mode === 'youtube-hls') return 'hls';
     const isHlsMode = ytstreamParams.mode === 'hls' || ytstreamParams.mode === 'hls-buffer';
+    // mode=download-cache (downloadCacheMode.js) always serves a real,
+    // complete .mp4 - unlike every other mode, it ignores the configured
+    // Container setting entirely (see that module's own doc comment), so
+    // the ignored setting must not leak into this cache either.
+    if (ytstreamParams.mode === 'download-cache') return 'mp4';
     return isHlsMode ? 'hls' : (ytstreamParams.container || fallbackContainer || null);
   }
 

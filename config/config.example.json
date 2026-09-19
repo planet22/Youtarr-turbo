@@ -139,6 +139,10 @@
         "stealthCache": false,
         "bufferStartAfterSegments": 3,
         "debugLogging": false,
+        "byteRangeDeliverAsFile": false,
+        "byteRangeResumeCache": false,
+        "audioLanguage": "",
+        "youtubeHlsProxy": "off",
         "forceKeyframesByHardwareMode": {}
     },
     "nzb": {

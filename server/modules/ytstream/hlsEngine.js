@@ -49,6 +49,7 @@ const {
   untrackStream,
   failStreamThenUntrack,
   getStream: getActiveStream,
+  createBytesCounter,
 } = require('./activeStreams');
 const { createCacheFinalize } = require('./cacheFinalize');
 
@@ -2426,12 +2427,12 @@ function createHlsAssetRouteHandler({ resolveClientIp }) {
         }
       }
 
-      // Streaming-page byte counter — the route never sends a partial
-      // Range response for segments (always the full file), so stat.size
-      // is the true transferred size on every request.
+      // Streaming-page byte counter - bytes are added per chunk as the file
+      // is actually read for the response (see the pipe below), not stat.size
+      // up front: a player aborting a segment fetch part way would otherwise
+      // still be charged the whole segment.
       const streamEntry = getActiveStream(sessionKey);
       if (streamEntry) {
-        streamEntry.bytesTransferred += stat.size;
         streamEntry.lastActivityAt = Date.now();
         streamEntry.state = 'active';
         if (streamEntry.viewers) {
@@ -2459,6 +2460,9 @@ function createHlsAssetRouteHandler({ resolveClientIp }) {
           res.end();
         }
       });
+      const countBytes = createBytesCounter(streamEntry);
+      fileStream.on('data', (chunk) => countBytes(chunk.length));
+      res.on('close', () => fileStream.destroy());
       fileStream.pipe(res);
     });
   };

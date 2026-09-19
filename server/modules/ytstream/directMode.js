@@ -143,8 +143,11 @@ function redactIncomingHeadersForLogging(headers) {
  * yt-dlp used to resolve the URL — age-restricted or members-only videos
  * get rejected. Proxying keeps this server in the loop, and forwards
  * Range so `mode=direct` stays seekable.
+ *
+ * @param {(bytes: number) => void} [onBytesSent] - called with each chunk of
+ *   the upstream body relayed to the client (for the stream history's byte total)
  */
-function proxyDirectStream(targetUrl, req, res, cookieHeader, redirectsLeft = 5) {
+function proxyDirectStream(targetUrl, req, res, cookieHeader, redirectsLeft = 5, onBytesSent = undefined) {
   return new Promise((resolve, reject) => {
     let parsed;
     try {
@@ -170,7 +173,7 @@ function proxyDirectStream(targetUrl, req, res, cookieHeader, redirectsLeft = 5)
       if ([301, 302, 303, 307, 308].includes(status) && upstreamRes.headers.location && redirectsLeft > 0) {
         upstreamRes.resume();
         streamDebug({ status, location: upstreamRes.headers.location, redirectsLeft }, 'ytstream: proxyDirectStream following upstream redirect');
-        proxyDirectStream(new URL(upstreamRes.headers.location, parsed).href, req, res, cookieHeader, redirectsLeft - 1)
+        proxyDirectStream(new URL(upstreamRes.headers.location, parsed).href, req, res, cookieHeader, redirectsLeft - 1, onBytesSent)
           .then(resolve)
           .catch(reject);
         return;
@@ -191,6 +194,7 @@ function proxyDirectStream(targetUrl, req, res, cookieHeader, redirectsLeft = 5)
           if (upstreamRes.headers[h]) res.set(h, upstreamRes.headers[h]);
         });
 
+      if (onBytesSent) upstreamRes.on('data', (chunk) => onBytesSent(chunk.length));
       upstreamRes.pipe(res);
       upstreamRes.on('error', (err) => {
         if (isAbortedByClient || err.code === 'ECONNRESET' || err.message === 'aborted') {

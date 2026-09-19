@@ -23,6 +23,8 @@ export interface VideoListFilterPanelProps {
   open: boolean;
   onClose?: () => void;
   customFilters?: React.ReactNode;
+  hasSearch?: boolean;
+  onClearSearch?: () => void;
 }
 
 function renderFilter(filter: FilterConfig, compact: boolean): React.ReactNode {
@@ -161,7 +163,19 @@ function filterLabel(filter: FilterConfig): string {
 // 'toggle' kind joins them here too (e.g. Download History's "no videos").
 const INLINE_ROW_TOGGLE_IDS = new Set(['showUntracked', 'showFilePaths', 'toggle']);
 
-function InlinePanel({ filters, open, customFilters }: { filters: FilterConfig[]; open: boolean; customFilters?: React.ReactNode }) {
+function InlinePanel({
+  filters,
+  open,
+  customFilters,
+  hasSearch = false,
+  onClearSearch,
+}: {
+  filters: FilterConfig[];
+  open: boolean;
+  customFilters?: React.ReactNode;
+  hasSearch?: boolean;
+  onClearSearch?: () => void;
+}) {
   if (!open) return null;
   const nonStatusFilters = filters.filter((f) => !isStatusFilter(f) && !INLINE_ROW_TOGGLE_IDS.has(f.id));
   const statusFiltersList = filters.filter(isStatusFilter);
@@ -184,10 +198,13 @@ function InlinePanel({ filters, open, customFilters }: { filters: FilterConfig[]
         {nonStatusFilters.map((filter, index) => (
           <div key={filter.id + '-' + index}>{renderFilter(filter, false)}</div>
         ))}
-        {hasActiveFilters(filters) && (
+        {(hasActiveFilters(filters) || hasSearch) && (
           <Button
             size="small"
-            onClick={() => clearAllFilters(filters)}
+            onClick={() => {
+              clearAllFilters(filters);
+              onClearSearch?.();
+            }}
             style={{ textTransform: 'none', marginLeft: 'auto' }}
             data-testid="video-list-clear-filters"
           >
@@ -228,11 +245,15 @@ function DrawerPanel({
   open,
   onClose,
   customFilters,
+  hasSearch = false,
+  onClearSearch,
 }: {
   filters: FilterConfig[];
   open: boolean;
   onClose?: () => void;
   customFilters?: React.ReactNode;
+  hasSearch?: boolean;
+  onClearSearch?: () => void;
 }) {
   const panelRef = useRef<HTMLDivElement | null>(null);
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -368,8 +389,11 @@ function DrawerPanel({
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16 }}>
             <Button
               variant="outlined"
-              onClick={() => clearAllFilters(filters)}
-              disabled={!hasActiveFilters(filters)}
+              onClick={() => {
+                clearAllFilters(filters);
+                onClearSearch?.();
+              }}
+              disabled={!hasActiveFilters(filters) && !hasSearch}
               style={{ flex: 1 }}
             >
               Clear All
@@ -385,11 +409,36 @@ function DrawerPanel({
   );
 }
 
-function VideoListFilterPanel({ filters, variant, open, onClose, customFilters }: VideoListFilterPanelProps) {
+function VideoListFilterPanel({
+  filters,
+  variant,
+  open,
+  onClose,
+  customFilters,
+  hasSearch,
+  onClearSearch,
+}: VideoListFilterPanelProps) {
   if (variant === 'drawer') {
-    return <DrawerPanel filters={filters} open={open} onClose={onClose} customFilters={customFilters} />;
+    return (
+      <DrawerPanel
+        filters={filters}
+        open={open}
+        onClose={onClose}
+        customFilters={customFilters}
+        hasSearch={hasSearch}
+        onClearSearch={onClearSearch}
+      />
+    );
   }
-  return <InlinePanel filters={filters} open={open} customFilters={customFilters} />;
+  return (
+    <InlinePanel
+      filters={filters}
+      open={open}
+      customFilters={customFilters}
+      hasSearch={hasSearch}
+      onClearSearch={onClearSearch}
+    />
+  );
 }
 
 export default VideoListFilterPanel;

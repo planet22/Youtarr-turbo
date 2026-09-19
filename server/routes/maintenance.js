@@ -10,7 +10,7 @@ const logger = require('../logger');
  *   name: Maintenance
  *   description: Filesystem reconciliation actions
  */
-function createMaintenanceRoutes({ verifyToken, videosModule, configModule, jobModule }) {
+function createMaintenanceRoutes({ verifyToken, videosModule, configModule, jobModule, cronJobs }) {
   const router = express.Router();
 
   /**
@@ -270,6 +270,60 @@ function createMaintenanceRoutes({ verifyToken, videosModule, configModule, jobM
     } catch (err) {
       logger.error({ err }, 'Failed to compact job history');
       return res.status(500).json({ error: 'Failed to compact job history' });
+    }
+  });
+
+  /**
+   * @swagger
+   * /api/maintenance/tasks:
+   *   get:
+   *     summary: List scheduled tasks with next run and last run status
+   *     tags: [Maintenance]
+   *     responses:
+   *       200:
+   *         description: Array of scheduled tasks
+   */
+  router.get('/api/maintenance/tasks', verifyToken, (req, res) => {
+    try {
+      return res.json({ tasks: cronJobs.getTasks() });
+    } catch (err) {
+      logger.error({ err }, 'Failed to list scheduled tasks');
+      return res.status(500).json({ error: 'Failed to list scheduled tasks' });
+    }
+  });
+
+  /**
+   * @swagger
+   * /api/maintenance/tasks/{id}/run:
+   *   post:
+   *     summary: Run a scheduled task now (in the background)
+   *     tags: [Maintenance]
+   *     parameters:
+   *       - in: path
+   *         name: id
+   *         required: true
+   *         schema:
+   *           type: string
+   *     responses:
+   *       202:
+   *         description: Task started
+   *       404:
+   *         description: Unknown task
+   *       409:
+   *         description: Task is already running
+   */
+  router.post('/api/maintenance/tasks/:id/run', verifyToken, (req, res) => {
+    try {
+      const result = cronJobs.runTaskNow(req.params.id);
+      if (!result.started) {
+        return result.reason === 'running'
+          ? res.status(409).json({ error: 'Task is already running' })
+          : res.status(404).json({ error: 'Unknown task' });
+      }
+      return res.status(202).json({ status: 'started' });
+    } catch (err) {
+      logger.error({ err, taskId: req.params.id }, 'Failed to start scheduled task');
+      return res.status(500).json({ error: 'Failed to start task' });
     }
   });
 

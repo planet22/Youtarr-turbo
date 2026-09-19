@@ -267,10 +267,6 @@ function rewriteHlsPlaylistUrls(content, baseUrl) {
 }
 
 const {
-  trySafeDeleteFinalizedTs,
-  promoteFinalizedTsToLibraryMp4,
-  promoteHiddenMp4ToLibrary,
-  swapHiddenCacheToMp4,
   resolveHlsBufferPromoteFn,
   maybeRetroactivelyRemuxReusedCache,
   maybeFinalizeTsToMp4,

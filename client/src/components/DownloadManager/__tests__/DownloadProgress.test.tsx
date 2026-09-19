@@ -2334,8 +2334,8 @@ describe('DownloadProgress', () => {
       expect(screen.getByText('Failed Downloads')).toBeInTheDocument();
       expect(screen.getByText(/2 videos failed:/)).toBeInTheDocument();
       expect(screen.getByText('Video unavailable')).toBeInTheDocument();
-      expect(screen.getByText(/Test Video 1/)).toBeInTheDocument();
-      expect(screen.getByText(/Test Video 2/)).toBeInTheDocument();
+      expect(screen.getAllByText(/Test Video 1/)[0]).toBeInTheDocument();
+      expect(screen.getAllByText(/Test Video 2/)[0]).toBeInTheDocument();
     });
 
     test('groups failed videos by error message', async () => {
@@ -2449,8 +2449,8 @@ describe('DownloadProgress', () => {
       expect(
         screen.getByText('unable to download video data: HTTP Error 403: Forbidden')
       ).toBeInTheDocument();
-      expect(screen.getByText(/Cosmic Queries/)).toBeInTheDocument();
-      expect(screen.getByText(/Another Episode/)).toBeInTheDocument();
+      expect(screen.getAllByText(/Cosmic Queries/)[0]).toBeInTheDocument();
+      expect(screen.getAllByText(/Another Episode/)[0]).toBeInTheDocument();
     });
 
     test('renders undiagnosed failures unchanged alongside diagnosed ones', async () => {
@@ -2507,7 +2507,7 @@ describe('DownloadProgress', () => {
       ).toBeInTheDocument();
       expect(screen.getByText(/1 video failed:$/)).toBeInTheDocument();
       expect(screen.getByText('Postprocessing failed')).toBeInTheDocument();
-      expect(screen.getByText(/Mystery Video/)).toBeInTheDocument();
+      expect(screen.getAllByText(/Mystery Video/)[0]).toBeInTheDocument();
     });
 
     test('shows YouTube ID links for failed videos with unknown titles', async () => {
@@ -2608,8 +2608,8 @@ describe('DownloadProgress', () => {
         expect(screen.getByText('Summary of last job')).toBeInTheDocument();
       });
       // Known titles render as text; unknown-titled videos render as ID links
-      expect(screen.getByText(/Known Video Title/)).toBeInTheDocument();
-      expect(screen.getByText(/Another Known Video/)).toBeInTheDocument();
+      expect(screen.getAllByText(/Known Video Title/)[0]).toBeInTheDocument();
+      expect(screen.getAllByText(/Another Known Video/)[0]).toBeInTheDocument();
       expect(screen.getByRole('link', { name: 'video2' })).toBeInTheDocument();
     });
 
@@ -2650,7 +2650,7 @@ describe('DownloadProgress', () => {
       // Verify both successes and failures are displayed
       expect(screen.getByText(/✓ 3 videos downloaded, ✗ 1 failed/)).toBeInTheDocument();
       expect(screen.getByText('Failed Downloads')).toBeInTheDocument();
-      expect(screen.getByText(/Failed Video/)).toBeInTheDocument();
+      expect(screen.getAllByText(/Failed Video/)[0]).toBeInTheDocument();
     });
 
     test('displays summary with only failed videos and no downloads', async () => {

@@ -141,6 +141,20 @@ class StrmToolTurboModule {
     }
     await adapter.startScheduledTask(task.Id);
   }
+
+  // Jellyfin only signals cancellation: the task moves to Cancelling and stops
+  // at its next cancellation check, so it may keep running briefly.
+  async stopExtraction(adapter) {
+    const task = await this._findTask(adapter);
+    if (!task) throw new StrmToolTurboError('The StrmToolTurbo extraction task was not found on the server', 404);
+    if (task.State !== 'Running') {
+      const message = task.State === 'Cancelling'
+        ? 'The extraction task is already stopping'
+        : 'The extraction task is not running';
+      throw new StrmToolTurboError(message, 409);
+    }
+    await adapter.stopScheduledTask(task.Id);
+  }
 }
 
 module.exports = new StrmToolTurboModule();

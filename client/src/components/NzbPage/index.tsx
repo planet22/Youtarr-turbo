@@ -14,7 +14,7 @@ interface NzbPageProps {
 }
 
 function NzbPage({ token }: NzbPageProps) {
-  const { stats, deleteCacheEntries, cancelCurrentJob } = useNzbStats(token);
+  const { stats, deleteCacheEntries, cancelCurrentJob, clearFailedGrabs } = useNzbStats(token);
 
   return (
     <Grid container spacing={2}>
@@ -71,7 +71,7 @@ function NzbPage({ token }: NzbPageProps) {
           <AccordionDetails>
             <Grid container spacing={2}>
               <Grid item xs={12}>
-                <NzbFailedGrabsTable grabs={stats?.failedGrabs ?? []} />
+                <NzbFailedGrabsTable grabs={stats?.failedGrabs ?? []} onDeleteAll={clearFailedGrabs} />
               </Grid>
               <Grid item xs={12}>
                 <NzbJobsSection jobs={stats?.jobs ?? null} onCancelCurrentJob={cancelCurrentJob} />

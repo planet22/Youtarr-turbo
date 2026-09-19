@@ -199,7 +199,7 @@ describe('logger.js', () => {
 
       const config = mockPino.mock.calls[0][0];
       expect(config.transport).toBeDefined();
-      expect(config.transport.target).toBe('pino-pretty');
+      expect(config.transport.targets.map((t) => t.target)).toContain('pino-pretty');
     });
 
   });
@@ -235,12 +235,30 @@ describe('logger.js', () => {
       require('../logger');
 
       const config = mockPino.mock.calls[0][0];
-      const transportOptions = config.transport.options;
+      const transportOptions = config.transport.targets.find((t) => t.target === 'pino-pretty').options;
 
       expect(transportOptions.colorize).toBe(true);
       expect(transportOptions.translateTime).toBe('UTC:yyyy-mm-dd HH:MM:ss.l o');
       expect(transportOptions.ignore).toBe('pid,hostname');
       expect(transportOptions.messageFormat).toBe('{if req.id}[{req.id}] {end}{msg}');
+    });
+  });
+
+  describe('File logging target', () => {
+    it('should include the rolling file target outside the test environment', () => {
+      require('../logger');
+
+      const config = mockPino.mock.calls[0][0];
+      expect(config.transport.targets.map((t) => t.target)).toEqual(['pino-pretty', 'pino-roll']);
+    });
+
+    it('should omit the rolling file target when NODE_ENV is test', () => {
+      process.env.NODE_ENV = 'test';
+
+      require('../logger');
+
+      const config = mockPino.mock.calls[0][0];
+      expect(config.transport.targets.map((t) => t.target)).toEqual(['pino-pretty']);
     });
   });
 

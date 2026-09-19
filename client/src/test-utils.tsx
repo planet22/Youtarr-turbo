@@ -7,6 +7,7 @@ import { TooltipProvider } from './components/ui/tooltip';
 
 type WebSocketValue = {
   socket: any;
+  isConnected: boolean;
   subscribe: jest.Mock;
   unsubscribe: jest.Mock;
 } | null;
@@ -14,6 +15,7 @@ type WebSocketValue = {
 export function createMockWebSocketContext(): NonNullable<WebSocketValue> {
   return {
     socket: null,
+    isConnected: false,
     subscribe: jest.fn(),
     unsubscribe: jest.fn(),
   };

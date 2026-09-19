@@ -2,7 +2,7 @@ const { Video } = require('../models');
 const fs = require('fs').promises;
 const path = require('path');
 const logger = require('../logger');
-const { isVideoDirectory, cleanupEmptyChannelDirectory, cleanupEmptyParents, isSubfolderDir, listSubdirectories, removeDirectoryResilient } = require('./filesystem');
+const { isVideoDirectory, cleanupEmptyChannelDirectory, cleanupEmptyParents, removeEmptyDescendants, isSubfolderDir, listSubdirectories, removeDirectoryResilient } = require('./filesystem');
 const m3uGenerator = require('./m3uGenerator');
 
 class VideoDeletionModule {
@@ -760,6 +760,7 @@ ${excludeClause}${minSizeClause}        ORDER BY timeCreated ASC
     const baseDir = configModule.directoryPath;
     const removed = [];
     const errors = [];
+    const prunedDescendants = [];
 
     if (!baseDir) {
       logger.debug('[Orphan Cleanup] No output directory configured, skipping');
@@ -777,6 +778,7 @@ ${excludeClause}${minSizeClause}        ORDER BY timeCreated ASC
           try {
             const channelDirs = await listSubdirectories(dir);
             for (const channelDir of channelDirs) {
+              prunedDescendants.push(...await removeEmptyDescendants(channelDir));
               const wasRemoved = await cleanupEmptyChannelDirectory(channelDir, baseDir, {
                 includeIgnorableFiles: true
               });
@@ -792,6 +794,11 @@ ${excludeClause}${minSizeClause}        ORDER BY timeCreated ASC
           }
         } else {
           // Root-level channel directory
+          // Hidden top-level dirs (.youtarr_tmp, .nzb_staging) hold in-flight work;
+          // only the emptiness check below applies to them.
+          if (!dirName.startsWith('.')) {
+            prunedDescendants.push(...await removeEmptyDescendants(dir));
+          }
           const wasRemoved = await cleanupEmptyChannelDirectory(dir, baseDir, {
             includeIgnorableFiles: true
           });
@@ -799,6 +806,10 @@ ${excludeClause}${minSizeClause}        ORDER BY timeCreated ASC
             removed.push(dir);
           }
         }
+      }
+
+      if (prunedDescendants.length > 0) {
+        logger.info({ count: prunedDescendants.length, directories: prunedDescendants }, '[Orphan Cleanup] Removed empty season/video directories');
       }
 
       if (removed.length > 0) {

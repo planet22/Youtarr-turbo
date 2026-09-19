@@ -71,6 +71,8 @@ const basePlaylist: Playlist = {
   title_filter_regex: 'keepme',
   audio_format: null,
   default_rating: 'PG',
+  media_mode: null,
+  library_mode: null,
   lastFetched: null,
 };
 
@@ -121,6 +123,8 @@ describe('PlaylistSettingsDialog', () => {
         video_quality: '720',
         audio_format: null,
         default_rating: 'PG',
+        media_mode: null,
+        library_mode: null,
         sort_order: 'default',
       });
     });

@@ -16,8 +16,6 @@ const seriesEpisodeResolver = require('./seriesEpisodeResolver');
 const MessageEmitter = require('./messageEmitter');
 const {
   SUBFOLDER_PREFIX,
-  composeVideoFolderName,
-  composeVideoFileTemplate,
   composeEpisodeFileTemplate,
 } = require('./filesystem/constants');
 const { buildSeasonFolderPath } = require('./filesystem/pathBuilder');
@@ -183,7 +181,6 @@ class StrmMaterializer {
   buildOutputPaths(meta, options = {}) {
     const cfg = configModule.getConfig();
     const root = configModule.directoryPath || process.env.DATA_PATH || '/usr/src/app/data';
-    const prefix = cfg.videoFilenamePrefix;
     const id = meta.id;
 
     const channelName = this._safeName(
@@ -985,6 +982,7 @@ class StrmMaterializer {
 
   _safeName(name) {
     return String(name || 'Unknown')
+      // eslint-disable-next-line no-control-regex
       .replace(/[<>:"/\\|?*\x00-\x1f]/g, '_')
       .replace(/\s+/g, ' ')
       .trim() || 'Unknown';

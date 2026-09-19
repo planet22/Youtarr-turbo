@@ -6,6 +6,7 @@ module.exports = {
   debug: jest.fn(),
   trace: jest.fn(),
   fatal: jest.fn(),
+  setLevel: jest.fn(),
   child: jest.fn(() => ({
     info: jest.fn(),
     warn: jest.fn(),

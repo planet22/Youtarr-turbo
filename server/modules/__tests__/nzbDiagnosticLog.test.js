@@ -48,6 +48,19 @@ describe('nzbDiagnosticLog', () => {
     });
   });
 
+  describe('clearDiagnosticEvents', () => {
+    test('deletes only rows of the given kind', async () => {
+      NzbDiagnosticLog.destroy.mockResolvedValueOnce(3);
+      await expect(nzbDiagnosticLog.clearDiagnosticEvents('failedGrab')).resolves.toBe(3);
+      expect(NzbDiagnosticLog.destroy).toHaveBeenCalledWith({ where: { kind: 'failedGrab' } });
+    });
+
+    test('rejects an unknown kind without touching the table', async () => {
+      await expect(nzbDiagnosticLog.clearDiagnosticEvents('bogus')).rejects.toThrow('Unknown diagnostic log kind');
+      expect(NzbDiagnosticLog.destroy).not.toHaveBeenCalled();
+    });
+  });
+
   describe('clearAllDiagnosticEvents', () => {
     test('deletes rows across all three log kinds together', async () => {
       NzbDiagnosticLog.destroy.mockResolvedValueOnce(7);

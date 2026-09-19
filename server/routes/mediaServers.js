@@ -185,6 +185,26 @@ function createMediaServerRoutes({ verifyToken, configModule, mediaServers }) {
 
   /**
    * @swagger
+   * /api/mediaservers/jellyfin/strmtoolturbo/stop:
+   *   post:
+   *     summary: Stop the running StrmToolTurbo media info extraction task
+   *     tags: [Media Servers]
+   *     responses:
+   *       202:
+   *         description: Cancellation requested
+   *       404:
+   *         description: Task not found
+   *       409:
+   *         description: Task is not running or is already stopping
+   */
+  router.post(`${STRMTOOLTURBO_PATH}/stop`, verifyToken, (req, res) =>
+    withStrmToolTurbo(req, res, 'stop', async (adapter) => {
+      await strmToolTurbo.stopExtraction(adapter);
+      res.status(202).json({ stopping: true });
+    }));
+
+  /**
+   * @swagger
    * /api/mediaservers/watch-status:
    *   get:
    *     summary: Get watch status sync state

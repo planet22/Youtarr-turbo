@@ -13,6 +13,7 @@ const mockWebSocketContextValue = {
   subscribe: mockSubscribe,
   unsubscribe: mockUnsubscribe,
   socket: null,
+  isConnected: false,
 };
 
 const renderWithContext = (component: React.ReactElement) =>

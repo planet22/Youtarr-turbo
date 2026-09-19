@@ -18,5 +18,5 @@ module.exports = {
     coverageReporters: ['text', 'lcov', 'html'],
     testTimeout: 10000,
     setupFilesAfterEnv: ['<rootDir>/jest.setup.js'],
-    maxWorkers: 1
+    maxWorkers: '75%'
 };

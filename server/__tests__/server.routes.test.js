@@ -415,6 +415,15 @@ const createServerModule = ({
         jest.doMock('node-cron', () => cronMock);
         jest.doMock('../modules/mediaServers/watchStatusScheduler', () => ({ scheduleTask: jest.fn(), subscribe: jest.fn() }));
         jest.doMock('../modules/channel/channelBackdropBackfill', () => ({ subscribe: jest.fn() }));
+        jest.doMock('../modules/strmMaterializer', () => ({}));
+        // ytdlpOptions route deps that transitively load fs-extra, which the minimal fs stub can't satisfy
+        ['networkTuningBenchmark', 'streamTuningBenchmark', 'streamEncoderTuning', 'hardwareCapabilityTester', 'hardwareDecodeModule'].forEach((name) => {
+          jest.doMock('../modules/' + name, () => ({}));
+        });
+        jest.doMock('../routes/nzb', () => () => require('express').Router());
+        jest.doMock('../routes/ytstream', () => () => require('express').Router());
+        jest.doMock('../modules/apiKeyModule', () => ({}));
+        jest.doMock('../models/video', () => ({}));
         jest.doMock('express-rate-limit', () => Object.assign(rateLimitMiddleware, { ipKeyGenerator: rateLimitMiddleware.ipKeyGenerator }));
         jest.doMock('multer', () => multerMock);
         jest.doMock('https', () => httpsMock);
@@ -1043,7 +1052,8 @@ describe('server routes - channels', () => {
         'off', // default protectedFilter
         'off', // default missingFilter
         'off', // default ignoredFilter
-        'off' // default watchedFilter
+        'off', // default watchedFilter
+        false // default applyChannelFilters
       );
       expect(res.statusCode).toBe(200);
       expect(res.body).toEqual({
@@ -1112,7 +1122,8 @@ describe('server routes - channels', () => {
         'off', // default protectedFilter
         'off', // default missingFilter
         'off', // default ignoredFilter
-        'only' // watchedFilter
+        'only', // watchedFilter
+        false // default applyChannelFilters
       );
       expect(res.statusCode).toBe(200);
     });
@@ -1155,7 +1166,8 @@ describe('server routes - channels', () => {
         'off', // default protectedFilter
         'off', // default missingFilter
         'off', // default ignoredFilter
-        'off' // default watchedFilter
+        'off', // default watchedFilter
+        false // default applyChannelFilters
       );
       expect(res.statusCode).toBe(200);
     });
@@ -1438,6 +1450,13 @@ describe('server routes - videos', () => {
         protectedFilter: 'off',
         missingFilter: 'off',
         watchedFilter: 'off',
+        addedDateFrom: null,
+        addedDateTo: null,
+        metadataCacheFilter: 'off',
+        cachedVideoFilter: 'off',
+        metadataOnlyFilter: 'off',
+        showUntracked: false,
+        strmFilter: 'off'
       });
       expect(res.statusCode).toBe(200);
       expect(res.body).toEqual({
@@ -1489,6 +1508,13 @@ describe('server routes - videos', () => {
         protectedFilter: 'off',
         missingFilter: 'off',
         watchedFilter: 'exclude',
+        addedDateFrom: null,
+        addedDateTo: null,
+        metadataCacheFilter: 'off',
+        cachedVideoFilter: 'off',
+        metadataOnlyFilter: 'off',
+        showUntracked: false,
+        strmFilter: 'off'
       });
       expect(res.statusCode).toBe(200);
     });

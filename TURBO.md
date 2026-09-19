@@ -99,7 +99,7 @@ Modeled on the [jellyfin-youtube-plugin](https://github.com/kingschnulli/jellyfi
 
 ### The three recommended modes
 
-Each has a ready-to-paste config in the [Streaming getting-started guide](docs/GETTING_STARTED_STREAMING.md#step-3--pick-a-playback-mode), with a side-by-side comparison table. All three examples turn on `forceServerSettings`, so switching between them applies to every existing `.strm` immediately.
+Each has a ready-to-paste config in the [Streaming getting-started guide](docs/GETTING_STARTED_STREAMING.md#step-3--pick-a-playback-mode), with a side-by-side comparison table. All three examples turn on `forceServerSettings`, so switching between them applies to every existing `.strm` immediately. **When experimenting with modes, regenerate the sidecars afterwards:** each `.strm` has a `.strmtool.json` that declares the stream's container (`hls`, `mp4` or `mkv`) and Jellyfin's StrmToolTurbo plugin trusts it instead of probing, so after a switch (say HLS to MKV) run Settings → Maintenance & Rescan → **Regenerate video metadata**, then Settings → Jellyfin → StrmToolTurbo Plugin → **Run extraction now** with **Force refresh: ignore existing media streams** on. See [Switching modes on an existing library](docs/GETTING_STARTED_STREAMING.md#switching-modes-on-an-existing-library). This is only needed while experimenting, not for a library that has always used one mode.
 
 **1. YouTube HLS passthrough (`youtube-hls`)** — the lightest option. One `yt-dlp` call finds YouTube's own HLS manifest, Youtarr-Turbo picks the variant matching **Stream quality** (and the audio track matching **Audio language**), and hands the player that playlist. YouTube's playlist lists every segment and its duration up front, so the player sees the exact length immediately and can seek anywhere. It is limited to what YouTube offers over HLS (H.264, up to 1080p), and age-restricted or members-only videos need cookies. The player must reach YouTube from the same network as the server, since URLs can be IP-bound and expire after a few hours; resolved playlists are cached for 30 minutes. Container, Transcode, the hardware settings, Calculated length, Probe shortcut, HLS master playlist, and Cache on play are all ignored.
 
@@ -289,12 +289,14 @@ A dedicated page (separate from Settings → Sonarr/Radarr) shows live activity 
 ## Deeper media-server integration
 
 - **Per-subfolder library mapping** for Jellyfin (not Emby) — different channel subfolders can land in different media-server libraries, independent of one global default library.
+- **StrmToolTurbo plugin control** — Settings → Jellyfin → StrmToolTurbo Plugin (needs an administrator API key) shows the plugin's status, edits its settings live, and runs its media-info extraction task from Youtarr-Turbo, so STRM items get correct duration/container from their `.strmtool.json` files. After changing Playback mode, turn on **Force refresh: ignore existing media streams** (leave **Force refresh: ignore cache** off), save, and **Run extraction now** to overwrite what Jellyfin already stored.
 
 ---
 
 ## Maintenance extras
 
 - **Resolution-tag backfill** — patches an "Available: ..." resolution tag onto videos that were downloaded before this feature existed, using [already-cached metadata](#yt-dlp-metadata-caching) (no fresh YouTube calls).
+- **Regenerate video metadata** — fully rewrites the `.nfo` for every downloaded/STRM'd video from cached metadata and, for STRM videos, regenerates the `.strmtool.json` sidecar from the *current* Streaming settings, without re-materializing any `.strm` or fetching from YouTube. Run it after changing the Playback mode or container so Jellyfin's cached container info doesn't go stale (see [Switching modes on an existing library](docs/GETTING_STARTED_STREAMING.md#switching-modes-on-an-existing-library)); it needs **Write Jellyfin StrmTool cache** on.
 - The existing filesystem rescan (reconciling Youtarr-Turbo's database against what's actually on disk) is unchanged from upstream but lives alongside this new tool on the same Maintenance page.
 
 ---

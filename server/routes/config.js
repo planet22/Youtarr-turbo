@@ -358,6 +358,21 @@ module.exports = function createConfigRoutes({ verifyToken, configModule, valida
   });
 
   /**
+   * Clears just the Failed Grabs log - the NZB page's "Delete all" button on
+   * that table (unlike DELETE /api/nzb/diagnostic-logs, which clears all
+   * three kinds).
+   */
+  router.delete('/api/nzb/failed-grabs', verifyToken, async (req, res, next) => {
+    try {
+      const nzbDiagnosticLog = require('../modules/nzbDiagnosticLog');
+      const removed = await nzbDiagnosticLog.clearDiagnosticEvents('failedGrab');
+      res.json({ removed });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  /**
    * Bulk count/clear for the Settings UI's "NZB Video Cache" section - the
    * nzb_resolution_cache table (nzbThumbnailProbe.js's per-video thumb/
    * extract resolution findings).

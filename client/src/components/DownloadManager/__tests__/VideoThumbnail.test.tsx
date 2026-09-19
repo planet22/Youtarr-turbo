@@ -53,9 +53,19 @@ describe('VideoThumbnail', () => {
     expect(onClick).toHaveBeenCalledTimes(1);
   });
 
-  test('calls onError when the image fails to load', () => {
+  test('falls back to the YouTube CDN thumbnail on the first load failure without calling onError', () => {
     const { onError } = renderThumbnail();
 
+    fireEvent.error(screen.getByRole('img', { name: 'Test Video' }));
+
+    expect(screen.getByRole('img', { name: 'Test Video' })).toHaveAttribute('src', 'https://i.ytimg.com/vi/abc123/hqdefault.jpg');
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  test('calls onError when the fallback image also fails to load', () => {
+    const { onError } = renderThumbnail();
+
+    fireEvent.error(screen.getByRole('img', { name: 'Test Video' }));
     fireEvent.error(screen.getByRole('img', { name: 'Test Video' }));
 
     expect(onError).toHaveBeenCalledTimes(1);

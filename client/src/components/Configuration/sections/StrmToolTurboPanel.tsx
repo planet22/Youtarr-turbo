@@ -56,8 +56,9 @@ function chipFor(
 }
 
 export const StrmToolTurboPanel: React.FC<StrmToolTurboPanelProps> = ({ token }) => {
-  const { status, loading, error, saving, saveError, starting, runError, refresh, save, run } =
-    useStrmToolTurbo(token);
+  const {
+    status, loading, error, saving, saveError, starting, runError, stopping, stopError, refresh, save, run, stop,
+  } = useStrmToolTurbo(token);
   const chip = chipFor(loading, error, status?.installed, status?.pluginStatus);
   const active = status?.installed && status.pluginStatus === 'Active';
 
@@ -104,14 +105,27 @@ export const StrmToolTurboPanel: React.FC<StrmToolTurboPanelProps> = ({ token })
             <Typography variant="body2" color="text.secondary" className="mb-3">
               Probes every strm file in the library that is missing media info, using the settings above.
             </Typography>
-            <Button
-              variant="contained"
-              onClick={run}
-              disabled={!token || starting || !status.task || status.task.running}
-              className="h-10 min-w-[190px] whitespace-nowrap"
-            >
-              {status.task?.running ? 'Extraction running...' : starting ? 'Starting...' : 'Run extraction now'}
-            </Button>
+            <Box className="flex items-center flex-wrap gap-2">
+              <Button
+                variant="contained"
+                onClick={run}
+                disabled={!token || starting || !status.task || status.task.running}
+                className="h-10 min-w-[190px] whitespace-nowrap"
+              >
+                {status.task?.running ? 'Extraction running...' : starting ? 'Starting...' : 'Run extraction now'}
+              </Button>
+              {status.task?.running && (
+                <Button
+                  variant="outlined"
+                  color="error"
+                  onClick={stop}
+                  disabled={!token || stopping || status.task.state === 'Cancelling'}
+                  className="h-10 whitespace-nowrap"
+                >
+                  {status.task.state === 'Cancelling' || stopping ? 'Stopping...' : 'Stop extraction'}
+                </Button>
+              )}
+            </Box>
             {!status.task && (
               <Typography variant="body2" color="error" className="mt-2">
                 The extraction task was not found on the server.
@@ -120,6 +134,11 @@ export const StrmToolTurboPanel: React.FC<StrmToolTurboPanelProps> = ({ token })
             {runError && (
               <Typography variant="body2" color="error" className="mt-2">
                 {runError}
+              </Typography>
+            )}
+            {stopError && (
+              <Typography variant="body2" color="error" className="mt-2">
+                {stopError}
               </Typography>
             )}
             {status.task && <TaskRunSummary task={status.task} />}

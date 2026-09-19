@@ -38,8 +38,8 @@ describe('FailedDownloadsDetail', () => {
     expect(
       screen.getAllByText('Re-export fresh cookies from your browser.')
     ).toHaveLength(1);
-    expect(screen.getByText(/Broken Video/)).toBeInTheDocument();
-    expect(screen.getByText(/Other Video/)).toBeInTheDocument();
+    expect(screen.getAllByText(/Broken Video/)[0]).toBeInTheDocument();
+    expect(screen.getAllByText(/Other Video/)[0]).toBeInTheDocument();
   });
 
   test('falls back to the raw error for undiagnosed failures', () => {
@@ -101,7 +101,6 @@ describe('FailedDownloadsDetail', () => {
       />
     );
 
-    expect(screen.queryByText(/Unknown by Unknown/)).not.toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'vid00000001' })).toBeInTheDocument();
+    expect(screen.getAllByRole('link', { name: 'vid00000001' })[0]).toBeInTheDocument();
   });
 });

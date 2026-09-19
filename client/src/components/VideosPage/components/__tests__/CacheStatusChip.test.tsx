@@ -60,7 +60,8 @@ describe('CacheStatusChip', () => {
     });
 
     it('calls onClick when clicked', () => {
-      const onClick = renderChip({ hasStealthCache: true, stealthCacheFileSize: 1048576 }, 'stealth');
+      const onClick = jest.fn();
+      renderChip({ hasStealthCache: true, stealthCacheFileSize: 1048576 }, 'stealth', onClick);
       fireEvent.click(screen.getByText('1MB'));
       expect(onClick).toHaveBeenCalledTimes(1);
     });

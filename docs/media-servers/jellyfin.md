@@ -185,6 +185,19 @@ Organize content by type:
 3. Disable other metadata providers
 4. Manually refresh metadata for items
 
+### STRM Video Misbehaves After Changing Playback Mode
+
+**Problem**: After switching the streaming Playback mode or container (for example HLS to Matroska), existing STRM items in Jellyfin show a wrong or missing duration, get transcoded unnecessarily, or won't start. This normally only happens while experimenting; a library that has always used one mode isn't affected.
+
+**Cause**: The StrmToolTurbo plugin reads each item's `.strmtool.json` sidecar instead of probing the stream, and those files still declare the old container.
+
+**Solutions**:
+1. Go to **Settings -> Maintenance & Rescan -> Regenerate video metadata** in Youtarr-Turbo and click **Regenerate video metadata** (**Write Jellyfin StrmTool cache** must be on).
+2. Go to **Settings -> Jellyfin -> StrmToolTurbo Plugin**, turn on **Force refresh: ignore existing media streams**, leave **Force refresh: ignore cache** off, click **Save to Jellyfin**, then **Run extraction now**.
+3. Restart the Jellyfin client if it still behaves as before.
+
+See [Switching modes on an existing library](../GETTING_STARTED_STREAMING.md#switching-modes-on-an-existing-library) for the full explanation.
+
 ### Channel .m3u Not Appearing as a Playlist
 
 **Problem**: A channel's "Generate channel playlist file (.m3u)" setting is on and the file exists on disk, but no playlist shows up in Jellyfin

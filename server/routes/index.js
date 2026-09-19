@@ -26,6 +26,7 @@ const channelSettingsModule = require('../modules/channelSettingsModule');
 const channelDownloadAllModule = require('../modules/channelDownloadAllModule');
 const ratingMapper = require('../modules/ratingMapper');
 const subfolderModule = require('../modules/subfolderModule');
+const cronJobs = require('../modules/cronJobs');
 const playlistVideoFilters = require('../modules/playlistVideoFilters');
 const models = require('../models');
 const createYtStreamRoutes = require('./ytstream');
@@ -115,12 +116,12 @@ function registerRoutes(app, deps) {
   app.use(createMediaServerRoutes({ verifyToken, configModule, mediaServers }));
 
   // Maintenance routes
-  app.use(createMaintenanceRoutes({ verifyToken, videosModule, configModule, jobModule }));
+  app.use(createMaintenanceRoutes({ verifyToken, videosModule, configModule, jobModule, cronJobs }));
 
   // Subfolder registry routes
   app.use(createSubfolderRoutes({ verifyToken, subfolderModule }));
 
-/*
+  /*
  * GET /api/ytstream/:youtubeId is public (no token) so media servers/players
  * can play STRM sidecar files. mode=direct proxies a resolved upstream URL,
  * mode=hls/hls-buffer re-stream through a local ffmpeg process into a real
@@ -128,7 +129,7 @@ function registerRoutes(app, deps) {
  */
   app.use(createYtStreamRoutes({ verifyToken, getClientAddress, models }));
 
-/*
+  /*
  * /nzb/* makes Youtarr act as a Newznab search indexer + SABnzbd-compatible
  * download client for Sonarr/Radarr/Prowlarr (see docs/NZB.md). Deliberately
  * mounted outside /api so it doesn't inherit apiLimiter/verifyToken - it has

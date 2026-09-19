@@ -504,10 +504,11 @@ export const CONFIG_FIELDS = {
       //            it's only ever used to confirm/correct thumb's uncertain
       //            or "hd" results. If fixed and thumb are both off, this
       //            becomes the only remaining check and runs directly.
+      //            Off by default (opt-in).
       resolutionDetection: {
         fixed: true,
         thumb: true,
-        extract: true,
+        extract: false,
       } as { fixed: boolean; thumb: boolean; extract: boolean },
       // How many rows each of the three nzb_diagnostic_log-backed logs
       // (see server/modules/nzbDiagnosticLog.js) keeps before pruning the

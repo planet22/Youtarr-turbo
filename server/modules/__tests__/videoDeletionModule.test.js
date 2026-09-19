@@ -45,6 +45,7 @@ describe('VideoDeletionModule', () => {
       isVideoDirectory: jest.fn(() => true),
       cleanupEmptyChannelDirectory: jest.fn().mockResolvedValue(false),
       cleanupEmptyParents: jest.fn().mockResolvedValue(),
+      removeEmptyDescendants: jest.fn().mockResolvedValue([]),
       isSubfolderDir: jest.fn((name) => name.startsWith('__')),
       listSubdirectories: jest.fn().mockResolvedValue([]),
       removeDirectoryResilient: jest.fn().mockResolvedValue()
@@ -62,9 +63,11 @@ describe('VideoDeletionModule', () => {
 
     jest.doMock('../filesystem', () => mockFilesystem);
 
-    // Mock configModule for _tryCleanupChannelDirectory
+    // Mock configModule for _tryCleanupChannelDirectory. The STRM revert-on-delete
+    // path is disabled so these tests exercise the normal file deletion flow.
     jest.doMock('../configModule', () => ({
-      directoryPath: '/test/output'
+      directoryPath: '/test/output',
+      getConfig: jest.fn().mockReturnValue({ autoRemovalPreserveStrmFallback: false })
     }));
 
     // Require the module after mocks are in place
@@ -1179,6 +1182,7 @@ describe('VideoDeletionModule', () => {
 
     test('should perform actual age-based cleanup', async () => {
       mockConfigModule.getConfig.mockReturnValue({
+        autoRemovalPreserveStrmFallback: false,
         autoRemovalEnabled: true,
         autoRemovalVideoAgeThreshold: '30',
         autoRemovalFreeSpaceThreshold: null
@@ -1422,6 +1426,7 @@ describe('VideoDeletionModule', () => {
 
     test('should handle partial deletion failures', async () => {
       mockConfigModule.getConfig.mockReturnValue({
+        autoRemovalPreserveStrmFallback: false,
         autoRemovalEnabled: true,
         autoRemovalVideoAgeThreshold: '30',
         autoRemovalFreeSpaceThreshold: null
@@ -1501,7 +1506,8 @@ describe('VideoDeletionModule', () => {
       expect(mockAutoRemovalQueries.getWatchedRemovalCandidates).toHaveBeenCalledWith({
         minDaysSinceWatched: 0,
         minVideoAgeDays: 0,
-        excludeIds: []
+        excludeIds: [],
+        minFileSizeBytes: 0
       });
       expect(result.plan.watchedStrategy.enabled).toBe(true);
       expect(result.plan.watchedStrategy.candidateCount).toBe(2);
@@ -1532,7 +1538,8 @@ describe('VideoDeletionModule', () => {
       expect(mockAutoRemovalQueries.getWatchedRemovalCandidates).toHaveBeenCalledWith({
         minDaysSinceWatched: 7,
         minVideoAgeDays: 30,
-        excludeIds: []
+        excludeIds: [],
+        minFileSizeBytes: 0
       });
       expect(result.plan.watchedStrategy.minDaysSinceWatched).toBe(7);
       expect(result.plan.watchedStrategy.minVideoAgeDays).toBe(30);
@@ -1540,6 +1547,7 @@ describe('VideoDeletionModule', () => {
 
     test('should perform actual watched-based cleanup', async () => {
       mockConfigModule.getConfig.mockReturnValue({
+        autoRemovalPreserveStrmFallback: false,
         autoRemovalEnabled: true,
         autoRemovalVideoAgeThreshold: null,
         autoRemovalFreeSpaceThreshold: null,
@@ -1617,7 +1625,8 @@ describe('VideoDeletionModule', () => {
       expect(mockAutoRemovalQueries.getWatchedRemovalCandidates).toHaveBeenCalledWith({
         minDaysSinceWatched: 0,
         minVideoAgeDays: 0,
-        excludeIds: [7]
+        excludeIds: [7],
+        minFileSizeBytes: 0
       });
     });
 
@@ -1634,7 +1643,8 @@ describe('VideoDeletionModule', () => {
       expect(mockAutoRemovalQueries.getWatchedRemovalCandidates).toHaveBeenCalledWith({
         minDaysSinceWatched: 0,
         minVideoAgeDays: 0,
-        excludeIds: []
+        excludeIds: [],
+        minFileSizeBytes: 0
       });
     });
 
@@ -1680,7 +1690,8 @@ describe('VideoDeletionModule', () => {
       expect(mockAutoRemovalQueries.getWatchedRemovalCandidates).toHaveBeenCalledWith({
         minDaysSinceWatched: 0,
         minVideoAgeDays: 0,
-        excludeIds: [101, 102]
+        excludeIds: [101, 102],
+        minFileSizeBytes: 0
       });
       expect(result.plan.keepRecent).toEqual({ count: 2, protectedCount: 2 });
     });
@@ -1806,6 +1817,7 @@ describe('VideoDeletionModule', () => {
         isVideoDirectory: jest.fn(() => true),
         cleanupEmptyChannelDirectory: jest.fn().mockResolvedValue(false),
         cleanupEmptyParents: jest.fn().mockResolvedValue(),
+        removeEmptyDescendants: jest.fn().mockResolvedValue([]),
         isSubfolderDir: jest.fn((name) => name.startsWith('__')),
         listSubdirectories: jest.fn().mockResolvedValue([]),
         removeDirectoryResilient: jest.fn().mockResolvedValue()
@@ -1838,6 +1850,22 @@ describe('VideoDeletionModule', () => {
         '/test/output',
         { includeIgnorableFiles: true }
       );
+    });
+
+    test('prunes empty season/video directories inside each root-level channel directory', async () => {
+      mockFilesystem.listSubdirectories.mockResolvedValue(['/test/output/Some Channel']);
+
+      await VideoDeletionModule.cleanupOrphanDirectories();
+
+      expect(mockFilesystem.removeEmptyDescendants).toHaveBeenCalledWith('/test/output/Some Channel');
+    });
+
+    test('does not prune inside hidden top-level directories', async () => {
+      mockFilesystem.listSubdirectories.mockResolvedValue(['/test/output/.youtarr_tmp']);
+
+      await VideoDeletionModule.cleanupOrphanDirectories();
+
+      expect(mockFilesystem.removeEmptyDescendants).not.toHaveBeenCalled();
     });
 
     test('should scan subfolder children as channel directories', async () => {

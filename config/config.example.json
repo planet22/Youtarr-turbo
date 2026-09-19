@@ -158,7 +158,7 @@
             "failedGrabs": 20
         },
         "resolutionDetection": {
-            "extract": true,
+            "extract": false,
             "fixed": true,
             "thumb": true
         }

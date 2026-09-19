@@ -28,6 +28,8 @@ const basePlaylist: Playlist = {
   title_filter_regex: null,
   audio_format: null,
   default_rating: null,
+  media_mode: null,
+  library_mode: null,
   lastFetched: null,
 };
 

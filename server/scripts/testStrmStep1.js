@@ -8,7 +8,6 @@
  *   node server/scripts/testStrmStep1.js dQw4w9WgXcQ /tmp/youtarr-strm-test
  */
 
-const path = require('path');
 const fs = require('fs');
 
 const strmMaterializer = require('../modules/strmMaterializer');

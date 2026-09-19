@@ -56,6 +56,9 @@ describe('Channel Poster Functionality', () => {
       findOne: jest.fn()
     }));
     jest.doMock('../../models/channelvideo', () => ({}));
+    // These pull in models/index.js, whose associations need real models
+    jest.doMock('../m3uGenerator', () => ({}));
+    jest.doMock('../mediaServers/watchStatusQueries', () => ({}));
     jest.doMock('../messageEmitter', () => ({
       emitMessage: jest.fn()
     }));
@@ -101,10 +104,15 @@ describe('Channel Poster Functionality', () => {
       await channelModule.backfillChannelImages(channels);
 
       // Should copy poster for channel 1 but not channel 2
-      expect(fs.copySync).toHaveBeenCalledTimes(1);
+      expect(fs.copySync).toHaveBeenCalledTimes(2);
       expect(fs.copySync).toHaveBeenCalledWith(
         '/images/channelthumb-UC123.jpg',
         '/videos/Test Channel 1/poster.jpg',
+        { overwrite: true }
+      );
+      expect(fs.copySync).toHaveBeenCalledWith(
+        '/images/channelthumb-UC123.jpg',
+        '/videos/Test Channel 1/logo.jpg',
         { overwrite: true }
       );
     });
@@ -139,10 +147,15 @@ describe('Channel Poster Functionality', () => {
       await channelModule.backfillChannelImages(channels);
 
       // Should only process the valid channel
-      expect(fs.copySync).toHaveBeenCalledTimes(1);
+      expect(fs.copySync).toHaveBeenCalledTimes(2);
       expect(fs.copySync).toHaveBeenCalledWith(
         '/images/channelthumb-UC456.jpg',
         '/videos/Valid Channel/poster.jpg',
+        { overwrite: true }
+      );
+      expect(fs.copySync).toHaveBeenCalledWith(
+        '/images/channelthumb-UC456.jpg',
+        '/videos/Valid Channel/logo.jpg',
         { overwrite: true }
       );
     });
@@ -224,10 +237,15 @@ describe('Channel Poster Functionality', () => {
 
       await channelModule.backfillChannelImages(channels);
 
-      expect(fs.copySync).toHaveBeenCalledTimes(1);
+      expect(fs.copySync).toHaveBeenCalledTimes(2);
       expect(fs.copySync).toHaveBeenCalledWith(
         '/images/channelbanner-UC123.jpg',
         '/videos/Test Channel/backdrop.jpg',
+        { overwrite: true }
+      );
+      expect(fs.copySync).toHaveBeenCalledWith(
+        '/images/channelbanner-UC123.jpg',
+        '/videos/Test Channel/banner.jpg',
         { overwrite: true }
       );
     });
@@ -264,10 +282,15 @@ describe('Channel Poster Functionality', () => {
 
       await channelModule.backfillChannelImages(channels);
 
-      expect(fs.copySync).toHaveBeenCalledTimes(1);
+      expect(fs.copySync).toHaveBeenCalledTimes(2);
       expect(fs.copySync).toHaveBeenCalledWith(
         '/images/channelbanner-UC123.jpg',
         '/videos/__GlobalDefault/Test Channel/backdrop.jpg',
+        { overwrite: true }
+      );
+      expect(fs.copySync).toHaveBeenCalledWith(
+        '/images/channelbanner-UC123.jpg',
+        '/videos/__GlobalDefault/Test Channel/banner.jpg',
         { overwrite: true }
       );
     });
@@ -289,10 +312,15 @@ describe('Channel Poster Functionality', () => {
 
       await channelModule.backfillChannelImages(channels);
 
-      expect(fs.copySync).toHaveBeenCalledTimes(1);
+      expect(fs.copySync).toHaveBeenCalledTimes(2);
       expect(fs.copySync).toHaveBeenCalledWith(
         '/images/channelthumb-UC123.jpg',
         '/videos/__Library1/Test Channel/poster.jpg',
+        { overwrite: true }
+      );
+      expect(fs.copySync).toHaveBeenCalledWith(
+        '/images/channelthumb-UC123.jpg',
+        '/videos/__Library1/Test Channel/logo.jpg',
         { overwrite: true }
       );
     });
@@ -314,10 +342,15 @@ describe('Channel Poster Functionality', () => {
 
       await channelModule.backfillChannelImages(channels);
 
-      expect(fs.copySync).toHaveBeenCalledTimes(1);
+      expect(fs.copySync).toHaveBeenCalledTimes(2);
       expect(fs.copySync).toHaveBeenCalledWith(
         '/images/channelthumb-UC123.jpg',
         '/videos/Test Channel/poster.jpg',
+        { overwrite: true }
+      );
+      expect(fs.copySync).toHaveBeenCalledWith(
+        '/images/channelthumb-UC123.jpg',
+        '/videos/Test Channel/logo.jpg',
         { overwrite: true }
       );
     });

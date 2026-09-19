@@ -105,21 +105,25 @@ async function waitForRangeAvailable(req, { getSize, isDone, isFailed, logContex
  * @returns {null | {source: 'base'|'stream', srcStart: number, srcEnd: number, start: number, end: number, total: number}}
  *   null when the range is unparseable or starts past the virtual end (416).
  */
-function resolveVirtualRange({ rangeHeader, baseSize, streamSize }) {
-  const total = baseSize + streamSize;
-  if (total <= 0) return null;
+function resolveVirtualRange({ rangeHeader, baseSize, streamSize, declaredTotal = null }) {
+  const written = baseSize + streamSize;
+  // With a declared total (mkv resume) ranges are read against it, so a player
+  // can seek into bytes that don't exist yet; only what is written is sent.
+  const total = declaredTotal !== null && declaredTotal !== undefined ? declaredTotal : written;
+  if (total <= 0 || written <= 0) return null;
   const range = parseSingleRange(rangeHeader || 'bytes=0-', total);
-  if (!range) return null;
+  if (!range || range.start >= written) return null;
   if (range.start < baseSize) {
     const srcEnd = Math.min(range.end, baseSize - 1);
     return { source: 'base', srcStart: range.start, srcEnd, start: range.start, end: srcEnd, total };
   }
+  const end = Math.min(range.end, written - 1);
   return {
     source: 'stream',
     srcStart: range.start - baseSize,
-    srcEnd: range.end - baseSize,
+    srcEnd: end - baseSize,
     start: range.start,
-    end: range.end,
+    end,
     total,
   };
 }
@@ -190,20 +194,20 @@ function serveDeclaredRange(session, req, res, onServed, onBytesSent) {
 }
 
 /** Serves one Range request from a resume session's virtual file - see resolveVirtualRange. */
-function serveResumeAwareRange(session, req, res, onServed, onBytesSent) {
+function serveResumeAwareRange(session, req, res, onServed, onBytesSent, declaredTotal = null) {
   const baseSize = session.resumeBaseCopy.size;
   // mkv resume: only the resume file's clusters continue the base (its own
   // header is skipped), and nothing of it is servable until its first cluster
   // has been checked against the seam - see mkvResume.getServableResumeBytes.
   const mkvSeam = session.resumeBaseCopy.mkv || null;
   const streamSize = getServableResumeBytes(session, statSize(session.streamPath));
-  const resolved = resolveVirtualRange({ rangeHeader: req.headers.range, baseSize, streamSize });
+  const resolved = resolveVirtualRange({ rangeHeader: req.headers.range, baseSize, streamSize, declaredTotal });
   if (!resolved) {
     streamDebug(
       { sessionKey: session.key, range: req.headers.range || null, baseSize, streamSize },
       'ytstream: hls-byterange resume serve - unparseable or out-of-range Range header, responding 416'
     );
-    res.status(416).set('Content-Range', `bytes */${baseSize + streamSize}`).end();
+    res.status(416).set('Content-Range', `bytes */${declaredTotal !== null ? declaredTotal : baseSize + streamSize}`).end();
     return;
   }
   const filePath = resolved.source === 'base' ? session.resumeBaseCopy.path : session.streamPath;

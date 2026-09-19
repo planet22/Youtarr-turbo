@@ -12,7 +12,8 @@ export function formatRelativeTime(timestampMs: number): string {
   const diffMinutes = Math.round(diffSeconds / 60);
   if (diffMinutes < 60) return `${diffMinutes}m ago`;
   const diffHours = Math.round(diffMinutes / 60);
-  return `${diffHours}h ago`;
+  if (diffHours < 24) return `${diffHours}h ago`;
+  return `${Math.round(diffHours / 24)}d ago`;
 }
 
 // "Resolution" column on the Recent Queries table - applyResolutionDetection's

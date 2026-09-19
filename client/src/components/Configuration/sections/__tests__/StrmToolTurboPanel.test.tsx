@@ -7,7 +7,11 @@ import type { StrmToolTurboStatus } from '../../hooks/useStrmToolTurbo';
 const mockRun = jest.fn();
 const mockSave = jest.fn();
 const mockRefresh = jest.fn();
+const mockStop = jest.fn();
 const hookReturn = {
+  stopping: false,
+  stopError: null as string | null,
+  stop: mockStop,
   status: null as StrmToolTurboStatus | null,
   loading: false,
   error: null as string | null,
@@ -56,6 +60,7 @@ describe('StrmToolTurboPanel', () => {
     hookReturn.saveError = null;
     hookReturn.starting = false;
     hookReturn.runError = null;
+    hookReturn.stopError = null;
   });
 
   test('shows a not-installed message when the plugin is missing', () => {
@@ -94,6 +99,32 @@ describe('StrmToolTurboPanel', () => {
     hookReturn.status = activeStatus({ ...idleTask, state: 'Running', running: true, progressPercent: 30 });
     renderWithProviders(<StrmToolTurboPanel token="tok" />);
     expect(screen.getByRole('button', { name: 'Extraction running...' })).toBeDisabled();
+  });
+
+  test('offers a stop button only while the task is running', () => {
+    hookReturn.status = activeStatus(idleTask);
+    renderWithProviders(<StrmToolTurboPanel token="tok" />);
+    expect(screen.queryByRole('button', { name: 'Stop extraction' })).not.toBeInTheDocument();
+  });
+
+  test('stops the extraction from the stop button', async () => {
+    hookReturn.status = activeStatus({ ...idleTask, state: 'Running', running: true });
+    renderWithProviders(<StrmToolTurboPanel token="tok" />);
+    await userEvent.click(screen.getByRole('button', { name: 'Stop extraction' }));
+    expect(mockStop).toHaveBeenCalledTimes(1);
+  });
+
+  test('disables the stop button while cancelling', () => {
+    hookReturn.status = activeStatus({ ...idleTask, state: 'Cancelling', running: true });
+    renderWithProviders(<StrmToolTurboPanel token="tok" />);
+    expect(screen.getByRole('button', { name: 'Stopping...' })).toBeDisabled();
+  });
+
+  test('shows a stop error', () => {
+    hookReturn.status = activeStatus({ ...idleTask, state: 'Running', running: true });
+    hookReturn.stopError = 'Failed to stop the extraction task';
+    renderWithProviders(<StrmToolTurboPanel token="tok" />);
+    expect(screen.getByText('Failed to stop the extraction task')).toBeInTheDocument();
   });
 
   test('shows progress while running', () => {

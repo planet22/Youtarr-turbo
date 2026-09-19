@@ -86,6 +86,8 @@ describe('channelCatalog', () => {
           terminated_at: null,
           auto_removal_protected: false,
           auto_removal_keep_recent_count: null,
+          media_mode: null,
+          library_mode: null,
         },
         {
           url: 'https://youtube.com/@channel2',
@@ -102,6 +104,8 @@ describe('channelCatalog', () => {
           terminated_at: null,
           auto_removal_protected: false,
           auto_removal_keep_recent_count: null,
+          media_mode: null,
+          library_mode: null,
         }
       ]);
     });
@@ -191,6 +195,8 @@ describe('channelCatalog', () => {
             terminated_at: null,
             auto_removal_protected: false,
             auto_removal_keep_recent_count: null,
+            media_mode: null,
+            library_mode: null,
           }
         ],
         total: 25,

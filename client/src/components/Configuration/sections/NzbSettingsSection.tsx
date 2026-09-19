@@ -140,7 +140,7 @@ export const NzbSettingsSection: React.FC<Props> = ({
     onConfigChange({ nzb: { ...nzb, ...patch } });
   };
 
-  const resolutionDetection = nzb.resolutionDetection ?? { fixed: true, thumb: true, extract: true };
+  const resolutionDetection = nzb.resolutionDetection ?? { fixed: true, thumb: true, extract: false };
   const setResolutionDetection = (patch: Partial<typeof resolutionDetection>) => {
     setNzb({ resolutionDetection: { ...resolutionDetection, ...patch } });
   };

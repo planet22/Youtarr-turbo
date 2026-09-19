@@ -120,9 +120,9 @@ describe('mkvResume', () => {
       expect(pickResumePoint(scan)).toMatchObject({ ok: true, seamMs: 45000, keptClusters: 9 });
     });
 
-    it('starts the resume pass a hair after the seam keyframe', () => {
+    it('keeps the resume pass from half a second before the seam keyframe', () => {
       const scan = scanMkv(write('a.mkv', mkvHeader(), ...range(0, 60000)));
-      expect(pickResumePoint(scan).resumeFromSeconds).toBeCloseTo(45.05, 3);
+      expect(pickResumePoint(scan).resumeFromSeconds).toBeCloseTo(44.5, 3);
     });
 
     it('skips clusters that do not start on a keyframe', () => {
@@ -174,13 +174,59 @@ describe('mkvResume', () => {
       expect(refreshLiveSeam(session)).toBe('ok');
     });
 
-    it('flags a mismatch when the resume pass began a whole GOP away', () => {
+    it('waits while the resume pass is still before the seam', () => {
       const session = sessionFor(write('r.mkv', mkvHeader(), cluster(40000)), 45000);
+      expect(refreshLiveSeam(session)).toBe('pending');
+    });
+
+    it('joins at the cluster that starts at the seam when the resume pass began earlier', () => {
+      const header = mkvHeader();
+      const early = [cluster(40000), cluster(45000), cluster(50000)];
+      const session = sessionFor(write('r.mkv', header, ...early), 45000);
+      expect(refreshLiveSeam(session)).toBe('ok');
+      expect(session.resumeBaseCopy.mkv.streamSkip).toBe(header.length + early[0].length);
+    });
+
+    it('skips the overlap: serves only the resume bytes from the seam cluster on', () => {
+      const early = [cluster(40000), cluster(45000), cluster(50000)];
+      const header = mkvHeader();
+      const streamPath = write('r.mkv', header, ...early);
+      const session = sessionFor(streamPath, 45000);
+      expect(getServableResumeBytes(session, fs.statSync(streamPath).size)).toBe(early[1].length + early[2].length);
+    });
+
+    it('copes with a resume pass that began several seconds early (as seen on a real file)', () => {
+      const session = sessionFor(write('r.mkv', mkvHeader(), ...range(471960, 478540, 2200).map((c) => c), cluster(478540), cluster(480700)), 478540);
+      expect(refreshLiveSeam(session)).toBe('ok');
+    });
+
+    it('flags a mismatch when the resume pass began after the seam', () => {
+      const session = sessionFor(write('r.mkv', mkvHeader(), cluster(50000)), 45000);
+      expect(refreshLiveSeam(session)).toBe('mismatch');
+    });
+
+    it('flags a mismatch when the resume clusters pass the seam without one starting at it', () => {
+      const session = sessionFor(write('r.mkv', mkvHeader(), cluster(40000), cluster(47000)), 45000);
+      expect(refreshLiveSeam(session)).toBe('mismatch');
+    });
+
+    it('logs the resume clusters around the seam when none starts at it, so the offset can be seen', () => {
+      const logger = require('../../../logger');
+      const session = sessionFor(write('r.mkv', mkvHeader(), cluster(43000), cluster(47000)), 45000);
+      refreshLiveSeam(session);
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({ nearSeam: [{ timecode: 43000, keyframe: true }, { timecode: 47000, keyframe: true }] }),
+        expect.any(String)
+      );
+    });
+
+    it('does not splice at a cluster that starts at the seam but not on a keyframe', () => {
+      const session = sessionFor(write('r.mkv', mkvHeader(), cluster(40000), cluster(45000, { keyframe: false }), cluster(47000)), 45000);
       expect(refreshLiveSeam(session)).toBe('mismatch');
     });
 
     it('serves nothing after a mismatch', () => {
-      const session = sessionFor(write('r.mkv', mkvHeader(), cluster(40000)), 45000);
+      const session = sessionFor(write('r.mkv', mkvHeader(), cluster(50000)), 45000);
       expect(getServableResumeBytes(session, 5000)).toBe(0);
     });
   });
@@ -222,7 +268,7 @@ describe('mkvResume', () => {
 
     it('holds back the resume file clusters while its seam is unverified', () => {
       const session = { key: 'k', youtubeId: 'y', streamPath: write('r.mkv', mkvHeader(), ...range(30000, 40000)), durationSeconds: 100, declaredTotal: null, resumeBaseCopy: { size: 10, mkv: { seamMs: 45000, streamSkip: null, state: 'pending' } } };
-      expect(getMkvProgress(session)).toMatchObject({ resumeState: 'mismatch', clusterStartsMs: [] });
+      expect(getMkvProgress(session)).toMatchObject({ resumeState: 'pending', clusterStartsMs: [] });
     });
   });
 
@@ -254,10 +300,30 @@ describe('mkvResume', () => {
       expect(result).toMatchObject({ ok: true, durationSeconds: 90 });
     });
 
-    it('rejects a resume that began away from the seam, as permanent', async () => {
+    it('rejects a resume that began after the seam, as permanent', async () => {
       write('base.mkv', ...baseParts());
-      write('resume.mkv', mkvHeader(), ...range(30000, 90000));
+      write('resume.mkv', mkvHeader(), ...range(50000, 90000));
       expect(await stitchMkvResume(args())).toMatchObject({ ok: false, permanent: true });
+    });
+
+    it('splices a resume that began before the seam, dropping the overlap it repeats', async () => {
+      write('base.mkv', ...baseParts());
+      write('resume.mkv', mkvHeader(), ...range(30000, 90000), cues());
+      const result = await stitchMkvResume(args());
+      expect(result).toMatchObject({ ok: true, durationSeconds: 90, clusters: 19 });
+      expect(scanMkv(path.join(dir, 'out.mkv')).clusters.map((c) => c.timecode)).toEqual(Array.from({ length: 19 }, (_, i) => i * 5000));
+    });
+
+    it('rejects a resume with clusters past the seam but none starting at it, as permanent', async () => {
+      write('base.mkv', ...baseParts());
+      write('resume.mkv', mkvHeader(), ...range(32000, 92000));
+      expect(await stitchMkvResume(args())).toMatchObject({ ok: false, permanent: true });
+    });
+
+    it('rejects a resume that never reached the seam, as not permanent', async () => {
+      write('base.mkv', ...baseParts());
+      write('resume.mkv', mkvHeader(), ...range(30000, 40000));
+      expect(await stitchMkvResume(args({ previousDurationSeconds: 0 }))).toMatchObject({ ok: false, permanent: false });
     });
 
     it('rejects a resume that did not get any further than the cache, as not permanent', async () => {
@@ -268,7 +334,7 @@ describe('mkvResume', () => {
 
     it('leaves nothing at the output path when it rejects', async () => {
       write('base.mkv', ...baseParts());
-      write('resume.mkv', mkvHeader(), ...range(30000, 90000));
+      write('resume.mkv', mkvHeader(), ...range(50000, 90000));
       await stitchMkvResume(args());
       expect(fs.existsSync(path.join(dir, 'out.mkv'))).toBe(false);
     });

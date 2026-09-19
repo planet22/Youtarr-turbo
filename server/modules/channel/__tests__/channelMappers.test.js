@@ -44,6 +44,7 @@ describe('channelMappers', () => {
         title_filter_regex: null,
         terminated_at: null,
         media_mode: null,
+        library_mode: null,
       });
     });
 

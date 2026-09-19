@@ -104,7 +104,7 @@ function getModeFieldCompatibility({ mode, transcode }) {
   fields.serveCachedFile = (mode === 'hls-byterange' || mode === 'download-cache' || mode === 'youtube-hls')
     ? {
       status: 'ignored',
-      reason: 'This experimental mode handles playback (and its own hidden cache) entirely on its own - the already-downloaded-file check never runs for it.',
+      reason: 'This mode handles playback (and its own hidden cache) entirely on its own - the already-downloaded-file check never runs for it.',
     }
     : {
       status: 'optional',
@@ -184,7 +184,7 @@ function getModeFieldCompatibility({ mode, transcode }) {
   } else if (mode === 'hls-byterange' || mode === 'download-cache' || mode === 'youtube-hls') {
     fields.cacheOnPlay = {
       status: 'ignored',
-      reason: 'This experimental mode handles playback (and its own hidden cache) entirely on its own - the STRM cache-on-play background download is never triggered for it.',
+      reason: 'This mode handles playback (and its own hidden cache) entirely on its own - the STRM cache-on-play background download is never triggered for it.',
     };
   } else {
     fields.cacheOnPlay = {

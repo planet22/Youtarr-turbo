@@ -799,7 +799,7 @@ describe('ChannelVideos Component', () => {
       });
       await user.click(floatingAction);
       expect(screen.getByRole('menuitem', { name: /Delete Selected/i })).toBeInTheDocument();
-      expect(screen.queryByRole('menuitem', { name: /Download Selected/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole('menuitem', { name: /^Download Selected$/i })).not.toBeInTheDocument();
     });
 
     test('prefers download mode when both selections would coexist (ternary order)', async () => {

@@ -113,6 +113,37 @@ describe('useStrmToolTurbo', () => {
     expect(result.current.runError).toBe('Task not found');
   });
 
+  test('stop posts to the stop endpoint and flips the task to cancelling', async () => {
+    const runningTask = { ...idleStatus.task!, state: 'Running', running: true };
+    axios.get.mockResolvedValue({ data: { ...idleStatus, task: runningTask } });
+    axios.post.mockResolvedValueOnce({ status: 202, data: { stopping: true } });
+    const { result } = renderHook(() => useStrmToolTurbo('tok'));
+    await waitFor(() => expect(result.current.status).not.toBeNull());
+
+    await act(async () => {
+      await result.current.stop();
+    });
+
+    expect(axios.post).toHaveBeenCalledWith(`${ENDPOINT}/stop`, null, HEADERS);
+    expect(result.current.status?.task?.state).toBe('Cancelling');
+  });
+
+  test('stop reports the server error and refreshes on a 409', async () => {
+    axios.get.mockResolvedValue({ data: idleStatus });
+    axios.isAxiosError.mockReturnValue(true);
+    axios.post.mockRejectedValueOnce({ response: { status: 409, data: { error: 'The extraction task is not running' } } });
+    const { result } = renderHook(() => useStrmToolTurbo('tok'));
+    await waitFor(() => expect(result.current.status).not.toBeNull());
+    const callsBefore = axios.get.mock.calls.length;
+
+    await act(async () => {
+      await result.current.stop();
+    });
+
+    expect(result.current.stopError).toBe('The extraction task is not running');
+    expect(axios.get.mock.calls.length).toBeGreaterThan(callsBefore);
+  });
+
   test('polls while the task runs and stops once it finishes', async () => {
     jest.useFakeTimers();
     try {

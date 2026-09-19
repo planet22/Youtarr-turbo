@@ -369,6 +369,48 @@ async function cleanupEmptyParents(startDir, stopAt) {
   }
 }
 
+const MAX_EMPTY_DESCENDANT_DEPTH = 4;
+
+/**
+ * Remove every truly empty directory below rootDir, deepest first, so a
+ * chain like Season 2019/S2019E01 - Title/ collapses once the files inside
+ * are gone (e.g. Sonarr/Radarr moved them away). rootDir itself is never
+ * removed. Hidden directories are skipped, and a directory is only removed
+ * when it has no entries at all - files (even sidecars) keep it alive.
+ *
+ * @param {string} rootDir - Directory whose empty descendants to remove
+ * @param {number} [depth=0] - Recursion depth (internal)
+ * @returns {Promise<string[]>} - Paths of the directories that were removed
+ */
+async function removeEmptyDescendants(rootDir, depth = 0) {
+  const removed = [];
+  if (depth >= MAX_EMPTY_DESCENDANT_DEPTH) return removed;
+
+  let entries;
+  try {
+    entries = await fsPromises.readdir(rootDir, { withFileTypes: true });
+  } catch (error) {
+    logger.debug({ err: error, rootDir }, 'Cannot read directory while pruning empty descendants');
+    return removed;
+  }
+
+  for (const entry of entries) {
+    if (!entry.isDirectory() || entry.name.startsWith('.')) continue;
+    const childDir = path.join(rootDir, entry.name);
+    removed.push(...await removeEmptyDescendants(childDir, depth + 1));
+    if (await isDirectoryEmpty(childDir)) {
+      try {
+        await fsPromises.rmdir(childDir);
+        removed.push(childDir);
+        logger.debug({ childDir }, 'Removed empty descendant directory');
+      } catch (error) {
+        logger.debug({ err: error, childDir }, 'Could not remove empty descendant directory');
+      }
+    }
+  }
+  return removed;
+}
+
 /**
  * List all entries in a directory
  *
@@ -463,6 +505,7 @@ module.exports = {
   isSubfolderDir,
   cleanupEmptyChannelDirectory,
   cleanupEmptyParents,
+  removeEmptyDescendants,
   removeDirectoryResilient,
   isIgnorableEntry,
   listDirectory,

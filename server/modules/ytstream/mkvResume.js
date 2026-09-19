@@ -56,14 +56,19 @@ const COPY_HIGH_WATER_MARK = 4 * 1024 * 1024;
 // trustworthy, and the resume re-covers it.
 const RESUME_OVERLAP_SECONDS = 12;
 const MIN_RESUMABLE_SECONDS = 30;
-// The resume pass is told to start a hair AFTER the seam keyframe so ffmpeg's
-// "keyframe at or before the target" lands on that keyframe, not the previous
-// one (cluster timecodes are rounded to whole ms).
-const SEEK_NUDGE_SECONDS = 0.05;
-// How far the resume file's first cluster may sit from the seam: an audio
-// packet can lead the keyframe by a frame or so; a whole GOP would mean the
-// seek landed on the wrong keyframe.
-const SEAM_TOLERANCE_MS = 500;
+// How far before the seam keyframe the sectioned (mp4) style of resume would
+// ask to start; kept so pickResumePoint still reports a start time.
+const SEEK_LEAD_SECONDS = 0.5;
+// Resume clusters logged around the seam when none starts at it.
+const NEAR_SEAM_WINDOW_MS = 3000;
+// The resume pass may begin EARLIER than asked (yt-dlp's section download
+// starts on a keyframe or fragment before the requested time - seen up to
+// several seconds). Its clusters before the seam repeat what the cached base
+// already holds, so they are skipped: the splice happens at the resume cluster
+// that starts where the base was cut. Both files are cut from the same source
+// with absolute timestamps, so that cluster's timecode equals the seam's to
+// within a few ms (a leading audio packet can nudge a cluster's start).
+const SEAM_MATCH_TOLERANCE_MS = 100;
 const MIN_GAIN_SECONDS = 1;
 
 /** @returns {{value: number, length: number} | null} an EBML element ID at `at` */
@@ -274,12 +279,22 @@ function pickResumePoint(scan, { overlapSeconds = RESUME_OVERLAP_SECONDS, minSec
       ok: true,
       cutOffset: cluster.offset,
       seamMs: cluster.timecode,
-      resumeFromSeconds: cluster.timecode / 1000 + SEEK_NUDGE_SECONDS,
+      resumeFromSeconds: cluster.timecode / 1000 - SEEK_LEAD_SECONDS,
       cachedEndSeconds: lastMs / 1000,
       keptClusters: i,
     };
   }
   return { ok: false, reason: 'no keyframe-led cluster far enough before the end of the partial' };
+}
+
+/**
+ * The resume cluster to splice from: the first one that starts on a video
+ * keyframe at the seam (the timecode the base was cut at).
+ * @param {Array<{timecode: number, startsWithKeyframe: boolean}>} clusters - the resume file's complete clusters
+ * @returns {object|null}
+ */
+function findSeamCluster(clusters, seamMs) {
+  return clusters.find((cluster) => cluster.startsWithKeyframe && Math.abs(cluster.timecode - seamMs) <= SEAM_MATCH_TOLERANCE_MS) || null;
 }
 
 /**
@@ -304,25 +319,36 @@ function findResumeSeam(filePath) {
 function refreshLiveSeam(session) {
   const seam = session.resumeBaseCopy && session.resumeBaseCopy.mkv;
   if (!seam || seam.state !== 'pending') return seam ? seam.state : 'ok';
-  const found = findResumeSeam(session.streamPath);
-  if (!found.ok) return 'pending';
-  const offsetMs = found.timecodeMs - seam.seamMs;
-  seam.firstTimecodeMs = found.timecodeMs;
-  if (Math.abs(offsetMs) > SEAM_TOLERANCE_MS) {
+  const scan = scanMkv(session.streamPath);
+  if (!scan.ok || scan.firstClusterOffset === null || scan.firstClusterTimecode === null) return 'pending';
+  const firstMs = scan.firstClusterTimecode;
+  seam.firstTimecodeMs = firstMs;
+  const abandon = (reason) => {
     seam.state = 'mismatch';
+    const nearSeam = scan.clusters
+      .filter((cluster) => Math.abs(cluster.timecode - seam.seamMs) <= NEAR_SEAM_WINDOW_MS)
+      .map((cluster) => ({ timecode: cluster.timecode, keyframe: cluster.startsWithKeyframe }));
     logger.warn(
-      { sessionKey: session.key, youtubeId: session.youtubeId, expectedSeamMs: seam.seamMs, resumeFirstClusterMs: found.timecodeMs, offsetMs },
-      'ytstream: hls-byterange mkv resume does not line up with the cached base - the resume pass started at a different point than the seam'
+      { sessionKey: session.key, youtubeId: session.youtubeId, expectedSeamMs: seam.seamMs, resumeFirstClusterMs: firstMs, resumeClusters: scan.clusters.length, nearSeam, reason },
+      'ytstream: hls-byterange mkv resume does not line up with the cached base'
     );
     return 'mismatch';
+  };
+  // Started after the cut: the seconds in between exist in neither file.
+  if (firstMs > seam.seamMs + SEAM_MATCH_TOLERANCE_MS) return abandon('the resume pass started after the seam, leaving a gap');
+  const match = findSeamCluster(scan.clusters, seam.seamMs);
+  if (match) {
+    seam.streamSkip = match.offset;
+    seam.state = 'ok';
+    logger.info(
+      { sessionKey: session.key, youtubeId: session.youtubeId, seamMs: seam.seamMs, resumeFirstClusterMs: firstMs, splicedAtMs: match.timecode, skippedOverlapMs: match.timecode - firstMs, streamSkip: match.offset, baseBytes: session.resumeBaseCopy.size },
+      'ytstream: hls-byterange mkv resume seam verified - serving cached base then the resume pass'
+    );
+    return 'ok';
   }
-  seam.streamSkip = found.clusterOffset;
-  seam.state = 'ok';
-  logger.info(
-    { sessionKey: session.key, youtubeId: session.youtubeId, seamMs: seam.seamMs, resumeFirstClusterMs: found.timecodeMs, offsetMs, streamSkip: found.clusterOffset, baseBytes: session.resumeBaseCopy.size },
-    'ytstream: hls-byterange mkv resume seam verified - serving cached base then the resume pass'
-  );
-  return 'ok';
+  const last = scan.clusters[scan.clusters.length - 1];
+  if (last && last.timecode > seam.seamMs + SEAM_MATCH_TOLERANCE_MS) return abandon('no resume cluster starts at the seam');
+  return 'pending';
 }
 
 /** @returns {number} how many bytes of the resume file are servable as the continuation of the base */
@@ -395,12 +421,16 @@ async function stitchMkvResume({ basePath, resumePath, outPath, seamMs, previous
     const resumeScan = scanMkv(resumePath);
     if (!resumeScan.ok) return fail(`resume file unreadable: ${resumeScan.reason}`);
     if (resumeScan.clusters.length === 0) return fail('resume pass wrote no complete cluster');
-    const first = resumeScan.clusters[0];
-    const offsetMs = first.timecode - seamMs;
-    if (Math.abs(offsetMs) > SEAM_TOLERANCE_MS) {
-      return fail(`resume pass began ${offsetMs} ms from the seam (first cluster at ${first.timecode} ms, seam ${seamMs} ms)`, true);
-    }
     const last = resumeScan.clusters[resumeScan.clusters.length - 1];
+    const first = findSeamCluster(resumeScan.clusters, seamMs);
+    if (!first) {
+      const startedMs = resumeScan.clusters[0].timecode;
+      if (startedMs > seamMs + SEAM_MATCH_TOLERANCE_MS) return fail(`resume pass began at ${startedMs} ms, after the seam at ${seamMs} ms`, true);
+      // It never got as far as the seam (torn down early): nothing to add yet.
+      if (last.timecode <= seamMs + SEAM_MATCH_TOLERANCE_MS) return fail(`resume pass only reached ${last.timecode} ms, not yet the seam at ${seamMs} ms`);
+      return fail(`no resume cluster starts at the seam (${seamMs} ms)`, true);
+    }
+    const offsetMs = first.timecode - seamMs;
     if (last.timecode / 1000 < previousDurationSeconds + MIN_GAIN_SECONDS) {
       return fail(`resume pass only reached ${(last.timecode / 1000).toFixed(1)}s, no further than the cached ${previousDurationSeconds.toFixed(1)}s`);
     }
@@ -418,7 +448,7 @@ async function stitchMkvResume({ basePath, resumePath, outPath, seamMs, previous
     await finished;
 
     const outScan = scanMkv(outPath);
-    const expectedClusters = baseScan.clusters.length + resumeScan.clusters.length;
+    const expectedClusters = baseScan.clusters.length + resumeScan.clusters.filter((cluster) => cluster.offset >= first.offset).length;
     if (!outScan.ok || outScan.clusters.length !== expectedClusters) {
       return fail(`spliced file has ${outScan.ok ? outScan.clusters.length : 0} clusters, expected ${expectedClusters}`, true);
     }
@@ -426,7 +456,7 @@ async function stitchMkvResume({ basePath, resumePath, outPath, seamMs, previous
       if (outScan.clusters[i].timecode < outScan.clusters[i - 1].timecode) return fail(`cluster timecodes go backwards at cluster ${i}`, true);
     }
     streamDebug(
-      { baseClusters: baseScan.clusters.length, resumeClusters: resumeScan.clusters.length, seamMs, offsetMs, endSeconds: last.timecode / 1000 },
+      { baseClusters: baseScan.clusters.length, resumeClusters: resumeScan.clusters.length, skippedOverlapClusters: resumeScan.clusters.length - (expectedClusters - baseScan.clusters.length), seamMs, offsetMs, endSeconds: last.timecode / 1000 },
       'ytstream: hls-byterange mkv resume spliced'
     );
     return { ok: true, durationSeconds: last.timecode / 1000, clusters: outScan.clusters.length };
@@ -438,7 +468,8 @@ async function stitchMkvResume({ basePath, resumePath, outPath, seamMs, previous
 
 module.exports = {
   RESUME_OVERLAP_SECONDS,
-  SEAM_TOLERANCE_MS,
+  SEAM_MATCH_TOLERANCE_MS,
+  findSeamCluster,
   scanMkv,
   pickResumePoint,
   findResumeSeam,

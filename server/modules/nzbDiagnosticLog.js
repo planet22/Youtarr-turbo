@@ -69,6 +69,13 @@ async function getDiagnosticEvents(kind, max) {
 // group of settings.
 const ALL_KINDS = ['query', 'trace', 'failedGrab'];
 
+/** Clears one kind only - e.g. the NZB page's Failed Grabs "Delete all" button. */
+async function clearDiagnosticEvents(kind) {
+  if (!ALL_KINDS.includes(kind)) throw new Error(`Unknown diagnostic log kind: ${kind}`);
+  const { NzbDiagnosticLog } = require('../models');
+  return NzbDiagnosticLog.destroy({ where: { kind } });
+}
+
 /** Total rows across all three log kinds - Settings UI's row count. */
 async function countAllDiagnosticEvents() {
   const { NzbDiagnosticLog } = require('../models');
@@ -87,4 +94,5 @@ module.exports = {
   resolveLogLimit,
   countAllDiagnosticEvents,
   clearAllDiagnosticEvents,
+  clearDiagnosticEvents,
 };

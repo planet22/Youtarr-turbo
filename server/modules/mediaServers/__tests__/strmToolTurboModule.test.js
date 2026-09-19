@@ -22,6 +22,7 @@ const buildAdapter = (overrides = {}) => ({
     { Id: 'task-1', Key: 'StrmToolTask', Name: 'Extract Strm Media Info', State: 'Idle', LastExecutionResult: { Status: 'Completed', StartTimeUtc: 's', EndTimeUtc: 'e' } },
   ]),
   startScheduledTask: jest.fn().mockResolvedValue(undefined),
+  stopScheduledTask: jest.fn().mockResolvedValue(undefined),
   ...overrides,
 });
 
@@ -133,6 +134,34 @@ describe('strmToolTurboModule.saveConfiguration', () => {
     const adapter = buildAdapter({ getPluginConfiguration: jest.fn().mockResolvedValue({ maxConcurrentExtract: 5 }) });
     await strmToolTurbo.saveConfiguration(adapter, { maxConcurrentExtract: 8 });
     expect(adapter.setPluginConfiguration).toHaveBeenCalledWith(PLUGIN_ID, { maxConcurrentExtract: 8 });
+  });
+});
+
+describe('strmToolTurboModule.stopExtraction', () => {
+  const withTaskState = (State) => buildAdapter({
+    listScheduledTasks: jest.fn().mockResolvedValue([{ Id: 'task-1', Key: 'StrmToolTask', State }]),
+  });
+
+  test('stops the running task by its Jellyfin id', async () => {
+    const adapter = withTaskState('Running');
+    await strmToolTurbo.stopExtraction(adapter);
+    expect(adapter.stopScheduledTask).toHaveBeenCalledWith('task-1');
+  });
+
+  test('rejects with 409 when the task is idle', async () => {
+    const adapter = withTaskState('Idle');
+    await expect(strmToolTurbo.stopExtraction(adapter)).rejects.toMatchObject({ statusCode: 409, message: 'The extraction task is not running' });
+    expect(adapter.stopScheduledTask).not.toHaveBeenCalled();
+  });
+
+  test('rejects with 409 when the task is already stopping', async () => {
+    const adapter = withTaskState('Cancelling');
+    await expect(strmToolTurbo.stopExtraction(adapter)).rejects.toMatchObject({ statusCode: 409, message: 'The extraction task is already stopping' });
+  });
+
+  test('rejects with 404 when the task cannot be found', async () => {
+    const adapter = buildAdapter({ listScheduledTasks: jest.fn().mockResolvedValue([]) });
+    await expect(strmToolTurbo.stopExtraction(adapter)).rejects.toMatchObject({ statusCode: 404 });
   });
 });
 

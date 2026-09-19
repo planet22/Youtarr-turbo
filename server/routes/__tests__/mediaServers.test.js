@@ -418,6 +418,7 @@ describe('StrmToolTurbo routes', () => {
       getStatus: jest.fn().mockResolvedValue({ installed: true }),
       saveConfiguration: jest.fn().mockResolvedValue({ maxConcurrentExtract: 8 }),
       runExtraction: jest.fn().mockResolvedValue(undefined),
+      stopExtraction: jest.fn().mockResolvedValue(undefined),
       ...strmOverrides,
     };
     const deps = buildDeps({ configModule: { getConfig: jest.fn().mockReturnValue(config) }, mediaServers: { strmToolTurbo } });
@@ -485,6 +486,22 @@ describe('StrmToolTurbo routes', () => {
     expect(strmToolTurbo.runExtraction).toHaveBeenCalled();
     expect(res.status).toHaveBeenCalledWith(202);
     expect(res.json).toHaveBeenCalledWith({ started: true });
+  });
+
+  test('POST stop requests cancellation and returns 202', async () => {
+    const { deps, strmToolTurbo } = buildStrmDeps();
+    const res = await call('post', `${STATUS_PATH}/stop`, deps);
+    expect(strmToolTurbo.stopExtraction).toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(202);
+    expect(res.json).toHaveBeenCalledWith({ stopping: true });
+  });
+
+  test('POST stop returns 409 when the task is not running', async () => {
+    const idle = Object.assign(new Error('The extraction task is not running'), { name: 'StrmToolTurboError', statusCode: 409 });
+    const { deps } = buildStrmDeps({ stopExtraction: jest.fn().mockRejectedValue(idle) });
+    const res = await call('post', `${STATUS_PATH}/stop`, deps);
+    expect(res.status).toHaveBeenCalledWith(409);
+    expect(res.json).toHaveBeenCalledWith({ error: idle.message });
   });
 
   test('POST run returns 409 when the task is already running', async () => {

@@ -563,7 +563,10 @@ const DECLARED_TOTAL_POLL_MS = 100;
  * A no-op for anything but a plain-remux deliverAsFile session.
  */
 function noteStreamSize(session, which, text) {
-  if (session.declaredTotal !== null || session.willEncode || session.resumeBaseCopy || !session.deliverAsFile) return;
+  // An mkv resume downloads the whole stream like a fresh encode, so its final
+  // size is declared the same way; an mp4 resume (a sectioned download) has no
+  // full size to go by.
+  if (session.declaredTotal !== null || session.willEncode || (session.resumeBaseCopy && !session.isMkv) || !session.deliverAsFile) return;
   if (session.sourceBytes[which] === null) session.sourceBytes[which] = parseDownloadSizeBytes(text);
   const { video, audio } = session.sourceBytes;
   if (video === null || audio === null) return;
@@ -581,7 +584,16 @@ function noteStreamSize(session, which, text) {
  */
 function finalizeDeclaredLength(session, exitCode) {
   if (session.declaredTotal === null || exitCode !== 0) return;
-  const result = padFileToSize(session.streamPath, session.declaredTotal, session.isMkv ? 'mkv' : 'mp4');
+  // An mkv resume's virtual file is the cached base plus the resume file from
+  // its seam cluster on, so it is the resume file that gets padded, to the
+  // size that makes that virtual file exactly the declared total.
+  let target = session.declaredTotal;
+  if (session.resumeBaseCopy) {
+    const seam = session.resumeBaseCopy.mkv;
+    if (!seam || seam.state !== 'ok') return;
+    target = session.declaredTotal - session.resumeBaseCopy.size + seam.streamSkip;
+  }
+  const result = padFileToSize(session.streamPath, target, session.isMkv ? 'mkv' : 'mp4');
   const logContext = { sessionKey: session.key, youtubeId: session.youtubeId, declaredTotal: session.declaredTotal };
   if (!result.ok) {
     // The estimate was too small: clients were told a shorter file than
@@ -646,6 +658,9 @@ function noteFfmpegDuration(session, text) {
  * still running is patched in later instead.
  */
 async function waitForHeaderDuration(session, timeoutMs = HEADER_DURATION_WAIT_MS) {
+  // A resume session's header is already in the cached base: there is nothing to
+  // wait for (this used to hold every request back by the full timeout).
+  if (session.resumeBaseCopy) return;
   // Whichever source lands first: ffmpeg's startup log or the cached lookup.
   const deadline = Date.now() + timeoutMs;
   while (!session.durationSeconds && !session.headerDurationDone && !session.failed && Date.now() < deadline) {
@@ -660,7 +675,7 @@ async function waitForHeaderDuration(session, timeoutMs = HEADER_DURATION_WAIT_M
  * waiting for anything that can't have one (re-encodes, resumes, failures).
  */
 async function waitForDeclaredTotal(session, { timeoutMs = DECLARED_TOTAL_WAIT_MS, pollMs = DECLARED_TOTAL_POLL_MS } = {}) {
-  if (!session.deliverAsFile || session.willEncode || session.resumeBaseCopy) return;
+  if (!session.deliverAsFile || session.willEncode || (session.resumeBaseCopy && !session.isMkv)) return;
   const deadline = Date.now() + timeoutMs;
   while (session.declaredTotal === null && !session.failed && session.ff.exitCode === null && Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, pollMs));
@@ -919,7 +934,17 @@ function spawnSession(sessionKey, { youtubeId, quality, qualityStrictness, trans
   // its comments): --download-sections alone fails piped to `-o -` on
   // fragmented DASH, so the internal extraction is forced to Matroska, and
   // -copyts keeps each pipe's real timestamp instead of re-zeroing them.
-  const sectionArgs = resumeFromSeconds !== null
+  // mkv resume downloads the streams whole and runs ffmpeg EXACTLY like the
+  // fresh encode that made the cached part (no -copyts, no trimming), so both
+  // files have the same timeline and cluster boundaries; the resume file's
+  // clusters before the seam are then skipped when joining (mkvResume.js).
+  // yt-dlp's native chunked download runs at full speed, whereas a sectioned
+  // download goes through ffmpeg's own HTTP client, which YouTube throttles to
+  // roughly twice real time (measured: ~0.5 MB/s against ~22 MB/s). Trimming
+  // with -ss/-copyts was tried and left the file starting at 0:00 with a
+  // shifted timeline, so nothing lined up.
+  const fullDownloadResume = isMkv && resumeFromSeconds !== null;
+  const sectionArgs = resumeFromSeconds !== null && !fullDownloadResume
     ? ['--download-sections', `*${resumeFromSeconds}-inf`, '--downloader-args', 'ffmpeg:-f matroska -copyts']
     : [];
   const ytVideoArgs = [...commonYtArgs, ...sectionArgs, '-f', videoFormat, watchUrl];
@@ -946,7 +971,7 @@ function spawnSession(sessionKey, { youtubeId, quality, qualityStrictness, trans
   // -copyts but deliberately NOT -start_at_zero (unlike hlsEngine.js): the
   // resume file's own timeline stays comparable to "seconds since the start
   // of the whole video", which the stitch step aligns the seam against.
-  if (resumeFromSeconds !== null) ffArgs.push('-copyts');
+  if (resumeFromSeconds !== null && !fullDownloadResume) ffArgs.push('-copyts');
   if (encoder && encoder.preInputArgs && encoder.preInputArgs.length) ffArgs.push(...encoder.preInputArgs);
   ffArgs.push(
     '-thread_queue_size', '4096', '-i', 'pipe:3',
@@ -961,6 +986,9 @@ function spawnSession(sessionKey, { youtubeId, quality, qualityStrictness, trans
     ffArgs.push('-c', 'copy');
   }
   if (isMkv) {
+    if (fullDownloadResume) {
+      streamDebug({ sessionKey, youtubeId, seamSeconds: resumeBaseCopy.mkv.seamMs / 1000 }, 'ytstream: hls-byterange mkv resume downloads the whole stream at full speed like a fresh encode; clusters before the seam are skipped when joining');
+    }
     ffArgs.push('-f', 'matroska', streamPath);
   } else ffArgs.push(
     '-f', 'hls',
@@ -1383,7 +1411,7 @@ async function handleByteRangeHlsRequest(req, res, { youtubeId, config, quality,
       }
     };
     const onBytesSent = createBytesCounter(streamEntry);
-    if (session.resumeBaseCopy) serveResumeAwareRange(session, req, res, onServed, onBytesSent);
+    if (session.resumeBaseCopy) serveResumeAwareRange(session, req, res, onServed, onBytesSent, declaredView ? session.declaredTotal : null);
     else if (declaredView) serveDeclaredRange(session, req, res, onServed, onBytesSent);
     else serveFileWithRangeSupport(session.streamPath, req, res, session.contentType, onServed, onBytesSent);
     return;

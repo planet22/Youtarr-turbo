@@ -107,7 +107,7 @@ class VideosModule {
     // when it was actually downloaded, falling back to the job that
     // produced it, falling back to its YouTube publish date for videos
     // backfilled before last_downloaded_at existed.
-    const ADDED_DATE_EXPR = "COALESCE(Videos.last_downloaded_at, Jobs.timeCreated, STR_TO_DATE(Videos.originalDate, '%Y%m%d'))";
+    const ADDED_DATE_EXPR = 'COALESCE(Videos.last_downloaded_at, Jobs.timeCreated, STR_TO_DATE(Videos.originalDate, \'%Y%m%d\'))';
 
     try {
       const offset = (page - 1) * limit;
@@ -682,11 +682,11 @@ class VideosModule {
     if (dateFrom) {
       // upload_date is yt-dlp's YYYYMMDD text, same format/comparison as
       // getVideosPaginated's Videos.originalDate handling.
-      metadataWhere.push(`JSON_UNQUOTE(JSON_EXTRACT(raw_info_json, '$.upload_date')) >= :dateFrom`);
+      metadataWhere.push('JSON_UNQUOTE(JSON_EXTRACT(raw_info_json, \'$.upload_date\')) >= :dateFrom');
       metadataReplacements.dateFrom = dateFrom.replace(/-/g, '');
     }
     if (dateTo) {
-      metadataWhere.push(`JSON_UNQUOTE(JSON_EXTRACT(raw_info_json, '$.upload_date')) <= :dateTo`);
+      metadataWhere.push('JSON_UNQUOTE(JSON_EXTRACT(raw_info_json, \'$.upload_date\')) <= :dateTo');
       metadataReplacements.dateTo = dateTo.replace(/-/g, '');
     }
     if (addedDateFrom) {

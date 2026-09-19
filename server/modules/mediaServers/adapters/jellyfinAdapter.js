@@ -236,6 +236,13 @@ class JellyfinAdapter extends BaseAdapter {
     });
   }
 
+  async stopScheduledTask(taskId) {
+    await axios.delete(`${this.url}/ScheduledTasks/Running/${encodeURIComponent(taskId)}`, {
+      headers: this._headers(),
+      timeout: REQUEST_TIMEOUT_MS,
+    });
+  }
+
   async createPlaylist(name, itemIds, opts = {}) {
     const body = {
       Name: name,

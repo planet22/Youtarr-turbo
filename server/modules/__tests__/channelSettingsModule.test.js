@@ -462,11 +462,15 @@ describe('ChannelSettingsModule', () => {
       // Mock validateTitleRegex to return valid first
       childProcess.execFileSync.mockReturnValue(JSON.stringify({ matches: false }));
 
-      // Then set up the specific responses for each video title
+      // Then set up the responses: the validation call, then one batched call covering every title
       childProcess.execFileSync
         .mockReturnValueOnce(JSON.stringify({ matches: false })) // validation call
-        .mockReturnValueOnce(JSON.stringify({ matches: true }))  // first video
-        .mockReturnValueOnce(JSON.stringify({ matches: false })); // second video
+        .mockReturnValueOnce(JSON.stringify({
+          results: [
+            { id: 'vid1', titleMatches: true },
+            { id: 'vid2', titleMatches: false },
+          ],
+        }));
 
       const result = await channelSettingsModule.previewTitleFilter('UC123456', 'Test');
       expect(result.totalCount).toBe(2);

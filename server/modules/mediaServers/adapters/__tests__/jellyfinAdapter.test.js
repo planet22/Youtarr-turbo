@@ -379,6 +379,15 @@ describe('JellyfinAdapter plugin and scheduled-task management', () => {
     expect(axios.get).toHaveBeenCalledWith('http://jf:8096/ScheduledTasks', expect.objectContaining({ headers: authHeaders }));
   });
 
+  test('stopScheduledTask deletes the running-task entry for that id', async () => {
+    axios.delete.mockResolvedValueOnce({});
+    await new JellyfinAdapter(cfg).stopScheduledTask('t1');
+    expect(axios.delete).toHaveBeenCalledWith(
+      'http://jf:8096/ScheduledTasks/Running/t1',
+      expect.objectContaining({ headers: authHeaders })
+    );
+  });
+
   test('startScheduledTask posts to the running-tasks endpoint for that id', async () => {
     axios.post.mockResolvedValueOnce({});
     await new JellyfinAdapter(cfg).startScheduledTask('t1');

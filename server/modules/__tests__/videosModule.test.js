@@ -152,6 +152,11 @@ describe('VideosModule', () => {
 
     jest.doMock('../m3uGenerator', () => mockM3uGenerator);
 
+    // Loading the real nzb routes pulls in fs-extra, which the minimal fs stub below can't satisfy
+    jest.doMock('../../routes/nzb', () => ({
+      reconcileMovedUntrackedVideo: jest.fn().mockResolvedValue(false),
+    }));
+
     // Mock logger
     jest.doMock('../../logger', () => mockLogger);
 
@@ -425,7 +430,7 @@ describe('VideosModule', () => {
       const query = mockSequelize.query.mock.calls[0][0];
       const replacements = mockSequelize.query.mock.calls[0][1].replacements;
 
-      const addedDateExpr = "COALESCE(Videos.last_downloaded_at, Jobs.timeCreated, STR_TO_DATE(Videos.originalDate, '%Y%m%d'))";
+      const addedDateExpr = 'COALESCE(Videos.last_downloaded_at, Jobs.timeCreated, STR_TO_DATE(Videos.originalDate, \'%Y%m%d\'))';
       expect(query).toContain(`${addedDateExpr} >= :addedDateFrom`);
       expect(query).toContain(`${addedDateExpr} <= :addedDateTo`);
       // Unlike originalDate's stripped-string comparison, these compare
@@ -1344,11 +1349,13 @@ describe('VideosModule', () => {
         .mockResolvedValueOnce(chunk3)
         // Post-pass stale cached-video reconciliation query (see
         // reconcileRemovedCachedVideo) - no stale rows in this scenario.
+        .mockResolvedValueOnce([])
+        // Post-pass NZB "moved untracked video" reconciliation query - none either.
         .mockResolvedValueOnce([]);
 
       const result = await VideosModule.backfillVideoMetadata();
 
-      expect(mockVideo.findAll).toHaveBeenCalledTimes(4);
+      expect(mockVideo.findAll).toHaveBeenCalledTimes(5);
       expect(result.processed).toBe(2500);
     });
 

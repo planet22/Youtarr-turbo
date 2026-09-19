@@ -30,8 +30,8 @@ const videoSearchModule = require('../../modules/videoSearchModule');
 const nzbThumbnailProbe = require('../../modules/nzbThumbnailProbe');
 
 describe('nzb.js getResolutionDetectionConfig', () => {
-  test('defaults all three to true when nzb.resolutionDetection is missing (configs saved before this setting existed)', () => {
-    expect(nzb.getResolutionDetectionConfig({})).toEqual({ fixed: true, thumb: true, extract: true });
+  test('defaults fixed/thumb to true and extract to false when nzb.resolutionDetection is missing (configs saved before this setting existed)', () => {
+    expect(nzb.getResolutionDetectionConfig({})).toEqual({ fixed: true, thumb: true, extract: false });
   });
 
   test('respects explicit false values', () => {

@@ -56,6 +56,8 @@ export const useStrmToolTurbo = (token: string | null) => {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
   const [runError, setRunError] = useState<string | null>(null);
+  const [stopping, setStopping] = useState(false);
+  const [stopError, setStopError] = useState<string | null>(null);
 
   const refresh = useCallback(async (showLoading = true) => {
     if (!token) return;
@@ -117,5 +119,22 @@ export const useStrmToolTurbo = (token: string | null) => {
     }
   }, [token, refresh]);
 
-  return { status, loading, error, saving, saveError, starting, runError, refresh, save, run };
+  const stop = useCallback(async () => {
+    if (!token) return;
+    setStopping(true);
+    setStopError(null);
+    try {
+      await axios.post(`${ENDPOINT}/stop`, null, { headers: { 'x-access-token': token } });
+      // Cancellation is asynchronous: show Cancelling now and let polling
+      // pick up the final state.
+      setStatus((prev) => (prev?.task ? { ...prev, task: { ...prev.task, state: 'Cancelling', running: true } } : prev));
+    } catch (err: unknown) {
+      setStopError(errorMessage(err, 'Failed to stop the extraction task'));
+      if (axios.isAxiosError(err) && err.response?.status === 409) refresh(false);
+    } finally {
+      setStopping(false);
+    }
+  }, [token, refresh]);
+
+  return { status, loading, error, saving, saveError, starting, runError, stopping, stopError, refresh, save, run, stop };
 };

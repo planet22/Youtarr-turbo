@@ -149,7 +149,7 @@ describe('YtdlpOptionsSection', () => {
   test('always shows the power-user warning Alert above the textarea', () => {
     setup();
     expect(screen.getByText(/power user feature/i)).toBeInTheDocument();
-    expect(screen.getByText(/applied to every yt-dlp call/i)).toBeInTheDocument();
+    expect(screen.getByText(/apply to every yt-dlp call/i)).toBeInTheDocument();
   });
 
   test('selecting Force IPv6 calls onConfigChange with ytdlpIpFamily=ipv6', async () => {

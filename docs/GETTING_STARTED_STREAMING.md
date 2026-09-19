@@ -139,7 +139,9 @@ A quick way to choose:
 > **Existing `.strm` files keep the mode they were written with** unless
 > **Force these settings (ignore URL / .strm overrides)** is on. All three
 > recipes turn it on (`forceServerSettings: true`), so switching between them
-> takes effect immediately, with no need to re-materialize your library.
+> takes effect immediately, with no need to re-materialize your library. If
+> you switch modes later, Jellyfin's cached container info goes stale; see
+> [Switching modes on an existing library](#switching-modes-on-an-existing-library).
 
 All of these fields live on **Settings → Streaming**, in the **STRM
 (stream-only)** card, below the Media Mode & Target section from Steps 1-2
@@ -301,6 +303,46 @@ Optional storage switches for this mode: `stealthCache` keeps the finished
 buffer out of the library so the video stays a `.strm` forever;
 `finalizeToMp4` remuxes the buffered `.ts` into an `.mp4` once complete. See
 [YTSTREAM.md § Storage & background processing](YTSTREAM.md#storage--background-processing).
+
+### Switching modes on an existing library
+
+Normally you pick a mode once and never think about this. It only matters when
+you're **experimenting** with what works best for you, for example moving from
+YouTube HLS passthrough to Byte-range Plain file, or from MP4 to Matroska.
+
+Next to each `.strm`, Youtarr-Turbo writes a `.strmtool.json` sidecar that
+declares the stream's container: `hls` for the HLS-shaped modes, `mp4` or `mkv`
+for plain files. Jellyfin's StrmToolTurbo plugin reads that file **instead of
+probing the stream**, so after a mode change Jellyfin keeps believing the *old*
+container. Symptoms are a wrong or missing duration, Jellyfin transcoding when
+it shouldn't, or a video that won't start. New `.strm` files are written with
+the current mode, so only your existing library needs fixing. After you change
+the mode:
+
+1. **Save the new mode** in Settings → Streaming. Because **Force these
+   settings** is on, play URLs already follow it.
+2. **Regenerate the sidecars.** Go to **Settings → Maintenance & Rescan →
+   Regenerate video metadata** and click **Regenerate video metadata**. This
+   rewrites the `.nfo` and the `.strmtool.json` for every STRM video using the
+   *current* streaming settings, without re-materializing any `.strm` and without
+   fetching anything from YouTube. Videos with no cached metadata still get their
+   container corrected in place. The **Write Jellyfin StrmTool cache** switch on
+   that card must be on, or no sidecars are written.
+3. **Make Jellyfin re-read them.** Go to **Settings → Jellyfin → StrmToolTurbo
+   Plugin** (shown once Jellyfin is connected with an administrator API key):
+   - turn on **Import existing cache when data missing from Jellyfin**
+   - turn off **Force refresh: ignore existing media streams**
+   - turn off **Force refresh: ignore cache** off, so the task reads the
+     regenerated `.strmtool.json` instead of probing every stream again;
+   - click **Save to Jellyfin**, then **Run extraction now**.
+
+   When it finishes you can turn the force refresh back off.
+4. Play a video. If a client still behaves as before, restart the client app or
+   clear its cache, since some cache the old container.
+
+Switching between modes that declare the same container (for example YouTube
+HLS passthrough and Enhanced HLS + Buffered, both `hls`) leaves the sidecars
+correct, but running step 2 anyway is harmless.
 
 ## Other modes
 

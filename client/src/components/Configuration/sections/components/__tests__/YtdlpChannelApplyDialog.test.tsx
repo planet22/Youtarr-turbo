@@ -25,7 +25,7 @@ describe('YtdlpChannelApplyDialog', () => {
     renderWithProviders(
       <YtdlpChannelApplyDialog targetChannel="stable" onApply={jest.fn()} onClose={jest.fn()} />
     );
-    expect(screen.getByText(/downgrades from the nightly build/i)).toBeInTheDocument();
+    expect(screen.getByText(/downgrading from the nightly build/i)).toBeInTheDocument();
   });
 
   test('Update now applies and closes', async () => {

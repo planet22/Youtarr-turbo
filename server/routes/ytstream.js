@@ -280,10 +280,10 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
         // title search can still be OR'd in against the other columns.
         const matchingVideoIds = models.Video
           ? (await models.Video.findAll({
-              where: { youTubeVideoName: { [Op.like]: `%${search}%` } },
-              attributes: ['youtubeId'],
-              limit: 500,
-            })).map((v) => v.youtubeId)
+            where: { youTubeVideoName: { [Op.like]: `%${search}%` } },
+            attributes: ['youtubeId'],
+            limit: 500,
+          })).map((v) => v.youtubeId)
           : [];
         where[Op.or] = [
           { youtube_id: { [Op.like]: `%${search}%` } },
@@ -692,7 +692,7 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
         const experimentalParams = experimental.params;
         logger.info(
           { youtubeId, mode: requestedModeForExperimentalCheck, quality: experimentalParams.quality, transcode: experimentalParams.transcode, hardwareMode: experimentalParams.hardwareMode },
-          'ytstream: dispatching to an experimental playback mode'
+          'ytstream: dispatching to a standalone playback mode'
         );
         try {
           if (requestedModeForExperimentalCheck === 'hls-byterange') {
@@ -703,8 +703,8 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
             await handleDownloadCacheRequest(req, res, experimentalParams);
           }
         } catch (err) {
-          logger.error({ err, youtubeId, mode: requestedModeForExperimentalCheck }, 'ytstream: experimental playback mode threw unexpectedly');
-          if (!res.headersSent) res.status(502).send('Experimental playback mode failed');
+          logger.error({ err, youtubeId, mode: requestedModeForExperimentalCheck }, 'ytstream: playback mode threw unexpectedly');
+          if (!res.headersSent) res.status(502).send('Playback mode failed');
         }
         return;
       }
@@ -749,15 +749,15 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
           // cooldown window, instead of one row per request.
           const historyEntry = shouldLogQuickServeHistory(youtubeId)
             ? {
-                streamId: crypto.randomUUID(),
-                mode: 'probe-cache-hit',
-                youtubeId,
-                ...(await resolveActualServedFileInfo(youtubeId, existingCachedFilePath, models)),
-                clientIp: resolveClientIp(req),
-                userAgent: req.headers['user-agent'] || null,
-                startedAt: Date.now(),
-                bytesTransferred: 0,
-              }
+              streamId: crypto.randomUUID(),
+              mode: 'probe-cache-hit',
+              youtubeId,
+              ...(await resolveActualServedFileInfo(youtubeId, existingCachedFilePath, models)),
+              clientIp: resolveClientIp(req),
+              userAgent: req.headers['user-agent'] || null,
+              startedAt: Date.now(),
+              bytesTransferred: 0,
+            }
             : null;
           if (historyEntry) persistStreamHistoryStart(historyEntry);
           const servedReal = await tryServeCachedVideoFile(req, res, existingCachedFilePath, historyEntry ? createBytesCounter(historyEntry) : undefined);
@@ -804,17 +804,17 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
         // same video a few hundred ms apart.
         const historyEntry = shouldLogQuickServeHistory(youtubeId)
           ? {
-              streamId: crypto.randomUUID(),
-              mode: 'probe-shortcut',
-              youtubeId,
-              quality: probePlan.quality,
-              container: probePlan.container,
-              transcode: probePlan.transcode,
-              hardwareMode: probePlan.hardwareMode,
-              clientIp: resolveClientIp(req),
-              userAgent: req.headers['user-agent'] || null,
-              startedAt: Date.now(),
-            }
+            streamId: crypto.randomUUID(),
+            mode: 'probe-shortcut',
+            youtubeId,
+            quality: probePlan.quality,
+            container: probePlan.container,
+            transcode: probePlan.transcode,
+            hardwareMode: probePlan.hardwareMode,
+            clientIp: resolveClientIp(req),
+            userAgent: req.headers['user-agent'] || null,
+            startedAt: Date.now(),
+          }
           : null;
         if (historyEntry) persistStreamHistoryStart(historyEntry);
         const served = await tryServeInstantHlsPlaylist(req, res, {
@@ -883,15 +883,15 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
             // branch) - same burst-collapsing, same reason.
             const historyEntry = shouldLogQuickServeHistory(youtubeId)
               ? {
-                  streamId: crypto.randomUUID(),
-                  mode: 'cached-file',
-                  youtubeId,
-                  ...(await resolveActualServedFileInfo(youtubeId, cachedVideo.filePath, models)),
-                  clientIp: resolveClientIp(req),
-                  userAgent: req.headers['user-agent'] || null,
-                  startedAt: Date.now(),
-                  bytesTransferred: 0,
-                }
+                streamId: crypto.randomUUID(),
+                mode: 'cached-file',
+                youtubeId,
+                ...(await resolveActualServedFileInfo(youtubeId, cachedVideo.filePath, models)),
+                clientIp: resolveClientIp(req),
+                userAgent: req.headers['user-agent'] || null,
+                startedAt: Date.now(),
+                bytesTransferred: 0,
+              }
               : null;
             if (historyEntry) persistStreamHistoryStart(historyEntry);
             const served = await tryServeCachedVideoFile(req, res, cachedVideo.filePath, historyEntry ? createBytesCounter(historyEntry) : undefined);

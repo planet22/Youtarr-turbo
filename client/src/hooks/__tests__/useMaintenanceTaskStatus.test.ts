@@ -26,6 +26,7 @@ type Subscriber = {
 function makeWrapper(subscribers: Subscriber[]) {
   const value = {
     socket: null,
+    isConnected: false,
     subscribe: (filter: (msg: unknown) => boolean, callback: (msg: unknown) => void) => {
       subscribers.push({ filter, callback });
     },

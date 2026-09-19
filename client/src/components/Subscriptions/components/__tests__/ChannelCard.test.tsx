@@ -71,6 +71,8 @@ jest.mock('../chips', () => ({
       'data-keep-recent-count': keepRecentCount ?? undefined,
     }, autoRemovalProtected ? 'Protected (All)' : `Protected (${keepRecentCount})`);
   },
+  MediaModeChip: () => null,
+  LibraryModeChip: () => null,
 }));
 
 describe('ChannelCard Component', () => {

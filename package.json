@@ -1,6 +1,6 @@
 {
   "name": "youtarr-turbo",
-  "version": "0.5.1",
+  "version": "0.5.0",
   "description": "",
   "main": "server/index.js",
   "engines": {

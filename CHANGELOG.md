@@ -1,5 +1,23 @@
 # Changelog
 
+## [v0.5.0](https://github.com/planet22/Youtarr-turbo/releases/tag/v0.5.0) - 2026-09-19
+
+## [0.5.0](https://github.com/planet22/Youtarr-turbo/compare/vv0.4.0...v0.5.0) (2026-09-19)
+
+
+### Features
+
+* add scheduled tasks management and UI components ([7138884](https://github.com/planet22/Youtarr-turbo/commit/71388841ace1789b1c4bc4ef81157cf294d98f56))
+
+
+### Documentation
+
+* update CHANGELOG for v0.4.0 [skip ci] ([1f353f9](https://github.com/planet22/Youtarr-turbo/commit/1f353f927bb9f8df3152fa7c222bd11fd6dc4f7e))
+
+
+
+
+
 ## [v0.4.0](https://github.com/planet22/Youtarr-turbo/releases/tag/v0.4.0) - 2026-09-19
 
 ## [0.4.0](https://github.com/planet22/Youtarr-turbo/compare/vv0.3.0...v0.4.0) (2026-09-19)

@@ -2,20 +2,20 @@
 
 ## Architecture Overview
 
-Youtarr uses Docker Compose with two containers:
+Youtarr-Turbo uses Docker Compose with two containers:
 - **youtarr**: Main application container (Node.js/React)
 - **youtarr-db**: MariaDB database container
 
 ### Compose Files
 
-Youtarr ships four Compose files so each supported runtime can layer the right overrides:
+Youtarr-Turbo ships four Compose files so each supported runtime can layer the right overrides:
 
 | File | Purpose |
 |------|---------|
 | `docker-compose.yml` | Production defaults with the bundled MariaDB container. Used by `./start.sh`. |
 | `docker-compose.dev.yml` | Development mode: mounts `./server/` and migrations into the container, runs the backend with `node --watch` for hot reload, and uses a separate `youtarr-db-dev` database with its own named volume. Used by `./scripts/start-dev.sh`. See [DEVELOPMENT.md](DEVELOPMENT.md). |
 | `docker-compose.arm.yml` | Named-volume database override. The filename is historical: it was originally added for ARM systems, but it is also useful on Docker Desktop and NAS/virtualized filesystems. Layered on top of `docker-compose.yml` via `-f`. |
-| `docker-compose.external-db.yml` | Runs Youtarr against an external MariaDB/MySQL instance instead of the bundled database. Used by `./start-with-external-db.sh` (layered via `-f` on top of `docker-compose.yml`), and also usable standalone - see the "Using an external database" section below. Deliberately self-contained (full `youtarr` service block, not a thin override like `docker-compose.arm.yml`) so the standalone path keeps working. |
+| `docker-compose.external-db.yml` | Runs Youtarr-Turbo against an external MariaDB/MySQL instance instead of the bundled database. Used by `./start-with-external-db.sh` (layered via `-f` on top of `docker-compose.yml`), and also usable standalone - see the "Using an external database" section below. Deliberately self-contained (full `youtarr` service block, not a thin override like `docker-compose.arm.yml`) so the standalone path keeps working. |
 
 ## Container Details
 
@@ -127,7 +127,7 @@ See [Troubleshooting](TROUBLESHOOTING.md#docker-desktop--arm-incorrect-informati
 
 When using network storage:
 
-1. **Mount your network storage BEFORE starting Youtarr**
+1. **Mount your network storage BEFORE starting Youtarr-Turbo**
 
 Examples:
 - Linux with NFS mount: `/mnt/nas/youtube`
@@ -144,7 +144,7 @@ vim .env # Or your editor of choice
 ## Using an External Database
 
 Some users prefer to supply their own MariaDB/MySQL instance instead of the bundled `youtarr-db` container. This is easily supported by setting up your external DB config in .env and then running
-Youtarr without the bundled DB via:
+Youtarr-Turbo without the bundled DB via:
 
 - `./start-with-external-db.sh` or `docker compose -f docker-compose.external-db.yml up -d`
 - See [External Database Guide](platforms/external-db.md)
@@ -153,7 +153,7 @@ Both helpers automatically run migrations against the external database on boot,
 
 ## Manual Setup Without Git Clone
 
-This section covers setting up Youtarr when you cannot (or prefer not to) clone the full repository—common in Portainer, TrueNAS, and similar Docker-native environments.
+This section covers setting up Youtarr-Turbo when you cannot (or prefer not to) clone the full repository—common in Portainer, TrueNAS, and similar Docker-native environments.
 
 ### Important Warnings
 
@@ -227,7 +227,7 @@ vim .env  # or nano, or your preferred editor
 
 #### 4. Create Required Directories
 
-Youtarr needs these directories to exist before first start:
+Youtarr-Turbo needs these directories to exist before first start:
 
 ```bash
 # Youtarr app directories (always required)
@@ -267,7 +267,7 @@ If you hit `InnoDB: Operating system error number 13` at startup, you have hit t
    YOUTARR_GID=1000
    ```
 
-2. Change ownership of the Youtarr directories on the host to match:
+2. Change ownership of the Youtarr-Turbo directories on the host to match:
 
    ```bash
    sudo chown -R 1000:1000 config jobs server/images downloads
@@ -315,7 +315,7 @@ By not cloning the repository, you lose access to:
 | Local documentation | Offline access to guides |
 | Development environment | Can't contribute changes easily |
 
-### Updating Youtarr
+### Updating Youtarr-Turbo
 
 Without Git, updates require manual steps:
 
@@ -407,7 +407,7 @@ sudo chown -R 999:999 database  # MariaDB runs as UID 999
 
 **Solution**:
 - Verify `YOUTUBE_OUTPUT_DIR` path is correct
-- Check that the path is accessible to both Youtarr and your media server
+- Check that the path is accessible to both Youtarr-Turbo and your media server
 - Ensure permissions allow your media server to read files
 - Trigger a manual library scan in your media server
 
@@ -416,7 +416,7 @@ sudo chown -R 999:999 database  # MariaDB runs as UID 999
 **Good use cases:**
 - Portainer/TrueNAS/similar Docker-native platforms where Git is unavailable
 - Systems where Git is not installed or cannot be installed
-- Testing Youtarr in isolated environments
+- Testing Youtarr-Turbo in isolated environments
 - Automated deployment scripts (though Git is still recommended)
 
 **Bad use cases:**
@@ -518,7 +518,7 @@ See: [ENVIRONMENT_VARIABLES](ENVIRONMENT_VARIABLES.md) for more details
 
 ### Platform Deployment Configuration
 
-Youtarr supports platform-managed deployments (Elfhosted, Kubernetes, etc.) with four special environment variables:
+Youtarr-Turbo supports platform-managed deployments (Elfhosted, Kubernetes, etc.) with four special environment variables:
 
 #### Environment Variables
 
@@ -526,7 +526,7 @@ Youtarr supports platform-managed deployments (Elfhosted, Kubernetes, etc.) with
 |----------|-------------|---------|
 | `DATA_PATH` | Video storage path inside container (only really needed for Elfhosted) | `/storage/rclone/storagebox/youtube` |
 | `AUTH_ENABLED` | Set to `false` to bypass internal authentication | `false` |
-| `TRUST_PROXY` | Controls whether Youtarr trusts proxy headers. Set `false` for direct exposure without a reverse proxy. | `false` |
+| `TRUST_PROXY` | Controls whether Youtarr-Turbo trusts proxy headers. Set `false` for direct exposure without a reverse proxy. | `false` |
 | `PLEX_URL` | Pre-configured Plex server URL, overrides plexIp and plexPort from config.json | `http://plex:32400` |
 
 ### Preset Credentials for Headless Deployments
@@ -568,11 +568,11 @@ When `AUTH_ENABLED=false`:
 
 ### Network Storage (NAS) Configuration
 
-Youtarr fully supports network-attached storage for your media library. This allows Youtarr and Plex to run on separate machines while sharing the same media storage.
+Youtarr-Turbo fully supports network-attached storage for your media library. This allows Youtarr-Turbo and Plex to run on separate machines while sharing the same media storage.
 
 #### Requirements
 - Network share accessible from the Docker host
-- Write permissions for Youtarr
+- Write permissions for Youtarr-Turbo
 - Read permissions for Plex (can be on a different machine)
 
 #### Mounting NAS/Network Shares
@@ -662,7 +662,7 @@ docker exec youtarr-turbo touch /usr/src/app/data/test.txt
 
 **Plex Can't See Files**:
 - Verify Plex has read access to the same network path
-- Ensure consistent file paths between Youtarr and Plex
+- Ensure consistent file paths between Youtarr-Turbo and Plex
 - Check file permissions after download (should be readable by Plex user)
 
 ### Backup and Restore
@@ -708,7 +708,7 @@ The application container includes health checks:
 ### Plex Server Communication
 
 #### Same Machine Setup
-When Youtarr and Plex run on the same machine:
+When Youtarr-Turbo and Plex run on the same machine:
 - Docker Desktop (Windows/macOS): `host.docker.internal` or host LAN IP (e.g., `192.168.x.x`)
 - Docker on macOS without Docker Desktop (e.g., Colima): host LAN IP (e.g., `192.168.x.x`) or `host.lima.internal`
 - Docker on Linux: host LAN IP (e.g., `192.168.x.x`). The default bridge IP (`172.17.0.1`) usually won't work unless Plex is bound to the Docker bridge.
@@ -716,7 +716,7 @@ When Youtarr and Plex run on the same machine:
 - Plex defaults to port `32400`. If you use a custom Plex port, update the Plex Port field or include the port in `PLEX_URL`.
 
 #### Separate Machine Setup
-When Youtarr and Plex run on different machines:
+When Youtarr-Turbo and Plex run on different machines:
 - Use Plex server's IP address or hostname
 - Example: `http://192.168.1.100:32400` or `http://plex-server.local:32400`
 - Ensure network connectivity between machines
@@ -795,7 +795,7 @@ If ports are already in use:
    netstat -tulpn | grep 3087
    ```
 
-2. Either stop the conflicting service or change Youtarr's ports in docker-compose.yml
+2. Either stop the conflicting service or change Youtarr-Turbo's ports in docker-compose.yml
 
 ## Docker Compose Version
 
@@ -831,7 +831,7 @@ jobs/*
 server/images/*
 ```
 
-If adjusting these settings, stop Youtarr, then fix ownership, then update .env, then restart.
+If adjusting these settings, stop Youtarr-Turbo, then fix ownership, then update .env, then restart.
 
 Example to fix ownership (example YOUTUBE_OUTPUT_DIR given)
 ```
@@ -839,4 +839,4 @@ sudo chown -R 1000:1000 /mnt/c/my_youtarr_videos ./config ./jobs ./server/images
 ```
 ## Development with Docker
 
-See [DEVELOPMENT.md](DEVELOPMENT.md) for running Youtarr in development mode with Docker.
+See [DEVELOPMENT.md](DEVELOPMENT.md) for running Youtarr-Turbo in development mode with Docker.

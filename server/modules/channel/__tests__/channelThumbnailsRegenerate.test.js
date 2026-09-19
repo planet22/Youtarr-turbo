@@ -391,6 +391,22 @@ describe('channelThumbnails.regenerateChannelImages', () => {
       expect(counts.videoThumbsSkipped).toBe(0);
     });
 
+    it('skips a removed video so no thumbnail is written next to its deleted media file', async () => {
+      const channels = [{ channel_id: 'UC123', uploader: 'Test Channel' }];
+      const channelDir = path.join(BASE_DIR, 'Test Channel');
+      const videoPath = path.join(channelDir, 'My Video [vid1].mp4');
+      const expectedThumbPath = path.join(channelDir, 'My Video [vid1].jpg');
+      Video.findAll.mockResolvedValue([{ filePath: videoPath, youtubeId: 'vid1', removed: true }]);
+
+      fs.existsSync.mockImplementation((p) => p !== expectedThumbPath);
+
+      const counts = await channelThumbnails.regenerateChannelImages(channels);
+
+      expect(fs.copySync).not.toHaveBeenCalledWith(expect.anything(), expectedThumbPath, expect.anything());
+      expect(counts.videoThumbsCopied).toBe(0);
+      expect(counts.videoThumbsDownloaded).toBe(0);
+    });
+
     it('runs for a movie-mode channel too (not gated by TV Series library mode)', async () => {
       downloadSettingsResolver.resolveFinalLibraryMode.mockReturnValue('movie');
       const channels = [{ channel_id: 'UC123', uploader: 'Test Channel' }];

@@ -1,6 +1,6 @@
 # Authentication Setup and Management
 
-This document covers all aspects of authentication in Youtarr, including initial setup, configuration options, troubleshooting, and security best practices.
+This document covers all aspects of authentication in Youtarr-Turbo, including initial setup, configuration options, troubleshooting, and security best practices.
 
 ## Table of Contents
 - [Overview](#overview)
@@ -15,7 +15,7 @@ This document covers all aspects of authentication in Youtarr, including initial
 
 ## Overview
 
-Youtarr implements a secure authentication system to protect your instance from unauthorized access. Authentication is required by default and can be configured through multiple methods.
+Youtarr-Turbo implements a secure authentication system to protect your instance from unauthorized access. Authentication is required by default and can be configured through multiple methods.
 
 ### Key Features
 - Local username/password authentication
@@ -29,13 +29,13 @@ Youtarr implements a secure authentication system to protect your instance from 
 
 ### Method 1: Web UI Setup with One-Time Token
 
-On first launch, Youtarr generates a one-time setup token and surfaces it through two channels: your container logs and a file in your data volume. You can complete setup from localhost, your trusted LAN, a VPN, or an SSH tunnel.
+On first launch, Youtarr-Turbo generates a one-time setup token and surfaces it through two channels: your container logs and a file in your data volume. You can complete setup from localhost, your trusted LAN, a VPN, or an SSH tunnel.
 
 1. Retrieve the setup token. Either:
-   - **From container logs:** `docker logs youtarr-turbo` (look for the "Youtarr initial setup required" log entry; the token-bearing entry is emitted at `LOG_LEVEL=info`), or
+   - **From container logs:** `docker logs youtarr-turbo` (look for the "Youtarr Turbo initial setup required" log entry; the token-bearing entry is emitted at `LOG_LEVEL=info`), or
    - **From the data volume:** read `config/setup-token` on the host (mounted from the container's `/app/config/setup-token`). The file is written with mode `0600`, so if your container runs as a UID that does not match your host user (for example, the container runs as root or as `YOUTARR_UID=1000` while you log in as a different user), the read will fail with "Permission denied". Use `sudo cat /path/to/youtarr/config/setup-token`, or fall back to the container-logs path above.
 
-2. Open Youtarr in a browser, e.g. `http://localhost:3087` or `http://<your-LAN-IP>:3087`.
+2. Open Youtarr-Turbo in a browser, e.g. `http://localhost:3087` or `http://<your-LAN-IP>:3087`.
 
 3. Complete the setup wizard:
    - Paste the setup token (64 hex characters)
@@ -47,11 +47,11 @@ On first launch, Youtarr generates a one-time setup token and surfaces it throug
 
 Knowledge of the token requires either Docker access (for the logs) or filesystem access to the data volume (for the file), both of which already imply admin status on the host. The token survives container restarts while setup is incomplete, so you have time to fetch it.
 
-If you wipe or recreate the `config/` volume, Youtarr loses the saved credentials and setup token state; run initial setup again on the next boot.
+If you wipe or recreate the `config/` volume, Youtarr-Turbo loses the saved credentials and setup token state; run initial setup again on the next boot.
 
-Plain HTTP is intended for localhost and private LAN/VPN access only. Do not expose Youtarr setup or login directly to the internet over HTTP; put it behind HTTPS and normal network controls first.
+Plain HTTP is intended for localhost and private LAN/VPN access only. Do not expose Youtarr-Turbo setup or login directly to the internet over HTTP; put it behind HTTPS and normal network controls first.
 
-Treat startup logs as sensitive while setup is incomplete. If you ship container logs to Loki, Splunk, CloudWatch, or another external system, redact or drop the `setupToken` field/log entry until the one-time setup token has been consumed. When `LOG_LEVEL=warn`, Youtarr logs setup guidance without the token; use `config/setup-token` to retrieve the token in that mode.
+Treat startup logs as sensitive while setup is incomplete. If you ship container logs to Loki, Splunk, CloudWatch, or another external system, redact or drop the `setupToken` field/log entry until the one-time setup token has been consumed. When `LOG_LEVEL=warn`, Youtarr-Turbo logs setup guidance without the token; use `config/setup-token` to retrieve the token in that mode.
 
 ### Method 2: Environment Variables (Headless/Automated)
 
@@ -65,7 +65,7 @@ For remote or automated deployments:
    AUTH_PRESET_PASSWORD=your-secure-password  # Min 8 characters
    ```
 
-2. Start Youtarr:
+2. Start Youtarr-Turbo:
    `./start.sh` or `docker compose up -d`
 
 3. Credentials are automatically configured
@@ -109,7 +109,7 @@ For deployments behind external authentication or not exposed to the internet:
    AUTH_ENABLED=false
    ```
 
-2. Youtarr bypasses internal authentication, no auth will be required to access Youtarr.
+2. Youtarr-Turbo bypasses internal authentication, no auth will be required to access Youtarr-Turbo.
 
 **Warning**: Only disable when using:
 - VPN access
@@ -219,7 +219,7 @@ DELETE FROM Sessions;
 
 ### Changing Password via UI
 
-1. Log in to Youtarr
+1. Log in to Youtarr-Turbo
 2. Navigate to Configuration
 3. Click "Change Password"
 4. Enter current password
@@ -227,10 +227,10 @@ DELETE FROM Sessions;
 6. Confirm new password
 7. Save changes
 
-### Reset Forgotten Password if locked out of Youtarr
+### Reset Forgotten Password if locked out of Youtarr-Turbo
 
 #### Option 1: Environment Variables
-1. Stop Youtarr:
+1. Stop Youtarr-Turbo:
    `./stop.sh` or `docker compose down`
 
 2. Edit `.env`:
@@ -244,10 +244,10 @@ DELETE FROM Sessions;
 
 4. Log in with new credentials, they will be saved to `config/config.json`
 
-5. (Optional) Remove from `.env` after login and restart Youtarr to allow changing credentials through web UI
+5. (Optional) Remove from `.env` after login and restart Youtarr-Turbo to allow changing credentials through web UI
 
 #### Option 2: Direct Config Edit
-1. Stop Youtarr:
+1. Stop Youtarr-Turbo:
    `./stop.sh` or `docker compose down`
 
 2. Edit `config/config.json`:
@@ -257,13 +257,13 @@ DELETE FROM Sessions;
 3. Restart:
    `./start.sh` or `docker compose up -d`
 
-4. Open Youtarr and set new credentials with the one-time setup token from the container logs or `config/setup-token`
+4. Open Youtarr-Turbo and set new credentials with the one-time setup token from the container logs or `config/setup-token`
 
 ### Remote Access for Initial Setup
 
 #### SSH Port Forwarding
 
-> SSH port forwarding is no longer required for security reasons (the localhost gate has been removed). It remains useful as a way to retrieve the setup token over a secure channel if you don't want to enable HTTPS for your Youtarr instance yet.
+> SSH port forwarding is no longer required for security reasons (the localhost gate has been removed). It remains useful as a way to retrieve the setup token over a secure channel if you don't want to enable HTTPS for your Youtarr-Turbo instance yet.
 
 **From Windows:**
 ```bash
@@ -283,7 +283,7 @@ This creates a secure tunnel for initial setup.
 ## Plex OAuth Integration
 
 ### Purpose
-Plex OAuth is used to obtain API tokens for Plex integration, not for Youtarr authentication.
+Plex OAuth is used to obtain API tokens for Plex integration, not for Youtarr-Turbo authentication.
 
 ### Setup Process
 
@@ -291,7 +291,7 @@ Plex OAuth is used to obtain API tokens for Plex integration, not for Youtarr au
 2. Click "Get Key" next to Plex API Key field
 3. Redirected to Plex authentication
 4. Log in with Plex account (must be server admin)
-5. Authorize Youtarr
+5. Authorize Youtarr-Turbo
 6. Token automatically populated
 7. Save configuration
 
@@ -342,7 +342,7 @@ If OAuth fails, get token manually:
 
 1. **Keep HTTP local**:
    - Plain HTTP is acceptable for localhost, a private LAN, VPN, or SSH tunnel
-   - Do not port-forward Youtarr directly to the internet over HTTP
+   - Do not port-forward Youtarr-Turbo directly to the internet over HTTP
 
 2. **Use HTTPS with reverse proxy for external access**:
    - Nginx/Caddy/Traefik with SSL
@@ -360,8 +360,8 @@ If OAuth fails, get token manually:
    - Avoid exposing to internet directly
 
 5. **Proxy trust**:
-   - Youtarr keeps the historical `TRUST_PROXY=true` default for compatibility with existing reverse-proxy installs
-   - Youtarr's own rate-limit, session, and setup audit IPs use the direct peer IP until `TRUST_PROXY` is explicitly configured
+   - Youtarr-Turbo keeps the historical `TRUST_PROXY=true` default for compatibility with existing reverse-proxy installs
+   - Youtarr-Turbo's own rate-limit, session, and setup audit IPs use the direct peer IP until `TRUST_PROXY` is explicitly configured
    - Set `TRUST_PROXY=false` when exposing the app directly without a reverse proxy
    - Set `TRUST_PROXY` to a specific hop count or trusted subnet when your reverse proxy setup needs forwarded client IPs
 
@@ -384,8 +384,8 @@ If OAuth fails, get token manually:
 **Solutions**:
 1. **Container logs:** `docker logs youtarr-turbo | grep -A5 "initial setup required"`. The token-bearing setup log entry is emitted at `LOG_LEVEL=info` on every startup until setup completes.
 2. **Data volume:** the token is also written to `config/setup-token` (mode 0600) in your data volume. From the host: `cat /path/to/youtarr/config/setup-token`. If you see "Permission denied", the container is running as a UID that does not match your host user; use `sudo cat ...` or retrieve the token from the container logs (option 1 above) instead.
-3. **Lost before setup is complete?** Stop Youtarr, delete `config/setup-token`, restart. A new token will be generated and logged.
-4. **Already completed setup and need to reset?** Stop Youtarr, remove `username` and `passwordHash` from `config/config.json`, restart, then complete setup again with the newly generated token.
+3. **Lost before setup is complete?** Stop Youtarr-Turbo, delete `config/setup-token`, restart. A new token will be generated and logged.
+4. **Already completed setup and need to reset?** Stop Youtarr-Turbo, remove `username` and `passwordHash` from `config/config.json`, restart, then complete setup again with the newly generated token.
 5. **Headless without log access?** Use the env-var path instead: set `AUTH_PRESET_USERNAME` and `AUTH_PRESET_PASSWORD` in `.env` (see Method 2 above).
 
 ### Invalid Credentials Error
@@ -409,7 +409,7 @@ docker exec youtarr-turbo cat /app/config/config.json | grep username
 
 **Solutions**:
 1. Log in again (normal after 7 days)
-2. Clear the `authToken` entry (Site Data / Local Storage) for the Youtarr origin if the browser continues to reuse an expired token
+2. Clear the `authToken` entry (Site Data / Local Storage) for the Youtarr-Turbo origin if the browser continues to reuse an expired token
 3. Check system time synchronization
 
 ### Authentication Loop

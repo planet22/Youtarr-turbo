@@ -308,6 +308,8 @@ export const CONFIG_FIELDS = {
       // the video. No effect without cacheOnPlay (there's never a cached
       // file to switch to).
       hotSwapToCache: false as boolean,
+      // (No Settings UI: its only applicable mode, plain mode=hls, is hidden
+      // from the Playback mode picker. Still honored from config.json.)
       // Any mode, any request - not tied to an in-progress session the way
       // hotSwapToCache is. Checked first, before any mode/quality
       // resolution or yt-dlp/ffmpeg work: if this video is already fully
@@ -326,21 +328,6 @@ export const CONFIG_FIELDS = {
       // the detection to work at all (real playback honors that override,
       // a bare probe doesn't - see strmGenerator.js).
       probeShortcut: false as boolean,
-      // probeShortcut only. The probe clip's resolution always checks
-      // whatever's already cached for this video's true best-available
-      // height (in-memory, then the persistent youtube_metadata_cache -
-      // free, never spawns yt-dlp) before falling back to
-      // resolveVideoTargetResolution's DB/.strm-cache/generic-placeholder
-      // value - see server/routes/ytstream.js. This flag only controls what
-      // happens on a cache MISS (an untracked video that's never been
-      // played or probed before): true pays for one live yt-dlp
-      // best-available-height lookup so the probe clip matches what real
-      // playback will actually deliver from the very first probe; false
-      // (default) falls back to today's behavior (the DB/.strm/placeholder
-      // value, potentially wrong for an untracked video). Either way, once
-      // resolved (by this lookup or by real playback itself), every
-      // subsequent probe for the same video gets it from cache for free.
-      probeResolveTrueResolution: false as boolean,
       // When true, every playback request uses these settings as-is and
       // ignores query-string overrides - both a caller's own URL params and
       // whatever mode/quality/etc. got baked into a .strm file's URL back

@@ -1,11 +1,11 @@
 # Plex Integration Guide
 
-Complete guide for integrating Youtarr with Plex Media Server.
+Complete guide for integrating Youtarr-Turbo with Plex Media Server.
 
 ## Table of Contents
 - [Overview](#overview)
 - [Library Setup](#library-setup)
-- [Youtarr Settings](#youtarr-settings)
+- [Youtarr-Turbo Settings](#youtarr-turbo-settings)
 - [Native Playlist Sync](#native-playlist-sync)
 - [Watch Status Sync](#watch-status-sync)
 - [Multi-Library Organization](#multi-library-organization)
@@ -15,18 +15,18 @@ Complete guide for integrating Youtarr with Plex Media Server.
 
 ## Overview
 
-Youtarr provides full Plex integration with:
+Youtarr-Turbo provides full Plex integration with:
 - Automatic library refresh after downloads
 - Embedded MP4 metadata for rich display
 - Channel poster artwork
 - OAuth authentication for API token retrieval
 - Multi-library support through subfolders
 - Native playlist sync: subscribed YouTube playlists appear as Plex playlists (see [Native Playlist Sync](#native-playlist-sync))
-- Watch status sync: Youtarr pulls who has watched what from Plex (see [Watch Status Sync](#watch-status-sync))
+- Watch status sync: Youtarr-Turbo pulls who has watched what from Plex (see [Watch Status Sync](#watch-status-sync))
 
 ## Library Setup
 
-There are two ways to add Youtarr content to Plex. The "Other Videos" library is the standard, recommended method: it has been in place since Youtarr's inception, is extensively tested, and works out of the box. The "TV Shows" library is an alternative you can try if you want a more series-style presentation in Plex. It requires a specific file naming convention, so you need to set the file naming before you start downloading, or re-download existing videos after changing it.
+There are two ways to add Youtarr-Turbo content to Plex. The "Other Videos" library is the standard, recommended method: it has been in place since Youtarr-Turbo's inception, is extensively tested, and works out of the box. The "TV Shows" library is an alternative you can try if you want a more series-style presentation in Plex. It requires a specific file naming convention, so you need to set the file naming before you start downloading, or re-download existing videos after changing it.
 
 ### Other Videos
 
@@ -62,14 +62,14 @@ Choose the appropriate agent:
 
 #### Step 4: Add Folder
 
-Point the library to your Youtarr download directory:
+Point the library to your Youtarr-Turbo download directory:
 - Default: `/path/to/youtube`
 - Or specific subfolder: `/path/to/youtube/__kids`
 
 ### TV Shows
 
 #### Step 1: Set Naming Convention
-In Youtarr, go to `Settings -> Core -> Video Filename Template` and select the `Plex TV Series` preset.
+In Youtarr-Turbo, go to `Settings -> Core -> Video Filename Template` and select the `Plex TV Series` preset.
 
 This will **not** rename previously downloaded videos. It is best to set this before you start downloading; otherwise, re-download videos so they pick up the new naming.
 
@@ -89,15 +89,15 @@ Choose the appropriate agent:
 
 It is also recommended to disable the settings that scan shows, like intro detection, credit detection, and voice activity detection. They do not work for this content, but Plex will still spend time scanning for them if left enabled.
 
-## Youtarr Settings
+## Youtarr-Turbo Settings
 
 ### Obtaining Plex Token
 
 #### Method 1: OAuth (Recommended)
-1. In Youtarr, open Settings -> Plex
+1. In Youtarr-Turbo, open Settings -> Plex
 2. Click "Get Key" next to Plex API Key field
 3. Log in with your Plex account
-4. Authorize Youtarr
+4. Authorize Youtarr-Turbo
 5. Token automatically populated
 
 #### Method 2: Manual
@@ -115,24 +115,24 @@ Under Settings -> Plex:
 
 ### Library Refresh
 
-Youtarr automatically:
+Youtarr-Turbo automatically:
 - Triggers library scan after each download
 - Updates only the affected sections
 - Handles multi-library setups intelligently
 
 ## Native Playlist Sync
 
-Once Plex is connected with the settings above, Youtarr can mirror your subscribed YouTube playlists into Plex as native playlists. Nothing extra is required for the common case: turn on a playlist's Plex sync chip in Youtarr and it appears under your account after the next sync.
+Once Plex is connected with the settings above, Youtarr-Turbo can mirror your subscribed YouTube playlists into Plex as native playlists. Nothing extra is required for the common case: turn on a playlist's Plex sync chip in Youtarr-Turbo and it appears under your account after the next sync.
 
 ### Playlist visibility scope (advanced)
 
-Most people can ignore this. Under **Settings -> Plex -> Advanced: playlist visibility scope**, you can control which account owns Youtarr's playlists:
+Most people can ignore this. Under **Settings -> Plex -> Advanced: playlist visibility scope**, you can control which account owns Youtarr-Turbo's playlists:
 
 - **Use my Plex admin account (default)**: the normal claimed-server case. Playlists are created under your account and are visible to you.
-- **Unclaimed server (anonymous LAN access)**: for an unclaimed server on your LAN, where Plex Web browses without a token. If a connection test detects an unclaimed server, Youtarr nudges you toward this option. Watch status sync also reads the anonymous session's watch state in this mode.
+- **Unclaimed server (anonymous LAN access)**: for an unclaimed server on your LAN, where Plex Web browses without a token. If a connection test detects an unclaimed server, Youtarr-Turbo nudges you toward this option. Watch status sync also reads the anonymous session's watch state in this mode.
 - **A specific Plex user account**: routes the playlists through a token you paste in.
 
-Plex playlists are always owned by a single account, so there's no automatic "public" setting. To let another Plex user see a playlist, open it in Plex Web and share it (playlist menu -> Share), or use **Settings -> Manage Library Access -> [user] -> Media**. Youtarr can't grant per-user access for you.
+Plex playlists are always owned by a single account, so there's no automatic "public" setting. To let another Plex user see a playlist, open it in Plex Web and share it (playlist menu -> Share), or use **Settings -> Manage Library Access -> [user] -> Media**. Youtarr-Turbo can't grant per-user access for you.
 
 Heads up: shared playlists do not appear in the recipient's **Playlists** section - Plex lists playlists shared by another account under a separate sidebar source named **Media**. If a user reports the playlist is missing even though the share looks correct, have them check there. See [Shared Playlists Don't Appear for Other Users](../TROUBLESHOOTING.md#shared-playlists-dont-appear-for-other-users-plex) for related gotchas (library access, content-rating restrictions).
 
@@ -140,14 +140,14 @@ For how syncing, ordering, and playlist updates work across all servers, see [Me
 
 ## Watch Status Sync
 
-The same Plex connection you set up above also enables watch status sync: on a schedule (every 4 hours by default), Youtarr pulls per-video watch state from Plex and shows it as Watched chips and filters on its listing pages. The sync is one-way; Youtarr never marks anything watched on Plex.
+The same Plex connection you set up above also enables watch status sync: on a schedule (every 4 hours by default), Youtarr-Turbo pulls per-video watch state from Plex and shows it as Watched chips and filters on its listing pages. The sync is one-way; Youtarr-Turbo never marks anything watched on Plex.
 
 A couple of Plex-specific details:
 
 - The server owner's account gets full detail: played, percent watched, and last watched time.
 - Other Plex accounts come from the server's play history, which only records completed plays. Those users show as watched or not, with no in-progress positions.
-- On an unclaimed server (see the playlist visibility scope above), Youtarr reads the anonymous session's watch state instead.
-- Plex decides when a video counts as played, not Youtarr: the **Video Played Threshold** setting under Settings -> Library (90% by default).
+- On an unclaimed server (see the playlist visibility scope above), Youtarr-Turbo reads the anonymous session's watch state instead.
+- Plex decides when a video counts as played, not Youtarr-Turbo: the **Video Played Threshold** setting under Settings -> Library (90% by default).
 
 Settings live under **Settings -> Watch Status**, including a per-server toggle for syncing all users vs. just the owner. See [Track Watch Status from Media Servers](../USAGE_GUIDE.md#track-watch-status-from-media-servers) for the full workflow.
 
@@ -163,7 +163,7 @@ Separate content by purpose:
 
 ### Setting Up Multiple Libraries
 
-1. **Configure channel subfolders** in Youtarr:
+1. **Configure channel subfolders** in Youtarr-Turbo:
    - Click settings icon on any channel page
    - Set custom subfolder (e.g., `__kids`, `__music`)
 
@@ -220,7 +220,7 @@ See: [docs/YOUTARR_DOWNLOADS_FOLDER_STRUCTURE.md](../YOUTARR_DOWNLOADS_FOLDER_ST
 3. **Keep subfolder names simple** (no spaces or special characters)
 
 ### Network Configuration
-1. **Same network**: Ensure Plex and Youtarr are on same network
+1. **Same network**: Ensure Plex and Youtarr-Turbo are on same network
 2. **Firewall rules**: Allow port 32400 between containers
 3. **Docker networking**: Use bridge network or host mode
 
@@ -243,9 +243,9 @@ See: [docs/YOUTARR_DOWNLOADS_FOLDER_STRUCTURE.md](../YOUTARR_DOWNLOADS_FOLDER_ST
 **Problem**: New videos don't appear
 
 **Solutions**:
-1. Check Youtarr logs for scan errors
+1. Check Youtarr-Turbo logs for scan errors
 2. Manually trigger library scan in Plex
-3. Verify library ID is correct in Youtarr
+3. Verify library ID is correct in Youtarr-Turbo
 4. Check folder permissions
 
 ### Metadata Not Displaying
@@ -291,7 +291,7 @@ See: [docs/YOUTARR_DOWNLOADS_FOLDER_STRUCTURE.md](../YOUTARR_DOWNLOADS_FOLDER_ST
 
 **Solutions**:
 1. Verify each library has unique path
-2. Check library IDs in Youtarr config
+2. Check library IDs in Youtarr-Turbo config
 3. Ensure subfolders are correctly set
 4. Test with manual refresh first
 

@@ -73,7 +73,6 @@ export const DEFAULT_YTSTREAM: YtstreamConfig = {
   hotSwapToCache: false,
   serveCachedFile: false,
   probeShortcut: false,
-  probeResolveTrueResolution: false,
   forceServerSettings: false,
   historyRetentionDays: 90,
   hlsStorageLocation: 'tmp',
@@ -97,7 +96,7 @@ const MODE_TOOLTIPS: Record<string, string> = {
   hls: 'Re-streams through yt-dlp\'s DASH formats + ffmpeg, quality beyond progressive\'s ceiling, writing real HLS segment files to disk instead of a live pipe: fixes players (Jellyfin included) that won\'t tolerate a live pipe\'s startup wait. Requires a working ffmpeg on the host; fails outright (502) if unavailable, no fallback to Direct. Costs local disk space per active stream. Backfill missing segments (below) can apply once Hot-swap to cached file gives it a local source.',
   'hls-buffer': 'Same as Enhanced HLS, but an independent fetch starts immediately and pulls the whole video once, unthrottled, into a local MPEG-TS buffer file that becomes the permanent download; continues even if playback seeks early or stops. Calculated length is always on for this mode. Backfill and Finalize .ts to .mp4 (below) can both apply once buffered.',
   'hls-byterange': 'Experimental. A simpler alternative to Enhanced HLS: ffmpeg writes one growing fragmented-MP4 file plus a manifest (#EXT-X-MAP/#EXT-X-BYTERANGE) describing byte ranges into it, instead of many small segment files. Forward-only - no seek-restart support. The well-supported variant: an HLS-aware player reads duration/seek info from the manifest, not from Content-Length. Container is ignored (always fMP4).',
-  'hls-byterange-file': 'Same underlying growing fragmented-MP4 file as Byte-range HLS, but skips the manifest entirely - the URL serves that file directly via plain HTTP Range requests, so playback starts in seconds. Real tradeoff: without a manifest or a finished random-access index, a player has no reliable way to seek into anything it hasn\'t already sequentially buffered through (seeking backward into already-buffered content should work; forward seeks past that point likely will not). Container is ignored (always mp4).',
+  'hls-byterange-file': 'Same underlying growing fragmented-MP4 file as Byte-range HLS, but skips the manifest entirely - the URL serves that file directly via plain HTTP Range requests, so playback starts in seconds. Real tradeoff: without a manifest or a finished random-access index, a player has no reliable way to seek into anything it hasn\'t already sequentially buffered through (seeking backward into already-buffered content should work; forward seeks past that point likely will not). Container is fixed to Matroska.',
   'youtube-hls': 'Serves YouTube\'s OWN HLS playlist for the video: no ffmpeg, no yt-dlp media download, no local file. YouTube\'s playlist lists every segment and its duration up front, so a player (Jellyfin included) sees the exact length immediately, can seek anywhere, and starts as soon as the first segment arrives. Only the small playlist passes through Youtarr-Turbo; the player fetches segments directly from YouTube, so it must reach YouTube from the same network as this server (URLs can be IP-bound and expire after a few hours). Limited to what YouTube offers over HLS (H.264, up to 1080p); age-restricted or members-only videos need cookies. Stream quality picks the variant; Container, Transcode and the hardware settings are ignored.',
   'download-cache': 'Experimental. No streaming at all: downloads (and, if Transcode is H.264, re-encodes) the whole video once, then serves the finished file directly with normal HTTP Range support. Every request - including the first - blocks until that finishes, so there is a real delay before any bytes reach the player. Container is ignored; always mp4.',
 };
@@ -205,6 +204,15 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [modeCompat.calculatedLength?.status, ytstream.calculatedLength]);
+
+  // Byte-range Plain file is pinned to Matroska in the UI: keep the saved
+  // container in step with what the (locked) Container dropdown shows.
+  useEffect(() => {
+    if (modeSelectValue === 'hls-byterange-file' && ytstream.container !== 'mkv') {
+      setYtstream({ container: 'mkv' });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modeSelectValue, ytstream.container]);
 
   const currentHardwareMode = ytstream.hardwareMode || 'none';
   // Maps Stream quality to the tuning matrix's resolution keys (480-2160).
@@ -323,15 +331,15 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
           <InputLabel>Container</InputLabel>
           <Box className="flex items-center gap-1">
             <Select
-              value={ytstream.container || 'mp4'}
+              value={modeSelectValue === 'hls-byterange-file' ? 'mkv' : (ytstream.container || 'mp4')}
               label="Container"
               onChange={(e: SelectChangeEvent<string>) =>
                 setYtstream({ container: e.target.value as 'mp4' | 'ts' | 'mkv' })
               }
               className="flex-1 min-w-0"
-              disabled={disabled || (modeCompat.container?.status !== 'optional' && modeSelectValue !== 'hls-byterange-file')}
+              disabled={disabled || modeSelectValue === 'hls-byterange-file' || modeCompat.container?.status !== 'optional'}
             >
-              <MenuItem value="mp4">MP4</MenuItem>
+              {modeSelectValue !== 'hls-byterange-file' && <MenuItem value="mp4">MP4</MenuItem>}
               {modeSelectValue !== 'hls-byterange-file' && <MenuItem value="ts">MPEG-TS</MenuItem>}
               {mode !== 'hls' && mode !== 'hls-buffer' && (
                 <MenuItem value="mkv">Matroska</MenuItem>
@@ -340,7 +348,7 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
             <InfoTooltip
               text={
                 (modeSelectValue === 'hls-byterange-file'
-                  ? 'Byte-range Plain file: MP4 writes a fragmented MP4 (Jellyfin has to read the whole file to learn its length). Matroska writes a growing .mkv with the real duration in its header, so Jellyfin sees the correct length at once; the final size is declared up front, so a forward seek waits for the download to reach that point. '
+                  ? 'Byte-range Plain file always uses Matroska: it writes a growing .mkv with the real duration in its header, so Jellyfin sees the correct length at once; the final size is declared up front, so a forward seek waits for the download to reach that point. '
                   : '')
                 + 'Matroska (mkv, Enhanced-only) accepts any video/audio codec pair: useful for Copy when the source isn\'t H.264.'
                 + (mode === 'hls-buffer'
@@ -638,31 +646,6 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
             text={
               'When a STRM item is played, enqueues a background download so later plays use a cached file instead of live proxying. Pairs with Automatic Video Removal, which can revert a cached video back to STRM instead of deleting it.'
               + (modeCompat.cacheOnPlay?.reason ? ` For the current Playback mode (${mode}): ${modeCompat.cacheOnPlay.reason}` : '')
-            }
-            onMobileClick={onMobileTooltipClick}
-          />
-        </Box>
-      </Grid>
-
-      {/* Always disabled currently: its only 'optional' case is mode=hls,
-          hidden from the picker above. Kept visible, not hidden - live
-          again the moment hls returns, no further wiring needed. */}
-      <Grid item xs={12} md={3}>
-        <Box className="flex items-center gap-1">
-          <FormControlLabel
-            control={
-              <Switch
-                checked={ytstream.hotSwapToCache ?? false}
-                onChange={(e) => setYtstream({ hotSwapToCache: e.target.checked })}
-                disabled={disabled || modeCompat.hotSwapToCache?.status !== 'optional'}
-              />
-            }
-            label="Hot-swap to cached file"
-          />
-          <InfoTooltip
-            text={
-              'If the Cache on play download finishes while this video is still playing, the session switches to producing the rest from the local file instead of the network: same picture, no restart, faster. No effect unless Cache on play is also enabled.'
-              + (modeCompat.hotSwapToCache?.reason ? ` For the current Playback mode (${mode}): ${modeCompat.hotSwapToCache.reason}` : '')
             }
             onMobileClick={onMobileTooltipClick}
           />

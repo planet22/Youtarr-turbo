@@ -1,6 +1,6 @@
 # Getting Started: Channel & Playlist Settings
 
-This guide covers the per-channel and per-playlist settings dialog in Youtarr
+This guide covers the per-channel and per-playlist settings dialog in Youtarr-Turbo
 Turbo — subfolder placement, TV Series library mode (season/episode
 numbering), title filtering, and the live preview tools that let you check
 both before you save anything. It uses a real subscribed channel
@@ -35,7 +35,7 @@ overrides it just for that channel/playlist.
 | Generate channel playlist file (.m3u) / Playlist Order | General | `m3u_enabled` / `m3u_sort_order` | Writes a `.m3u` playlist file into the channel folder, oldest-first or newest-first. |
 | Min Duration (mins) / Max Duration (mins) | Filters | `min_duration` / `max_duration` | Reject videos shorter/longer than these bounds. **Note the UI takes minutes**, even though the underlying config stores seconds. |
 | Title Filter (Python Regex) | Filters | `title_filter_regex` | Only download videos whose title matches this regex. See [Title filtering](#title-filtering) below. |
-| Season/Episode Regex (Python, named groups) | Filters | `season_episode_regex` | Only shown when Library Mode is TV Series. See [TV Series numbering](#tv-series-numbering) below. |
+| Season/Episode Regex (Python, named groups) | Filters | `season_episode_regex` | Only shown when Library Mode is TV Series. See [TV Series numbering](#tv-series-numbering--the-combined-filter-preview) below. |
 | Default Rating | Ratings | `default_rating` | Rating tag applied to videos with no other rating source. |
 | Protect this channel from auto-removal | Auto-Removal | `auto_removal_protected` | Excludes every video of this channel from all auto-removal strategies. |
 | Always keep newest downloads | Auto-Removal | `auto_removal_keep_recent_count` | Per-channel version of the global keep-recent-count guard — see [CONFIG.md § Per-Channel Auto-Removal Settings](CONFIG.md#per-channel-auto-removal-settings). Mutually exclusive with Protect above. |
@@ -115,12 +115,12 @@ correctly:
 That third row shows something worth knowing: the
 spin-off ("Junior Taskmaster") episode and the flagship episode both matched
 `Series 1, Episode 2` and landed in the **same** `S01E02` slot as two
-different files. Youtarr Turbo doesn't require season/episode numbers to be
+different files. Youtarr-Turbo doesn't require season/episode numbers to be
 unique — every filename still ends in the locked `[VIDEO_ID]` suffix, so
 same-slot files never collide on disk, they just both show up under
 "Season 1, Episode 2" in your media server.
 
-**When a title doesn't resolve to a season/episode**, Youtarr Turbo doesn't
+**When a title doesn't resolve to a season/episode**, Youtarr-Turbo doesn't
 fail the download — it falls back to the year/chronological default, same
 as a channel with no regex configured at all. You'll see this show up as a
 year-numbered season folder (e.g. `Season 2020`) sitting alongside your real

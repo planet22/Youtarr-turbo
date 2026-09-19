@@ -87,15 +87,29 @@ function getModeFieldCompatibility({ mode, transcode }) {
       status: 'forced',
       reason: `${mode} builds a real .m3u8 playlist - without this, a player sees ffmpeg's own raw growing playlist instead of a pre-declared exact-duration one, and can "join near the live edge" on reconnect (a real forward jump, displayed position stuck behind it), regardless of how this setting is configured.`,
     }
-    : (mode === 'direct' || mode === 'direct-redirect' || mode === 'youtube-hls')
+    : (mode === 'hls-byterange' || mode === 'download-cache')
       ? {
         status: 'ignored',
-        reason: `${mode} mode uses the stream's own real length (whatever the upstream/player's own fetch reports), not an estimate.`,
+        reason: mode === 'hls-byterange'
+          ? 'The manifest (or, for Plain file, the growing file itself) carries its own duration - there is no estimated Content-Length to calculate.'
+          : 'The finished file is served whole with its real Content-Length - there is nothing to estimate.',
       }
       : {
-        status: 'optional',
-        reason: 'A genuine trade-off: reports an estimated size/duration upfront and answers seeks faster (but only approximately) by restarting at the estimated timestamp.',
+        status: 'ignored',
+        reason: `${mode} mode uses the stream's own real length (whatever the upstream/player's own fetch reports), not an estimate.`,
       };
+
+  // Experimental modes are intercepted in routes/ytstream.js before the
+  // cached-file check runs, so it never gets a chance to apply to them.
+  fields.serveCachedFile = (mode === 'hls-byterange' || mode === 'download-cache' || mode === 'youtube-hls')
+    ? {
+      status: 'ignored',
+      reason: 'This experimental mode handles playback (and its own hidden cache) entirely on its own - the already-downloaded-file check never runs for it.',
+    }
+    : {
+      status: 'optional',
+      reason: 'Serves a video that is already fully downloaded straight from its real local file instead of live-proxying or re-transcoding it.',
+    };
 
   fields.probeShortcut = !isHlsFamily
     ? {

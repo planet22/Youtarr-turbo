@@ -1,6 +1,6 @@
 # Database Configuration and Management
 
-This document provides comprehensive information about Youtarr's database setup, configuration, troubleshooting, and management.
+This document provides comprehensive information about Youtarr-Turbo's database setup, configuration, troubleshooting, and management.
 
 ## Table of Contents
 - [Overview](#overview)
@@ -12,7 +12,7 @@ This document provides comprehensive information about Youtarr's database setup,
 
 ## Overview
 
-Youtarr uses MariaDB/MySQL for storing:
+Youtarr-Turbo uses MariaDB/MySQL for storing:
 - Channel subscriptions and metadata
 - Playlist subscriptions and per-server sync state
 - Video information and download history
@@ -83,7 +83,7 @@ volumes:
 
 ### Migrating from Bind Mount to Named Volume
 
-If you already have Youtarr data in `./database/`, do **not** switch the compose mount by hand unless you intentionally want to start with an empty database. Use the migration helper instead:
+If you already have Youtarr-Turbo data in `./database/`, do **not** switch the compose mount by hand unless you intentionally want to start with an empty database. Use the migration helper instead:
 
 ```bash
 ./scripts/migrate-to-named-volume.sh
@@ -91,17 +91,17 @@ If you already have Youtarr data in `./database/`, do **not** switch the compose
 
 What the script does (in this order, so any failure leaves the simplest possible recovery state):
 1. Runs a pre-flight permissions check so it fails fast (instead of stalling on an interactive `sudo` prompt) if it cannot write to the project directory.
-2. Stops Youtarr.
+2. Stops Youtarr-Turbo.
 3. Starts the existing bind-mounted MariaDB long enough to run `mysqldump` and to capture per-table row counts.
 4. Renames `./database/` to `./database.bind-mount-backup.<timestamp>/` so the original files are preserved.
 5. Starts a fresh named-volume MariaDB and imports the dump.
 6. Verifies that the table set matches the source **and** that every table has the same row count as the source.
 7. **Only after verification succeeds**, snapshots `.env` to `./.env.bak.<timestamp>` and pins `COMPOSE_PATH_SEPARATOR=:` and `COMPOSE_FILE=docker-compose.yml:docker-compose.arm.yml` in `.env`. This means a failure during step 5 or 6 leaves `.env` untouched, and recovery is just `mv ./database.bind-mount-backup.<timestamp> ./database` plus removing the partial named volume.
-8. Brings the full stack (app + database) back up so Youtarr is immediately usable.
+8. Brings the full stack (app + database) back up so Youtarr-Turbo is immediately usable.
 
-**What the migration does *not* copy**: `mysqldump` runs with `--single-transaction --routines --triggers --events`. Schema, data, stored routines, triggers, and events all migrate. MariaDB users and `GRANT` statements (anything in `mysql.user` / `mysql.db`) do **not**. The default Youtarr install only uses the bundled `root` user, so this is a no-op for almost everyone. If you have created additional database users on the bundled MariaDB, recreate them after the migration completes.
+**What the migration does *not* copy**: `mysqldump` runs with `--single-transaction --routines --triggers --events`. Schema, data, stored routines, triggers, and events all migrate. MariaDB users and `GRANT` statements (anything in `mysql.user` / `mysql.db`) do **not**. The default Youtarr-Turbo install only uses the bundled `root` user, so this is a no-op for almost everyone. If you have created additional database users on the bundled MariaDB, recreate them after the migration completes.
 
-**Password note**: for the bundled `root` database user, `DB_ROOT_PASSWORD` seeds the root password when a fresh MariaDB data directory is initialized, while Youtarr connects with `DB_PASSWORD`. The migration requires those two values to match before it creates the new named-volume database.
+**Password note**: for the bundled `root` database user, `DB_ROOT_PASSWORD` seeds the root password when a fresh MariaDB data directory is initialized, while Youtarr-Turbo connects with `DB_PASSWORD`. The migration requires those two values to match before it creates the new named-volume database.
 
 After it completes, the stack is already running. Subsequent restarts can use any of:
 
@@ -132,7 +132,7 @@ The migration is reversible:
    ```bash
    mv ./database.bind-mount-backup.<timestamp> ./database
    ```
-5. Start Youtarr:
+5. Start Youtarr-Turbo:
    ```bash
    ./start.sh
    ```
@@ -183,7 +183,7 @@ COMPOSE_FILE=docker-compose.yml:docker-compose.arm.yml
 - MariaDB 10.3+ or MySQL 8.0+
 - Database with `utf8mb4` character set
 - User with full privileges on the database
-- Network connectivity from Youtarr container
+- Network connectivity from Youtarr-Turbo container
 
 ### Step 1: Prepare External Database
 
@@ -207,7 +207,7 @@ FLUSH PRIVILEGES;
 
 Replace `'%'` with specific IP/network if restricting access.
 
-### Step 2: Configure Youtarr
+### Step 2: Configure Youtarr-Turbo
 
 Edit `.env` file:
 ```bash

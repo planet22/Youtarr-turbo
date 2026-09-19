@@ -7,15 +7,23 @@ it's a new route file (`server/routes/ytstream.js`, plus its
 `server/modules/ytstream/` sub-modules) you can use instead of, or
 alongside, STRM files.
 
-It's modeled on the two playback modes from
-[kingschnulli/jellyfin-youtube-plugin](https://github.com/kingschnulli/jellyfin-youtube-plugin):
+It started as the two playback modes from
+[kingschnulli/jellyfin-youtube-plugin](https://github.com/kingschnulli/jellyfin-youtube-plugin)
+(`direct`, `hls`) and now has seven modes. **Three are the recommended ones**
+(marked ★): YouTube HLS passthrough, Byte-range Plain file, and Enhanced HLS +
+Buffered. The [Getting Started guide](GETTING_STARTED_STREAMING.md#step-3--pick-a-playback-mode)
+has a paste-ready config and comparison table for each.
 
 | This route (`?mode=`) | What it does | Needs ffmpeg? |
 |---|---|---|
 | `direct` (default) | Resolves one progressive URL with yt-dlp and proxies it straight through (Range-forwarded, real Content-Length). | No |
 | `direct-redirect` | Same resolve as `direct`, but sends the player a 302 straight to the resolved URL instead of proxying the bytes — lightest mode on resources, but cookies/Referer don't travel with the redirect. | No |
 | `hls` | DASH video-only + audio-only, each fetched by its own `yt-dlp -o -` process and piped into ffmpeg, which writes real segmented HLS output (`.m3u8` + segment files) to disk instead of piping live — the response isn't sent until the first segment actually exists. Natively seekable within whatever's already been encoded. Optional `calculatedLength` pre-declares the *entire* real-duration playlist upfront — see "Calculated length" below. Not offered in the Settings UI's Playback mode dropdown (`hls-buffer` is a strict superset there), but still a fully valid `?mode=` value and config setting. | Yes |
-| `hls-buffer` | Same engine as `hls`, plus an independent, unthrottled fetch starts immediately and pulls the whole video once into a local buffer file that becomes the permanent download — later seeks in the same session can read from that local file instead of the network. `calculatedLength` is always on for this mode. This is the option labeled "Enhanced HLS + Buffered" in Settings. | Yes |
+| `hls-buffer` | Same engine as `hls`, plus an independent, unthrottled fetch starts immediately and pulls the whole video once into a local buffer file that becomes the permanent download — later seeks in the same session can read from that local file instead of the network. `calculatedLength` is always on for this mode. This is the option labeled "Enhanced HLS + Buffered" in Settings. ★ | Yes |
+| `youtube-hls` ★ | Serves YouTube's OWN HLS VOD playlist: no ffmpeg, no yt-dlp media download, no local file. YouTube's playlist lists every segment and duration up front, so the player knows the exact length and can seek anywhere. `quality` picks the variant, `audioLanguage` picks the audio track, `youtubeHlsProxy` chooses whether playlists and segment URLs route through Youtarr-Turbo. Limited to what YouTube offers over HLS (H.264, up to 1080p). Labeled "YouTube HLS passthrough" in Settings. See "YouTube HLS passthrough" below. | No |
+| `hls-byterange` + `byteRangeDeliverAsFile: true` ★ | One growing MP4/Matroska file written by ffmpeg (yt-dlp video + audio piped in) and served directly with HTTP Range support from the hidden stealth cache. Labeled "Byte-range Plain file" in Settings. See "Byte-range Plain file" below. | Yes |
+| `hls-byterange` (manifest) | Experimental. The same growing fMP4, but the URL returns an HLS manifest (`#EXT-X-MAP`/`#EXT-X-BYTERANGE`) into it. Forward-only, and Jellyfin treats the playlist as live, so it is not recommended for STRM playback. Labeled "Byte-range HLS (experimental)". | Yes |
+| `download-cache` | Experimental. Downloads (and, with `transcode=h264`, re-encodes) the whole video, then serves the finished mp4 with normal Range support. Every request, including the first, blocks until it finishes. | Yes |
 
 There used to be a fifth mode, a live-pipe `mode=ffmpeg` (yt-dlp piped
 straight into a single ffmpeg process, sent to the client as it was
@@ -31,7 +39,7 @@ invalid-mode handling in `server/modules/ytstream/playbackPlan.js`.
 
 **Why not just use the Jellyfin plugin directly?** It has no cookie
 support, so age-restricted and members-only videos won't play. This route
-reuses Youtarr's existing cookie handling
+reuses Youtarr-Turbo's existing cookie handling
 (`configModule.getCookiesPath()`) plus its existing proxy / IP-family /
 rate-limit conventions (`YtdlpCommandBuilder.buildCommonArgs`), so
 anything your channel downloads can already authenticate for will also
@@ -55,10 +63,10 @@ stream.
 
 | Param | Values | Default | Notes |
 |---|---|---|---|
-| `mode` | `direct` \| `direct-redirect` \| `hls` \| `hls-buffer` | `ytstream.defaultMode` config (else `direct`) | Playback mode, see table above. An unrecognized value (e.g. a `.strm` written before a mode was retired) falls back to the current `ytstream.defaultMode` if that's still valid, else hardcoded `direct` — never a hardcoded lower-quality mode regardless of what's configured. |
+| `mode` | `direct` \| `direct-redirect` \| `hls` \| `hls-buffer` \| `hls-byterange` \| `download-cache` \| `youtube-hls` | `ytstream.defaultMode` config (else `direct`) | Playback mode, see table above. The last three are handled before any other mode logic (they read `quality`, `qualityStrictness`, `transcode`, `hardware`, `tuning`, `container`, `audioLanguage`, `hlsProxy`, `deliverAsFile` and `resumeCache` from the query, or from config when `forceServerSettings` is on). An unrecognized value (e.g. a `.strm` written before a mode was retired) falls back to the current `ytstream.defaultMode` if that's still valid, else hardcoded `direct` — never a hardcoded lower-quality mode regardless of what's configured. |
 | `quality` | e.g. `720`, `1080`, `best`, or any height | `ytstream.quality` config, else `preferredResolution`, else `720` | `mode=direct`/`direct-redirect` map to the plugin's progressive playback targets (`720` → BroadCompatibility, `1080` → Balanced1080p, `best` → MaximumQuality, capped at whatever progressive (already-muxed) format YouTube happens to serve — 720p max in practice). `hls`/`hls-buffer` instead fetch a **DASH** video-only + audio-only pair, so they aren't capped at progressive's ~720p ceiling and genuinely support `1080`/`1440`/`2160`. See `qualityStrictness` for how a mismatch with what's actually available is handled. |
 | `qualityStrictness` | `fixed` \| `fallback` \| `best` | `ytstream.qualityStrictness` config (else `fallback`) | Controls how the `quality` height becomes a yt-dlp selector. `fallback` (default, long-standing behavior): chains from the exact height down to best-available. `fixed`: matches only that exact height — yt-dlp fails cleanly (no silent substitution) if this video doesn't have it. `best`: ignores `quality` entirely, always the mode's true best-available format. Never written into a generated `.strm` URL (server-side/config only). |
-| `container` | `mp4` \| `ts` \| `mkv` | `ytstream.container` config (else `mp4`) | Used by `hls`/`hls-buffer`. **`mkv` has no effect on real HLS output today** — `getHlsContainerInfo` only special-cases `ts` (real MPEG-TS segments); every other value, `mkv` included, falls through to fragmented MP4 (`.m4s` + init segment, matching Jellyfin's own HLS output). The only place `mkv` actually changes anything is the probe-shortcut synthetic clip (see below), which can be muxed as Matroska. `ts` still means real MPEG-TS HLS segments as before. |
+| `container` | `mp4` \| `ts` \| `mkv` | `ytstream.container` config (else `mp4`) | Used by `hls`/`hls-buffer`, and by Byte-range Plain file (`hls-byterange` + `deliverAsFile`, where it picks `mp4` or `mkv`; `ts` is not offered; the Settings UI pins it to `mkv` for this mode). **`mkv` has no effect on `hls`/`hls-buffer` segment output** — `getHlsContainerInfo` only special-cases `ts` (real MPEG-TS segments); every other value, `mkv` included, falls through to fragmented MP4 (`.m4s` + init segment, matching Jellyfin's own HLS output). `mkv` is only meaningful for Byte-range Plain file (a real growing `.mkv`) and the inert probe-shortcut clip path. |
 | `transcode` | `copy` \| `h264` | `ytstream.transcode` config (else `copy`) | Used by `hls`/`hls-buffer`. `copy` remuxes without re-encoding (fast); `h264` re-encodes to H.264/AAC for maximum client compatibility. `copy` is auto-upgraded to `h264` per-request when the selected format isn't actually H.264 (see "transcode=copy auto-upgrade" below). |
 | `hardware` | `none` \| `qsv` \| `nvenc` \| `vaapi` \| `amf` | `ytstream.hardwareMode` (else `none`) | Only applies when `mode=hls`/`hls-buffer` and `transcode=h264` — this is the **encode** backend. See `hardwareDecodeMode` below for the independent decode-side setting. Prefer setting this in config rather than in `.strm` URLs; never written into a generated `.strm` URL. |
 | `tuning` | `fast` \| `balanced` \| `quality` | `ytstream.tuning` (else `fast`) | Encoder speed/quality tier, only meaningful alongside `transcode=h264`. `fast` matches this app's original always-on defaults; `balanced`/`quality` trade real-time encode speed for picture quality — see "Encoding tuning" below. Never written into a generated `.strm` URL. |
@@ -97,17 +105,22 @@ All of the query params above are ignored entirely when `ytstream.forceServerSet
   "backfillMissingSegments": false,
   "finalizeToMp4": false,
   "stealthCache": false,
+  "bufferStartAfterSegments": 3,
   "debugLogging": false,
+  "byteRangeDeliverAsFile": false,
+  "byteRangeResumeCache": false,
+  "audioLanguage": "",
+  "youtubeHlsProxy": "off",
   "forceKeyframesByHardwareMode": {}
 }
 ```
 
-`calculatedLength` was renamed from `fakeLength`; configs saved under the old name are migrated automatically the next time Youtarr starts (see `configModule.js`). The single authoritative field list, with the exact default/type/interaction notes reproduced below, lives in `client/src/config/configSchema.ts`'s `ytstream:` block.
+`calculatedLength` was renamed from `fakeLength`; configs saved under the old name are migrated automatically the next time Youtarr-Turbo starts (see `configModule.js`). The single authoritative field list, with the exact default/type/interaction notes reproduced below, lives in `client/src/config/configSchema.ts`'s `ytstream:` block.
 
 | Field | Values | Settings UI? | Notes |
 |---|---|---|---|
-| `defaultMode` | `direct` \| `direct-redirect` \| `hls` \| `hls-buffer` | Yes (dropdown offers Direct / Direct (redirect) / Enhanced HLS + Buffered only — `hls` is a valid value but hidden from the picker, since `hls-buffer` is a strict superset) | See the mode table above. |
-| `container` | `mp4` \| `ts` \| `mkv` | Yes, but only interactive when Playback mode is `hls`/`hls-buffer` (the field is disabled for `direct`/`direct-redirect`, which never transcode); the `mkv` option is additionally hidden from the dropdown whenever `mode` is `hls`/`hls-buffer` since it has no effect there — in practice `mkv` can only be set by editing `config.json` directly | See the query-param table for what each container value actually maps to per mode. |
+| `defaultMode` | `direct` \| `direct-redirect` \| `hls` \| `hls-buffer` \| `hls-byterange` \| `download-cache` \| `youtube-hls` | Yes (dropdown offers Direct, Direct (redirect), Enhanced HLS + Buffered, Byte-range HLS (experimental), Byte-range Plain file, Download & cache (experimental), YouTube HLS passthrough — `hls` is a valid value but hidden from the picker, since `hls-buffer` is a strict superset; "Byte-range Plain file" is `hls-byterange` plus `byteRangeDeliverAsFile: true`) | See the mode table above. |
+| `container` | `mp4` \| `ts` \| `mkv` | Yes, but only interactive when Playback mode is `hls`/`hls-buffer` (the field is disabled for `direct`/`direct-redirect`, which never transcode); the `mkv` option is additionally hidden from the dropdown whenever `mode` is `hls`/`hls-buffer` since it has no effect there — in practice `mkv` can only be set by editing `config.json` directly, except for Byte-range Plain file, where the dropdown is locked to Matroska and saves `mkv` for you | See the query-param table for what each container value actually maps to per mode. |
 | `probeShortcutContainerOverride` | `mp4` \| `ts` \| `mkv` \| `null` | **No** — config.json only, debug escape hatch | **Currently inert.** Was a debug escape hatch for the old probe-shortcut synthetic-clip container/duration-patch path (mvhd/tkhd/mdhd for mp4, Segment Info Duration for mkv), abandoned in favor of `tryServeInstantHlsPlaylist` (see "Probe shortcut" below) - the field/code are kept, unused, in case that path is ever revisited. |
 | `transcode` | `""` \| `copy` \| `h264` | Yes | Empty = derive from `videoCodec` (the regular download codec setting): `h264`/`h265` → force `h264`, otherwise → `copy`. |
 | `quality` | `null` \| height \| `best` | Yes | `null` → `preferredResolution` / 720. |
@@ -118,22 +131,25 @@ All of the query params above are ignored entirely when `ytstream.forceServerSet
 | `vaapiQuality` | `1`-`7` \| `null` | Yes (only shown when Hardware encoder = VAAPI) | `hardwareMode=vaapi` only: manual override for `h264_vaapi`'s driver-level `-quality` (compression_level) knob, separate from `-qp`. `null` (default) uses each tuning tier's own baked-in default (fast=7, balanced=4, quality=1). Ignored, harmlessly, on drivers that don't support it (e.g. AMD's Mesa radeonsi). |
 | `playerClient` | `""` \| yt-dlp client list | Yes (power-user field, with a warning) | Passed as `--extractor-args youtube:player_client=<value>`. Empty = `default,-tv` (excludes the `tv` client — see Troubleshooting below). Server-side only. |
 | `audioLanguage` | `""` \| language code (`en`, `de`, `pt-BR`...) | Yes (only shown for YouTube HLS passthrough) | `mode=youtube-hls` only. Many YouTube videos carry dubbed audio tracks; this picks the language served when the video offers it (a region-less code matches its regions). Empty, or a language the video doesn't offer, serves the original track (the one YouTube marks `original`, else the video's own language, else `DEFAULT=YES`, else the first). The log line `youtube-hls chose the audio rendition` lists what each video offered and what was chosen. |
-| `youtubeHlsProxy` | `off` \| `proxy` \| `serve` | Yes (only shown for YouTube HLS passthrough; dropdown "Route through Youtarr") | `mode=youtube-hls` only. `off` (default): only the master playlist comes from Youtarr and the player fetches everything else from YouTube, so the Streaming page sees nothing after the first request. `proxy`: Youtarr also fetches and serves the chosen video and audio media playlists (`/api/ytstream/:id/yth/:key/video.m3u8`, `audio.m3u8`), so each play, its quality and its viewers show on the Streaming page; segments still go straight from YouTube. `serve`: additionally every segment URL points at Youtarr (`.../yth/:key/:kind/s<n>.ts`), which answers `302` to the real YouTube segment. No video bytes pass through Youtarr, so the Total and rate on the Streaming page are **estimates** (segment duration × the variant's bitrate, shown with a `~`) and the row carries the playback position. The proxy routes are public (players send no token) but only serve or redirect to playlists Youtarr resolved itself, looked up by an unguessable-by-URL registry key, so they cannot be pointed at other URLs. Playlists are held in memory for 30 minutes; an expired one answers 404 and playing again re-resolves it. In `serve` mode the row also has a segment strip and popup (the same ones hls uses): a filled cell is a video segment the player has requested, the darker cell is the most recent request, and the popup wording changes accordingly ("requested by the player", not "encoded"). Log lines: `routing the video and audio playlists through Youtarr`, `served a media playlist`, `playback started`, and per-segment `redirected a segment request` (debug). |
+| `youtubeHlsProxy` | `off` \| `proxy` \| `serve` | Yes (only shown for YouTube HLS passthrough; dropdown "Route through Youtarr") | `mode=youtube-hls` only. `off` (default): only the master playlist comes from Youtarr-Turbo and the player fetches everything else from YouTube, so the Streaming page sees nothing after the first request. `proxy`: Youtarr-Turbo also fetches and serves the chosen video and audio media playlists (`/api/ytstream/:id/yth/:key/video.m3u8`, `audio.m3u8`), so each play, its quality and its viewers show on the Streaming page; segments still go straight from YouTube. `serve`: additionally every segment URL points at Youtarr-Turbo (`.../yth/:key/:kind/s<n>.ts`), which answers `302` to the real YouTube segment. No video bytes pass through Youtarr-Turbo, so the Total and rate on the Streaming page are **estimates** (segment duration × the variant's bitrate, shown with a `~`) and the row carries the playback position. The proxy routes are public (players send no token) but only serve or redirect to playlists Youtarr-Turbo resolved itself, looked up by an unguessable-by-URL registry key, so they cannot be pointed at other URLs. Playlists are held in memory for 30 minutes; an expired one answers 404 and playing again re-resolves it. In `serve` mode the row also has a segment strip and popup (the same ones hls uses): a filled cell is a video segment the player has requested, the darker cell is the most recent request, and the popup wording changes accordingly ("requested by the player", not "encoded"). Log lines: `routing the video and audio playlists through Youtarr`, `served a media playlist`, `playback started`, and per-segment `redirected a segment request` (debug). |
 | `httpChunkSizeMiB` | number (MiB), `0`=off | Yes | `--http-chunk-size`. Splits yt-dlp's own fetch into ranged HTTP requests — yt-dlp's documented fix for YouTube's mid-download throttling. Only affects `hls`/`hls-buffer` (the only modes where yt-dlp itself streams media bytes); inert on `direct`/`direct-redirect`'s one-shot `-g` resolve. |
 | `concurrentFragments` | number, `0`/`1`=off | Yes | `-N`/`--concurrent-fragments`. Fetches those chunks concurrently. Same `hls`/`hls-buffer`-only applicability as `httpChunkSizeMiB`. |
 | `throttledRateKBps` | number (KB/s), `0`=off | Yes | `--throttled-rate`: yt-dlp re-extracts the URL if the measured rate drops below this. Passed on every mode's yt-dlp calls, but only actually measures anything on a call that streams real data (`hls`/`hls-buffer`); a no-op on `direct`/`direct-redirect`'s quick `-g` resolve. |
 | `socketTimeoutSeconds` | number (seconds), `0`=off | Yes | `--socket-timeout`. Applies to every yt-dlp call this app makes for ytstream, including `direct`/`direct-redirect`'s `-g` resolve — a stall triggers this app's own retry/fallback sooner instead of hanging on yt-dlp's much longer built-in default. |
 | `calculatedLength` | `true`/`false` | Yes, but the toggle itself was removed from the UI: every reachable mode now has a fixed status (`forced` for `hls-buffer`, `ignored` for `direct`/`direct-redirect`; plain `hls` — not reachable from the UI's mode picker — would be `optional`) | See "Calculated length" below. Renamed from `fakeLength`; old configs are migrated automatically. |
 | `hlsMasterPlaylist` | `true`/`false` | Yes | `hls`/`hls-buffer` only. Wraps the real media playlist in a thin HLS master playlist instead of serving it directly. On by default. See "HLS master playlist" below. |
-| `hotSwapToCache` | `true`/`false` | Yes (only meaningfully `optional` for plain `hls`, which the UI's mode picker doesn't offer — so effectively always disabled via the UI today, though the switch is still shown) | Pairs with `strm.cacheOnPlay`. Once the cache-on-play background download finishes, an active `hls` session switches its encode source from the network to the local cached file — same picture, no player-visible restart. No effect for `hls-buffer`, which has its own independent buffer-fetch mechanism instead. |
-| `serveCachedFile` | `true`/`false` | **No** — config.json only | Checked first, before any mode/quality resolution or yt-dlp/ffmpeg work, on the first request of a fresh playback attempt for any mode (skipped once an `hls`/`hls-buffer` session is already running for this video — that path uses `hotSwapToCache` instead, which preserves segment/index continuity): if the video is already fully downloaded (cache-on-play or a genuine download), the real local file is served directly with real byte-range support instead of live-proxying/transcoding it again. Off by default. |
+| `hotSwapToCache` | `true`/`false` | **No** — config.json only (its only applicable mode, plain `hls`, isn't offered by the UI's mode picker, so the switch is hidden) | Pairs with `strm.cacheOnPlay`. Once the cache-on-play background download finishes, an active `hls` session switches its encode source from the network to the local cached file — same picture, no player-visible restart. No effect for `hls-buffer`, which has its own independent buffer-fetch mechanism instead. |
+| `serveCachedFile` | `true`/`false` | Yes ("Serve already-downloaded files directly" on the STRM settings page; disabled for the experimental modes below) | Checked first, before any mode/quality resolution or yt-dlp/ffmpeg work, on the first request of a fresh playback attempt for `direct`, `direct-redirect`, `hls` and `hls-buffer` (never for `hls-byterange`, `download-cache` or `youtube-hls`, which are intercepted earlier and handle their own caching; skipped once an `hls`/`hls-buffer` session is already running for this video — that path uses `hotSwapToCache` instead, which preserves segment/index continuity): if the video is already fully downloaded (cache-on-play or a genuine download), the real local file is served directly with real byte-range support instead of live-proxying/transcoding it again. Off by default. |
 | `probeShortcut` | `true`/`false` | Yes | Detects Jellyfin's bare-UA metadata-probe request and serves the real session's own playlist instantly, before any segment is encoded, instead of making the probe wait for a full cold start. See "Probe shortcut" below. |
 | `forceServerSettings` | `true`/`false` | Yes | When `true`, ignores every query-param override above (both a caller's own URL and whatever got baked into an already-written `.strm` file) and always uses this config as-is. Off by default. |
 | `historyRetentionDays` | number (days) | Yes | How long `stream_history` rows are kept before the nightly 3:15 AM prune (`server/modules/cronJobs.js`); `<= 0`/unset falls back to 90. Governs the Streaming → History page only, not the live Streaming page (current sessions only, always visible regardless of this setting). |
-| `hlsStorageLocation` | `tmp` \| `cache` | Yes | Where a live `hls`/`hls-buffer` session's segment files are written. `tmp` (default): the OS temp directory — fastest, but can be small/volatile on some hosts. `cache`: Youtarr's own persistent `.youtarr_ytstream_cache` folder instead. Segments are still deleted on the same idle-timeout schedule either way; this only changes where they live. Read fresh per session, no restart needed. For `hls-byterange` with `byteRangeDeliverAsFile`, `cache` also makes the encode write directly into the hidden stealth cache (`.byterange-cache/<key>.partial-<id>.mp4`, renamed into place once finished) instead of copying a temp file there. |
+| `hlsStorageLocation` | `tmp` \| `cache` | Yes | Where a live `hls`/`hls-buffer` session's segment files are written. `tmp` (default): the OS temp directory — fastest, but can be small/volatile on some hosts. `cache`: Youtarr-Turbo's own persistent `.youtarr_ytstream_cache` folder instead. Segments are still deleted on the same idle-timeout schedule either way; this only changes where they live. Read fresh per session, no restart needed. For `hls-byterange` with `byteRangeDeliverAsFile`, `cache` also makes the encode write directly into the hidden stealth cache (`.byterange-cache/<key>.partial-<id>.mp4`, renamed into place once finished) instead of copying a temp file there. |
 | `backfillMissingSegments` | `true`/`false` | Yes | `hls`/`hls-buffer` only, and only once a local source becomes available this session (cache-on-play hot-swap, or `hls-buffer`'s own buffer fetch). A forward seek permanently strands the segments it skipped over; when this is on, once the live encode reaches the real end of the video, a background pass fills those gaps from the local source so the rest of the session can seek anywhere instantly. Never affects live playback itself. |
 | `finalizeToMp4` | `true`/`false` | Yes | `hls-buffer` only — its permanent output is always `.ts` (browsers can't play raw `.ts`; some players fall back to server-side transcode rather than direct-play it). When on, once that `.ts` is fully finalized, a background pass remuxes it (`-c copy`, no re-encode) into a sibling `.mp4`; playback then prefers that `.mp4` automatically. |
-| `stealthCache` | `true`/`false` | Yes | `hls-buffer` only — keeps the buffered file out of the visible library folder entirely, in Youtarr's own hidden cache, so a media server's scanner never has a mid-flight file to discover and lose track of. See "Storage & background processing" below for the exact interaction with `finalizeToMp4`. |
+| `stealthCache` | `true`/`false` | Yes | `hls-buffer` only — keeps the buffered file out of the visible library folder entirely, in Youtarr-Turbo's own hidden cache, so a media server's scanner never has a mid-flight file to discover and lose track of. See "Storage & background processing" below for the exact interaction with `finalizeToMp4`. |
+| `bufferStartAfterSegments` | number, `0`=off | **No** — config.json only | `hls-buffer` only. Delays the network-bound full-video buffer fetch until this many DISTINCT segments have been requested, instead of the instant the session is created. A metadata probe (Jellyfin/StrmTool) only requests segment 0 (occasionally 1), so this avoids a full background download for every probe that never becomes real playback. Default `3`; `0` starts the fetch immediately. |
+| `byteRangeDeliverAsFile` | `true`/`false` | Yes (the "Byte-range Plain file" entry of the Playback mode dropdown sets it) | `hls-byterange` only. `false` (default): the URL returns an HLS manifest of byte ranges into the growing fMP4 (Jellyfin treats it as live). `true`: skips the manifest and serves the growing file directly over HTTP Range. See "Byte-range Plain file" below. |
+| `byteRangeResumeCache` | `true`/`false` | Yes ("Resume partial cache", shown for Byte-range Plain file) | `hls-byterange` + `byteRangeDeliverAsFile` only. When a cached encode was cut off early (idle timeout, forced stop), resume from where it stopped and splice the new tail onto it instead of re-encoding from 0:00. Off: a partial cache entry is ignored and a fresh encode runs. Works for MP4 and MKV. |
 | `debugLogging` | `true`/`false` | **No** — config.json only | This module's own per-request/per-segment diagnostic lines are too high-volume for `logger.info` by default; gating them behind the global Log Level=debug setting also turns on every other module's debug output. When on, ytstream's own lines print regardless of the global Log Level, without affecting any other module's verbosity. |
 | `forceKeyframesByHardwareMode` | `{ [hardwareMode]: boolean }` | No direct editor — only ever set by the "Test HLS segment timing" benchmark button | Per-hardware-mode result of that benchmark: `true` means time-based forced keyframes (exact ~4s HLS segments regardless of source fps) were empirically confirmed working on this host for that mode; absent/`false` keeps the original fixed-frame-count GOP (exact only at 30fps, but a known-safe default). Never set by hand. |
 
@@ -200,7 +216,7 @@ uses (`ManagedTranscodeService.cs`): ffmpeg writes real segmented HLS
 output — a `playlist.m3u8` plus numbered segment files — to disk instead
 of piping live, and **the HTTP response isn't sent at all until the first
 real segment exists on disk** (polled, up to 45s). The wait happens
-entirely on Youtarr's side, before the player's connection is ever
+entirely on Youtarr-Turbo's side, before the player's connection is ever
 opened. Once ready, every subsequent request (the player re-polling the
 growing playlist, or fetching a segment) is just an ordinary static-file
 response — real `Content-Length`, no estimation: the player seeks by
@@ -226,7 +242,7 @@ applies here first.
 `.m3u8` manifest — playing it requires a player with an HLS engine
 (Safari's native `<video>` support, or a library like `hls.js`, which is
 what Jellyfin's own web client uses). A plain `<video src="...">` element
-with no HLS engine (e.g. Youtarr's own in-app library preview player)
+with no HLS engine (e.g. Youtarr-Turbo's own in-app library preview player)
 cannot play it at all.
 
 ## Probe shortcut (`probeShortcut`)
@@ -382,23 +398,102 @@ curl "http://localhost:3087/api/ytstream/dQw4w9WgXcQ" -o test.mp4
 curl "http://localhost:3087/api/ytstream/dQw4w9WgXcQ?mode=hls-buffer&transcode=h264&container=ts"
 ```
 
+## YouTube HLS passthrough (`mode=youtube-hls`)
+
+Serves YouTube's own HLS playlist instead of building anything locally. One
+`yt-dlp --dump-single-json` call (with the `web_safari` player client added,
+since it's the one that offers HLS) finds the manifest URL, the master playlist
+is fetched, the variant matching `quality` is chosen, and that variant's media
+playlist is returned (or a one-variant master, when audio is a separate
+rendition). Every URI is made absolute. Results are cached for 30 minutes.
+
+Because YouTube's playlist is a finished VOD playlist listing every segment and
+its duration, the player knows the exact length from the first byte, can seek
+anywhere, and starts as soon as the first segment arrives. No ffmpeg, no yt-dlp
+media download, no local file. Settings that apply: `quality`,
+`qualityStrictness`, `playerClient`, `audioLanguage`, `youtubeHlsProxy` (see the
+config table). Ignored: Container, Transcode, the hardware settings,
+`calculatedLength`, `probeShortcut`, `hlsMasterPlaylist`, and cache-on-play.
+
+Limits: only what YouTube offers over HLS (H.264, up to 1080p); age-restricted
+or members-only videos need cookies; the manifest and segment URLs can be bound
+to the requesting IP and expire after a few hours, so **the player must reach
+YouTube from the same network as this server**. Like the other experimental
+modes there is no fallback to another mode: it works or answers `502`.
+
+`youtubeHlsProxy` decides how much of the traffic Youtarr-Turbo sees:
+
+| Value | Player fetches from Youtarr-Turbo | Player fetches from YouTube | Streaming page |
+|---|---|---|---|
+| `off` | master playlist only | media playlists and segments | nothing after the first request |
+| `proxy` | master + video/audio media playlists | segments | each play, quality and viewers |
+| `serve` | master + media playlists + every segment URL (answered with `302`) | segment bytes (after the redirect) | plus playback position and an estimated data rate (`~`) |
+
+The audio track is chosen by `audioLanguage` when the video has dubs (a
+region-less code matches its regions); the log line `youtube-hls chose the audio
+rendition` lists what each video offered and what was chosen.
+
+Recommended config (this is the "YouTube HLS passthrough" recipe from the
+[Getting Started guide](GETTING_STARTED_STREAMING.md#recipe-a--youtube-hls-passthrough)):
+
+```json
+"ytstream": {
+  "defaultMode": "youtube-hls",
+  "quality": "1080",
+  "qualityStrictness": "fallback",
+  "audioLanguage": "en",
+  "youtubeHlsProxy": "serve",
+  "forceServerSettings": true
+}
+```
+
 ## Byte-range Plain file, MP4 or Matroska (`mode=hls-byterange` + `byteRangeDeliverAsFile`)
 
-yt-dlp video + audio are piped into one ffmpeg that writes a single growing file, served with Range support (and kept in the hidden stealth cache). The Container dropdown picks the output:
+yt-dlp video + audio are piped into one ffmpeg that writes a single growing file, served with Range support (and kept in the hidden stealth cache). Recommended config (the "Byte-range Plain file" recipe from the [Getting Started guide](GETTING_STARTED_STREAMING.md#recipe-b--byte-range-plain-file)):
+
+```json
+"ytstream": {
+  "defaultMode": "hls-byterange",
+  "byteRangeDeliverAsFile": true,
+  "byteRangeResumeCache": false,
+  "container": "mkv",
+  "transcode": "copy",
+  "quality": "1080",
+  "hlsStorageLocation": "cache",
+  "forceServerSettings": true
+}
+```
+
+`transcode` defaults to `copy` here and is never auto-upgraded to H.264 the way `hls`/`hls-buffer` do it; set `h264` plus `hardwareMode` to re-encode. The Container dropdown picks the output:
 
 - **MP4** (default): fragmented MP4. Players must read the whole file to learn the exact length, so the final size is declared up front and the header patched where possible.
 - **MKV** (`container=mkv`): `-f matroska` written directly (no HLS muxer/playlist). The real duration is written into the Matroska Segment Info (`Duration`, or ffmpeg's reserved 11-byte Void slot), the final size is declared up front from yt-dlp's stream sizes (0.5% margin, measured overhead is ~0), and the leftover is padded with an EBML Void element when the encode ends. Reads past the written bytes wait for the encode to catch up, so forward seeks work. The mkv cache key differs from the mp4 one and its cache files are `.mkv` (older ones named `.mp4` are still found).
 
   **MKV resume** (`byteRangeResumeCache`): a partial `.mkv` is extended by byte splicing, with no ffmpeg/ffprobe step. The partial is scanned for its complete clusters; the cut is the last cluster that starts on a video keyframe at least 12 s before its end. The base is served at once, yt-dlp restarts at that cluster's timecode (`-copyts`, so timecodes are absolute), and the resume pass's own header and Cues are left out. The seam is checked: the resume file's first cluster must start within 500 ms of the cut, or the resume is abandoned, the partial is flagged `mkvResumeFailed` in its sidecar and the next play does a fresh encode. The spliced result has no Cues (seeking works the same way as on a growing file). Debug lines: "mkv resume - scanned the cached partial", "mkv resume seam verified", "mkv resume spliced".
 
-**Cache hits on the Streaming page:** when a request is answered from a finished stealth-cache entry (no encode session), Youtarr streams the file itself. That shows as a Live Streams row with mode `byterange-cache-hit` (one row per cache entry, shared by all its requests; kept while any request is in flight and for 15 s after the last, so a seek's abort-and-reconnect doesn't make it flicker; a paused player keeps its connection open; Stop cuts the transfers) and gets a Stream History row. Debug logging: per request (`range`, `sentMB`, `MBps`), a 5 s throughput heartbeat while reading (`readMB`, `MBps`, `totalMB`), and an info summary when the row ends (`totalMB`, `averageMBps`, `requests`). A finished encode session's own row is handed over to the cache-hit row on the first cache hit, and a finished session is freed 20 s after the player's last request closes (a session still encoding is left to the normal idle timeout).
+**Cache hits on the Streaming page:** when a request is answered from a finished stealth-cache entry (no encode session), Youtarr-Turbo streams the file itself. That shows as a Live Streams row with mode `byterange-cache-hit` (one row per cache entry, shared by all its requests; kept while any request is in flight and for 15 s after the last, so a seek's abort-and-reconnect doesn't make it flicker; a paused player keeps its connection open; Stop cuts the transfers) and gets a Stream History row. Debug logging: per request (`range`, `sentMB`, `MBps`), a 5 s throughput heartbeat while reading (`readMB`, `MBps`, `totalMB`), and an info summary when the row ends (`totalMB`, `averageMBps`, `requests`). A finished encode session's own row is handed over to the cache-hit row on the first cache hit, and a finished session is freed 20 s after the player's last request closes (a session still encoding is left to the normal idle timeout).
 
 Debug lines: "output container decision", "mkv output ready to serve", "header duration patch attempt" (logs `infoHex` if the slot can't be found), "declaring the final file size up front", "padded the finished file to its declared size".
 
 ## Choosing a playback mode
 
-- Start with `direct`. It's zero-CPU-overhead and works for most progressive
-  formats up to 1080p.
+| | YouTube HLS passthrough ★ | Byte-range Plain file ★ | Enhanced HLS + Buffered ★ |
+|---|---|---|---|
+| Server CPU | none | low with `copy`, an encode with `h264` | low with `copy`, an encode with `h264` |
+| Local disk | none | whole video in the hidden cache | live segments + whole-video buffer |
+| Max quality | 1080p H.264 | 4K | 4K |
+| Seeking | anywhere | backward always, forward waits for the download | anywhere (a far seek restarts the encode there) |
+| Repeat plays | re-resolve | instant from cache | instant from buffer |
+| Player must reach YouTube | yes | no | no |
+
+- Start with YouTube HLS passthrough if 1080p is enough and your players can
+  reach YouTube: it costs the server almost nothing.
+- Use Byte-range Plain file when a client prefers a plain file to HLS, or you
+  want repeat plays served from a local cache without a transcode.
+- Use Enhanced HLS + Buffered to force H.264/AAC for every client, offload the
+  encode to a GPU, and keep a permanent buffered copy.
+- `direct`/`direct-redirect` are zero-CPU but capped at progressive formats
+  (~360p in practice); `direct` is the simplest fallback.
 - Switch to `hls`/`hls-buffer` when:
   - You want quality above what progressive formats offer (DASH video+audio
     muxed via ffmpeg can reach much higher bitrates/resolutions).
@@ -496,7 +591,7 @@ curl "http://localhost:3087/api/ytstream/VIDEO_ID?mode=hls-buffer&transcode=h264
 Docker hosts must pass through the GPU device (e.g. `--device /dev/dri` for
 VAAPI/QSV, or NVIDIA Container Toolkit for NVENC).
 
-If Youtarr is running as a non-root user (`YOUTARR_UID`/`YOUTARR_GID` in
+If Youtarr-Turbo is running as a non-root user (`YOUTARR_UID`/`YOUTARR_GID` in
 `docker-compose.yml`), passing the device through is not enough by itself:
 `/dev/dri/card0` and `/dev/dri/renderD128` are normally owned `root:video` and
 `root:<render-group>` and are not world-writable, so that user also needs to
@@ -512,7 +607,7 @@ than assuming a value.
 
 - **`hlsStorageLocation`** — where a live session's segment files live
   while playback is active. `tmp` (default) is the OS temp directory;
-  `cache` is Youtarr's own persistent `.youtarr_ytstream_cache` folder.
+  `cache` is Youtarr-Turbo's own persistent `.youtarr_ytstream_cache` folder.
   Neither location is under `tempPathManager`'s temp base, which gets
   wiped wholesale on every download-job start — that would delete
   segments out from under an active session.
@@ -544,7 +639,7 @@ than assuming a value.
   `.mp4`, never an intermediate `.ts`.
 - **Untracked buffer cache** — a video with no library `Video` row (an
   untracked NZB grab, or one disowned via `importStrategy: 'untracked'`)
-  still gets buffer-fetched by `hls-buffer`, but lands in Youtarr's own
+  still gets buffer-fetched by `hls-buffer`, but lands in Youtarr-Turbo's own
   cache keyed by YouTube ID instead of a library location: no Video/Job
   row, invisible in the library or Download History, purely a
   same-video-again speed-up. Manage it via Settings (file count/size,
@@ -562,10 +657,12 @@ than assuming a value.
   catches up (or, without `calculatedLength`, restarts the encode at the
   new target). `calculatedLength` (forced on for `hls-buffer`) makes the
   *playlist* exact/full-length upfront, but doesn't change this.
-- `mkv` as a `container` value only affects the probe-shortcut synthetic
-  clip, never real `hls`/`hls-buffer` segment output (always MPEG-TS for
-  `ts`, fragmented MP4 for everything else). This is a common point of
-  confusion — see the query-param table above.
+- `mkv` as a `container` value never affects `hls`/`hls-buffer` segment
+  output (always MPEG-TS for `ts`, fragmented MP4 for everything else); it
+  only produces a real Matroska file for Byte-range Plain file. This is a
+  common point of confusion — see the query-param table above.
+- `youtube-hls` needs the player to reach YouTube itself and tops out at
+  1080p H.264; the byte-range modes wait for the encode on forward seeks.
 - Like `/api/strm`, playback still depends on yt-dlp + (optionally)
   cookies for age-restricted/members-only content — see `docs/STRM.md`'s
   Limitations section, which applies here too.
@@ -625,9 +722,9 @@ line itself).
 
 ## Installing ffmpeg
 
-`direct`/`direct-redirect` need nothing beyond what Youtarr already
+`direct`/`direct-redirect` need nothing beyond what Youtarr-Turbo already
 requires. `hls`/`hls-buffer` need the `ffmpeg` binary on `PATH` for the
-Youtarr server process, the same way Youtarr already needs `yt-dlp` on
+Youtarr-Turbo server process, the same way Youtarr-Turbo already needs `yt-dlp` on
 `PATH`.
 
 ### Docker (this repo's `Dockerfile`)

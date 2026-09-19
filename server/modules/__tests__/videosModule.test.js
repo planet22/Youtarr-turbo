@@ -1832,6 +1832,19 @@ describe('VideosModule', () => {
       }));
     });
 
+    test('skips removed videos so no sidecars are written next to a deleted media file', async () => {
+      mockVideo.count.mockResolvedValueOnce(1);
+      mockVideo.findAll.mockResolvedValueOnce([
+        { id: 1, youtubeId: 'gone123', filePath: '/test/output/dir/Video [gone123].strm', season: null, is_strm: true, removed: true }
+      ]);
+
+      const result = await VideosModule.regenerateVideoMetadataFiles({ trigger: 'manual' });
+
+      expect(mockFs.readFile).not.toHaveBeenCalled();
+      expect(mockNfoGenerator.writeVideoNfoFile).not.toHaveBeenCalled();
+      expect(result).toEqual(expect.objectContaining({ scanned: 1, regenerated: 0, skippedNoFile: 1 }));
+    });
+
     test('counts a failed write as an error without throwing', async () => {
       mockVideo.count.mockResolvedValueOnce(1);
       mockVideo.findAll.mockResolvedValueOnce([

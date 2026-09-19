@@ -1928,7 +1928,7 @@ class VideosModule {
         const videos = await Video.findAll({
           attributes: [
             'id', 'youtubeId', 'filePath', 'youTubeChannelName',
-            'season', 'episode', 'normalized_rating', 'rating_source', 'is_strm',
+            'season', 'episode', 'normalized_rating', 'rating_source', 'is_strm', 'removed',
           ],
           limit: CHUNK_SIZE,
           offset,
@@ -1941,7 +1941,10 @@ class VideosModule {
           totalScanned++;
           if (video.is_strm) totalStrmVideosScanned++;
 
-          if (!video.filePath) {
+          // A deleted/missing video keeps its stale filePath; writing sidecars
+          // for it would resurrect orphan .nfo/.strmtool.json files next to a
+          // media file that is gone.
+          if (!video.filePath || video.removed) {
             totalSkippedNoFile++;
             continue; // no downloaded/materialized file to attach an .nfo to
           }

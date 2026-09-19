@@ -1,6 +1,6 @@
 # Environment Variables Reference
 
-This document provides a comprehensive reference for all environment variables supported by Youtarr.
+This document provides a comprehensive reference for all environment variables supported by Youtarr-Turbo.
 
 ## Table of Contents
 - [Required Variables](#required-variables)
@@ -26,14 +26,14 @@ This document provides a comprehensive reference for all environment variables s
 **Important Notes**:
 - This path must exist on your host system before starting the containers
 - Ensure the directory has appropriate write permissions for the configured UID/GID
-- For network storage, mount the storage before starting Youtarr
+- For network storage, mount the storage before starting Youtarr-Turbo
 
 ## Application Access
 
 ### YOUTARR_HOST_PORT
 **Required**: No
 **Default**: `3087`
-**Description**: Host port mapped to the Youtarr web interface. The container still listens on port `3011`.
+**Description**: Host port mapped to the Youtarr-Turbo web interface. The container still listens on port `3011`.
 **Example**: `YOUTARR_HOST_PORT=8087`
 **Note**: The bundled start scripts use this value when polling `/setup/status` and printing first-time setup URLs.
 
@@ -52,7 +52,7 @@ When using the bundled MariaDB container, these variables typically use their de
 **Required**: No
 **Default**: `3321` for the internal database (docker-compose.yml), `3306` for external databases (docker-compose.external-db.yml)
 **Description**: Database port number
-**Note**: The bundled MariaDB container listens on 3321 inside the Docker network only and is not published to the host. When pointing Youtarr at an external MariaDB/MySQL instance, the default drops to the standard 3306; override it in `.env` if your external database listens elsewhere.
+**Note**: The bundled MariaDB container listens on 3321 inside the Docker network only and is not published to the host. When pointing Youtarr-Turbo at an external MariaDB/MySQL instance, the default drops to the standard 3306; override it in `.env` if your external database listens elsewhere.
 
 ### DB_USER
 **Required**: No
@@ -69,7 +69,7 @@ When using the bundled MariaDB container, these variables typically use their de
 ### DB_NAME
 **Required**: No
 **Default**: `youtarr`
-**Description**: Database name for Youtarr DB
+**Description**: Database name for Youtarr-Turbo DB
 
 ### DB_ROOT_PASSWORD
 **Required**: Only for internal database setup
@@ -93,7 +93,7 @@ To use an external database:
 **Warning**: Never set to `false` when exposed to the internet
 
 **Use Cases for Disabling**:
-- When only using Youtarr in an environment that is not exposed to the internet
+- When only using Youtarr-Turbo in an environment that is not exposed to the internet
 - When behind a VPN
 - When using reverse proxy with authentication
 - Platform deployments with external auth (e.g., Cloudflare Access)
@@ -122,10 +122,10 @@ To use an external database:
 **Description**: Controls whether Express trusts proxy headers such as `X-Forwarded-For`
 
 **Recommendations**:
-- Set `TRUST_PROXY=false` when Youtarr is exposed directly without a reverse proxy
-- Leave unset only if you want the historical Express proxy-header trust behavior; Youtarr's rate-limit, session, and setup audit IPs will still key on the direct peer IP until `TRUST_PROXY` is explicitly configured
-- Set `TRUST_PROXY=1` when Youtarr is behind one trusted reverse proxy and you want per-client rate limits
-- Prefer a specific hop count or trusted subnet over broad `true` when exposing Youtarr through a proxy you control
+- Set `TRUST_PROXY=false` when Youtarr-Turbo is exposed directly without a reverse proxy
+- Leave unset only if you want the historical Express proxy-header trust behavior; Youtarr-Turbo's rate-limit, session, and setup audit IPs will still key on the direct peer IP until `TRUST_PROXY` is explicitly configured
+- Set `TRUST_PROXY=1` when Youtarr-Turbo is behind one trusted reverse proxy and you want per-client rate limits
+- Prefer a specific hop count or trusted subnet over broad `true` when exposing Youtarr-Turbo through a proxy you control
 
 ## User and Permissions
 
@@ -133,13 +133,13 @@ To use an external database:
 **Required**: No
 **Default**: `0` (root)
 **Recommended**: `1000` (typical first user on Linux)
-**Description**: User ID for running Youtarr inside the container
+**Description**: User ID for running Youtarr-Turbo inside the container
 
 ### YOUTARR_GID
 **Required**: No
 **Default**: `0` (root)
 **Recommended**: `1000`
-**Description**: Group ID for running Youtarr inside the container
+**Description**: Group ID for running Youtarr-Turbo inside the container
 
 **Important Setup Steps**:
 
@@ -200,7 +200,7 @@ Note: *The `/path/to/youtube/videos` is just an example. Use the path you have c
 **Default**: `UTC`
 **Description**: Timezone for scheduled jobs and cleanup tasks
 **Format**: IANA timezone (e.g., `America/Los_Angeles`, `Europe/Paris`)
-**Note**: Affects cron job execution times in Youtarr container.
+**Note**: Affects cron job execution times in Youtarr-Turbo container.
 
 ### YOUTARR_IMAGE
 **Required**: No
@@ -228,9 +228,9 @@ These variables are used by docker-compose.yml but not directly by the applicati
 1. **Always change default passwords** in production
 2. **Never disable AUTH_ENABLED** for internet-exposed instances
 3. **Use HTTPS/VPN for remote access**; plain HTTP is intended for localhost and trusted LAN access only
-4. **Set TRUST_PROXY=false** when directly exposing Youtarr without a reverse proxy
+4. **Set TRUST_PROXY=false** when directly exposing Youtarr-Turbo without a reverse proxy
 5. **Use non-root UID/GID** (set YOUTARR_UID=1000)
-    - Existing Youtarr users that were previously using the default root GID/UID (0:0) will need to completely stop Youtarr and ensure that directory permissions are updated if they want to switch from root UID/GID to non-root
+    - Existing Youtarr-Turbo users that were previously using the default root GID/UID (0:0) will need to completely stop Youtarr-Turbo and ensure that directory permissions are updated if they want to switch from root UID/GID to non-root
 6. **Secure your .env file** with appropriate permissions:
    ```bash
    chmod 600 .env
@@ -269,8 +269,8 @@ For the bundled database:
 3. Confirm credentials from inside the container: `docker compose exec youtarr-db mysql -u ${DB_USER:-root} -p ${DB_NAME:-youtarr}`
 
 For an external database:
-1. Verify `DB_HOST` is reachable from the Youtarr container
-2. Check `DB_PORT` is open between Youtarr and the database host
+1. Verify `DB_HOST` is reachable from the Youtarr-Turbo container
+2. Check `DB_PORT` is open between Youtarr-Turbo and the database host
 3. Confirm credentials with: `mysql -h ${DB_HOST} -P ${DB_PORT} -u ${DB_USER} -p`
 
 ### Authentication Problems

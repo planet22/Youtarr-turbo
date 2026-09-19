@@ -1,6 +1,6 @@
 # Emby Integration Guide
 
-Complete guide for integrating Youtarr with Emby Media Server.
+Complete guide for integrating Youtarr-Turbo with Emby Media Server.
 
 ## Table of Contents
 - [Overview](#overview)
@@ -14,7 +14,7 @@ Complete guide for integrating Youtarr with Emby Media Server.
 
 ## Overview
 
-Youtarr provides comprehensive Emby support through:
+Youtarr-Turbo provides comprehensive Emby support through:
 - NFO metadata files with complete video information
 - Channel poster artwork
 - Optional channel and video backdrop art
@@ -35,9 +35,9 @@ Youtarr provides comprehensive Emby support through:
 
 #### Choosing a library type
 
-Youtarr writes each video as a standalone "movie" with its own NFO metadata, so two Emby library types can read the library:
+Youtarr-Turbo writes each video as a standalone "movie" with its own NFO metadata, so two Emby library types can read the library:
 
-- **`Movies` (current recommendation)**: the most reliable option. Every video displays as a movie with full metadata and artwork. Limitation: Emby will NOT automatically import Youtarr's optional per-channel `.m3u` playlist files as playlists; that only happens in Mixed Content libraries. See [Channel Playlist Files (.m3u)](#channel-playlist-files-m3u).
+- **`Movies` (current recommendation)**: the most reliable option. Every video displays as a movie with full metadata and artwork. Limitation: Emby will NOT automatically import Youtarr-Turbo's optional per-channel `.m3u` playlist files as playlists; that only happens in Mixed Content libraries. See [Channel Playlist Files (.m3u)](#channel-playlist-files-m3u).
 - **`Mixed Content`**: automatically imports the per-channel `.m3u` files as Emby playlists, but [Emby's own documentation](https://emby.media/support/articles/Library-Setup.html) notes that "support for mixed content is limited", and its TV-detection heuristics can misclassify channel content as TV series: video titles that look episode-like ("Season 3", "Episode 12") can be picked up as episodes and display with wrong metadata. This tends to work on smaller libraries and break as the library grows, since more titles means more chances for a false match.
 - **`TV Shows`**: not currently supported. Writing videos and metadata in a way that is compatible with TV Shows libraries is on our roadmap but is not supported yet.
 
@@ -45,7 +45,7 @@ Youtarr writes each video as a standalone "movie" with its own NFO metadata, so 
 
 Configure folder settings:
 1. Click "Add" to add folder
-2. Browse to your Youtarr download directory
+2. Browse to your Youtarr-Turbo download directory
 3. For specific content types, use subfolders associated to different libraries:
    - `/path/to/youtube/__kids`
    - `/path/to/youtube/__music`
@@ -62,7 +62,7 @@ In the library configuration:
 **Metadata savers**:
 - **Disable**: Nfo ("Save metadata to NFO")
 
-> **Warning**: Do NOT enable Emby's NFO metadata saver. Youtarr generates and maintains the `.nfo` file for every video it downloads. If the saver is enabled, Emby will update and overwrite those files with its own data (for example, incorrectly guessed season/episode tags), which can cause problems for your library.
+> **Warning**: Do NOT enable Emby's NFO metadata saver. Youtarr-Turbo generates and maintains the `.nfo` file for every video it downloads. If the saver is enabled, Emby will update and overwrite those files with its own data (for example, incorrectly guessed season/episode tags), which can cause problems for your library.
 
 **Image fetchers**:
 - **Local Images** (enable)
@@ -90,7 +90,7 @@ Emby reads comprehensive NFO files containing:
 
 ### Artwork Configuration
 
-Youtarr provides:
+Youtarr-Turbo provides:
 - **`poster.jpg`**: Channel artwork in channel folders
 - **`<VIDEO NAME>.jpg`**: Video thumbnails in video folders
 - **`backdrop.jpg`**: Channel background art from the YouTube channel banner, written when "Create backdrop images" is enabled in Settings -> Core (off by default)
@@ -113,23 +113,23 @@ The library and metadata setup above is all you need for downloaded videos to sh
 ### Step 1: Create an Emby API key
 
 1. In Emby, go to **Settings -> Advanced -> API Keys**
-2. Create a new key for Youtarr and copy it
+2. Create a new key for Youtarr-Turbo and copy it
 
-### Step 2: Connect Emby in Youtarr
+### Step 2: Connect Emby in Youtarr-Turbo
 
-1. In Youtarr, open **Settings -> Emby Integration**
+1. In Youtarr-Turbo, open **Settings -> Emby Integration**
 2. Enter the **Emby URL** and the **API key** from Step 1
-3. Open the **Emby User** dropdown and pick the account that should own the playlists. (Youtarr loads the user list from your server; you can also enter the user ID by hand.)
-4. (Optional) Leave **Video Library IDs** blank. Youtarr matches downloaded videos to Emby items across all your libraries.
+3. Open the **Emby User** dropdown and pick the account that should own the playlists. (Youtarr-Turbo loads the user list from your server; you can also enter the user ID by hand.)
+4. (Optional) Leave **Video Library IDs** blank. Youtarr-Turbo matches downloaded videos to Emby items across all your libraries.
 5. Click **Test Connection**, then turn on **Enable Emby integration**
 
-Once connected, open a playlist in Youtarr and turn on its Emby sync chip. See [Media Server Playlists](../MEDIA_SERVER_PLAYLISTS.md) for how syncing, ordering, and updates work.
+Once connected, open a playlist in Youtarr-Turbo and turn on its Emby sync chip. See [Media Server Playlists](../MEDIA_SERVER_PLAYLISTS.md) for how syncing, ordering, and updates work.
 
-Connecting Emby also enables watch status sync: Youtarr periodically pulls per-video watch state (played, percent watched, last watched) for every user on the server and shows it as Watched chips and filters on its listing pages. It's one-way; Youtarr never marks anything watched on Emby. Emby decides when a video counts as played: edit the library and set **Max resume percentage**; stop after that point and the title counts as fully played. Settings live under **Settings -> Watch Status**; see [Track Watch Status from Media Servers](../USAGE_GUIDE.md#track-watch-status-from-media-servers).
+Connecting Emby also enables watch status sync: Youtarr-Turbo periodically pulls per-video watch state (played, percent watched, last watched) for every user on the server and shows it as Watched chips and filters on its listing pages. It's one-way; Youtarr-Turbo never marks anything watched on Emby. Emby decides when a video counts as played: edit the library and set **Max resume percentage**; stop after that point and the title counts as fully played. Settings live under **Settings -> Watch Status**; see [Track Watch Status from Media Servers](../USAGE_GUIDE.md#track-watch-status-from-media-servers).
 
 ### Visibility
 
-A playlist marked **Public** in Youtarr is created as a server-wide (shared) Emby playlist that all users can see; a **Private** one is owned by the configured user account only. Emby sets this when the playlist is created, so changing Public/Private for a playlist that already exists takes effect on the next sync that recreates it. Emby also shows shared playlists as read-only, which is expected: Youtarr owns these playlists and rewrites them on every sync.
+A playlist marked **Public** in Youtarr-Turbo is created as a server-wide (shared) Emby playlist that all users can see; a **Private** one is owned by the configured user account only. Emby sets this when the playlist is created, so changing Public/Private for a playlist that already exists takes effect on the next sync that recreates it. Emby also shows shared playlists as read-only, which is expected: Youtarr-Turbo owns these playlists and rewrites them on every sync.
 
 ## Channel Playlist Files (.m3u)
 
@@ -193,7 +193,7 @@ Configure in Advanced settings:
 
 **Metadata Settings**:
 - **Prefer local metadata**: Yes
-- **Save metadata within media folders**: No (Emby would overwrite Youtarr's `.nfo` files; see the NFO saver warning in [Library Setup](#library-setup))
+- **Save metadata within media folders**: No (Emby would overwrite Youtarr-Turbo's `.nfo` files; see the NFO saver warning in [Library Setup](#library-setup))
 - **Save subtitles within media folders**: Yes (if using)
 
 **Image Settings**:
@@ -285,4 +285,4 @@ Configure in Advanced settings:
 
 ## File Structure Example
 
-See [Youtarr Downloads Folder Structure](../YOUTARR_DOWNLOADS_FOLDER_STRUCTURE.md)
+See [Youtarr-Turbo Downloads Folder Structure](../YOUTARR_DOWNLOADS_FOLDER_STRUCTURE.md)

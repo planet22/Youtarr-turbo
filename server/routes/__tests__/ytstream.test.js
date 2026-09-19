@@ -178,6 +178,24 @@ describe('GET /api/ytstream/mode-compatibility', () => {
     expect(body.cacheOnPlay.status).toBe('ignored');
   });
 
+  test.each(['hls-byterange', 'download-cache'])('mode=%s: calculatedLength is ignored (no estimated Content-Length to calculate)', (mode) => {
+    const res = call({ mode, transcode: 'copy' });
+    const body = res.json.mock.calls[0][0];
+    expect(body.calculatedLength.status).toBe('ignored');
+  });
+
+  test.each(['hls-byterange', 'download-cache', 'youtube-hls'])('mode=%s: serveCachedFile is ignored (experimental modes are intercepted before the cached-file check)', (mode) => {
+    const res = call({ mode, transcode: 'copy' });
+    const body = res.json.mock.calls[0][0];
+    expect(body.serveCachedFile.status).toBe('ignored');
+  });
+
+  test.each(['direct', 'direct-redirect', 'hls', 'hls-buffer'])('mode=%s: serveCachedFile is optional', (mode) => {
+    const res = call({ mode, transcode: 'copy' });
+    const body = res.json.mock.calls[0][0];
+    expect(body.serveCachedFile.status).toBe('optional');
+  });
+
   test('defaults to mode=direct when no query params are given', () => {
     const res = call({});
     const body = res.json.mock.calls[0][0];

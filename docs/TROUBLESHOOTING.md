@@ -1,4 +1,4 @@
-# Youtarr Troubleshooting Guide
+# Youtarr-Turbo Troubleshooting Guide
 
 ## Login Issues
 
@@ -15,7 +15,7 @@ See [Authentication - Cannot Find the Setup Token](AUTHENTICATION.md#cannot-find
 **Solution**:
 
 **Method 1: Using Environment Variables (Recommended)**
-1. Stop Youtarr:
+1. Stop Youtarr-Turbo:
    ```bash
    ./stop.sh
    ```
@@ -26,7 +26,7 @@ See [Authentication - Cannot Find the Setup Token](AUTHENTICATION.md#cannot-find
    AUTH_PRESET_PASSWORD=your-new-password
    ```
 
-3. Start Youtarr:
+3. Start Youtarr-Turbo:
    ```bash
    ./start.sh
    ```
@@ -34,19 +34,19 @@ See [Authentication - Cannot Find the Setup Token](AUTHENTICATION.md#cannot-find
 4. Log in with the new credentials. Once logged in, you can remove these variables from `.env` if desired (credentials will persist in `config/config.json`)
 
 **Method 2: Reset via config.json (Requires localhost access)**
-1. Stop Youtarr:
+1. Stop Youtarr-Turbo:
    ```bash
    ./stop.sh
    ```
 
 2. Edit `./config/config.json` and delete both the `username` and `passwordHash` lines
 
-3. Start Youtarr:
+3. Start Youtarr-Turbo:
    ```bash
    ./start.sh
    ```
 
-4. Open Youtarr in any browser. You will be prompted to create a new admin account using the one-time setup token from `docker logs youtarr-turbo` or `config/setup-token`.
+4. Open Youtarr-Turbo in any browser. You will be prompted to create a new admin account using the one-time setup token from `docker logs youtarr-turbo` or `config/setup-token`.
 
 ### Session Expired
 
@@ -75,7 +75,7 @@ See [Authentication - Cannot Find the Setup Token](AUTHENTICATION.md#cannot-find
    - Save configuration
 
 3. **If you have an invalid/old key**:
-   - Stop Youtarr: `./stop.sh`
+   - Stop Youtarr-Turbo: `./stop.sh`
    - Edit `config/config.json` and clear the key: `"plexApiKey": ""`
    - Restart: `./start.sh`
    - Get a new key using method 1 or 2 above
@@ -129,25 +129,25 @@ See [Authentication - Cannot Find the Setup Token](AUTHENTICATION.md#cannot-find
 
 **Problem**: After moving downloaded files to a new location, renaming a folder, or restoring from backup, videos display with a cloud-off icon as if they were deleted.
 
-**Solution**: Open **Settings -> Maintenance & Rescan** and click **Rescan files on disk**. Youtarr walks the downloads folder, matches files by the `[<youtube-id>]` segment in each filename, and updates the stored paths and "missing" flags. The same scan also runs daily on a schedule and at server startup.
+**Solution**: Open **Settings -> Maintenance & Rescan** and click **Rescan files on disk**. Youtarr-Turbo walks the downloads folder, matches files by the `[<youtube-id>]` segment in each filename, and updates the stored paths and "missing" flags. The same scan also runs daily on a schedule and at server startup.
 
 The rescan recognizes `.mp4`, `.webm`, `.mkv`, `.m4v`, `.avi`, and `.mp3`. Files that no longer have the `[<youtube-id>]` segment in their name (for example, if you renamed `Channel - Video [abc123XYZ01].mp4` to `My Movie.mp4`) cannot be matched and will continue to show as missing.
 
-### I Converted Videos to a Different Format and Youtarr Lost Them
+### I Converted Videos to a Different Format and Youtarr-Turbo Lost Them
 
-**Problem**: You used ffmpeg or another tool to convert downloaded `.mp4` videos to `.mkv` (or another container), and Youtarr now lists those videos as missing.
+**Problem**: You used ffmpeg or another tool to convert downloaded `.mp4` videos to `.mkv` (or another container), and Youtarr-Turbo now lists those videos as missing.
 
-**Solution**: Run **Settings -> Maintenance & Rescan -> Rescan files on disk**. As long as the converted file kept the original `[<youtube-id>]` segment in its filename and uses one of the supported extensions (`.mp4`, `.webm`, `.mkv`, `.m4v`, `.avi`, `.mp3`), Youtarr will detect the new file, update the stored path, and clear the "missing" flag. See [Rescan Files on Disk](USAGE_GUIDE.md#rescan-files-on-disk) for full details on supported formats and limitations.
+**Solution**: Run **Settings -> Maintenance & Rescan -> Rescan files on disk**. As long as the converted file kept the original `[<youtube-id>]` segment in its filename and uses one of the supported extensions (`.mp4`, `.webm`, `.mkv`, `.m4v`, `.avi`, `.mp3`), Youtarr-Turbo will detect the new file, update the stored path, and clear the "missing" flag. See [Rescan Files on Disk](USAGE_GUIDE.md#rescan-files-on-disk) for full details on supported formats and limitations.
 
 ### Video Downloads Fine but Never Appears in Plex (Windows Path Length)
 
-**Problem**: A video downloads successfully, shows as downloaded in Youtarr, and exists on disk, but it never appears in Plex; if the video belongs to a synced playlist, the logs show `Unable to sync item <id> for playlist "..." to <server>: not found on server, skipping`.
+**Problem**: A video downloads successfully, shows as downloaded in Youtarr-Turbo, and exists on disk, but it never appears in Plex; if the video belongs to a synced playlist, the logs show `Unable to sync item <id> for playlist "..." to <server>: not found on server, skipping`.
 
-**Cause**: When Plex runs on Windows, its scanner silently skips any file whose full path is 260 characters or longer (the Win32 MAX_PATH limit). Youtarr's filename template is used for both the per-video folder and the filename; with the channel folder on top, the channel name appears three times in the full path and the title twice. Combined with your Windows drive and folder prefix, a long channel name plus a long title can cross the limit. The current default template caps titles at 64 bytes (`%(title).64B`) to keep typical paths well clear of the limit, but installs that saved settings under an older default keep their persisted `.74B`/`.76B` value, which can cross it. The file itself is fine: NTFS and File Explorer handle long paths, but Plex's scanner does not. Note that Windows' `LongPathsEnabled` registry setting does not help, because Plex does not declare itself long-path aware.
+**Cause**: When Plex runs on Windows, its scanner silently skips any file whose full path is 260 characters or longer (the Win32 MAX_PATH limit). Youtarr-Turbo's filename template is used for both the per-video folder and the filename; with the channel folder on top, the channel name appears three times in the full path and the title twice. Combined with your Windows drive and folder prefix, a long channel name plus a long title can cross the limit. The current default template caps titles at 64 bytes (`%(title).64B`) to keep typical paths well clear of the limit, but installs that saved settings under an older default keep their persisted `.74B`/`.76B` value, which can cross it. The file itself is fine: NTFS and File Explorer handle long paths, but Plex's scanner does not. Note that Windows' `LongPathsEnabled` registry setting does not help, because Plex does not declare itself long-path aware.
 
 **Diagnosis**: Measure the full path as Plex sees it (drive letter through `.mp4`). At 260 characters or more, this is your problem.
 
-**Solution**: Shorten the video's folder and file names on disk, keeping the `[<youtube-id>]` segment in the filename. Then run **Settings -> Maintenance & Rescan -> Rescan files on disk** so Youtarr picks up the new path, let Plex scan the library, and (for playlists) run **Sync now**. To prevent recurrence, shorten the filename template under **Settings -> Core Settings -> Video Filename Template**: reduce the title truncation to the current recommended `%(title).64B` (or smaller), or use a preset without the channel-name prefix; see [Video Filename Template](CONFIG.md#video-filename-template). Only new downloads are affected; existing files keep their names.
+**Solution**: Shorten the video's folder and file names on disk, keeping the `[<youtube-id>]` segment in the filename. Then run **Settings -> Maintenance & Rescan -> Rescan files on disk** so Youtarr-Turbo picks up the new path, let Plex scan the library, and (for playlists) run **Sync now**. To prevent recurrence, shorten the filename template under **Settings -> Core Settings -> Video Filename Template**: reduce the title truncation to the current recommended `%(title).64B` (or smaller), or use a preset without the channel-name prefix; see [Video Filename Template](CONFIG.md#video-filename-template). Only new downloads are affected; existing files keep their names.
 
 ## Docker Issues
 
@@ -218,34 +218,28 @@ This is a known Docker Desktop issue on Windows where mount points become corrup
    netstat -an | grep 3087
    ```
 
-### Asustor App Central: Stuck on an Old Version
-
-**Problem**: You installed Youtarr from App Central on an Asustor NAS, a newer Youtarr release exists, but pulling images via Docker or Portainer doesn't update anything.
-
-**Solution**: This is expected. The App Central package pins the exact Youtarr version in its docker-compose file, so the image tag doesn't change until the package maintainer publishes an updated package and Asustor approves it. That usually happens within a few days of a [GitHub release](https://github.com/DialmasterOrg/Youtarr/releases). Update through App Central when the new version appears there; your config, database, and videos are preserved. See the [Asustor guide](platforms/asustor.md) for details.
-
 ## Database Issues
 
-### Table Corruption After Simultaneous Database and Youtarr Update
+### Table Corruption After Simultaneous Database and Youtarr-Turbo Update
 
-**Problem**: After updating both your external MariaDB/MySQL and Youtarr at the same time, logs show errors like:
+**Problem**: After updating both your external MariaDB/MySQL and Youtarr-Turbo at the same time, logs show errors like:
 ```
 SequelizeDatabaseError: Table 'youtarr.Jobs' doesn't exist in engine
 ```
 (errno 1932), and/or tables appear empty despite having data before the update.
 
-**Cause**: When MariaDB upgrades to a new version, it performs internal data file upgrades on startup. If a Youtarr migration runs before that process completes, the combination of a database engine upgrade and an ALTER TABLE happening back-to-back can corrupt tables or cause data loss. This is a MariaDB/InnoDB limitation that affects any application running migrations during a database version change.
+**Cause**: When MariaDB upgrades to a new version, it performs internal data file upgrades on startup. If a Youtarr-Turbo migration runs before that process completes, the combination of a database engine upgrade and an ALTER TABLE happening back-to-back can corrupt tables or cause data loss. This is a MariaDB/InnoDB limitation that affects any application running migrations during a database version change.
 
 **Solution**:
-Restart Youtarr. In most cases the table corruption is transient and the health check will recover automatically on restart. The error in the logs may look severe, but the database typically self-heals once MariaDB finishes its internal upgrade. Job/download history may be lost, but channels, videos, and settings are unaffected.
+Restart Youtarr-Turbo. In most cases the table corruption is transient and the health check will recover automatically on restart. The error in the logs may look severe, but the database typically self-heals once MariaDB finishes its internal upgrade. Job/download history may be lost, but channels, videos, and settings are unaffected.
 
-**Prevention**: Never update your database server and Youtarr at the same time. Update MariaDB first, confirm it is fully running (check its logs for "ready for connections"), then update Youtarr. See the [External Database Guide](platforms/external-db.md) for details.
+**Prevention**: Never update your database server and Youtarr-Turbo at the same time. Update MariaDB first, confirm it is fully running (check its logs for "ready for connections"), then update Youtarr-Turbo. See the [External Database Guide](platforms/external-db.md) for details.
 
 ### UTF-8 Character Errors
 
 **Problem**: Errors like `Incorrect string value: '\\xF0\\x9F\\xA7\\xA1'` when channel names or video titles contain emojis.
 
-By default Youtarr creates the database and tables as utf8mb4, so this shouldn't happen
+By default Youtarr-Turbo creates the database and tables as utf8mb4, so this shouldn't happen
 unless you are using an external DB. If so, see [External Database Guide](platforms/external-db.md)
 for how to create your DB with the correct character set.
 
@@ -304,7 +298,7 @@ the conversion fails right there. It only happens when the database was created 
 first place. The bundled MariaDB is created as `utf8mb4`, so it skips the conversion entirely and
 never runs into this.
 
-**Solution**: Update Youtarr. The migration now turns foreign key checks off while it converts the
+**Solution**: Update Youtarr-Turbo. The migration now turns foreign key checks off while it converts the
 tables and turns them back on afterward. It also checks each table on its own instead of trusting the
 database default, so it'll finish the job on a database that an earlier failed run left half-converted
 (database default already on `utf8mb4`, some tables still on `utf8mb3`).
@@ -341,7 +335,7 @@ or a MariaDB service running without the compose file's `--character-set-server=
 them to `utf8mb4_unicode_ci`. The `JobVideoDownloads` migration then creates its `job_id` column as
 `utf8mb4_bin`, and InnoDB refuses the foreign key because the collations on the two sides no longer match.
 
-**Solution**: Update Youtarr. The migrations now restore the binary collation automatically - the utf8mb4
+**Solution**: Update Youtarr-Turbo. The migrations now restore the binary collation automatically - the utf8mb4
 conversion re-applies it right after converting, and the `JobVideoDownloads` migration repairs it before
 creating the table, so a restart on the latest image finishes the job.
 
@@ -352,7 +346,7 @@ ALTER TABLE Jobs MODIFY id CHAR(36) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NO
 ALTER TABLE JobVideos MODIFY job_id CHAR(36) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL;
 SET FOREIGN_KEY_CHECKS = 1;
 ```
-then restart the Youtarr container; the remaining migrations will complete.
+then restart the Youtarr-Turbo container; the remaining migrations will complete.
 
 **Prevention**: Same as the previous section - create your own database as `utf8mb4` from the start, or
 keep the charset arguments from the bundled `docker-compose.yml`.
@@ -399,7 +393,7 @@ youtarr-db  | 2025-11-22  6:28:19 8 [Warning] Access denied for user '<DB_USER>'
 **Cause**: When using the bundled MariaDB container, you changed `DB_USER` and `DB_PASSWORD` in `.env` but forgot to uncomment the corresponding `MYSQL_USER` and `MYSQL_PASSWORD` environment variables in `docker-compose.yml`. MariaDB needs these variables to create the custom user during initialization.
 
 **Solution**:
-1. Stop Youtarr:
+1. Stop Youtarr-Turbo:
    `./stop.sh` or `docker compose down`
 
 2. Edit `docker-compose.yml` and uncomment the `MYSQL_USER` and `MYSQL_PASSWORD` lines under the `youtarr-db` service:
@@ -420,7 +414,7 @@ youtarr-db  | 2025-11-22  6:28:19 8 [Warning] Access denied for user '<DB_USER>'
    docker volume rm youtarr-db-data
    ```
 
-4. Start Youtarr again:
+4. Start Youtarr-Turbo again:
    `./start.sh` or `docker compose up -d`
 
 **Note**: This only applies when using the bundled MariaDB container. External database setups don't need the `MYSQL_USER`/`MYSQL_PASSWORD` variables.
@@ -493,7 +487,7 @@ COMPOSE_FILE=docker-compose.yml:docker-compose.arm.yml
 ```
 
 **Alternatives**:
-- Point Youtarr at an external MariaDB/MySQL instance via `./start-with-external-db.sh`.
+- Point Youtarr-Turbo at an external MariaDB/MySQL instance via `./start-with-external-db.sh`.
 - Run the stack on Linux/WSL, which uses a native filesystem for bind mounts.
 
 ## Download Issues
@@ -522,7 +516,7 @@ Update yt-dlp. Most download failures are extractor breakage that a newer yt-dlp
 
 - The fastest fix is in-app: go to **Settings -> YT-DLP** and update yt-dlp manually. With **Automatically update yt-dlp daily (4:00 AM)** enabled this happens each night on its own.
 - If the latest stable yt-dlp still fails, switch the **Update Channel** to **Nightly** on the same page. Nightly gets extractor fixes days earlier than stable.
-- Youtarr's Docker image also bundles the latest yt-dlp at release time, so pulling a new image updates it too:
+- Youtarr-Turbo's Docker image also bundles the latest yt-dlp at release time, so pulling a new image updates it too:
   - Via docker compose:
       ```bash
       docker compose down
@@ -546,9 +540,9 @@ YouTube is blocking your downloads.
 
 ### Downloads Fail with HTTP 403: Forbidden
 
-**Problem**: A video (or every video) fails with `unable to download video data: HTTP Error 403: Forbidden`, even after Youtarr's automatic retry. Metadata, thumbnails, and subtitles often download fine; only the video itself fails.
+**Problem**: A video (or every video) fails with `unable to download video data: HTTP Error 403: Forbidden`, even after Youtarr-Turbo's automatic retry. Metadata, thumbnails, and subtitles often download fine; only the video itself fails.
 
-Youtarr detects this pattern and shows a "Likely cause" diagnosis on the Downloads page, in Download History (expand the failed job's row), and in notifications. The right fix depends on whether cookies are enabled:
+Youtarr-Turbo detects this pattern and shows a "Likely cause" diagnosis on the Downloads page, in Download History (expand the failed job's row), and in notifications. The right fix depends on whether cookies are enabled:
 
 **If cookies are enabled** (Settings -> Cookies):
 
@@ -567,15 +561,15 @@ The 403 is sometimes a temporary block on YouTube's side - retrying later can wo
 
 **Problem**: Downloads complete successfully, but the **Downloads -> Activity** page never updates live: progress percentages stay frozen (or the page shows "Waiting for progress updates...") until you refresh the page or switch back to the tab. Other real-time updates (channel refresh status, download complete notifications) are also missing.
 
-**Cause**: Youtarr delivers all real-time updates over a WebSocket connection that shares the same host and port as the web UI. Regular page loads and downloads use plain HTTP, so everything else works - but if something between your browser and Youtarr (most commonly a reverse proxy) doesn't forward WebSocket upgrade requests, the progress display never gets live updates.
+**Cause**: Youtarr-Turbo delivers all real-time updates over a WebSocket connection that shares the same host and port as the web UI. Regular page loads and downloads use plain HTTP, so everything else works - but if something between your browser and Youtarr-Turbo (most commonly a reverse proxy) doesn't forward WebSocket upgrade requests, the progress display never gets live updates.
 
 **How to confirm**:
-1. Open your browser devtools (F12) -> **Network** tab -> filter by "WS", then reload the Youtarr page. A working setup shows a WebSocket connection with status `101 Switching Protocols`. If it fails or keeps retrying, the WebSocket is being blocked.
+1. Open your browser devtools (F12) -> **Network** tab -> filter by "WS", then reload the Youtarr-Turbo page. A working setup shows a WebSocket connection with status `101 Switching Protocols`. If it fails or keeps retrying, the WebSocket is being blocked.
 2. While a download is running, watch the Activity page. It seeds its state over plain HTTP, so it will show the running job and catch up whenever you refresh or refocus the tab - but live progress between refreshes only arrives over the WebSocket. If the page stays frozen until you refresh, the WebSocket is the problem.
 
-**Solution**: Enable WebSocket support for the Youtarr host in your reverse proxy:
+**Solution**: Enable WebSocket support for the Youtarr-Turbo host in your reverse proxy:
 - **Nginx Proxy Manager**: edit the proxy host and enable the **Websockets Support** toggle.
-- **nginx**: add to the Youtarr `location` block:
+- **nginx**: add to the Youtarr-Turbo `location` block:
   ```nginx
   proxy_http_version 1.1;
   proxy_set_header Upgrade $http_upgrade;
@@ -594,7 +588,7 @@ If you aren't using a reverse proxy, check for browser extensions, VPN software,
 
 **Problem**: Adding a new channel or refreshing channel metadata takes around 15 seconds longer than expected.
 
-**Cause**: Youtarr first attempts direct HTTP requests for thumbnails and RSS feeds. When you're using a SOCKS5 or HTTP proxy, these direct requests cannot reach YouTube and must wait for a 15-second timeout before falling back to yt-dlp, which correctly uses your configured proxy.
+**Cause**: Youtarr-Turbo first attempts direct HTTP requests for thumbnails and RSS feeds. When you're using a SOCKS5 or HTTP proxy, these direct requests cannot reach YouTube and must wait for a 15-second timeout before falling back to yt-dlp, which correctly uses your configured proxy.
 
 **Solution**: This is expected behavior and no action is needed. The operations will complete successfully after the brief timeout. If operations are taking significantly longer than 15-20 seconds, verify your proxy is correctly configured in **Configuration > Advanced Settings**.
 
@@ -619,7 +613,7 @@ If you aren't using a reverse proxy, check for browser extensions, VPN software,
 
 ### Cannot Connect to Plex
 
-**Problem**: Youtarr cannot communicate with Plex server.
+**Problem**: Youtarr-Turbo cannot communicate with Plex server.
 
 **Solution**:
 1. Verify the Plex IP and port settings:
@@ -640,7 +634,7 @@ For how playlist sync works across Plex, Jellyfin, and Emby, see [Media Server P
 **Problem**: A playlist syncs, but some videos aren't in it.
 
 **Checklist**:
-1. Confirm the videos are actually downloaded. Youtarr only adds videos that exist on disk; a video still showing as "Tracked" on the playlist page hasn't downloaded yet.
+1. Confirm the videos are actually downloaded. Youtarr-Turbo only adds videos that exist on disk; a video still showing as "Tracked" on the playlist page hasn't downloaded yet.
 2. A video has to be indexed in your media server's library before it can be added. Trigger a library scan and use **Sync now** on the playlist page.
 3. Check that the video isn't marked **Ignored** on the playlist page.
 4. Check the item's format matches the playlist's **Download Type**: an MP3 Only playlist syncs only items that have an mp3, and a video playlist syncs only items with a video file, so items downloaded in the other format (for example via a per-video override) are left out. The playlist page shows a notice with the count of affected items; see [Switching a playlist's download type](MEDIA_SERVER_PLAYLISTS.md#switching-a-playlists-download-type).
@@ -652,35 +646,35 @@ For how playlist sync works across Plex, Jellyfin, and Emby, see [Media Server P
 **Checklist**:
 1. Open **Settings -> Jellyfin Integration** (or **Settings -> Emby Integration**) and click **Test Connection**. A stale API key or changed server URL is the usual cause.
 2. Confirm the configured **User** still exists on the server.
-3. Youtarr won't create the playlist until at least one of its videos is downloaded and indexed. Download a video, then **Sync now**.
+3. Youtarr-Turbo won't create the playlist until at least one of its videos is downloaded and indexed. Download a video, then **Sync now**.
 
 ### Playlist Not Visible to Other Users (Plex)
 
-This is by design. Plex playlists are owned by a single account, and Youtarr can't grant per-user access. To share one, open the playlist in Plex Web and share it (playlist menu -> Share), or use **Settings -> Manage Library Access -> [user] -> Media** to grant playlists to a user. See the [Plex playlist visibility scope](MEDIA_SERVER_PLAYLISTS.md#plex) notes for unclaimed-server setups.
+This is by design. Plex playlists are owned by a single account, and Youtarr-Turbo can't grant per-user access. To share one, open the playlist in Plex Web and share it (playlist menu -> Share), or use **Settings -> Manage Library Access -> [user] -> Media** to grant playlists to a user. See the [Plex playlist visibility scope](MEDIA_SERVER_PLAYLISTS.md#plex) notes for unclaimed-server setups.
 
 ### Shared Playlists Don't Appear for Other Users (Plex)
 
 **Problem**: You shared a Youtarr-created playlist with another Plex user (the share shows up correctly under **Settings -> Manage Library Access -> [user] -> Media**), but when that user opens the server's **Playlists** section it says "Playlists is empty" - on every client (Web, iOS, Apple TV, etc.).
 
-This is Plex behavior, not a Youtarr bug, and nothing needs to be reconfigured. In Plex, the **Playlists** source only lists playlists the user created themselves. Playlists shared by another account appear under a separate sidebar source named **Media**, at the same level as Playlists and Libraries. Have the recipient open **Media** in the server's sidebar; the shared playlists are listed there.
+This is Plex behavior, not a Youtarr-Turbo bug, and nothing needs to be reconfigured. In Plex, the **Playlists** source only lists playlists the user created themselves. Playlists shared by another account appear under a separate sidebar source named **Media**, at the same level as Playlists and Libraries. Have the recipient open **Media** in the server's sidebar; the shared playlists are listed there.
 
 Related gotchas when sharing playlists with other users:
 
-1. **Sharing a playlist does not grant access to the underlying library.** The recipient also needs the Youtarr library shared with them, or the playlist's items will be hidden.
+1. **Sharing a playlist does not grant access to the underlying library.** The recipient also needs the Youtarr-Turbo library shared with them, or the playlist's items will be hidden.
 2. **Content-rating restrictions hide YouTube videos.** Downloaded YouTube videos have no content rating, so rating-based parental restrictions filter them out. For kid accounts, use label-based restrictions instead.
-3. **Smart playlists can't be shared** - but Youtarr creates standard playlists, so this doesn't affect Youtarr-created playlists.
+3. **Smart playlists can't be shared** - but Youtarr-Turbo creates standard playlists, so this doesn't affect Youtarr-created playlists.
 
 ## Watch Status Issues
 
 ### Videos Not Showing as Watched
 
-**Problem**: You've watched videos on your media server, but Youtarr never shows the Watched chip for them.
+**Problem**: You've watched videos on your media server, but Youtarr-Turbo never shows the Watched chip for them.
 
 **Solutions**:
 1. Confirm the sync is on and has run: open **Settings -> Watch Status**, click **Sync Now**, and check the per-server results for the last run. A server that errors here is usually a connection or API-key problem; fix that first.
-2. Watching in Youtarr's built-in player doesn't count. Watch status only comes from your media servers.
+2. Watching in Youtarr-Turbo's built-in player doesn't count. Watch status only comes from your media servers.
 3. All three servers only mark a video played once playback passes a configurable percentage threshold (90% by default), so a video you stopped partway through may genuinely not count as watched yet. See [What determines if a video is "watched"](USAGE_GUIDE.md#what-determines-if-a-video-is-watched) for where to change the threshold on each server.
-4. Check for a path mismatch. Youtarr matches watch state to videos by filename, so if the server is indexing files from a different copy of your library (or files renamed to drop the `[<youtube-id>]` segment), nothing will match. Run a [rescan](USAGE_GUIDE.md#rescan-files-on-disk) if you've moved or renamed files.
+4. Check for a path mismatch. Youtarr-Turbo matches watch state to videos by filename, so if the server is indexing files from a different copy of your library (or files renamed to drop the `[<youtube-id>]` segment), nothing will match. Run a [rescan](USAGE_GUIDE.md#rescan-files-on-disk) if you've moved or renamed files.
 5. For non-owner Plex users specifically: their state comes from the server's play history, and that pull is incremental. If a path mismatch prevented matching for a while, plays from that period may have been scanned already and won't be picked up on later syncs. After fixing the mismatch, delete the `plex` row from the `watch_status_sync_cursors` table to force a full history re-scan on the next sync (see the [Configuration Reference](CONFIG.md#watch-status-sync)).
 
 ## Channel Import Issues
@@ -746,10 +740,10 @@ The cookies preview endpoint is rate-limited to 3 requests per minute because ea
 
 ### High Memory/CPU Usage
 
-**Problem**: Youtarr consuming excessive resources.
+**Problem**: Youtarr-Turbo consuming excessive resources.
 
 **Solution**:
-1. Check for stuck download jobs (these can be cleared by restarting Youtarr)
+1. Check for stuck download jobs (these can be cleared by restarting Youtarr-Turbo)
 2. Restart containers:
    ```bash
    ./stop.sh
@@ -761,7 +755,7 @@ The cookies preview endpoint is rate-limited to 3 requests per minute because ea
 
 ### Cannot Access from Other Devices
 
-**Problem**: Can't access Youtarr from other computers on the network.
+**Problem**: Can't access Youtarr-Turbo from other computers on the network.
 
 **Solution**:
 1. Configure firewall to allow port 3087
@@ -811,11 +805,11 @@ The cookies preview endpoint is rate-limited to 3 requests per minute because ea
 **Problem**: Titles with $, &, or other special characters display incorrectly.
 
 **Solution**:
-- Youtarr properly escapes XML characters in NFO files
+- Youtarr-Turbo properly escapes XML characters in NFO files
 - For Plex: Embedded metadata handles special characters automatically
 - If issues persist:
   - Check media server logs for XML parsing errors
-  - Verify you're running the latest version of Youtarr
+  - Verify you're running the latest version of Youtarr-Turbo
   - Report specific character issues on GitHub
 
 ### NFO Files Not Being Created

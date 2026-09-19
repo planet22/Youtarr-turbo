@@ -33,6 +33,12 @@ const logFilePath = process.env.LOG_FILE_PATH || '/app/config/logs/youtarr.log';
 const logFileMaxSize = process.env.LOG_FILE_MAX_SIZE || '10m';
 const logFileMaxCount = Number.parseInt(process.env.LOG_FILE_MAX_COUNT, 10) || 5;
 
+// Jest sets NODE_ENV=test. Skip the file target there: on hosts without a
+// writable /app (e.g. CI runners) pino-roll's mkdir throws an unhandled
+// ThreadStream error that kills the whole test process before coverage is
+// written.
+const fileLoggingEnabled = process.env.NODE_ENV !== 'test';
+
 const pinoConfig = {
   level: logLevel,
 
@@ -59,7 +65,7 @@ const pinoConfig = {
           destination: 1, // stdout
         },
       },
-      {
+      ...(fileLoggingEnabled ? [{
         target: 'pino-roll',
         level: 'trace',
         options: {
@@ -68,7 +74,7 @@ const pinoConfig = {
           limit: { count: logFileMaxCount },
           mkdir: true,
         },
-      },
+      }] : []),
     ],
   },
 

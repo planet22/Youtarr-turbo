@@ -2,7 +2,7 @@
 
 ## Using Development Builds
 
-Want to try features before they hit a stable release? Youtarr publishes a bleeding-edge `dev-latest` image that tracks the `dev` branch. Every merge to `dev` rebuilds it, so it's the fastest way to test unreleased work. It hasn't been through the stabilization pass that `latest` gets, so expect rough edges and occasional breakage. It's best used for testing and feedback, not as a daily driver.
+Want to try features before they hit a stable release? Youtarr-Turbo publishes a bleeding-edge `dev-latest` image that tracks the `dev` branch. Every merge to `dev` rebuilds it, so it's the fastest way to test unreleased work. It hasn't been through the stabilization pass that `latest` gets, so expect rough edges and occasional breakage. It's best used for testing and feedback, not as a daily driver.
 
 The `dev-latest` tag always points at the most recent dev build. Each commit also gets an immutable `dev-rc.<sha>` tag if you want to pin to a specific build.
 
@@ -124,7 +124,7 @@ The script runs `npm run build` for the client and then invokes `docker build`, 
   - This is optional, if not created manually it will be created by the `./scripts/start-dev.sh`
     script
   - Edit `.env` to configure your YOUTUBE_OUTPUT_DIR
-    - This will be the directory that is mounted by Youtarr where downloaded videos will be placed
+    - This will be the directory that is mounted by Youtarr-Turbo where downloaded videos will be placed
     - It defaults to `./downloads`
   - Leave `AUTH_PRESET_USERNAME` and `AUTH_PRESET_PASSWORD` blank to configure your login via
     UI on first startup (credentials will be saved to `config/config.json`)
@@ -316,7 +316,7 @@ docker compose -f docker-compose.dev.yml logs -f
 ./stop.sh
 ```
 
-**Note:** Youtarr only supports the Docker-based workflow described here. Always build and test inside the dev containers rather than trying to run the backend or frontend directly on the host.
+**Note:** Youtarr-Turbo only supports the Docker-based workflow described here. Always build and test inside the dev containers rather than trying to run the backend or frontend directly on the host.
 
 ### Working with Containers
 
@@ -495,7 +495,7 @@ Then set `LOG_LEVEL=debug` in your `.env` to see the queries.
 
 ### API Documentation (Swagger)
 
-Youtarr provides interactive API documentation via Swagger UI:
+Youtarr-Turbo provides interactive API documentation via Swagger UI:
 
 - **Swagger UI**: http://localhost:3087/swagger
 - **OpenAPI JSON**: http://localhost:3087/swagger.json
@@ -596,7 +596,7 @@ The client also synthesizes a local `connectionRestored` message after every rec
 
 ### Branching Strategy
 
-Youtarr uses a **dev → main** branching model:
+Youtarr-Turbo uses a **dev → main** branching model:
 
 | Branch | Purpose | Docker Tag |
 |--------|---------|------------|
@@ -796,9 +796,3 @@ app.use((req, res, next) => {
 ### Frontend Profiling
 
 Use React DevTools Profiler to identify performance bottlenecks.
-
-## Platform-Specific Development
-
-When working on changes that interact with platform-managed deployments, see the dedicated developer guides:
-
-- [Elfhosted](development/ELFHOSTED.md) - environment variables, behavior switches, and how to spoof an Elfhosted deployment locally for testing.

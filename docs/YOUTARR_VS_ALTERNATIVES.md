@@ -1,6 +1,6 @@
-# Youtarr vs alternatives
+# Youtarr-Turbo vs alternatives
 
-*Youtarr details updated July 2026; Pinchflat and Tube Archivist last verified April 2026.*
+*Youtarr-Turbo details updated July 2026; Pinchflat and Tube Archivist last verified April 2026.*
 
 ## At a glance
 
@@ -8,11 +8,11 @@ All three monitor YouTube channels and archive new videos with yt-dlp, but they 
 
 - **Pick Tube Archivist** if you want a full self-hosted YouTube media server with in-app playback, full-text search across subtitles and comments, and you're willing to run a multi-container stack.
 - **Pick Pinchflat** if you want the simplest single-container install, the most flexible filename/folder templating, and a podcast-RSS workflow. One caveat: the project has been in maintenance-only mode since September 2025 (small fixes still land, no new features). It still works and is still widely recommended, but don't expect the roadmap to move.
-- **Pick Youtarr** if you want the deepest media-server integration: native playlist sync into Plex, Jellyfin, or Emby, watch-status sync back from those servers into Youtarr's own library views, an optional TV-show-style Plex layout, polished in-browser playback, integrated YouTube search, and a documented REST API. The tradeoff is a smaller community and a couple of things the other two do better (transcript search, podcast RSS).
+- **Pick Youtarr-Turbo** if you want the deepest media-server integration: native playlist sync into Plex, Jellyfin, or Emby, watch-status sync back from those servers into Youtarr-Turbo's own library views, an optional TV-show-style Plex layout, polished in-browser playback, integrated YouTube search, and a documented REST API. The tradeoff is a smaller community and a couple of things the other two do better (transcript search, podcast RSS).
 
 Short summary of each:
 
-- **Youtarr** (Node.js/Express + React + MariaDB, ISC). Media-server automation tool with the strongest Plex story of the three. Unique strengths: automatic Plex library refresh with per-subfolder library mapping, native playlist sync that mirrors subscribed YouTube playlists into Plex, Jellyfin, and Emby (plus a universal `.m3u` fallback), MP3 playlists that sync as real music playlists, watch-status sync that pulls per-user watched state from Plex, Jellyfin, and Emby back into Youtarr's listing pages and filters, an optional TV Series layout that shows each channel as a show in Plex, one-click download of a channel's entire back catalog, automatic detection of terminated YouTube channels, channel grouping into user-defined subfolders (`__kids`/`__music`/`__news`, whatever), per-video content ratings, integrated in-app YouTube search, in-browser playback, a Swagger-documented REST API, MP3-only audio extraction, per-channel regex title filters, bulk channel import from Google Takeout CSV or a one-time cookies file, per-video and per-channel protection against auto-deletion, backup/restore scripts, in-app yt-dlp updates, and Apprise notifications. Weaker than the competition on full-text transcript/comment search, multi-user RBAC, podcast RSS output, and sheer community size.
+- **Youtarr-Turbo** (Node.js/Express + React + MariaDB, ISC). Media-server automation tool with the strongest Plex story of the three. Unique strengths: automatic Plex library refresh with per-subfolder library mapping, native playlist sync that mirrors subscribed YouTube playlists into Plex, Jellyfin, and Emby (plus a universal `.m3u` fallback), MP3 playlists that sync as real music playlists, watch-status sync that pulls per-user watched state from Plex, Jellyfin, and Emby back into Youtarr-Turbo's listing pages and filters, an optional TV Series layout that shows each channel as a show in Plex, one-click download of a channel's entire back catalog, automatic detection of terminated YouTube channels, channel grouping into user-defined subfolders (`__kids`/`__music`/`__news`, whatever), per-video content ratings, integrated in-app YouTube search, in-browser playback, a Swagger-documented REST API, MP3-only audio extraction, per-channel regex title filters, bulk channel import from Google Takeout CSV or a one-time cookies file, per-video and per-channel protection against auto-deletion, backup/restore scripts, in-app yt-dlp updates, and Apprise notifications. Weaker than the competition on full-text transcript/comment search, multi-user RBAC, podcast RSS output, and sheer community size.
 
 - **Pinchflat** (Elixir/Phoenix + SQLite, AGPL-3.0). Single-container media manager by Kieran Eglin. Community favorite for its "just works" install, powerful filename templating, per-source filters (regex, duration, date cutoff), audio-only Media Profiles that produce podcast-app-compatible RSS feeds, and first-class SponsorBlock + cookies handling. No built-in player by design, no REST API, single-user HTTP basic auth only.
 
@@ -20,7 +20,7 @@ Short summary of each:
 
 ## Project health
 
-| | Youtarr | Pinchflat | Tube Archivist |
+| | Youtarr-Turbo | Pinchflat | Tube Archivist |
 |---|---|---|---|
 | First commit | May 2023 | Jan 2024 | Sept 2021 |
 | Primary maintainer | Chris Dial (dialmaster) | Kieran Eglin (kieraneglin) | Simon (bbilly1) + MerlinScheurer |
@@ -33,7 +33,7 @@ Short summary of each:
 
 ## Architecture and tech stack
 
-**Youtarr** runs two containers: a Node.js app and MariaDB. yt-dlp, ffmpeg, and Deno are bundled in the app image, with an in-app "Update yt-dlp" action. Multi-arch images cover ARM64. No Redis, no Elasticsearch. Comfortable on a small NAS or Pi.
+**Youtarr-Turbo** runs two containers: a Node.js app and MariaDB. yt-dlp, ffmpeg, and Deno are bundled in the app image, with an in-app "Update yt-dlp" action. Multi-arch images cover ARM64. No Redis, no Elasticsearch. Comfortable on a small NAS or Pi.
 
 **Pinchflat** is the most resource-efficient. A single container, SQLite storage, no external services. yt-dlp runs as a subprocess and auto-updates daily. SQLite on network shares is a known pain point with a documented workaround. Also fine on a NAS or Pi.
 
@@ -43,7 +43,7 @@ Short summary of each:
 
 Legend: ✅ supported, ❌ not supported, ⚠️ partial/caveat, "unclear" = not documented clearly enough to confirm.
 
-| Feature | Youtarr | Pinchflat | Tube Archivist |
+| Feature | Youtarr-Turbo | Pinchflat | Tube Archivist |
 |---|---|---|---|
 | **Subscriptions & sources** | | | |
 | Channel subscriptions + auto-download | ✅ Per-tab controls (videos/shorts/streams); one-click Download All for the back catalog; terminated channels get flagged automatically | ✅ "Sources", the core model | ✅ Subscriptions page; separate "add to queue" for back-catalog |
@@ -97,7 +97,7 @@ Legend: ✅ supported, ❌ not supported, ⚠️ partial/caveat, "unclear" = not
 
 ## Install and operational complexity
 
-**Youtarr** sits in the middle. One `git clone` + `./start.sh` spins up the two containers and walks you through output path, timezone, and admin credentials. MariaDB adds weight versus Pinchflat's SQLite. Updates run via `./start.sh --pull-latest`. First-time setup is gated behind a one-time token, the bundled database isn't reachable from outside the Docker network, and there's a published security disclosure policy. Downloads also work on FUSE-backed storage like rclone mounts. In-app backup/restore scripts, an in-app yt-dlp update, bulk channel import, per-video auto-deletion protection, and per-subfolder Plex library mapping are all available. Documentation covers Plex, Jellyfin, Emby, Kodi, Synology, Unraid, external DB, authentication, and backup/restore, plus Swagger API docs.
+**Youtarr-Turbo** sits in the middle. One `git clone` + `./start.sh` spins up the two containers and walks you through output path, timezone, and admin credentials. MariaDB adds weight versus Pinchflat's SQLite. Updates run via `./start.sh --pull-latest`. First-time setup is gated behind a one-time token, the bundled database isn't reachable from outside the Docker network, and there's a published security disclosure policy. Downloads also work on FUSE-backed storage like rclone mounts. In-app backup/restore scripts, an in-app yt-dlp update, bulk channel import, per-video auto-deletion protection, and per-subfolder Plex library mapping are all available. Documentation covers Plex, Jellyfin, Emby, Kodi, Synology, Unraid, external DB, authentication, and backup/restore, plus Swagger API docs.
 
 **Pinchflat** is the clear winner for simplicity. A single `docker run` with two volumes and one port. No DB to provision, no Redis, no Elasticsearch, no kernel knobs. Everything configurable lives under environment variables plus the web UI. Documentation is GitHub Wiki-based, no standalone docs site, but the wiki is well-written and honest about edge cases. Updates are "pull the new image." The one recurring gotcha is SQLite on network shares, with a documented workaround that carries a data-loss caveat.
 

@@ -1,6 +1,6 @@
 # Configuration Reference (config.json)
 
-This document provides a comprehensive reference for all configuration options in Youtarr's `config.json` file.
+This document provides a comprehensive reference for all configuration options in Youtarr-Turbo's `config.json` file.
 These settings can be changed from the Settings pages in the web UI.
 
 ## Table of Contents
@@ -34,7 +34,7 @@ These settings can be changed from the Settings pages in the web UI.
 
 ## Configuration File Location
 
-The configuration file is stored at `./config/config.json` relative to your Youtarr installation directory.
+The configuration file is stored at `./config/config.json` relative to your Youtarr-Turbo installation directory.
 
 ### Auto-Creation
 The `config.json` is automatically created on first startup if it doesn't exist, with sensible defaults from `config.example.json`.
@@ -42,7 +42,7 @@ The `config.json` is automatically created on first startup if it doesn't exist,
 ### Editing Configuration
 Configuration can be modified through:
 1. **Web UI** (recommended) - Settings pages in the application
-2. **Manual editing** - Stop Youtarr, edit the JSON file, restart
+2. **Manual editing** - Stop Youtarr-Turbo, edit the JSON file, restart
 3. **Environment variables** - Some values can be overridden (see [ENVIRONMENT_VARIABLES.md](ENVIRONMENT_VARIABLES.md))
 
 ## Core Settings
@@ -94,7 +94,7 @@ Configuration can be modified through:
 - **Options**: `"2160"`, `"1440"`, `"1080"`, `"720"`, `"480"`, `"360"`
 - **Description**: Global setting for preferred download resolution
 - **Note**: Downloads from YouTube at best available quality up to this limit. Other values hand-edited into `config.json` are passed to yt-dlp as-is, but the UI only offers the options above.
-- **Codec implication**: YouTube only provides H.264 in MP4 up to 1080p. Selecting 1440p or 2160p forces Youtarr to pick a VP9 or AV1 source stream (YouTube does not offer H.264 at those resolutions) and remux it into MP4 via `--merge-output-format mp4`. The remux is lossless (no re-encode), but Plex clients without native VP9/AV1 hardware decode (Apple TV HD, older Apple TV 4K, iOS, older Rokus) will transcode at playback. If direct-play compatibility matters more than resolution, keep this at 1080p or set `videoCodec` to `h264`.
+- **Codec implication**: YouTube only provides H.264 in MP4 up to 1080p. Selecting 1440p or 2160p forces Youtarr-Turbo to pick a VP9 or AV1 source stream (YouTube does not offer H.264 at those resolutions) and remux it into MP4 via `--merge-output-format mp4`. The remux is lossless (no re-encode), but Plex clients without native VP9/AV1 hardware decode (Apple TV HD, older Apple TV 4K, iOS, older Rokus) will transcode at playback. If direct-play compatibility matters more than resolution, keep this at 1080p or set `videoCodec` to `h264`.
 
 ### Preferred Video Codec
 - **Config Key**: `videoCodec`
@@ -112,7 +112,7 @@ Configuration can be modified through:
 - **Type**: `string`
 - **Default**: `"movie"`
 - **Options**: `"movie"`, `"series"`
-- **Description**: Global default for how downloaded videos are organized/named. `"movie"` is Youtarr's traditional behavior. `"series"` treats each channel like a TV series: videos are assigned a `season` (the calendar year of upload) and an `episode` number (ordinal within that year) and named using the Episode Filename Template below, for Jellyfin/Plex/Emby "Shows" libraries. See [TV Series Library Mode](#tv-series-library-mode).
+- **Description**: Global default for how downloaded videos are organized/named. `"movie"` is Youtarr-Turbo's traditional behavior. `"series"` treats each channel like a TV series: videos are assigned a `season` (the calendar year of upload) and an `episode` number (ordinal within that year) and named using the Episode Filename Template below, for Jellyfin/Plex/Emby "Shows" libraries. See [TV Series Library Mode](#tv-series-library-mode).
 - **Note**: Can be overridden per-channel or per-playlist (`library_mode` column; NULL inherits this global default). See [DATABASE.md](DATABASE.md).
 
 ### Default Subfolder
@@ -145,7 +145,7 @@ Configuration can be modified through:
 - **Config Key**: `videoFilenamePrefix`
 - **Type**: `string`
 - **Default**: `"%(uploader,channel,uploader_id).80B - %(title).64B"`. The title is capped at 64 bytes because the prefix appears twice in the full path (per-video folder + filename) and Plex on Windows silently skips files whose full path reaches 260 characters. Installs that saved settings under an older default keep their persisted value (`.74B`/`.76B`) until the setting is edited.
-- **Description**: User-customizable prefix for downloaded video filenames AND per-video directory names. Youtarr always appends ` [VIDEO_ID].EXT` to filenames and ` - VIDEO_ID` to per-video folder names so it can re-find your videos on disk; those suffixes are not configurable.
+- **Description**: User-customizable prefix for downloaded video filenames AND per-video directory names. Youtarr-Turbo always appends ` [VIDEO_ID].EXT` to filenames and ` - VIDEO_ID` to per-video folder names so it can re-find your videos on disk; those suffixes are not configurable.
 - **Syntax**: Uses [yt-dlp's output template syntax](https://github.com/yt-dlp/yt-dlp#output-template). Common tokens: `%(title)s`, `%(uploader)s`, `%(channel)s`, `%(upload_date>%Y-%m-%d)s`, `%(channel_id)s`, `%(display_id)s`. Use `.NB` to byte-truncate values (e.g. `%(title).64B`) or `.Ns` for character truncation (e.g. `%(title).40s`); recommended to keep paths under Windows' 260-char limit.
 - **Validation**: Empty values, path separators (`/`, `\`), `..`, ASCII control characters, values longer than 160 characters, malformed yt-dlp percent syntax, and invalid truncation like `%(title).40` are rejected. Escape literal percent signs as `%%`. Trailing whitespace is trimmed on save.
 - **Scope**: Global setting. Applies only to NEW downloads; existing files are not renamed.
@@ -158,14 +158,14 @@ Configuration can be modified through:
 
 ## TV Series Library Mode
 
-When a channel/playlist is in `series` library mode (see `defaultLibraryMode` above), downloaded videos are numbered and named as TV episodes instead of Youtarr's default movie-style naming.
+When a channel/playlist is in `series` library mode (see `defaultLibraryMode` above), downloaded videos are numbered and named as TV episodes instead of Youtarr-Turbo's default movie-style naming.
 
 ### Episode Filename Template
 - **Config Key**: `episodeFilenamePrefix`
 - **Type**: `string`
 - **Default**: `"S%(season)02dE%(episode)03d - %(title).64s"`
 - **Description**: Filename template for series-mode videos, applied instead of `videoFilenamePrefix`. Supports `%(title)s`, `%(season)d` / `%(season)0Nd`, `%(episode)0Nd`, `%(channel)s`. A locked `" [id].ext"` suffix is always appended.
-- **Note**: Uses Youtarr's own placeholder syntax, not yt-dlp's — the episode number is only known after checking the database (see `season`/`episode` columns on `Videos` in [DATABASE.md](DATABASE.md)), not at yt-dlp invocation time.
+- **Note**: Uses Youtarr-Turbo's own placeholder syntax, not yt-dlp's — the episode number is only known after checking the database (see `season`/`episode` columns on `Videos` in [DATABASE.md](DATABASE.md)), not at yt-dlp invocation time.
 
 ### TV Series Output Subfolder
 - **Config Key**: `seriesOutputSubfolder`
@@ -271,7 +271,7 @@ Not a global `config.json` field — set per-channel via the channel's `season_e
 
 ## Jellyfin Integration
 
-These fields are required only when you want Youtarr to mirror playlists to Jellyfin as native playlists. Channel downloads work without them.
+These fields are required only when you want Youtarr-Turbo to mirror playlists to Jellyfin as native playlists. Channel downloads work without them.
 
 ### Enable Jellyfin
 - **Config Key**: `jellyfinEnabled`
@@ -300,7 +300,7 @@ These fields are required only when you want Youtarr to mirror playlists to Jell
 - **Config Key**: `jellyfinVideoLibraryIds`
 - **Type**: `array<string>`
 - **Default**: `[]`
-- **Description**: Library IDs that contain your Youtarr videos. Optional and safe to leave blank; Youtarr matches downloaded videos to Jellyfin items across all of your libraries.
+- **Description**: Library IDs that contain your Youtarr-Turbo videos. Optional and safe to leave blank; Youtarr-Turbo matches downloaded videos to Jellyfin items across all of your libraries.
 
 ### Jellyfin Subfolder Library Mappings
 - **Config Key**: `jellyfinSubfolderLibraryMappings`
@@ -310,7 +310,7 @@ These fields are required only when you want Youtarr to mirror playlists to Jell
 
 ## Emby Integration
 
-These fields work like the Jellyfin fields above, with `emby*` names. They're required only when you want Youtarr to mirror playlists to Emby as native playlists; channel downloads work without them. See [Media Server Playlists](MEDIA_SERVER_PLAYLISTS.md) for setup details.
+These fields work like the Jellyfin fields above, with `emby*` names. They're required only when you want Youtarr-Turbo to mirror playlists to Emby as native playlists; channel downloads work without them. See [Media Server Playlists](MEDIA_SERVER_PLAYLISTS.md) for setup details.
 
 | Config Key | Type | Default | Description |
 | :--------- | :--- | :------ | :---------- |
@@ -318,20 +318,20 @@ These fields work like the Jellyfin fields above, with `emby*` names. They're re
 | `embyUrl` | `string` | `""` | Base URL of your Emby server (e.g., `http://192.168.1.100:8096`). |
 | `embyApiKey` | `string` | `""` | Created in Emby under **Settings -> Advanced -> API Keys**. Redacted in logs. |
 | `embyUserId` | `string` | `""` | User account that will own Youtarr-managed playlists. Open the **Emby User** dropdown in the UI to load accounts from your server and pick one. |
-| `embyVideoLibraryIds` | `array<string>` | `[]` | Library IDs that contain your Youtarr videos. Optional and safe to leave blank; Youtarr matches videos across all of your libraries. |
+| `embyVideoLibraryIds` | `array<string>` | `[]` | Library IDs that contain your Youtarr-Turbo videos. Optional and safe to leave blank; Youtarr-Turbo matches videos across all of your libraries. |
 
 ## Watch Status Sync
 
 | Config Key | Type | Default | Description |
 | :--------- | :--- | :------ | :---------- |
-| `watchStatusSyncEnabled` | `boolean` | `true` | Periodically pull per-video watch status (watched, percent, last watched) from connected media servers (Plex, Jellyfin, Emby) into Youtarr. No-op when no media server is connected. |
+| `watchStatusSyncEnabled` | `boolean` | `true` | Periodically pull per-video watch status (watched, percent, last watched) from connected media servers (Plex, Jellyfin, Emby) into Youtarr-Turbo. No-op when no media server is connected. |
 | `watchStatusSyncFrequency` | `string` (cron) | `"0 */4 * * *"` | How often the watch status sync runs. |
 | `plexWatchStatusAllUsers` | `boolean` | `true` | Also sync watch status for every Plex account on the server (from the server's play history; the owner keeps full fidelity). When `false`, only the server owner's state is synced. |
 | `jellyfinWatchStatusAllUsers` | `boolean` | `true` | Sync watch status for every Jellyfin user. When `false`, only the configured `jellyfinUserId`. |
 | `embyWatchStatusAllUsers` | `boolean` | `true` | Sync watch status for every Emby user. When `false`, only the configured `embyUserId`. |
 | `watchStatusWatchedRule` | `string` | `"any"` | When a video counts as "Watched" in listings: `"any"` (any synced user watched it) or `"primary"` (only the Plex owner / configured Jellyfin/Emby user). |
 
-Sync is one-way (server -> Youtarr). Non-owner Plex users come from the server's play history, which records plays but not in-progress positions: any play marks the video watched for that user. User names are stored in the `media_server_users` table so the video modal can show who watched what. The history pull is incremental via a durable cursor in the `watch_status_sync_cursors` table; deleting that table's `plex` row forces a full history re-scan on the next sync (useful after repairing a path mismatch that had prevented videos from matching).
+Sync is one-way (server -> Youtarr-Turbo). Non-owner Plex users come from the server's play history, which records plays but not in-progress positions: any play marks the video watched for that user. User names are stored in the `media_server_users` table so the video modal can show who watched what. The history pull is incremental via a durable cursor in the `watch_status_sync_cursors` table; deleting that table's `plex` row forces a full history re-scan on the next sync (useful after repairing a path mismatch that had prevented videos from matching).
 
 ## Media Mode & STRM
 
@@ -340,7 +340,7 @@ Sync is one-way (server -> Youtarr). Non-owner Plex users come from the server's
 - **Type**: `string`
 - **Default**: `"download"`
 - **Options**: `"download"`, `"strm"`, `"both"`
-- **Description**: `"download"` is Youtarr's traditional full-file download behavior. `"strm"` writes a `.strm` shortcut (plus NFO/thumbnail) instead of downloading the video, for on-demand playback via Jellyfin/Emby/Kodi. `"both"` downloads the media file **and** writes a `.strm` pointing at the proxy/YouTube.
+- **Description**: `"download"` is Youtarr-Turbo's traditional full-file download behavior. `"strm"` writes a `.strm` shortcut (plus NFO/thumbnail) instead of downloading the video, for on-demand playback via Jellyfin/Emby/Kodi. `"both"` downloads the media file **and** writes a `.strm` pointing at the proxy/YouTube.
 - **Note**: Can be overridden per-channel or per-playlist (`media_mode` column; NULL inherits this global default). See [STRM.md](STRM.md) and [DATABASE.md](DATABASE.md).
 
 ### STRM Settings
@@ -361,7 +361,7 @@ Sync is one-way (server -> Youtarr). Non-owner Plex users come from the server's
 
 | Field | Values | Notes |
 |---|---|---|
-| `target` | `"youtube"` \| `"ytstream"` | `youtube`: `.strm` points straight at the YouTube watch URL. `ytstream` (default): `.strm` points at Youtarr's own `/api/ytstream/:id` route — see [YTSTREAM.md](YTSTREAM.md). |
+| `target` | `"youtube"` \| `"ytstream"` | `youtube`: `.strm` points straight at the YouTube watch URL. `ytstream` (default): `.strm` points at Youtarr-Turbo's own `/api/ytstream/:id` route — see [YTSTREAM.md](YTSTREAM.md). |
 | `proxyBaseUrl` | `string` | Base URL for `target: "ytstream"` `.strm` files. Must be reachable by the media server/clients, not `127.0.0.1` unless they run on the same host. |
 | `writeNfo` / `writeThumbnail` | `boolean` | Write NFO metadata / thumbnail image alongside the `.strm`. |
 | `writeMediaInfoCache` | `boolean` | Cache probed media info (resolution/duration/etc.) for the STRM item so it doesn't need re-probing on every scan. |
@@ -372,24 +372,83 @@ Sync is one-way (server -> Youtarr). Non-owner Plex users come from the server's
 ## Streaming (ytstream)
 
 - **Config Key**: `ytstream` (object)
-- **Description**: Server-side playback/transcode settings for the `/api/ytstream/:youtubeId` route used by `strm.target: "ytstream"` `.strm` files (and any direct caller). Covers stream mode (`defaultMode`: `direct`/`direct-redirect`/`hls`/`hls-buffer`), container/quality/transcode selection, hardware encode/decode backends, network tuning (chunk size, concurrent fragments, throttle/socket timeouts), HLS segment storage and caching behavior (`hotSwapToCache`, `serveCachedFile`, `hlsStorageLocation`, `backfillMissingSegments`, `finalizeToMp4`, `stealthCache`), and history retention (`historyRetentionDays`, default 90 — see the `stream_history` table in [DATABASE.md](DATABASE.md)).
+- **Description**: Server-side playback/transcode settings for the `/api/ytstream/:youtubeId` route used by `strm.target: "ytstream"` `.strm` files (and any direct caller). Covers stream mode (`defaultMode`: `direct`/`direct-redirect`/`hls`/`hls-buffer`/`hls-byterange`/`download-cache`/`youtube-hls`), container/quality/transcode selection, hardware encode/decode backends, network tuning (chunk size, concurrent fragments, throttle/socket timeouts), HLS segment storage and caching behavior (`hotSwapToCache`, `serveCachedFile`, `hlsStorageLocation`, `backfillMissingSegments`, `finalizeToMp4`, `stealthCache`, `bufferStartAfterSegments`), the byte-range mode options (`byteRangeDeliverAsFile`, `byteRangeResumeCache`), the YouTube HLS passthrough options (`audioLanguage`, `youtubeHlsProxy`), and history retention (`historyRetentionDays`, default 90 — see the `stream_history` table in [DATABASE.md](DATABASE.md)).
 - **Full field reference**: [YTSTREAM.md § Config (config.json)](YTSTREAM.md#config-configjson).
+- **Step-by-step setup**: [GETTING_STARTED_STREAMING.md § Pick a playback mode](GETTING_STARTED_STREAMING.md#step-3--pick-a-playback-mode).
 - **Note**: `calculatedLength` was renamed from `fakeLength`; old configs are migrated automatically at startup.
+
+### Recommended playback mode configs
+
+Three modes cover most setups. Each example sets `forceServerSettings: true`, so an already-written `.strm` picks up the mode without being rewritten. Only the fields shown differ from the defaults; the rest of the block can stay as is.
+
+**YouTube HLS passthrough** — serves YouTube's own HLS playlist; no ffmpeg, no local file, 1080p H.264 maximum. The player must reach YouTube from the server's network.
+
+```json
+"ytstream": {
+  "defaultMode": "youtube-hls",
+  "quality": "1080",
+  "qualityStrictness": "fallback",
+  "audioLanguage": "en",
+  "youtubeHlsProxy": "serve",
+  "forceServerSettings": true
+}
+```
+
+**Byte-range Plain file** — one growing file (Matroska here) served over HTTP Range and kept in a hidden cache. In the Settings UI this is the **Byte-range Plain file** entry, which sets `defaultMode` and `byteRangeDeliverAsFile` together.
+
+```json
+"ytstream": {
+  "defaultMode": "hls-byterange",
+  "byteRangeDeliverAsFile": true,
+  "byteRangeResumeCache": false,
+  "container": "mkv",
+  "transcode": "copy",
+  "quality": "1080",
+  "hlsStorageLocation": "cache",
+  "forceServerSettings": true
+}
+```
+
+**Enhanced HLS + Buffered** — real segmented HLS with an H.264 re-encode on the GPU, plus a whole-video buffer file.
+
+```json
+"ytstream": {
+  "defaultMode": "hls-buffer",
+  "container": "mp4",
+  "transcode": "h264",
+  "quality": "1080",
+  "hardwareMode": "vaapi",
+  "tuning": "quality",
+  "forceServerSettings": true
+}
+```
+
+### Streaming mode-specific fields
+
+| Field | Type | Default | Applies to | Notes |
+|---|---|---|---|---|
+| `audioLanguage` | `string` | `""` | `youtube-hls` | Preferred audio track language (`en`, `de`, `pt-BR`). A region-less code matches its regions. Blank, or a language the video doesn't offer, serves the original track. |
+| `youtubeHlsProxy` | `"off"` \| `"proxy"` \| `"serve"` | `"off"` | `youtube-hls` | `off`: only the master playlist comes from Youtarr-Turbo. `proxy`: Youtarr-Turbo also serves the media playlists, so plays show on the Streaming page. `serve`: every segment URL also goes through Youtarr-Turbo as a `302` to YouTube (estimated data rate shown with `~`). |
+| `byteRangeDeliverAsFile` | `boolean` | `false` | `hls-byterange` | `true`: serve the growing file directly over HTTP Range (**Byte-range Plain file**). `false`: return an HLS manifest of byte ranges (Jellyfin treats it as live, so not recommended for STRM). |
+| `byteRangeResumeCache` | `boolean` | `false` | `hls-byterange` + `byteRangeDeliverAsFile` | Resume a cut-off encode from near where it stopped and splice the new tail onto the cached partial instead of re-encoding from 0:00. |
+| `bufferStartAfterSegments` | `number` | `3` | `hls-buffer` | `config.json` only. Delay the full-video buffer fetch until this many distinct segments have been requested, so metadata probes don't start a download. `0` = start immediately. |
+
+`container`, `transcode`, `hardwareMode`, `tuning`, `calculatedLength`, `probeShortcut`, and `hlsMasterPlaylist` are ignored by `youtube-hls`, and `calculatedLength`, `probeShortcut`, and `hlsMasterPlaylist` are ignored by the byte-range modes. With `hls-byterange`, `container` chooses `mp4` or `mkv` only when `byteRangeDeliverAsFile` is on. The Settings page shows every ignored field disabled with the reason.
 
 ## Sonarr/Radarr Integration (NZB)
 
 - **Config Key**: `nzb` (object)
-- **Description**: Makes Youtarr act as a Newznab-compatible search indexer and SABnzbd-compatible download client so Sonarr/Radarr/Prowlarr can search and "grab" YouTube videos through Youtarr. See [NZB.md](NZB.md) for setup and integration details, and the `nzb_diagnostic_log` / `nzb_resolution_cache` tables in [DATABASE.md](DATABASE.md).
+- **Description**: Makes Youtarr-Turbo act as a Newznab-compatible search indexer and SABnzbd-compatible download client so Sonarr/Radarr/Prowlarr can search and "grab" YouTube videos through Youtarr-Turbo. See [NZB.md](NZB.md) for setup and integration details, and the `nzb_diagnostic_log` / `nzb_resolution_cache` tables in [DATABASE.md](DATABASE.md).
 - **Top-level fields**:
   - `enabled` (`boolean`, default `false`) — turns the `/nzb` routes on.
   - `apiKey` (`string`) — shared key for both the Newznab indexer and SABnzbd download-client endpoints; stored/displayed in plaintext (a service-integration token, not a login credential).
-  - `remoteBasePath` (`string | null`, default `null`) — when Sonarr/Radarr see the shared media volume at a different path than Youtarr does internally, every path Youtarr reports back has its real data-root prefix swapped for this value. `null` = report paths unchanged.
+  - `remoteBasePath` (`string | null`, default `null`) — when Sonarr/Radarr see the shared media volume at a different path than Youtarr-Turbo does internally, every path Youtarr-Turbo reports back has its real data-root prefix swapped for this value. `null` = report paths unchanged.
   - `searchCacheMinutes` (`number`, default `10`) — how long a raw search result set is reused before a repeat query re-fetches; avoids a redundant yt-dlp run/API call for Sonarr/Radarr's own repeat polling. `0` disables caching.
   - `debugLogging` (`boolean`, default `false`) — this route's own diagnostic lines print regardless of the global Log Level, without turning on every other module's debug output.
   - `resolutionDetection` (`{ fixed, thumb, extract }`, all default `true`) — which methods are tried, in order, to determine a search result's real resolution: `fixed` (a previously-downloaded video's own recorded resolution, free/exact), `thumb` (maxresdefault-thumbnail heuristic, cheap but can false-positive "hd"), `extract` (a real yt-dlp extraction, authoritative but slower — only used to confirm/correct an uncertain `thumb` result unless both other methods are off).
   - `diagnosticLogLimits` (`{ recentQueries, searchTraces, failedGrabs }`, default `{ 50, 20, 20 }`, each `1`-`100`) — how many rows the NZB diagnostics page's Recent Queries, Search Detail/Debug, and Failed Grabs logs keep before pruning the oldest row on the next write (see `nzb_diagnostic_log` in [DATABASE.md](DATABASE.md)). Read live, no restart needed.
   - `videoResolutionCacheLimit` (`number`, default `5000`, range `100`-`10000`) — how many rows the `nzb_resolution_cache` table (nzbThumbnailProbe.js's per-video thumb/extract resolution findings, see [DATABASE.md](DATABASE.md)) keeps before pruning the oldest by `createdAt` on the next write. Read live, no restart needed.
-  - `categories` (`array`) — one entry per Sonarr/Radarr "Category": `name`, `subfolder`, `mediaMode` (`download`/`strm`/`both`), `searchMode` (`flat`/`episode`), `importStrategy` (`hardlink`: video stays in Youtarr's own library, a hardlink is staged for Sonarr/Radarr to import; `untracked`: Youtarr drops its own DB tracking immediately so the video never appears in Youtarr's own list/history), `newznabCategoryIds` (array of Newznab category id strings a search can match under), `additionalLocalFilter` + `excludeTerms` (require search terms actually present in the title / reject junk substrings like "advert"), `postEncode` (per-category gate on the global post-download transcode — see [Post-Download Transcode](#post-download-transcode)).
+  - `categories` (`array`) — one entry per Sonarr/Radarr "Category": `name`, `subfolder`, `mediaMode` (`download`/`strm`/`both`), `searchMode` (`flat`/`episode`), `importStrategy` (`hardlink`: video stays in Youtarr-Turbo's own library, a hardlink is staged for Sonarr/Radarr to import; `untracked`: Youtarr-Turbo drops its own DB tracking immediately so the video never appears in Youtarr-Turbo's own list/history), `newznabCategoryIds` (array of Newznab category id strings a search can match under), `additionalLocalFilter` + `excludeTerms` (require search terms actually present in the title / reject junk substrings like "advert"), `postEncode` (per-category gate on the global post-download transcode — see [Post-Download Transcode](#post-download-transcode)).
 
 ## YouTube Data API (Optional)
 
@@ -397,11 +456,11 @@ Sync is one-way (server -> Youtarr). Non-owner Plex users come from the server's
 - **Config Key**: `youtubeApiKey`
 - **Type**: `string`
 - **Default**: `""` (empty)
-- **Description**: Optional YouTube Data API v3 key. When set, Youtarr uses the API for faster channel metadata, video metadata, and search fetches. On any failure (invalid key, quota exhausted, API disabled, network error), Youtarr silently falls back to yt-dlp with no user-visible error.
+- **Description**: Optional YouTube Data API v3 key. When set, Youtarr-Turbo uses the API for faster channel metadata, video metadata, and search fetches. On any failure (invalid key, quota exhausted, API disabled, network error), Youtarr-Turbo silently falls back to yt-dlp with no user-visible error.
 - **Notes**:
   - API keys do not expire. The Settings -> YouTube API page shows a "last validated" timestamp instead of an expiration.
   - Default quota is 10,000 units per day per Google Cloud project, resetting at midnight Pacific time. Search calls cost 100 units; metadata and channel/playlist calls cost 1 unit per call.
-  - On a 403 `quotaExceeded` response, Youtarr enters an in-memory cooldown until the next Pacific-midnight reset and uses yt-dlp exclusively during that window.
+  - On a 403 `quotaExceeded` response, Youtarr-Turbo enters an in-memory cooldown until the next Pacific-midnight reset and uses yt-dlp exclusively during that window.
   - When a key is configured, channel video listing and tab auto-detection use the API for all three tabs (Videos, Shorts, Streams) via the per-tab auto-generated playlist IDs (`UULF`/`UUSH`/`UULV`). yt-dlp remains the fallback.
   - Search results filter out live/upcoming broadcasts and Shorts under 60s to match yt-dlp's behavior. The Shorts filter requires a follow-up `videos.list` enrichment call to read each result's duration; if that enrichment fails (e.g., quota burned mid-search), the search returns the un-enriched results and a small number of Shorts may slip through. Live/upcoming filtering still applies in that fallback path.
   - Set up instructions and a test button are on the Settings -> YouTube API page.
@@ -496,7 +555,7 @@ Sync is one-way (server -> Youtarr). Non-owner Plex users come from the server's
 
 ## Notifications
 
-Youtarr uses [Apprise](https://github.com/caronc/apprise) to send notifications when new videos are downloaded, supporting 100+ notification services.
+Youtarr-Turbo uses [Apprise](https://github.com/caronc/apprise) to send notifications when new videos are downloaded, supporting 100+ notification services.
 
 ### Enable Notifications
 - **Config Key**: `notificationsEnabled`
@@ -543,7 +602,7 @@ Each entry in the array is an object with the following properties:
 
 ### Rich Formatting
 
-For supported services, Youtarr sends beautifully formatted notifications with embeds, styled text, video cards, and timestamps. Services without rich formatting support receive plain text notifications.
+For supported services, Youtarr-Turbo sends beautifully formatted notifications with embeds, styled text, video cards, and timestamps. Services without rich formatting support receive plain text notifications.
 
 | Service | URL Format | Rich Formatting |
 |---------|------------|-----------------|
@@ -573,7 +632,7 @@ Common services include:
 
 ### Migration from Discord Webhook
 
-If you previously used the `discordWebhookUrl` configuration option, Youtarr automatically migrates it to the new `appriseUrls` format on startup:
+If you previously used the `discordWebhookUrl` configuration option, Youtarr-Turbo automatically migrates it to the new `appriseUrls` format on startup:
 
 **Before (legacy):**
 ```json
@@ -630,7 +689,7 @@ The old `discordWebhookUrl` and `notificationService` fields are automatically r
 - **Default**: `1`
 - **Description**: Number of times a video that fails with a transient HTTP 403 is automatically re-queued in a fresh download job
 - **Options**: `0`, `1`, `2`, `3` (the values offered in the UI; `0` disables auto-retry)
-- **Note**: YouTube sometimes rejects an already-issued stream URL mid-download with HTTP 403. yt-dlp's own retries (`downloadRetryCount`) re-request the same rejected URL and cannot recover; only a fresh yt-dlp run with a fresh extraction can. When a video fails with the 403 signature, Youtarr queues an "Auto-retry" job for just that video. Permanent failures (members-only, terminated channels, bot detection) are never auto-retried.
+- **Note**: YouTube sometimes rejects an already-issued stream URL mid-download with HTTP 403. yt-dlp's own retries (`downloadRetryCount`) re-request the same rejected URL and cannot recover; only a fresh yt-dlp run with a fresh extraction can. When a video fails with the 403 signature, Youtarr-Turbo queues an "Auto-retry" job for just that video. Permanent failures (members-only, terminated channels, bot detection) are never auto-retried.
 
 ### Enable Stall Detection
 - **Config Key**: `enableStallDetection`
@@ -732,8 +791,8 @@ Not a global setting — each Sonarr/Radarr NZB category has its own `postEncode
 - **Default**: `""` (empty)
 - **Description**: Free-form yt-dlp arguments appended to every invocation. Tokenized shell-style (single/double quotes and backslash-escapes supported). Maximum length: 2000 characters.
 - **Blocked flags**: For safety, several flags are rejected at save time and silently dropped at command-build time. The full list is in `server/modules/download/customArgsParser.js`; it includes (among others) `--exec`, `--netrc-cmd`, `-o`/`--output`, `-P`/`--paths`, `--print-to-file`, `--external-downloader`/`--downloader`, `--external-downloader-args`/`--downloader-args`, `--cookies`/`--cookies-from-browser`, `--ffmpeg-location`, `--config-location`, `--batch-file`, `--load-info-json`, `--download-archive`, plus the flags that have dedicated config fields (`--proxy`, `-4`/`-6`, `--limit-rate`, `--sleep-requests`).
-- **Order**: Custom args are appended LAST in the yt-dlp command, after Youtarr's managed flags. Per yt-dlp's last-wins semantics, your flags can override managed ones (e.g. `--retries 5` overrides Youtarr's default `--retries 2`).
-- **Note**: Power-user feature. Incorrect flags can prevent downloads from working entirely or break Youtarr's behavior in unexpected ways. Use the "Validate Arguments" button in the UI to argparse-check your args against yt-dlp before saving. The validation does not gate save — invalid args can still be saved and will only surface failures at download time.
+- **Order**: Custom args are appended LAST in the yt-dlp command, after Youtarr-Turbo's managed flags. Per yt-dlp's last-wins semantics, your flags can override managed ones (e.g. `--retries 5` overrides Youtarr-Turbo's default `--retries 2`).
+- **Note**: Power-user feature. Incorrect flags can prevent downloads from working entirely or break Youtarr-Turbo's behavior in unexpected ways. Use the "Validate Arguments" button in the UI to argparse-check your args against yt-dlp before saving. The validation does not gate save — invalid args can still be saved and will only surface failures at download time.
 
 ### Use External Temporary Directory
 - **Config Key**: `useTmpForDownloads`
@@ -749,7 +808,7 @@ Not a global setting — each Sonarr/Radarr NZB category has its own `postEncode
 - **Type**: `string`
 - **Default**: `"/tmp/youtarr-downloads"`
 - **Description**: External temporary directory for downloads when `useTmpForDownloads` is `true`
-- **Note**: Only used when `useTmpForDownloads` is enabled. Internal path in Youtarr container.
+- **Note**: Only used when `useTmpForDownloads` is enabled. Internal path in Youtarr-Turbo container.
 
 ### NFS Output Directory Considerations
 
@@ -873,24 +932,24 @@ For detailed information on creating and using API keys, see [API Integration Gu
 
 ## yt-dlp Auto-Update
 
-Youtarr can optionally check for and install yt-dlp updates on a daily schedule (4:00 AM). The channel picker, toggle, and status display live with the manual yt-dlp update button on the Settings -> YT-DLP page.
+Youtarr-Turbo can optionally check for and install yt-dlp updates on a daily schedule (4:00 AM). The channel picker, toggle, and status display live with the manual yt-dlp update button on the Settings -> YT-DLP page.
 
 ### Update Channel
 - **Config Key**: `ytdlpUpdateChannel`
 - **Type**: `string`
 - **Default**: `'stable'`
 - **Values**: `'stable'` or `'nightly'`
-- **Description**: Which yt-dlp release channel Youtarr keeps the binary on. Every update (manual, automatic, or startup) runs `yt-dlp --update-to <channel>@latest`, so the configured channel is re-applied even after a container recreation resets the binary to the image's baked-in stable build. Switching back to `stable` from `nightly` downgrades to the latest stable release.
+- **Description**: Which yt-dlp release channel Youtarr-Turbo keeps the binary on. Every update (manual, automatic, or startup) runs `yt-dlp --update-to <channel>@latest`, so the configured channel is re-applied even after a container recreation resets the binary to the image's baked-in stable build. Switching back to `stable` from `nightly` downgrades to the latest stable release.
 - **Note**: Nightly builds get extractor fixes days earlier than stable but may occasionally break. On managed platforms (Elfhosted) the channel cannot be changed.
 
 ### Auto-Update Enabled
 - **Config Key**: `autoUpdateYtdlp`
 - **Type**: `boolean`
 - **Default**: `false`
-- **Description**: When `true`, Youtarr runs `yt-dlp --update-to <channel>@latest` at 4:00 AM (server local time, controlled by the `TZ` env var) every night.
+- **Description**: When `true`, Youtarr-Turbo runs `yt-dlp --update-to <channel>@latest` at 4:00 AM (server local time, controlled by the `TZ` env var) every night.
 - **Behavior**:
   - Updates run even while downloads are in progress; the in-flight download finishes on the previous version and the next spawned download uses the new one.
-  - If the update process itself fails (e.g., permission denied on managed platforms, network error, timeout), the failure is logged and Youtarr continues to run on the previous yt-dlp version.
+  - If the update process itself fails (e.g., permission denied on managed platforms, network error, timeout), the failure is logged and Youtarr-Turbo continues to run on the previous yt-dlp version.
   - On success, the in-process yt-dlp version cache is refreshed without requiring a server restart.
 
 ### Last Checked Timestamp

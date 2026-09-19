@@ -130,7 +130,6 @@
         "hotSwapToCache": false,
         "serveCachedFile": false,
         "probeShortcut": false,
-        "probeResolveTrueResolution": false,
         "forceServerSettings": false,
         "historyRetentionDays": 90,
         "hlsStorageLocation": "tmp",

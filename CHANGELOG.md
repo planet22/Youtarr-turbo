@@ -1,5 +1,23 @@
 # Changelog
 
+## [v0.3.0](https://github.com/planet22/Youtarr-turbo/releases/tag/v0.3.0) - 2026-09-19
+
+## [0.3.0](https://github.com/planet22/Youtarr-turbo/compare/vv0.2.0...v0.3.0) (2026-09-19)
+
+
+### Features
+
+* enhance Ytstream dry run functionality with new settings and experimental modes ([42306cc](https://github.com/planet22/Youtarr-turbo/commit/42306cc3c7805a32ab0f5449ed5d5767437c2bb5))
+
+
+### Documentation
+
+* update CHANGELOG for v0.2.0 [skip ci] ([d6fd818](https://github.com/planet22/Youtarr-turbo/commit/d6fd8183246ccd0f22b4d68786320bc0776418dc))
+
+
+
+
+
 ## [v0.2.0](https://github.com/planet22/Youtarr-turbo/releases/tag/v0.2.0) - 2026-09-19
 
 ## [0.2.0](https://github.com/planet22/Youtarr-turbo/compare/vv0.1.0...v0.2.0) (2026-09-19)

@@ -1,5 +1,23 @@
 # Changelog
 
+## [v0.4.0](https://github.com/planet22/Youtarr-turbo/releases/tag/v0.4.0) - 2026-09-19
+
+## [0.4.0](https://github.com/planet22/Youtarr-turbo/compare/vv0.3.0...v0.4.0) (2026-09-19)
+
+
+### Features
+
+* Update Unraid documentation for Youtarr-Turbo installation and configuration ([922aaba](https://github.com/planet22/Youtarr-turbo/commit/922aaba31153b7f3ed0a6b54edce68d1c5335b11))
+
+
+### Documentation
+
+* update CHANGELOG for v0.3.0 [skip ci] ([c8f1734](https://github.com/planet22/Youtarr-turbo/commit/c8f17347ede4ed00bce048ae65be37ad544b3258))
+
+
+
+
+
 ## [v0.3.0](https://github.com/planet22/Youtarr-turbo/releases/tag/v0.3.0) - 2026-09-19
 
 ## [0.3.0](https://github.com/planet22/Youtarr-turbo/compare/vv0.2.0...v0.3.0) (2026-09-19)

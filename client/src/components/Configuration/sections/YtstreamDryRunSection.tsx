@@ -58,6 +58,10 @@ export const YtstreamDryRunSection: React.FC<Props> = ({ config, token }) => {
     ytstream?.tuning,
     ytstream?.calculatedLength,
     ytstream?.forceServerSettings,
+    ytstream?.audioLanguage,
+    ytstream?.youtubeHlsProxy,
+    ytstream?.byteRangeDeliverAsFile,
+    ytstream?.byteRangeResumeCache,
   ]);
 
   if (config.strm?.target !== 'ytstream') {
@@ -106,6 +110,10 @@ export const YtstreamDryRunSection: React.FC<Props> = ({ config, token }) => {
         hardwareMode: ytstream?.hardwareMode || undefined,
         tuning: ytstream?.tuning || undefined,
         calculatedLength: ytstream?.calculatedLength,
+        audioLanguage: ytstream?.audioLanguage || undefined,
+        hlsProxy: ytstream?.youtubeHlsProxy || undefined,
+        byteRangeDeliverAsFile: ytstream?.byteRangeDeliverAsFile,
+        byteRangeResumeCache: ytstream?.byteRangeResumeCache,
       }, { probe });
       setState({ loading: false, result, error: null });
     } catch (err: unknown) {

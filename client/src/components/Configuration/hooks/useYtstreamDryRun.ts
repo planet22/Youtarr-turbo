@@ -14,6 +14,10 @@ export interface YtstreamDryRunOverrides {
   hardwareMode?: string;
   tuning?: string;
   calculatedLength?: boolean;
+  audioLanguage?: string;
+  hlsProxy?: string;
+  byteRangeDeliverAsFile?: boolean;
+  byteRangeResumeCache?: boolean;
 }
 
 /**
@@ -49,6 +53,11 @@ export const useYtstreamDryRun = ({ token }: UseYtstreamDryRunParams) => {
     if (overrides.hardwareMode) params.set('hardware', overrides.hardwareMode);
     if (overrides.tuning) params.set('tuning', overrides.tuning);
     if (overrides.calculatedLength !== undefined) params.set('calculatedLength', String(overrides.calculatedLength));
+    // Only read by the experimental modes (YouTube HLS passthrough, Byte-range).
+    if (overrides.audioLanguage) params.set('audioLanguage', overrides.audioLanguage);
+    if (overrides.hlsProxy) params.set('hlsProxy', overrides.hlsProxy);
+    if (overrides.byteRangeDeliverAsFile !== undefined) params.set('deliverAsFile', String(overrides.byteRangeDeliverAsFile));
+    if (overrides.byteRangeResumeCache !== undefined) params.set('resumeCache', String(overrides.byteRangeResumeCache));
 
     const response = await fetch(`/api/ytstream/${encodeURIComponent(youtubeId)}/simulate?${params.toString()}`, {
       headers: {

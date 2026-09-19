@@ -964,6 +964,8 @@ describe('ConfigModule', () => {
       ConfigModule.config.cookiesEnabled = true;
       ConfigModule.config.customCookiesUploaded = true;
       fs.existsSync.mockReturnValue(true);
+      fs.statSync.mockReturnValue({ size: 42, mtime: new Date('2026-01-01T00:00:00.000Z') });
+      fs.readFileSync.mockReturnValue('');
 
       // Act
       const status = ConfigModule.getCookiesStatus();
@@ -972,7 +974,13 @@ describe('ConfigModule', () => {
       expect(status).toEqual({
         cookiesEnabled: true,
         customCookiesUploaded: true,
-        customFileExists: true
+        customFileExists: true,
+        sizeBytes: 42,
+        uploadedAt: '2026-01-01T00:00:00.000Z',
+        authCookiesFound: 0,
+        hasExpiredAuthCookie: false,
+        earliestExpiry: null,
+        earliestExpiryName: null
       });
     });
 

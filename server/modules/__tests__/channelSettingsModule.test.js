@@ -1135,6 +1135,8 @@ describe('ChannelSettingsModule', () => {
       ...mockChannel,
       uploader: 'TestChannel'
     };
+    // The module builds paths with path.join, so expectations need the platform separator too.
+    const outputPath = (...parts) => require('path').join('/test/output', ...parts);
 
     beforeEach(() => {
       Video.findAll.mockResolvedValue([]);
@@ -1152,8 +1154,8 @@ describe('ChannelSettingsModule', () => {
       );
 
       expect(fs.move).toHaveBeenCalledWith(
-        '/test/output/TestChannel',
-        '/test/output/__Music/TestChannel',
+        outputPath('TestChannel'),
+        outputPath('__Music/TestChannel'),
         { overwrite: true }
       );
       expect(result.success).toBe(true);
@@ -1171,8 +1173,8 @@ describe('ChannelSettingsModule', () => {
       );
 
       expect(fs.move).toHaveBeenCalledWith(
-        '/test/output/__Music/TestChannel',
-        '/test/output/TestChannel',
+        outputPath('__Music/TestChannel'),
+        outputPath('TestChannel'),
         { overwrite: true }
       );
       expect(result.success).toBe(true);
@@ -1190,8 +1192,8 @@ describe('ChannelSettingsModule', () => {
       );
 
       expect(fs.move).toHaveBeenCalledWith(
-        '/test/output/__Music/TestChannel',
-        '/test/output/__Gaming/TestChannel',
+        outputPath('__Music/TestChannel'),
+        outputPath('__Gaming/TestChannel'),
         { overwrite: true }
       );
       expect(result.success).toBe(true);
@@ -1228,7 +1230,7 @@ describe('ChannelSettingsModule', () => {
 
       await channelSettingsModule.moveChannelFolder(channel, null, 'Music');
 
-      expect(fs.ensureDir).toHaveBeenCalledWith('/test/output/__Music');
+      expect(fs.ensureDir).toHaveBeenCalledWith(outputPath('__Music'));
     });
 
     test('should update video file paths after move', async () => {
@@ -1238,11 +1240,11 @@ describe('ChannelSettingsModule', () => {
 
       const mockVideos = [
         {
-          filePath: '/test/output/TestChannel/video1.mp4',
+          filePath: outputPath('TestChannel/video1.mp4'),
           update: jest.fn()
         },
         {
-          filePath: '/test/output/TestChannel/video2.mp4',
+          filePath: outputPath('TestChannel/video2.mp4'),
           update: jest.fn()
         }
       ];
@@ -1251,10 +1253,10 @@ describe('ChannelSettingsModule', () => {
       await channelSettingsModule.moveChannelFolder(channel, null, 'Music');
 
       expect(mockVideos[0].update).toHaveBeenCalledWith({
-        filePath: '/test/output/__Music/TestChannel/video1.mp4'
+        filePath: outputPath('__Music/TestChannel/video1.mp4')
       });
       expect(mockVideos[1].update).toHaveBeenCalledWith({
-        filePath: '/test/output/__Music/TestChannel/video2.mp4'
+        filePath: outputPath('__Music/TestChannel/video2.mp4')
       });
     });
 

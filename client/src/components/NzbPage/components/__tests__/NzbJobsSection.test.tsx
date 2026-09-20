@@ -123,6 +123,35 @@ describe.each([
       expect(onCancelCurrentJob).toHaveBeenCalledTimes(1);
     });
 
+    it('tells the user when the cancel request fails and lets them retry', async () => {
+      const onCancel = jest.fn().mockRejectedValue(new Error('offline'));
+      const { user } = setup(snapshot([active()]), onCancel);
+
+      await user.click(screen.getByRole('button', { name: /Cancel/ }));
+
+      expect(await screen.findByText("Couldn't cancel the job. Please try again.")).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /Cancel/ })).toBeEnabled();
+    });
+
+    it('clears the failure message when the next cancel succeeds', async () => {
+      const onCancel = jest.fn().mockRejectedValueOnce(new Error('offline')).mockResolvedValue(undefined);
+      const { user } = setup(snapshot([active()]), onCancel);
+      await user.click(screen.getByRole('button', { name: /Cancel/ }));
+      await screen.findByText("Couldn't cancel the job. Please try again.");
+
+      await user.click(screen.getByRole('button', { name: /Cancel/ }));
+
+      await waitFor(() => expect(screen.queryByText("Couldn't cancel the job. Please try again.")).not.toBeInTheDocument());
+    });
+
+    it('does not show a failure message when the cancel succeeds', async () => {
+      const { user } = setup(snapshot([active()]));
+
+      await user.click(screen.getByRole('button', { name: /Cancel/ }));
+
+      expect(screen.queryByText("Couldn't cancel the job. Please try again.")).not.toBeInTheDocument();
+    });
+
     it('disables Cancel while the cancel request runs, then re-enables it', async () => {
       let resolve: () => void = () => {};
       const onCancel = jest.fn(() => new Promise<void>((r) => { resolve = r; }));

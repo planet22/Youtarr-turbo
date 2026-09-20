@@ -135,6 +135,18 @@ describe('ytdlpArgs', () => {
       expect(loadYoutubeCookieHeader(file)).toBe('B=2');
     });
 
+    it('keeps a cookie whose value is empty', () => {
+      const file = write([cookie('.youtube.com', 'A', ''), cookie('.youtube.com', 'B', '2')].join('\n'));
+
+      expect(loadYoutubeCookieHeader(file)).toBe('A=; B=2');
+    });
+
+    it('keeps a cookie whose value is empty on a Windows line ending', () => {
+      const file = write([cookie('.youtube.com', 'A', ''), cookie('.youtube.com', 'B', '2')].join('\r\n'));
+
+      expect(loadYoutubeCookieHeader(file)).toBe('A=; B=2');
+    });
+
     it('handles Windows line endings', () => {
       const file = write([cookie('.youtube.com', 'A', '1'), cookie('.youtube.com', 'B', '2')].join('\r\n'));
 

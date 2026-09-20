@@ -79,7 +79,9 @@ function loadYoutubeCookieHeader(cookiePath) {
       const trimmed = line.trim();
       if (!trimmed || trimmed.startsWith('#')) continue;
       // Netscape: domain \t flag \t path \t secure \t expiry \t name \t value
-      const parts = trimmed.split('\t');
+      // Split the untrimmed line: an empty value leaves a trailing tab that
+      // trim() would strip, dropping the seventh column.
+      const parts = line.trimStart().split('\t');
       if (parts.length < 7) continue;
       const domain = parts[0].replace(/^\./, '').toLowerCase();
       if (

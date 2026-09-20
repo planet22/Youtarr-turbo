@@ -312,6 +312,51 @@ describe('videos routes: remaining endpoints', () => {
     });
   });
 
+  describe('bulk delete and purge size limit', () => {
+    const ids = (n) => Array.from({ length: n }, (_, i) => i + 1);
+
+    it.each([
+      ['videoIds', { videoIds: ids(501) }],
+      ['youtubeIds', { youtubeIds: ids(501).map(String) }],
+    ])('rejects a delete with more than 500 %s', async (_label, body) => {
+      const { app } = makeApp();
+
+      const res = await supertest(app).delete('/api/videos').send(body);
+
+      expect(res.status).toBe(400);
+      expect(res.body).toEqual({ success: false, error: 'ids array exceeds maximum of 500' });
+      expect(videoDeletionModule.deleteVideos).not.toHaveBeenCalled();
+    });
+
+    it('accepts a delete of exactly 500 ids', async () => {
+      videoDeletionModule.deleteVideos.mockResolvedValue({ success: true });
+      const { app } = makeApp();
+
+      const res = await supertest(app).delete('/api/videos').send({ videoIds: ids(500) });
+
+      expect(res.status).toBe(200);
+    });
+
+    it('rejects a purge of more than 500 ids', async () => {
+      const { app } = makeApp();
+
+      const res = await supertest(app).delete('/api/videos/purge').send({ videoIds: ids(501) });
+
+      expect(res.status).toBe(400);
+      expect(res.body).toEqual({ success: false, error: 'videoIds array exceeds maximum of 500' });
+      expect(videoDeletionModule.purgeVideos).not.toHaveBeenCalled();
+    });
+
+    it('accepts a purge of exactly 500 ids', async () => {
+      videoDeletionModule.purgeVideos.mockResolvedValue({ success: true });
+      const { app } = makeApp();
+
+      const res = await supertest(app).delete('/api/videos/purge').send({ videoIds: ids(500) });
+
+      expect(res.status).toBe(200);
+    });
+  });
+
   describe('DELETE /api/videos/purge', () => {
     it.each([['missing', {}], ['empty', { videoIds: [] }], ['not an array', { videoIds: 4 }]])('rejects videoIds that are %s', async (_label, body) => {
       const { app } = makeApp();
@@ -501,15 +546,37 @@ describe('videos routes: remaining endpoints', () => {
       });
     });
 
-    it('answers 500 when reverting throws', async () => {
-      videoDeletionModule.revertToStrm.mockRejectedValue(new Error('io'));
+    it('records a video whose revert throws as failed and carries on with the rest', async () => {
+      videoDeletionModule.revertToStrm
+        .mockResolvedValueOnce({ success: true })
+        .mockRejectedValueOnce(new Error('io'))
+        .mockResolvedValueOnce({ success: true });
       const { app, log } = makeApp();
 
-      const res = await supertest(app).post('/api/videos/strm/revert').send({ videoIds: [1] });
+      const res = await supertest(app).post('/api/videos/strm/revert').send({ videoIds: [1, 2, 3] });
 
-      expect(res.status).toBe(500);
-      expect(res.body).toEqual({ success: false, error: 'io' });
-      expect(log.error).toHaveBeenCalled();
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ success: false, processed: [1, 3], failed: [{ videoId: 2, error: 'io' }] });
+      expect(log.error).toHaveBeenCalledWith(expect.objectContaining({ videoId: 2 }), 'Failed to revert video to STRM');
+    });
+
+    it('rejects more than 500 ids', async () => {
+      const { app } = makeApp();
+
+      const res = await supertest(app).post('/api/videos/strm/revert').send({ videoIds: Array.from({ length: 501 }, (_, i) => i + 1) });
+
+      expect(res.status).toBe(400);
+      expect(res.body).toEqual({ success: false, error: 'videoIds array exceeds maximum of 500' });
+      expect(videoDeletionModule.revertToStrm).not.toHaveBeenCalled();
+    });
+
+    it('accepts exactly 500 ids', async () => {
+      videoDeletionModule.revertToStrm.mockResolvedValue({ success: true });
+      const { app } = makeApp();
+
+      const res = await supertest(app).post('/api/videos/strm/revert').send({ videoIds: Array.from({ length: 500 }, (_, i) => i + 1) });
+
+      expect(res.status).toBe(200);
     });
   });
 

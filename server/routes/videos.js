@@ -3,9 +3,13 @@ const rateLimit = require('express-rate-limit');
 const { ROOT_SENTINEL, GLOBAL_DEFAULT_SENTINEL } = require('../modules/filesystem/constants');
 const youtubeUrlParser = require('../modules/youtubeUrlParser');
 
-// Upper bound on how many videoIds a single /api/videos/strm/download request
-// may process, to avoid an unbounded batch of sequential enqueue calls.
+// Upper bound on how many videoIds a single /api/videos/strm/download or
+// /api/videos/strm/revert request may process, to avoid an unbounded batch of
+// sequential calls.
 const MAX_STRM_BULK_VIDEO_IDS = 500;
+
+// Same bound for the bulk delete and purge routes.
+const MAX_BULK_VIDEO_IDS = 500;
 
 // Video validation rate limiter
 const videoValidationLimiter = rateLimit({
@@ -396,6 +400,13 @@ module.exports = function createVideoRoutes({ verifyToken, videosModule, downloa
         });
       }
 
+      if ((videoIds && videoIds.length > MAX_BULK_VIDEO_IDS) || (youtubeIds && youtubeIds.length > MAX_BULK_VIDEO_IDS)) {
+        return res.status(400).json({
+          success: false,
+          error: `ids array exceeds maximum of ${MAX_BULK_VIDEO_IDS}`
+        });
+      }
+
       const videoDeletionModule = require('../modules/videoDeletionModule');
       let result;
 
@@ -450,6 +461,12 @@ module.exports = function createVideoRoutes({ verifyToken, videosModule, downloa
         return res.status(400).json({
           success: false,
           error: 'videoIds array is required'
+        });
+      }
+      if (videoIds.length > MAX_BULK_VIDEO_IDS) {
+        return res.status(400).json({
+          success: false,
+          error: `videoIds array exceeds maximum of ${MAX_BULK_VIDEO_IDS}`
         });
       }
 
@@ -608,16 +625,25 @@ module.exports = function createVideoRoutes({ verifyToken, videosModule, downloa
         return res.status(400).json({ success: false, error: 'videoIds array is required' });
       }
 
+      if (videoIds.length > MAX_STRM_BULK_VIDEO_IDS) {
+        return res.status(400).json({ success: false, error: `videoIds array exceeds maximum of ${MAX_STRM_BULK_VIDEO_IDS}` });
+      }
+
       const videoDeletionModule = require('../modules/videoDeletionModule');
       const processed = [];
       const failed = [];
 
       for (const videoId of videoIds) {
-        const result = await videoDeletionModule.revertToStrm(videoId);
-        if (result.success) {
-          processed.push(videoId);
-        } else {
-          failed.push({ videoId, error: result.error || 'Could not revert to STRM' });
+        try {
+          const result = await videoDeletionModule.revertToStrm(videoId);
+          if (result.success) {
+            processed.push(videoId);
+          } else {
+            failed.push({ videoId, error: result.error || 'Could not revert to STRM' });
+          }
+        } catch (err) {
+          req.log.error({ err, videoId }, 'Failed to revert video to STRM');
+          failed.push({ videoId, error: err.message || 'Unknown error' });
         }
       }
 

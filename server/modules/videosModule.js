@@ -941,7 +941,7 @@ class VideosModule {
       // Get all channels from the channels table
       const Channel = require('../models/channel');
       const allChannels = await Channel.findAll({
-        attributes: ['title'],
+        attributes: ['uploader'],
         order: [['title', 'ASC']]
       });
 

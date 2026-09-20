@@ -255,6 +255,14 @@ describe('VideosModule file scanning, rating updates and backfill flushing', () 
       await expect(videosModule.getAllUniqueChannels()).resolves.toEqual(['Alpha', 'Tracked']);
     });
 
+    it('selects the uploader column of the channel rows, since that is the name it reads back', async () => {
+      sequelize.query.mockResolvedValue([]);
+
+      await videosModule.getAllUniqueChannels();
+
+      expect(ChannelModel.findAll).toHaveBeenCalledWith(expect.objectContaining({ attributes: ['uploader'] }));
+    });
+
     it('returns an empty list and logs when a query fails', async () => {
       sequelize.query.mockRejectedValue(new Error('db down'));
 

@@ -189,6 +189,16 @@ describe('ytstream playbackPlan', () => {
       expect(ytDlpRunner.run).toHaveBeenCalledTimes(1);
     });
 
+    it('does not cache an empty result, so the next request probes again', async () => {
+      ytDlpRunner.run.mockResolvedValueOnce('').mockResolvedValueOnce('avc1');
+
+      await playbackPlan.resolveVideoCodec(YT_ID, '720', {}, 'web', 'fallback');
+      const second = await playbackPlan.resolveVideoCodec(YT_ID, '720', {}, 'web', 'fallback');
+
+      expect(second).toBe('avc1');
+      expect(ytDlpRunner.run).toHaveBeenCalledTimes(2);
+    });
+
     it('treats a missing strictness as fallback for caching', async () => {
       ytDlpRunner.run.mockResolvedValue('avc1');
 

@@ -2,6 +2,8 @@ const fs = require('fs').promises;
 const path = require('path');
 const { VIDEO_EXTENSIONS, AUDIO_EXTENSIONS } = require('./filesystem/constants');
 const createLimiter = require('./subscriptionImport/concurrencyLimiter');
+const jobEventLog = require('./jobEventLog');
+const { EVENT_TYPES } = require('./jobEventLog/eventCatalog');
 
 // Per-video checks run concurrently up to this bound: each stat costs a full
 // round trip on network-backed mounts (NAS, WSL drvfs), so checking a
@@ -144,9 +146,11 @@ class FileCheckModule {
         if (hasAnyFile && video.removed) {
           update.removed = false;
           hasUpdates = true;
+          this.recordFileState(EVENT_TYPES.VIDEO_RESTORED, video);
         } else if (!hasAnyFile && !video.removed && !wasRecentlyDownloaded(video)) {
           update.removed = true;
           hasUpdates = true;
+          this.recordFileState(EVENT_TYPES.VIDEO_MARKED_MISSING, video);
         }
       }
 
@@ -164,6 +168,16 @@ class FileCheckModule {
     })));
 
     return { videos: updatedVideos, updates: updateSlots.filter(Boolean) };
+  }
+
+  // Logs a video's file appearing or disappearing, with the facts of the row as they are now.
+  recordFileState(eventType, video) {
+    jobEventLog.record(eventType, {
+      youtubeId: video.youtubeId,
+      videoTitle: video.youTubeVideoName,
+      channelName: video.youTubeChannelName,
+      detail: { filePath: video.filePath || video.audioFilePath },
+    });
   }
 
   async applyVideoUpdates(sequelize, Sequelize, updates) {

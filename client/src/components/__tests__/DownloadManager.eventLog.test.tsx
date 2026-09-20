@@ -1,6 +1,7 @@
 import React from 'react';
 import { render, screen } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import userEvent from '@testing-library/user-event';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import axios from 'axios';
 import DownloadManager from '../DownloadManager';
 import WebSocketContext from '../../contexts/WebSocketContext';
@@ -24,7 +25,9 @@ jest.mock('../DownloadManager/DownloadProgress', () => ({
 }));
 jest.mock('../DownloadManager/DownloadHistory', () => ({
   __esModule: true,
-  default: () => require('react').createElement('div', { 'data-testid': 'download-history' }),
+  default: ({ onOpenTimeline }: { onOpenTimeline?: (jobId: string) => void }) =>
+    require('react').createElement('div', { 'data-testid': 'download-history' },
+      require('react').createElement('button', { onClick: () => onOpenTimeline && onOpenTimeline('job 9') }, 'open timeline')),
 }));
 jest.mock('../DownloadManager/EventLog', () => ({
   __esModule: true,
@@ -64,5 +67,23 @@ describe('DownloadManager event log route', () => {
     renderAt('/history');
 
     expect(screen.queryByTestId('event-log')).not.toBeInTheDocument();
+  });
+
+  test('the Timeline link on a History row lands on the event log', async () => {
+    render(
+      <MemoryRouter initialEntries={['/downloads/history']}>
+        <WebSocketContext.Provider
+          value={{ socket: null, isConnected: false, subscribe: jest.fn(), unsubscribe: jest.fn() }}
+        >
+          <Routes>
+            <Route path="/downloads/*" element={<DownloadManager token="tok-1" />} />
+          </Routes>
+        </WebSocketContext.Provider>
+      </MemoryRouter>
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: 'open timeline' }));
+
+    expect(screen.getByTestId('event-log')).toBeInTheDocument();
   });
 });

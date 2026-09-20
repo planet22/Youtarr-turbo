@@ -119,3 +119,33 @@ describe('eventCatalog', () => {
     });
   });
 });
+
+describe('file, STRM and cache steps', () => {
+  const msg = (type, detail) => describeEvent(type, { detail }).message;
+
+  test('video.transcoded names the codec and the original file', () => {
+    expect(msg(EVENT_TYPES.VIDEO_TRANSCODED, { codec: 'h264', from: 'a.webm' })).toBe('Transcoded after download to h264 (from a.webm)');
+  });
+
+  test('video.marked_missing is a warning that names the file', () => {
+    const result = describeEvent(EVENT_TYPES.VIDEO_MARKED_MISSING, { detail: { filePath: '/lib/x.mp4' } });
+    expect(result).toMatchObject({ level: 'warn', message: 'Video file not found on disk, marked missing (/lib/x.mp4)' });
+  });
+
+  test('video.restored names the file', () => {
+    expect(msg(EVENT_TYPES.VIDEO_RESTORED, { filePath: '/lib/x.mp4' })).toBe('Video file found again on disk (/lib/x.mp4)');
+  });
+
+  test('strm.archived names the archived file', () => {
+    expect(msg(EVENT_TYPES.STRM_ARCHIVED, { path: '/lib/x.strm' })).toBe('STRM file archived after a real download replaced it (/lib/x.strm)');
+  });
+
+  test('cache.fetch_started says the hidden cache is being created, with quality', () => {
+    expect(msg(EVENT_TYPES.CACHE_FETCH_STARTED, { quality: '1080' })).toBe('Hidden cache being created (buffer fetch started) at quality 1080');
+  });
+
+  test('log.cleared is a warning saying how many events were removed', () => {
+    const result = describeEvent(EVENT_TYPES.LOG_CLEARED, { detail: { deletedCount: 12 } });
+    expect(result).toMatchObject({ level: 'warn', actor: 'maintenance', message: 'Event log cleared (12 events removed)' });
+  });
+});

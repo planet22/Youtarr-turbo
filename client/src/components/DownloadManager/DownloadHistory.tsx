@@ -49,6 +49,9 @@ interface DownloadHistoryProps {
   // can never hide the linked job.
   jobIdFilter?: string | null;
   onClearJobIdFilter?: () => void;
+  // When given, each job row offers a "Timeline" link to that job's step-by-step
+  // entries in the event log.
+  onOpenTimeline?: (jobId: string) => void;
 }
 
 function cleanJobTypeLabel(jobType: string): string {
@@ -290,7 +293,19 @@ const DownloadHistory: React.FC<DownloadHistoryProps> = ({
   onVideoDeleted,
   jobIdFilter = null,
   onClearJobIdFilter,
+  onOpenTimeline,
 }) => {
+  const timelineLink = (job: Job) =>
+    onOpenTimeline ? (
+      <Link
+        component="button"
+        type="button"
+        onClick={(e: React.MouseEvent) => { e.stopPropagation(); onOpenTimeline(job.id); }}
+        style={{ background: 'none', border: 'none', padding: 0, textAlign: 'left', display: 'block' }}
+      >
+        <Typography variant="caption">Timeline</Typography>
+      </Link>
+    ) : null;
   const [modalVideo, setModalVideo] = useState<VideoData | null>(null);
   // Persisted the same way as the search box above, so switching away from
   // this page and back (or reloading) doesn't quietly drop the filters back
@@ -625,6 +640,7 @@ const DownloadHistory: React.FC<DownloadHistoryProps> = ({
                       <Typography variant="caption" color="secondary">Date:</Typography>
                       <Typography variant="caption" className="font-medium">{formattedTimeCreated}</Typography>
                     </Box>
+                    {timelineLink(job)}
                     <Box className="flex items-baseline gap-x-4 gap-y-0.5 flex-wrap">
                       {formattedJobType && (
                         <Box className="flex items-baseline gap-1">
@@ -643,6 +659,7 @@ const DownloadHistory: React.FC<DownloadHistoryProps> = ({
                     <Typography variant="caption" color="secondary">
                       Date: {formattedTimeCreated}
                     </Typography>
+                    {timelineLink(job)}
                     {formattedJobType && (
                       <Typography variant="caption" color="secondary">
                         Source: {formattedJobType}
@@ -809,7 +826,10 @@ const DownloadHistory: React.FC<DownloadHistoryProps> = ({
                           </Typography>
                         )}
                       </TableCell>
-                      <TableCell>{formattedJobType}</TableCell>
+                      <TableCell>
+                        {formattedJobType}
+                        {timelineLink(job)}
+                      </TableCell>
                       <TableCell>{durationString}</TableCell>
                       {/* Blank at the summary-row level - this rolls up multiple
                           videos, each with its own file size/speed; see the
@@ -952,7 +972,10 @@ const DownloadHistory: React.FC<DownloadHistoryProps> = ({
                       </Box>
                     )}
                   </TableCell>
-                  <TableCell>{formattedJobType || '---'}</TableCell>
+                  <TableCell>
+                    {formattedJobType || '---'}
+                    {timelineLink(job)}
+                  </TableCell>
                   <TableCell>{durationString}</TableCell>
                   <TableCell>{singleVideo ? videoFileSizeText(singleVideo) : ''}</TableCell>
                   <TableCell>{singleVideo ? formatDownloadSpeed(singleVideo.avgDownloadMBps) : ''}</TableCell>

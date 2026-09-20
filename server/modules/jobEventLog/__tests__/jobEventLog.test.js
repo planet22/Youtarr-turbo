@@ -353,6 +353,41 @@ describe('jobEventLog', () => {
     });
   });
 
+  describe('clear', () => {
+    test('deletes every event and reports how many', async () => {
+      JobEvent.destroy.mockResolvedValueOnce(42);
+      await expect(jobEventLog.clear()).resolves.toBe(42);
+      expect(JobEvent.destroy).toHaveBeenCalledWith({ where: {} });
+    });
+
+    test('waits for events already queued before deleting', async () => {
+      jobEventLog.record('job.started', { jobId: 'j1' });
+      await jobEventLog.clear();
+      expect(JobEvent.create.mock.invocationCallOrder[0]).toBeLessThan(JobEvent.destroy.mock.invocationCallOrder[0]);
+    });
+
+    test('leaves one log.cleared entry behind so the log is never silently empty', async () => {
+      JobEvent.destroy.mockResolvedValueOnce(7);
+      await jobEventLog.clear();
+      await jobEventLog.flush();
+      const last = JobEvent.create.mock.calls[JobEvent.create.mock.calls.length - 1][0];
+      expect(last).toMatchObject({ event_type: 'log.cleared', level: 'warn', message: 'Event log cleared (7 events removed)' });
+    });
+
+    test('writes the log.cleared entry after the delete, so it survives', async () => {
+      await jobEventLog.clear();
+      await jobEventLog.flush();
+      expect(JobEvent.destroy.mock.invocationCallOrder[0]).toBeLessThan(JobEvent.create.mock.invocationCallOrder[0]);
+    });
+
+    test('rejects and leaves no clear entry when the delete fails', async () => {
+      JobEvent.destroy.mockRejectedValueOnce(new Error('db down'));
+      await expect(jobEventLog.clear()).rejects.toThrow('db down');
+      await jobEventLog.flush();
+      expect(JobEvent.create).not.toHaveBeenCalled();
+    });
+  });
+
   describe('retention', () => {
     test('defaults to 180 days when config has no value', () => {
       expect(jobEventLog.getRetentionDays()).toBe(180);

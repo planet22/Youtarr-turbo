@@ -187,6 +187,36 @@ function createJobEventRoutes({ verifyToken, jobEventLog }) {
     }
   });
 
+  /**
+   * @swagger
+   * /api/job-events:
+   *   delete:
+   *     summary: Clear the whole video/events log
+   *     description: Permanently deletes every log entry (one "log cleared" entry is left behind). Download History and downloaded videos are not affected. Cannot be undone.
+   *     tags: [Maintenance]
+   *     responses:
+   *       200:
+   *         description: The log was cleared
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 success: { type: boolean }
+   *                 deletedCount: { type: integer }
+   *       500:
+   *         description: Failed to clear the log
+   */
+  router.delete('/api/job-events', verifyToken, async (req, res) => {
+    try {
+      const deletedCount = await jobEventLog.clear();
+      return res.json({ success: true, deletedCount });
+    } catch (err) {
+      logger.error({ err }, 'Failed to clear the video/events log');
+      return res.status(500).json({ error: 'Failed to clear the video/events log' });
+    }
+  });
+
   return router;
 }
 

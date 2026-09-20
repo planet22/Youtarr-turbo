@@ -138,6 +138,43 @@ describe('Job event routes', () => {
     });
   });
 
+  describe('DELETE /api/job-events', () => {
+    beforeEach(() => {
+      jobEventLog.clear = jest.fn().mockResolvedValue(12);
+    });
+
+    test('clears the log and reports how many were removed', async () => {
+      const res = await request(app).delete('/api/job-events');
+
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ success: true, deletedCount: 12 });
+    });
+
+    test('runs the auth middleware', async () => {
+      await request(app).delete('/api/job-events');
+
+      expect(verifyToken).toHaveBeenCalled();
+    });
+
+    test('does not clear anything when the auth middleware refuses', async () => {
+      verifyToken.mockImplementationOnce((req, res) => res.status(401).json({ error: 'no' }));
+
+      const res = await request(app).delete('/api/job-events');
+
+      expect(res.status).toBe(401);
+      expect(jobEventLog.clear).not.toHaveBeenCalled();
+    });
+
+    test('answers 500 as { error } when clearing fails', async () => {
+      jobEventLog.clear.mockRejectedValueOnce(new Error('boom'));
+
+      const res = await request(app).delete('/api/job-events');
+
+      expect(res.status).toBe(500);
+      expect(res.body).toEqual({ error: 'Failed to clear the video/events log' });
+    });
+  });
+
   describe('GET /api/job-events/facets', () => {
     beforeEach(() => {
       jobEventLog.facets = jest.fn().mockResolvedValue({ eventTypes: ['video.failed'], actors: [], channels: [], sources: ['NZB'] });

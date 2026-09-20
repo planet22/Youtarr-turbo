@@ -131,6 +131,68 @@ describe('JobModule video/events log', () => {
     });
   });
 
+  describe('a failed NZB grab', () => {
+    const nzbJob = (data = {}) => ({
+      id: 'j1', jobType: 'Sonarr/Radarr: TV [abc]', status: 'In Progress',
+      data: { nzb: { youtubeId: 'abc', nzbName: 'Celebrity Juice S26E09', categoryName: 'TV' }, ...data },
+    });
+
+    test('is recorded once, when the job finishes with no video produced', async () => {
+      jobModule.jobs.j1 = nzbJob();
+
+      await jobModule.updateJob('j1', { status: 'Complete' });
+
+      expect(callsOf('nzb.grab_failed')).toHaveLength(1);
+    });
+
+    test('carries the video, category and reason', async () => {
+      jobModule.jobs.j1 = nzbJob({ failedVideos: [{ error: 'Sign in to confirm you are not a bot' }] });
+
+      await jobModule.updateJob('j1', { status: 'Complete' });
+
+      expect(callsOf('nzb.grab_failed')[0][1]).toMatchObject({
+        jobId: 'j1', youtubeId: 'abc', videoTitle: 'Celebrity Juice S26E09',
+        detail: { message: 'Sign in to confirm you are not a bot', categoryName: 'TV' },
+      });
+    });
+
+    test('is not recorded when a video was produced', async () => {
+      const Video = require('../../models/video');
+      JobVideo.findAll.mockResolvedValue([{ video_id: 1 }]);
+      Video.findOne.mockResolvedValue({ dataValues: { id: 1 } });
+      jobModule.jobs.j1 = nzbJob();
+
+      await jobModule.updateJob('j1', { status: 'Complete' });
+
+      expect(callsOf('nzb.grab_failed')).toHaveLength(0);
+    });
+
+    test('is not recorded when yt-dlp skipped the video because it was already downloaded', async () => {
+      jobModule.jobs.j1 = nzbJob({ cumulativeSkipped: 1 });
+
+      await jobModule.updateJob('j1', { status: 'Complete' });
+
+      expect(callsOf('nzb.grab_failed')).toHaveLength(0);
+    });
+
+    test('is not recorded for a job that is not an NZB grab', async () => {
+      jobModule.jobs.j1 = { id: 'j1', jobType: DOWNLOAD, status: 'In Progress', data: {} };
+
+      await jobModule.updateJob('j1', { status: 'Complete' });
+
+      expect(callsOf('nzb.grab_failed')).toHaveLength(0);
+    });
+
+    test('is not recorded again by a later, unrelated update', async () => {
+      jobModule.jobs.j1 = nzbJob();
+      await jobModule.updateJob('j1', { status: 'Complete' });
+
+      await jobModule.updateJob('j1', { data: { note: 'x' } });
+
+      expect(callsOf('nzb.grab_failed')).toHaveLength(1);
+    });
+  });
+
   describe('updateJob status changes', () => {
     it('records job.started when a Pending job flips to In Progress', async () => {
       jobModule.jobs.j1 = { id: 'j1', jobType: DOWNLOAD, status: 'Pending' };

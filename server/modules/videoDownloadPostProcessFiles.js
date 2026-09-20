@@ -669,6 +669,8 @@ async function resolveTrackedOwnerChannelId(youtubeId, metadataChannelId) {
 // Main execution wrapped in async IIFE to handle async operations
 (async () => {
   if (fs.existsSync(jsonPath)) {
+    // Set when the optional post-download transcode changes the file; logged once the video id is known.
+    let transcodeEvent = null;
     // Optional post-download transcode (config.downloadTranscodeVideoCodec,
     // off by default) - run first, before anything else (NFO/AtomicParsley/
     // moves) touches the file, so every downstream step already sees the
@@ -678,6 +680,11 @@ async function resolveTrackedOwnerChannelId(youtubeId, metadataChannelId) {
     if (parsedPath.ext.toLowerCase() !== '.mp3') {
       const transcodedPath = await transcodeDownloadedVideo(videoPath);
       if (transcodedPath !== videoPath) {
+        transcodeEvent = {
+          at: new Date(),
+          from: path.basename(videoPath),
+          codec: configModule.getConfig().downloadTranscodeVideoCodec,
+        };
         videoPath = transcodedPath;
         parsedPath = path.parse(videoPath);
       }
@@ -1608,6 +1615,16 @@ async function resolveTrackedOwnerChannelId(youtubeId, metadataChannelId) {
           finalFileSize = fs.statSync(finalVideoPath).size;
         } catch (statErr) {
           finalFileSize = undefined;
+        }
+        if (transcodeEvent) {
+          jobEventLog.record(EVENT_TYPES.VIDEO_TRANSCODED, {
+            jobId: activeJobId,
+            youtubeId: id,
+            videoTitle: jsonData.title,
+            channelName: jsonData.uploader || jsonData.channel,
+            occurredAt: transcodeEvent.at,
+            detail: { from: transcodeEvent.from, to: path.basename(finalVideoPath), codec: transcodeEvent.codec },
+          });
         }
         jobEventLog.record(EVENT_TYPES.VIDEO_FILE_FINALIZED, {
           jobId: activeJobId,

@@ -8,7 +8,7 @@ import React, {
 import { Grid } from './ui';
 import useMediaQuery from '../hooks/useMediaQuery';
 import axios from 'axios';
-import { Navigate, Route, Routes, useSearchParams } from 'react-router-dom';
+import { Navigate, Route, Routes, useNavigate, useSearchParams } from 'react-router-dom';
 import DownloadNew from './DownloadManager/DownloadNew';
 import DownloadProgress from './DownloadManager/DownloadProgress';
 import DownloadHistory from './DownloadManager/DownloadHistory';
@@ -39,6 +39,7 @@ function DownloadManager({ token }: DownloadManagerProps) {
 
   const isMobile = useMediaQuery('(max-width: 599px)');
   const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
   const jobIdFilter = searchParams.get('job');
 
   const fetchRunningJobs = useCallback(() => {
@@ -123,6 +124,7 @@ function DownloadManager({ token }: DownloadManagerProps) {
               onVideoDeleted={fetchRunningJobs}
               jobIdFilter={jobIdFilter}
               onClearJobIdFilter={() => setSearchParams({}, { replace: true })}
+              onOpenTimeline={(jobId) => navigate(`/downloads/log?job=${encodeURIComponent(jobId)}`)}
             />
           </Grid>
         }

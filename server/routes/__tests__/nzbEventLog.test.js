@@ -148,30 +148,23 @@ describe('nzb.js video/events log', () => {
       Video.findOne.mockResolvedValue(null);
     });
 
-    it('records nzb.grab_failed with the reason so the failure shows in the log', async () => {
+    it('never writes to the log just because a status was read', async () => {
       await nzb.computeNzbStatusDetail(failedJob('fail-1'));
-
-      expect(callFor('nzb.grab_failed')[1]).toMatchObject({
-        jobId: 'fail-1',
-        youtubeId: 'abc123',
-        videoTitle: 'Celebrity Juice S26E09',
-        detail: { categoryName: 'Keep' },
-      });
-    });
-
-    it('explains that no video file was produced', async () => {
       await nzb.computeNzbStatusDetail(failedJob('fail-2'));
 
-      expect(callFor('nzb.grab_failed')[1].detail.message).toMatch(/no video file produced/);
+      expect(jobEventLog.record).not.toHaveBeenCalled();
     });
 
-    it('records the failure only once however often the status is read', async () => {
-      const job = failedJob('fail-3');
+    it('still reports a grab with no video as failed', async () => {
+      await expect(nzb.computeNzbStatusDetail(failedJob('fail-3'))).resolves.toBe('Failed - no video produced');
+    });
 
-      await nzb.computeNzbStatusDetail(job);
-      await nzb.computeNzbStatusDetail(job);
+    it('does not report an imported, untracked grab as failed just because its video row is gone', async () => {
+      const job = failedJob('imported-1');
+      job.data.nzb.untracked = true;
+      job.data.nzb.importStrategy = 'untracked';
 
-      expect(typesRecorded().filter((type) => type === 'nzb.grab_failed')).toHaveLength(1);
+      await expect(nzb.computeNzbStatusDetail(job)).resolves.toMatch(/Imported by Sonarr\/Radarr/);
     });
 
     it('records nothing when the video was produced', async () => {

@@ -61,12 +61,14 @@ jest.mock('../resolutionTier', () => ({
 }));
 
 const mockJob = { findOne: jest.fn() };
+const mockRecordEvent = jest.fn();
 const mockChannel = { findOne: jest.fn(), findAll: jest.fn(), update: jest.fn() };
 const mockJobVideoDownload = { update: jest.fn() };
 
 jest.mock('../../models/channel', () => mockChannel);
 jest.mock('../../models/channelvideo', () => ({ findAll: jest.fn(() => Promise.resolve([])) }));
 jest.mock('../../models', () => ({ JobVideoDownload: mockJobVideoDownload, Channel: mockChannel, Job: mockJob }));
+jest.mock('../jobEventLog', () => ({ record: (...args) => mockRecordEvent(...args) }));
 jest.mock('../videoPersistence', () => ({ persistDownloadedVideoForJob: jest.fn(() => Promise.resolve(null)) }));
 jest.mock('../../logger');
 jest.mock('../filesystem', () => ({
@@ -612,6 +614,53 @@ describe('videoDownloadPostProcessFiles post-download transcode', () => {
       const stderr = logger.error.mock.calls.find(([, msg]) => String(msg).includes('keeping original file'))[0].stderr;
       expect(stderr.length).toBeLessThanOrEqual(4000);
       expect(stderr.endsWith('TAIL')).toBe(true);
+    });
+  });
+
+  describe('video/events log', () => {
+    const eventsOfType = (type) => mockRecordEvent.mock.calls.filter(([t]) => t === type);
+
+    it('records video.transcoded with the codec and the original file name', async () => {
+      await run();
+
+      expect(eventsOfType('video.transcoded')[0][1]).toMatchObject({
+        jobId: 'job-1',
+        youtubeId: 'abc123',
+        videoTitle: 'Video Title',
+        channelName: 'Channel',
+        detail: { from: 'Video Title [abc123].mkv', to: 'Video Title [abc123].mp4', codec: 'hevc' },
+      });
+    });
+
+    it('stamps the transcode with the time it happened, not the time of the later finalize', async () => {
+      await run();
+
+      expect(eventsOfType('video.transcoded')[0][1].occurredAt).toBeInstanceOf(Date);
+    });
+
+    it('records the transcode before the file is finalized', async () => {
+      await run();
+
+      const transcodedOrder = mockRecordEvent.mock.invocationCallOrder[mockRecordEvent.mock.calls.findIndex(([t]) => t === 'video.transcoded')];
+      const finalizedOrder = mockRecordEvent.mock.invocationCallOrder[mockRecordEvent.mock.calls.findIndex(([t]) => t === 'video.file_finalized')];
+      expect(transcodedOrder).toBeLessThan(finalizedOrder);
+    });
+
+    it('records no transcode when transcoding is off', async () => {
+      mockConfig.downloadTranscodeVideoCodec = 'off';
+
+      await run();
+
+      expect(eventsOfType('video.transcoded')).toHaveLength(0);
+    });
+
+    it('records no transcode for an audio-only download', async () => {
+      const mp3 = inputPath.replace(/\.mkv$/, '.mp3');
+      mockFsState.existing = new Set([jsonPath, mp3]);
+
+      await run('.mp3');
+
+      expect(eventsOfType('video.transcoded')).toHaveLength(0);
     });
   });
 });

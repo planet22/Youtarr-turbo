@@ -907,12 +907,6 @@ const recordedFailedGrabJobIds = new Set();
 async function recordFailedGrab(job, message) {
   if (recordedFailedGrabJobIds.has(job.id)) return;
   recordedFailedGrabJobIds.add(job.id);
-  jobEventLog.record(EVENT_TYPES.NZB_GRAB_FAILED, {
-    jobId: String(job.id),
-    youtubeId: job.data?.nzb?.youtubeId,
-    videoTitle: job.data?.nzb?.nzbName,
-    detail: { message, categoryName: job.data?.nzb?.categoryName },
-  });
   const max = nzbDiagnosticLog.resolveLogLimit(configModule.getConfig(), 'failedGrabs');
   await nzbDiagnosticLog.recordDiagnosticEvent('failedGrab', {
     jobId: String(job.id),
@@ -988,8 +982,13 @@ async function computeNzbStatusDetail(job) {
   if (job.status === 'Pending' || job.status === 'In Progress') return null;
   if (job.status === 'Error' || job.status === 'Terminated') return null;
 
-  const { failed } = await resolveNzbJobOutcome(job);
-  if (failed) return 'Failed - no video produced';
+  // A grab already imported by Sonarr/Radarr and removed from Youtarr's library
+  // (nzb.untracked) has no Video row by design - that is a success, not a
+  // failure, so it must not be judged by whether the row still exists.
+  if (!job.data.nzb.untracked) {
+    const { failed } = await resolveNzbJobOutcome(job);
+    if (failed) return 'Failed - no video produced';
+  }
 
   const nzb = job.data.nzb;
   const cfg = configModule.getConfig();

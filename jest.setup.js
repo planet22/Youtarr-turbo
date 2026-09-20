@@ -26,6 +26,7 @@ jest.mock('./server/modules/jobEventLog', () => {
     list: jest.fn(() => Promise.resolve({ events: [], total: 0 })),
     facets: jest.fn(() => Promise.resolve({ eventTypes: [], actors: [], channels: [], sources: [] })),
     prune: jest.fn(() => Promise.resolve(0)),
+    clear: jest.fn(() => Promise.resolve(0)),
     getRetentionDays: jest.fn(() => 180),
     EVENT_TYPES,
     LEVELS,

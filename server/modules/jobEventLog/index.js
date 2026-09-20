@@ -295,6 +295,21 @@ class JobEventLog {
   }
 
   /**
+   * Deletes every event (the Maintenance page's "Clear event log"). Pending
+   * writes are flushed first so nothing lands after the delete, and one
+   * log.cleared entry is left behind so the log never empties silently.
+   * @returns {Promise<number>} rows deleted
+   */
+  async clear() {
+    const { JobEvent } = require('../../models');
+    await this.flush();
+    const deletedCount = await JobEvent.destroy({ where: {} });
+    this.record(EVENT_TYPES.LOG_CLEARED, { detail: { deletedCount } });
+    logger.warn({ deletedCount }, 'jobEventLog: event log cleared');
+    return deletedCount;
+  }
+
+  /**
    * Deletes events older than the retention window. The only path that ever
    * removes rows.
    * @param {number} [retentionDays] - defaults to the configured value; 0 keeps everything

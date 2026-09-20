@@ -1408,6 +1408,26 @@ class JobModule {
     }
   }
 
+  // A Sonarr/Radarr grab that finished without producing a video, decided from
+  // what the job holds at the moment it finishes (never re-derived later). A
+  // yt-dlp run that skipped the video because it was already downloaded is not a
+  // failure, so a non-zero skipped count rules it out.
+  recordNzbGrabFailure(jobId, job) {
+    if (!job.data?.nzb) return;
+    if (job.status !== 'Complete' && job.status !== 'Complete with Warnings') return;
+    if (job.data.videos?.length || job.data.cumulativeSkipped) return;
+    const firstError = job.data.failedVideos?.[0]?.error;
+    jobEventLog.record(EVENT_TYPES.NZB_GRAB_FAILED, {
+      jobId,
+      jobType: job.jobType,
+      ...singleVideoRefForJob(job),
+      detail: {
+        message: firstError || 'Completed with no video file produced - check server logs for the underlying error (e.g. age-restricted content, yt-dlp bot-check, network failure).',
+        categoryName: job.data.nzb.categoryName,
+      },
+    });
+  }
+
   // Records a status transition in the video/events log. Only a real change of
   // status is logged (updateJob is also called for pure data updates), and
   // 'Pending' is not an event of its own - job.created already covers it.
@@ -1417,6 +1437,7 @@ class JobModule {
       jobEventLog.record(EVENT_TYPES.JOB_STARTED, { jobId, jobType: job.jobType, ...singleVideoRefForJob(job), occurredAt: changedAt });
       return;
     }
+    this.recordNzbGrabFailure(jobId, job);
     const failedStatuses = ['Error', 'Terminated', 'Killed', 'Failed'];
     jobEventLog.record(EVENT_TYPES.JOB_FINISHED, {
       jobId,

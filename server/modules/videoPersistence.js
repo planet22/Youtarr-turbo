@@ -1,4 +1,5 @@
 const jobEventLog = require('./jobEventLog');
+const { EVENT_TYPES } = require('./jobEventLog/eventCatalog');
 const Job = require('../models/job');
 const Video = require('../models/video');
 const JobVideo = require('../models/jobvideo');
@@ -129,7 +130,7 @@ class VideoPersistence {
       // so automatic removal can later revert to them instead of losing the
       // library entry entirely. See videoDeletionModule.deleteVideoById.
       if (previousStrmFilePath && updateData.is_strm === false) {
-        this._archiveStaleStrmSidecars(previousStrmFilePath);
+        this._archiveStaleStrmSidecars(previousStrmFilePath, videoInstance);
       }
     } else {
       try {
@@ -191,7 +192,7 @@ class VideoPersistence {
    * @param {string} oldStrmFilePath
    * @private
    */
-  _archiveStaleStrmSidecars(oldStrmFilePath) {
+  _archiveStaleStrmSidecars(oldStrmFilePath, video = {}) {
     const fs = require('fs');
     const strmMediaInfoCache = require('./strmMediaInfoCache');
     const oldCachePath = strmMediaInfoCache.getMediaInfoCachePath(oldStrmFilePath);
@@ -200,6 +201,12 @@ class VideoPersistence {
         if (fs.existsSync(p)) {
           fs.renameSync(p, `${p}.cached`);
           logger.info({ path: p }, 'Archived STRM sidecar after real download completed');
+          jobEventLog.record(EVENT_TYPES.STRM_ARCHIVED, {
+            youtubeId: video.youtubeId,
+            videoTitle: video.youTubeVideoName,
+            channelName: video.youTubeChannelName,
+            detail: { path: p },
+          });
         }
       } catch (err) {
         logger.warn({ err, path: p }, 'Failed to archive STRM sidecar (non-fatal)');

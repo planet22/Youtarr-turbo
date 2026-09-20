@@ -22,9 +22,13 @@ const EVENT_TYPES = Object.freeze({
   VIDEO_AUTO_RETRY_QUEUED: 'video.auto_retry_queued',
   VIDEO_DELETED: 'video.deleted',
   VIDEO_REVERTED_TO_STRM: 'video.reverted_to_strm',
+  VIDEO_TRANSCODED: 'video.transcoded',
+  VIDEO_MARKED_MISSING: 'video.marked_missing',
+  VIDEO_RESTORED: 'video.restored',
   // STRM
   STRM_CREATED: 'strm.created',
   STRM_CACHE_ON_PLAY_QUEUED: 'strm.cache_on_play_queued',
+  STRM_ARCHIVED: 'strm.archived',
   // Sonarr/Radarr (NZB) grabs
   NZB_GRAB_REQUESTED: 'nzb.grab_requested',
   NZB_STAGED_FOR_IMPORT: 'nzb.staged_for_import',
@@ -33,7 +37,10 @@ const EVENT_TYPES = Object.freeze({
   NZB_UNTRACKED: 'nzb.untracked',
   NZB_UNTRACK_FAILED: 'nzb.untrack_failed',
   NZB_GRAB_FAILED: 'nzb.grab_failed',
+  // The log itself
+  LOG_CLEARED: 'log.cleared',
   // ytstream buffer cache
+  CACHE_FETCH_STARTED: 'cache.fetch_started',
   CACHE_HLS_BUFFER_FINALIZED: 'cache.hls_buffer_finalized',
   CACHE_TS_TO_MP4: 'cache.ts_to_mp4',
   CACHE_PROMOTED_TO_LIBRARY: 'cache.promoted_to_library',
@@ -128,7 +135,26 @@ const EVENT_CATALOG = {
     message: ({ detail = {} }) => `Downloaded file removed, restored to STRM playback${suffix(detail.reason, '- %s')}`,
   },
 
+  [EVENT_TYPES.VIDEO_TRANSCODED]: {
+    actor: 'downloader',
+    message: ({ detail = {} }) =>
+      `Transcoded after download${suffix(detail.codec, 'to %s')}${suffix(detail.from, '(from %s)')}`,
+  },
+  [EVENT_TYPES.VIDEO_MARKED_MISSING]: {
+    actor: 'library',
+    level: () => LEVELS.WARN,
+    message: ({ detail = {} }) => `Video file not found on disk, marked missing${suffix(detail.filePath, '(%s)')}`,
+  },
+  [EVENT_TYPES.VIDEO_RESTORED]: {
+    actor: 'library',
+    message: ({ detail = {} }) => `Video file found again on disk${suffix(detail.filePath, '(%s)')}`,
+  },
+
   [EVENT_TYPES.STRM_CREATED]: { actor: 'strm', message: () => 'STRM file created' },
+  [EVENT_TYPES.STRM_ARCHIVED]: {
+    actor: 'strm',
+    message: ({ detail = {} }) => `STRM file archived after a real download replaced it${suffix(detail.path, '(%s)')}`,
+  },
   [EVENT_TYPES.STRM_CACHE_ON_PLAY_QUEUED]: {
     actor: 'strm',
     message: () => 'Background download queued because the STRM item was played',
@@ -165,6 +191,15 @@ const EVENT_CATALOG = {
     message: ({ detail = {} }) => `Grab failed${suffix(detail.message, '- %s')}`,
   },
 
+  [EVENT_TYPES.LOG_CLEARED]: {
+    actor: 'maintenance',
+    level: () => LEVELS.WARN,
+    message: ({ detail = {} }) => `Event log cleared${suffix(detail.deletedCount, '(%s events removed)')}`,
+  },
+  [EVENT_TYPES.CACHE_FETCH_STARTED]: {
+    actor: 'ytstream',
+    message: ({ detail = {} }) => `Hidden cache being created (buffer fetch started)${suffix(detail.quality, 'at quality %s')}`,
+  },
   [EVENT_TYPES.CACHE_HLS_BUFFER_FINALIZED]: {
     actor: 'ytstream',
     message: ({ detail = {} }) => `HLS buffer saved${transferSummary(detail)}${suffix(detail.filePath, 'to %s')}`,

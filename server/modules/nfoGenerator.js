@@ -436,7 +436,7 @@ class NfoGenerator {
         xml += `  <trailer>${this.buildYouTubeTrailerUrl(youtubeId)}</trailer>\n`;
       }
 
-      xml += `\n  <thumb>${parsedPath.name}.jpg</thumb>\n`;
+      xml += `\n  <thumb>${this.escapeXml(parsedPath.name)}.jpg</thumb>\n`;
       xml += '</episodedetails>\n';
 
       fs.writeFileSync(nfoPath, xml, 'utf8');

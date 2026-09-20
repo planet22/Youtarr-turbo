@@ -301,6 +301,12 @@ describe('nfoGenerator file output', () => {
       expect(read('ep.nfo')).toContain('<thumb>ep.jpg</thumb>');
     });
 
+    it('escapes XML special characters in the thumb filename', () => {
+      nfoGenerator.writeEpisodeNfoFile(path.join(dir, 'Tom & Jerry.mp4'), { id: 'abc' }, { season: 2024, episode: 7, showTitle: 'My Show' });
+
+      expect(read('Tom & Jerry.nfo')).toContain('<thumb>Tom &amp; Jerry.jpg</thumb>');
+    });
+
     it('includes the resolution tag', () => {
       write({ id: 'abc', formats: formats(720) });
 

@@ -17,6 +17,7 @@ const createYoutubeApiKeyRoutes = require('./youtubeApiKey');
 const createYtdlpOptionsRoutes = require('./ytdlpOptions');
 const createMaintenanceRoutes = require('./maintenance');
 const createSubfolderRoutes = require('./subfolders');
+const createJobEventRoutes = require('./jobEvents');
 const videoMetadataModule = require('../modules/videoMetadataModule');
 const videoOembedEnricher = require('../modules/videoOembedEnricher');
 const playlistModule = require('../modules/playlistModule');
@@ -27,6 +28,7 @@ const channelDownloadAllModule = require('../modules/channelDownloadAllModule');
 const ratingMapper = require('../modules/ratingMapper');
 const subfolderModule = require('../modules/subfolderModule');
 const cronJobs = require('../modules/cronJobs');
+const jobEventLog = require('../modules/jobEventLog');
 const playlistVideoFilters = require('../modules/playlistVideoFilters');
 const models = require('../models');
 const createYtStreamRoutes = require('./ytstream');
@@ -96,6 +98,9 @@ function registerRoutes(app, deps) {
 
   // Job routes
   app.use(createJobRoutes({ verifyToken, jobModule, downloadModule }));
+
+  // Video/events log read routes
+  app.use(createJobEventRoutes({ verifyToken, jobEventLog }));
 
   // Plex routes
   app.use(createPlexRoutes({ verifyToken, plexModule, configModule }));

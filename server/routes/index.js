@@ -79,7 +79,7 @@ function registerRoutes(app, deps) {
   app.use(createConfigRoutes({ verifyToken, configModule, validateEnvAuthCredentials, isWslEnvironment, filenamePreviewRateLimiter }));
 
   // Channel routes
-  app.use(createChannelRoutes({ verifyToken, channelModule, archiveModule, channelDownloadAllModule, ratingMapper }));
+  app.use(createChannelRoutes({ verifyToken, channelModule, archiveModule, channelDownloadAllModule, ratingMapper, jobEventLog }));
 
   // Video routes
   app.use(createVideoRoutes({ verifyToken, videosModule, downloadModule, videoOembedEnricher }));

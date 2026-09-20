@@ -25,6 +25,11 @@ const EVENT_TYPES = Object.freeze({
   VIDEO_TRANSCODED: 'video.transcoded',
   VIDEO_MARKED_MISSING: 'video.marked_missing',
   VIDEO_RESTORED: 'video.restored',
+  VIDEO_PROTECTED: 'video.protected',
+  VIDEO_UNPROTECTED: 'video.unprotected',
+  VIDEO_IGNORED: 'video.ignored',
+  VIDEO_UNIGNORED: 'video.unignored',
+  VIDEO_UNAVAILABLE_ON_YOUTUBE: 'video.unavailable_on_youtube',
   // STRM
   STRM_CREATED: 'strm.created',
   STRM_CACHE_ON_PLAY_QUEUED: 'strm.cache_on_play_queued',
@@ -36,7 +41,6 @@ const EVENT_TYPES = Object.freeze({
   NZB_HISTORY_REMOVED: 'nzb.history_removed',
   NZB_UNTRACKED: 'nzb.untracked',
   NZB_UNTRACK_FAILED: 'nzb.untrack_failed',
-  NZB_GRAB_FAILED: 'nzb.grab_failed',
   // The log itself
   LOG_CLEARED: 'log.cleared',
   // ytstream buffer cache
@@ -150,6 +154,28 @@ const EVENT_CATALOG = {
     message: ({ detail = {} }) => `Video file found again on disk${suffix(detail.filePath, '(%s)')}`,
   },
 
+  [EVENT_TYPES.VIDEO_PROTECTED]: {
+    actor: 'library',
+    message: () => 'Video protected from automatic removal',
+  },
+  [EVENT_TYPES.VIDEO_UNPROTECTED]: {
+    actor: 'library',
+    message: () => 'Video protection removed',
+  },
+  [EVENT_TYPES.VIDEO_IGNORED]: {
+    actor: 'library',
+    message: () => 'Video ignored - it will not be downloaded',
+  },
+  [EVENT_TYPES.VIDEO_UNIGNORED]: {
+    actor: 'library',
+    message: () => 'Video no longer ignored',
+  },
+  [EVENT_TYPES.VIDEO_UNAVAILABLE_ON_YOUTUBE]: {
+    actor: 'youtube',
+    level: () => LEVELS.WARN,
+    message: () => 'Video is no longer available on YouTube',
+  },
+
   [EVENT_TYPES.STRM_CREATED]: { actor: 'strm', message: () => 'STRM file created' },
   [EVENT_TYPES.STRM_ARCHIVED]: {
     actor: 'strm',
@@ -183,12 +209,6 @@ const EVENT_CATALOG = {
     actor: 'nzb',
     level: () => LEVELS.WARN,
     message: ({ detail = {} }) => `Could not remove from the Youtarr library${suffix(detail.error, '- %s')}`,
-  },
-
-  [EVENT_TYPES.NZB_GRAB_FAILED]: {
-    actor: 'nzb',
-    level: () => LEVELS.ERROR,
-    message: ({ detail = {} }) => `Grab failed${suffix(detail.message, '- %s')}`,
   },
 
   [EVENT_TYPES.LOG_CLEARED]: {

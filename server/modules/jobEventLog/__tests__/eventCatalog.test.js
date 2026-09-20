@@ -63,11 +63,6 @@ describe('eventCatalog', () => {
       const { message } = describeEvent(EVENT_TYPES.CACHE_DELETED, { detail: { freedBytes: 3 * 1024 * 1024, reason: 'expired hidden cache' } });
       expect(message).toBe('Hidden cache file deleted (freed 3.0 MB) - expired hidden cache');
     });
-
-    test('grab failure is an error with its reason', () => {
-      const result = describeEvent(EVENT_TYPES.NZB_GRAB_FAILED, { detail: { message: 'no video file produced' } });
-      expect(result).toMatchObject({ level: 'error', message: 'Grab failed - no video file produced' });
-    });
   });
 
   describe('describeEvent', () => {
@@ -147,5 +142,22 @@ describe('file, STRM and cache steps', () => {
   test('log.cleared is a warning saying how many events were removed', () => {
     const result = describeEvent(EVENT_TYPES.LOG_CLEARED, { detail: { deletedCount: 12 } });
     expect(result).toMatchObject({ level: 'warn', actor: 'maintenance', message: 'Event log cleared (12 events removed)' });
+  });
+});
+
+describe('protection, ignore and YouTube availability', () => {
+  test.each([
+    ['video.protected', 'Video protected from automatic removal'],
+    ['video.unprotected', 'Video protection removed'],
+    ['video.ignored', 'Video ignored - it will not be downloaded'],
+    ['video.unignored', 'Video no longer ignored'],
+  ])('%s says what happened', (type, message) => {
+    expect(describeEvent(type, {}).message).toBe(message);
+  });
+
+  test('video.unavailable_on_youtube is a warning', () => {
+    expect(describeEvent(EVENT_TYPES.VIDEO_UNAVAILABLE_ON_YOUTUBE, {})).toMatchObject({
+      level: 'warn', message: 'Video is no longer available on YouTube',
+    });
   });
 });

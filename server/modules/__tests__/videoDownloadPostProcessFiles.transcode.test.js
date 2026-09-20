@@ -382,6 +382,22 @@ describe('videoDownloadPostProcessFiles post-download transcode', () => {
       expect(fs.moveSync).toHaveBeenCalledWith(tmpOutput, finalMp4, { overwrite: true });
     });
 
+    it('removes the original only after the transcoded file is in place', async () => {
+      await run();
+
+      const removeOrder = fs.removeSync.mock.calls.findIndex(([p]) => p === inputPath);
+      const moveOrder = fs.moveSync.mock.invocationCallOrder[0];
+      expect(fs.removeSync.mock.invocationCallOrder[removeOrder]).toBeGreaterThan(moveOrder);
+    });
+
+    it('keeps the original when the transcoded file cannot be moved into place', async () => {
+      fs.moveSync.mockImplementationOnce(() => { throw new Error('disk full'); });
+
+      await run();
+
+      expect(fs.removeSync).not.toHaveBeenCalledWith(inputPath);
+    });
+
     it('carries the transcoded path through the rest of post-processing', async () => {
       await run();
 
@@ -411,6 +427,20 @@ describe('videoDownloadPostProcessFiles post-download transcode', () => {
       await waitUntil(() => mockJobVideoDownload.update.mock.calls.length > 0);
 
       expect(fs.moveSync).toHaveBeenCalledWith(tmpOutput, mp4, { overwrite: true });
+    });
+
+    it('does not try to remove a same-named mp4 original, since the move overwrites it', async () => {
+      const mp4 = inputPath.replace(/\.mkv$/, '.mp4');
+      mockFsState.existing = new Set([jsonPath, mp4]);
+      scriptFfmpeg({ writesOutput: true });
+      process.argv = ['node', 'script', mp4];
+
+      jest.isolateModules(() => {
+        require('../videoDownloadPostProcessFiles');
+      });
+      await waitUntil(() => mockJobVideoDownload.update.mock.calls.length > 0);
+
+      expect(fs.removeSync).not.toHaveBeenCalledWith(mp4);
     });
   });
 

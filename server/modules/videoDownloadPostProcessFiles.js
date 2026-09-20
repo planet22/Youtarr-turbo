@@ -366,14 +366,18 @@ async function transcodeDownloadedVideo(inputPath) {
     return inputPath;
   }
 
-  try {
-    fs.removeSync(inputPath);
-  } catch (err) {
-    logger.warn({ err, inputPath }, '[Post-Process] Could not remove pre-transcode original file');
-  }
   const finalPath = path.join(inputDir, `${inputStem}.mp4`);
   if (outputPath !== finalPath) {
     fs.moveSync(outputPath, finalPath, { overwrite: true });
+  }
+  // Only drop the original once the transcoded file is in place. A same-named
+  // .mp4 original has already been overwritten by the move above.
+  if (inputPath !== finalPath) {
+    try {
+      fs.removeSync(inputPath);
+    } catch (err) {
+      logger.warn({ err, inputPath }, '[Post-Process] Could not remove pre-transcode original file');
+    }
   }
   logger.info({ finalPath, videoCodec, hardwareMode }, '[Post-Process] Transcode complete');
   return finalPath;

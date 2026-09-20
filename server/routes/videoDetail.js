@@ -273,6 +273,9 @@ function createVideoDetailRoutes({ verifyToken, videoMetadataModule, mediaServer
         stream.on('error', (err) => {
           req.log.error({ err, youtubeId }, 'Stream read error');
           if (!res.headersSent) {
+            // Drop the file headers set above so the JSON error is not labelled as video.
+            res.removeHeader('Content-Type');
+            res.removeHeader('Content-Range');
             res.status(500).json({ error: 'Error reading file' });
           } else {
             res.destroy();
@@ -292,6 +295,9 @@ function createVideoDetailRoutes({ verifyToken, videoMetadataModule, mediaServer
         stream.on('error', (err) => {
           req.log.error({ err, youtubeId }, 'Stream read error');
           if (!res.headersSent) {
+            // Drop the file headers set above so the JSON error is not labelled as video.
+            res.removeHeader('Content-Type');
+            res.removeHeader('Content-Range');
             res.status(500).json({ error: 'Error reading file' });
           } else {
             res.destroy();

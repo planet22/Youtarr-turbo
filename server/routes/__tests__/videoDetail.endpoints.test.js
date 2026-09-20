@@ -230,8 +230,16 @@ describe('videoDetail routes: remaining endpoints', () => {
         const res = await get();
 
         expect(res.status).toBe(500);
-        expect(JSON.parse(res.body.toString())).toEqual({ error: 'Error reading file' });
+        expect(res.body).toEqual({ error: 'Error reading file' });
         expect(log.error).toHaveBeenCalledWith(expect.objectContaining({ youtubeId: YT_ID }), 'Stream read error');
+      });
+
+      it('labels the read error as JSON rather than as the video', async () => {
+        videoMetadataModule.getVideoStreamInfo.mockResolvedValue(streamInfo({ filePath: path.join(dir, 'gone.mp4') }));
+
+        const res = await get();
+
+        expect(res.headers['content-type']).toMatch(/application\/json/);
       });
     });
 
@@ -240,6 +248,16 @@ describe('videoDetail routes: remaining endpoints', () => {
         const chunks = [];
         res.on('data', (c) => chunks.push(c));
         res.on('end', () => cb(null, Buffer.concat(chunks)));
+      });
+
+      it('answers a read error on a range request with JSON and no content range', async () => {
+        videoMetadataModule.getVideoStreamInfo.mockResolvedValue(streamInfo({ filePath: path.join(dir, 'gone.mp4') }));
+
+        const res = await ranged('bytes=2-5');
+
+        expect(res.status).toBe(500);
+        expect(res.headers['content-type']).toMatch(/application\/json/);
+        expect(res.headers['content-range']).toBeUndefined();
       });
 
       it('returns the requested bytes with a content range', async () => {

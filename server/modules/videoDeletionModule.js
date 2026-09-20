@@ -250,19 +250,26 @@ class VideoDeletionModule {
     const restoredCachePath = strmMediaInfoCache.getMediaInfoCachePath(restoredStrmPath);
     const cacheBackupPath = `${restoredCachePath}.cached`;
 
+    // Restore the STRM backups before deleting the media file, so a failed
+    // rename cannot leave the row pointing at a file that is already gone.
+    const renamed = [];
+    let mediaDeleted = false;
     try {
+      await fs.rename(strmBackupPath, restoredStrmPath);
+      renamed.push([restoredStrmPath, strmBackupPath]);
+      if (fsSync.existsSync(cacheBackupPath)) {
+        await fs.rename(cacheBackupPath, restoredCachePath);
+        renamed.push([restoredCachePath, cacheBackupPath]);
+      }
+
       await fs.unlink(video.filePath).catch((err) => {
         if (err.code !== 'ENOENT') throw err;
       });
+      mediaDeleted = true;
       if (video.audioFilePath) {
         await fs.unlink(video.audioFilePath).catch((err) => {
           if (err.code !== 'ENOENT') throw err;
         });
-      }
-
-      await fs.rename(strmBackupPath, restoredStrmPath);
-      if (fsSync.existsSync(cacheBackupPath)) {
-        await fs.rename(cacheBackupPath, restoredCachePath);
       }
 
       const strmFileSize = (await fs.stat(restoredStrmPath)).size;
@@ -313,6 +320,13 @@ class VideoDeletionModule {
         message: 'Reverted to STRM playback (cached file removed)',
       };
     } catch (err) {
+      if (!mediaDeleted) {
+        // Nothing was lost yet: put the backups back so a later attempt can
+        // still find them.
+        for (const [from, to] of renamed.reverse()) {
+          await fs.rename(from, to).catch(() => {});
+        }
+      }
       logger.error({ err, videoId: video.id, filePath: video.filePath }, '[Auto-Removal] Revert-to-STRM failed, falling back to normal deletion');
       return null;
     }

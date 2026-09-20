@@ -231,6 +231,38 @@ describe('VideoDeletionModule STRM revert, cache expiry and purge', () => {
       expect(result).toEqual({ success: false, videoId: 1, error });
     });
 
+    it('keeps the media file and the STRM backup when restoring the media-info cache fails', async () => {
+      write(path.join(videoDir, `Title [${YT_ID}].strmtool.json.cached`), '{"a":1}');
+      // A directory where the restored media-info cache belongs makes that rename fail.
+      const cachePath = path.join(videoDir, `Title [${YT_ID}].strmtool.json`);
+      fs.mkdirSync(cachePath);
+      write(path.join(cachePath, 'blocker'));
+      Video.findByPk.mockResolvedValue(makeVideo());
+
+      const result = await videoDeletionModule.revertToStrm(1);
+
+      expect(result.success).toBe(false);
+      expect(exists(mediaPath)).toBe(true);
+      expect(exists(`${strmPath}.cached`)).toBe(true);
+      expect(exists(strmPath)).toBe(false);
+    });
+
+    it('puts the STRM backup back when the media file cannot be deleted', async () => {
+      // A directory in place of the media file makes the unlink fail.
+      fs.unlinkSync(mediaPath);
+      fs.mkdirSync(mediaPath);
+      write(path.join(mediaPath, 'blocker'));
+      const video = makeVideo();
+      Video.findByPk.mockResolvedValue(video);
+
+      const result = await videoDeletionModule.revertToStrm(1);
+
+      expect(result.success).toBe(false);
+      expect(exists(`${strmPath}.cached`)).toBe(true);
+      expect(exists(strmPath)).toBe(false);
+      expect(video.update).not.toHaveBeenCalled();
+    });
+
     it('explains when the video was never STRM', async () => {
       fs.unlinkSync(`${strmPath}.cached`);
       Video.findByPk.mockResolvedValue(makeVideo());

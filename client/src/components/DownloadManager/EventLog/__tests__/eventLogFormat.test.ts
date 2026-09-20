@@ -65,3 +65,40 @@ describe('eventLogFormat', () => {
     expect(EVENT_LEVEL_OPTIONS[0]).toEqual({ value: '', label: 'All levels' });
   });
 });
+
+describe('detail formatting', () => {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { detailLabel, describeDetailEntries } = require('../eventLogFormat');
+
+  test('turns a camelCase key into a readable label', () => {
+    expect(detailLabel('diagnosisMessage')).toBe('Diagnosis message');
+  });
+
+  test('labels a single word', () => {
+    expect(detailLabel('error')).toBe('Error');
+  });
+
+  test('formats a file size as bytes', () => {
+    expect(describeDetailEntries({ fileSize: 2048 })).toEqual([{ label: 'File size', value: '2.0 KB' }]);
+  });
+
+  test('formats a duration in seconds', () => {
+    expect(describeDetailEntries({ downloadDurationSeconds: 12 })).toEqual([{ label: 'Download duration seconds', value: '12s' }]);
+  });
+
+  test('shows text values as they are', () => {
+    expect(describeDetailEntries({ error: 'HTTP 403' })).toEqual([{ label: 'Error', value: 'HTTP 403' }]);
+  });
+
+  test('shows nested values as JSON', () => {
+    expect(describeDetailEntries({ counts: { a: 1 } })).toEqual([{ label: 'Counts', value: '{"a":1}' }]);
+  });
+
+  test('drops empty values', () => {
+    expect(describeDetailEntries({ a: null, b: undefined, c: '' })).toEqual([]);
+  });
+
+  test('has nothing to show when there is no detail', () => {
+    expect(describeDetailEntries(null)).toEqual([]);
+  });
+});

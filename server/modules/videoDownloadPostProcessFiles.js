@@ -1612,6 +1612,8 @@ async function resolveTrackedOwnerChannelId(youtubeId, metadataChannelId) {
         jobEventLog.record(EVENT_TYPES.VIDEO_FILE_FINALIZED, {
           jobId: activeJobId,
           youtubeId: id,
+          videoTitle: jsonData.title,
+          channelName: jsonData.uploader || jsonData.channel,
           detail: { filePath: finalVideoPath, fileSize: finalFileSize },
         });
       } catch (err) {

@@ -17,6 +17,7 @@ const EVENT_TYPES = Object.freeze({
   // Per-video download pipeline
   VIDEO_DOWNLOAD_STARTED: 'video.download_started',
   VIDEO_FILE_FINALIZED: 'video.file_finalized',
+  VIDEO_DOWNLOADED: 'video.downloaded',
   VIDEO_FAILED: 'video.failed',
   VIDEO_AUTO_RETRY_QUEUED: 'video.auto_retry_queued',
   VIDEO_DELETED: 'video.deleted',
@@ -31,14 +32,45 @@ const EVENT_TYPES = Object.freeze({
   NZB_HISTORY_REMOVED: 'nzb.history_removed',
   NZB_UNTRACKED: 'nzb.untracked',
   NZB_UNTRACK_FAILED: 'nzb.untrack_failed',
+  NZB_GRAB_FAILED: 'nzb.grab_failed',
   // ytstream buffer cache
   CACHE_HLS_BUFFER_FINALIZED: 'cache.hls_buffer_finalized',
   CACHE_TS_TO_MP4: 'cache.ts_to_mp4',
   CACHE_PROMOTED_TO_LIBRARY: 'cache.promoted_to_library',
+  CACHE_DELETED: 'cache.deleted',
 });
 
 const has = (value) => value !== undefined && value !== null && value !== '';
 const suffix = (value, text) => (has(value) ? ` ${text.replace('%s', value)}` : '');
+
+// "12s", "2m 03s", "1h 05m" - how long a transfer took.
+function formatSeconds(seconds) {
+  const total = Math.round(Number(seconds));
+  if (!Number.isFinite(total) || total < 0) return null;
+  if (total < 60) return `${total}s`;
+  if (total < 3600) return `${Math.floor(total / 60)}m ${String(total % 60).padStart(2, '0')}s`;
+  return `${Math.floor(total / 3600)}h ${String(Math.floor((total % 3600) / 60)).padStart(2, '0')}m`;
+}
+
+function formatBytes(bytes) {
+  const n = Number(bytes);
+  if (!Number.isFinite(n) || n < 0) return null;
+  if (n < 1024) return `${n} B`;
+  const units = ['KB', 'MB', 'GB', 'TB'];
+  let value = n / 1024;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) { value /= 1024; unit += 1; }
+  return `${value.toFixed(value >= 100 ? 0 : 1)} ${units[unit]}`;
+}
+
+// "181 B in 12s (2.4 MB/s)" from whichever of size / time / rate are known.
+function transferSummary({ fileSize, downloadDurationSeconds, avgDownloadMBps }) {
+  const size = has(fileSize) ? formatBytes(fileSize) : null;
+  const took = has(downloadDurationSeconds) ? formatSeconds(downloadDurationSeconds) : null;
+  const rate = Number(avgDownloadMBps) > 0 ? `${Number(avgDownloadMBps).toFixed(2)} MB/s` : null;
+  const parts = [size, took ? `in ${took}` : null, rate ? `(${rate})` : null].filter(Boolean);
+  return parts.length ? ` ${parts.join(' ')}` : '';
+}
 
 const EVENT_CATALOG = {
   [EVENT_TYPES.JOB_CREATED]: {
@@ -69,10 +101,16 @@ const EVENT_CATALOG = {
     actor: 'downloader',
     message: ({ detail = {} }) => `File finalized${suffix(detail.filePath, 'at %s')}${suffix(detail.fileSize, '(%s bytes)')}`,
   },
+  [EVENT_TYPES.VIDEO_DOWNLOADED]: {
+    actor: 'downloader',
+    message: ({ detail = {} }) => `Downloaded${transferSummary(detail)}`,
+  },
   [EVENT_TYPES.VIDEO_FAILED]: {
     actor: 'downloader',
     level: () => LEVELS.ERROR,
-    message: ({ detail = {} }) => `Download failed${suffix(detail.error, '- %s')}`,
+    // The error yt-dlp reported, plus the same "likely cause" advice Download History shows.
+    message: ({ detail = {} }) =>
+      `Download failed${suffix(detail.error, '- %s')}${suffix(detail.diagnosisTitle, '(Likely cause: %s)')}`,
   },
   [EVENT_TYPES.VIDEO_AUTO_RETRY_QUEUED]: {
     actor: 'downloader',
@@ -121,9 +159,20 @@ const EVENT_CATALOG = {
     message: ({ detail = {} }) => `Could not remove from the Youtarr library${suffix(detail.error, '- %s')}`,
   },
 
+  [EVENT_TYPES.NZB_GRAB_FAILED]: {
+    actor: 'nzb',
+    level: () => LEVELS.ERROR,
+    message: ({ detail = {} }) => `Grab failed${suffix(detail.message, '- %s')}`,
+  },
+
   [EVENT_TYPES.CACHE_HLS_BUFFER_FINALIZED]: {
     actor: 'ytstream',
-    message: ({ detail = {} }) => `HLS buffer saved${suffix(detail.filePath, 'to %s')}`,
+    message: ({ detail = {} }) => `HLS buffer saved${transferSummary(detail)}${suffix(detail.filePath, 'to %s')}`,
+  },
+  [EVENT_TYPES.CACHE_DELETED]: {
+    actor: 'ytstream',
+    message: ({ detail = {} }) =>
+      `Hidden cache file deleted${suffix(formatBytes(detail.freedBytes), '(freed %s)')}${suffix(detail.reason, '- %s')}`,
   },
   [EVENT_TYPES.CACHE_TS_TO_MP4]: {
     actor: 'ytstream',

@@ -112,6 +112,35 @@ describe('downloadJobFinalizer video/events log', () => {
     expect(failedCalls.map(([, fields]) => fields.youtubeId)).toEqual(['aaaaaaaaaaa', 'bbbbbbbbbbb']);
   });
 
+  it('records the likely cause on the failure, as Download History shows it', async () => {
+    failing([{ youtubeId: 'abc123def45', error: 'HTTP Error 403: Forbidden', diagnosisKey: 'x' }]);
+    require('../failureAdvisor').adviseFailures = jest.fn(() => [{ key: 'x', title: 'Blocked', message: 'Try cookies', count: 1 }]);
+
+    await finalizeDownloadJob(context());
+
+    const detail = jobEventLog.record.mock.calls.find(([type]) => type === 'video.failed')[1].detail;
+    expect(detail).toMatchObject({ error: 'HTTP Error 403: Forbidden' });
+  });
+
+  it('records download size, time and rate for a video that downloaded', async () => {
+    require('../videoMetadataProcessor').processVideoMetadata.mockResolvedValue([
+      { youtubeId: 'okokokokok1', youTubeVideoName: 'Good', youTubeChannelName: 'Chan', fileSize: '2048', downloadDurationSeconds: 4, avgDownloadMBps: 0.5 },
+    ]);
+    downloadResultProcessor.partitionDownloadResults.mockReturnValue({
+      successfulVideos: [{ youtubeId: 'okokokokok1', youTubeVideoName: 'Good', youTubeChannelName: 'Chan', fileSize: '2048', downloadDurationSeconds: 4, avgDownloadMBps: 0.5 }],
+      failedVideosList: [],
+    });
+
+    await finalizeDownloadJob(context());
+
+    expect(jobEventLog.record).toHaveBeenCalledWith('video.downloaded', expect.objectContaining({
+      jobId: 'job-123',
+      youtubeId: 'okokokokok1',
+      videoTitle: 'Good',
+      detail: { fileSize: 2048, downloadDurationSeconds: 4, avgDownloadMBps: 0.5 },
+    }));
+  });
+
   it('records nothing when no video failed', async () => {
     await finalizeDownloadJob(context());
 

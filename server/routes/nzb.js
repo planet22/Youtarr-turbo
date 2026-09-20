@@ -907,6 +907,12 @@ const recordedFailedGrabJobIds = new Set();
 async function recordFailedGrab(job, message) {
   if (recordedFailedGrabJobIds.has(job.id)) return;
   recordedFailedGrabJobIds.add(job.id);
+  jobEventLog.record(EVENT_TYPES.NZB_GRAB_FAILED, {
+    jobId: String(job.id),
+    youtubeId: job.data?.nzb?.youtubeId,
+    videoTitle: job.data?.nzb?.nzbName,
+    detail: { message, categoryName: job.data?.nzb?.categoryName },
+  });
   const max = nzbDiagnosticLog.resolveLogLimit(configModule.getConfig(), 'failedGrabs');
   await nzbDiagnosticLog.recordDiagnosticEvent('failedGrab', {
     jobId: String(job.id),

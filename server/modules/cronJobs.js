@@ -180,7 +180,10 @@ function initialize(deps = {}) {
     // ytstream.js's sweepExpiredUntrackedBufferCache doc comment.
     try {
       const ytstreamRoutes = require('../routes/ytstream');
-      const bufferResult = await ytstreamRoutes.sweepExpiredUntrackedBufferCache();
+      const bufferResult = await jobEventLog.runWithContext(
+        { actor: 'strm-cache-expiry', reason: 'STRM cache-on-play expiry' },
+        () => ytstreamRoutes.sweepExpiredUntrackedBufferCache()
+      );
       if (bufferResult.deleted > 0) {
         logger.info(bufferResult, 'Untracked hls-buffer cache expiry sweep completed');
       }

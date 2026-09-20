@@ -18,6 +18,58 @@ describe('eventCatalog', () => {
     }
   });
 
+  describe('download and failure detail', () => {
+    test('video.downloaded shows size, time taken and rate', () => {
+      const { message } = describeEvent(EVENT_TYPES.VIDEO_DOWNLOADED, {
+        detail: { fileSize: 181, downloadDurationSeconds: 12, avgDownloadMBps: 2.4 },
+      });
+      expect(message).toBe('Downloaded 181 B in 12s (2.40 MB/s)');
+    });
+
+    test('video.downloaded scales the size and the time', () => {
+      const { message } = describeEvent(EVENT_TYPES.VIDEO_DOWNLOADED, {
+        detail: { fileSize: 5 * 1024 * 1024, downloadDurationSeconds: 125, avgDownloadMBps: 0.04 },
+      });
+      expect(message).toBe('Downloaded 5.0 MB in 2m 05s (0.04 MB/s)');
+    });
+
+    test('video.downloaded copes with only some figures known', () => {
+      expect(describeEvent(EVENT_TYPES.VIDEO_DOWNLOADED, { detail: { fileSize: 2048 } }).message).toBe('Downloaded 2.0 KB');
+    });
+
+    test('video.downloaded says just "Downloaded" when nothing is known', () => {
+      expect(describeEvent(EVENT_TYPES.VIDEO_DOWNLOADED, {}).message).toBe('Downloaded');
+    });
+
+    test('video.failed adds the likely cause Download History shows', () => {
+      const { message } = describeEvent(EVENT_TYPES.VIDEO_FAILED, {
+        detail: { error: 'HTTP Error 403: Forbidden', diagnosisTitle: 'YouTube blocked the download' },
+      });
+      expect(message).toBe('Download failed - HTTP Error 403: Forbidden (Likely cause: YouTube blocked the download)');
+    });
+
+    test('video.failed with no diagnosis shows only the error', () => {
+      expect(describeEvent(EVENT_TYPES.VIDEO_FAILED, { detail: { error: 'boom' } }).message).toBe('Download failed - boom');
+    });
+
+    test('the hls buffer message includes the transfer rate', () => {
+      const { message } = describeEvent(EVENT_TYPES.CACHE_HLS_BUFFER_FINALIZED, {
+        detail: { fileSize: 2048, downloadDurationSeconds: 4, avgDownloadMBps: 0.5, filePath: '/c/x.ts' },
+      });
+      expect(message).toBe('HLS buffer saved 2.0 KB in 4s (0.50 MB/s) to /c/x.ts');
+    });
+
+    test('cache.deleted says how much was freed and why', () => {
+      const { message } = describeEvent(EVENT_TYPES.CACHE_DELETED, { detail: { freedBytes: 3 * 1024 * 1024, reason: 'expired hidden cache' } });
+      expect(message).toBe('Hidden cache file deleted (freed 3.0 MB) - expired hidden cache');
+    });
+
+    test('grab failure is an error with its reason', () => {
+      const result = describeEvent(EVENT_TYPES.NZB_GRAB_FAILED, { detail: { message: 'no video file produced' } });
+      expect(result).toMatchObject({ level: 'error', message: 'Grab failed - no video file produced' });
+    });
+  });
+
   describe('describeEvent', () => {
     test('falls back to the raw type as the message for an unknown event type', () => {
       expect(describeEvent('made.up_type', {})).toEqual({ actor: null, level: LEVELS.INFO, message: 'made.up_type' });

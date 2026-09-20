@@ -21,12 +21,32 @@ export interface JobEvent {
 
 export interface JobEventPage {
   events: JobEvent[];
-  nextCursor: number | null;
+  // Number of events matching the filters, across all pages
+  total: number;
 }
 
 export interface JobEventFilters {
   jobId?: string;
   youtubeId?: string;
   level?: string;
+  // Event type family: job, video, nzb, strm or cache
+  category?: string;
+  // Exact event type, e.g. video.failed
+  eventType?: string;
+  actor?: string;
+  channel?: string;
+  // Job source label, e.g. NZB or Channels
+  source?: string;
   q?: string;
+  // ISO instants bounding when the event happened
+  from?: string;
+  to?: string;
+}
+
+// Values each filter dropdown can offer (GET /api/job-events/facets)
+export interface JobEventFacets {
+  eventTypes: string[];
+  actors: string[];
+  channels: string[];
+  sources: string[];
 }

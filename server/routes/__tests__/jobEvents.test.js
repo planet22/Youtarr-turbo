@@ -11,7 +11,7 @@ describe('Job event routes', () => {
 
   beforeEach(() => {
     jest.resetModules();
-    jobEventLog = { list: jest.fn().mockResolvedValue({ events: [], nextCursor: null }) };
+    jobEventLog = { list: jest.fn().mockResolvedValue({ events: [], total: 0 }) };
     verifyToken = jest.fn((req, res, next) => next());
     const createJobEventRoutes = require('../jobEvents');
     app = express();
@@ -20,7 +20,7 @@ describe('Job event routes', () => {
 
   describe('GET /api/job-events', () => {
     test('returns the page from the module', async () => {
-      const page = { events: [{ id: 3, message: 'm' }], nextCursor: 2 };
+      const page = { events: [{ id: 3, message: 'm' }], total: 1 };
       jobEventLog.list.mockResolvedValueOnce(page);
 
       const res = await request(app).get('/api/job-events');
@@ -63,10 +63,22 @@ describe('Job event routes', () => {
       expect(jobEventLog.list).toHaveBeenCalledWith({ jobId: 'j1', youtubeId: 'abc', eventType: 'video.failed', q: 'juice' });
     });
 
-    test('converts numeric cursors and limit to numbers', async () => {
-      await request(app).get('/api/job-events').query({ before: '50', after: '10', limit: '25' });
+    test('converts offset and limit to numbers', async () => {
+      await request(app).get('/api/job-events').query({ offset: '50', limit: '25' });
 
-      expect(jobEventLog.list).toHaveBeenCalledWith({ before: 50, after: 10, limit: 25 });
+      expect(jobEventLog.list).toHaveBeenCalledWith({ offset: 50, limit: 25 });
+    });
+
+    test('passes a category and a time range through', async () => {
+      await request(app).get('/api/job-events').query({ category: 'video', from: '2026-09-19T00:00:00.000Z', to: '2026-09-20' });
+
+      expect(jobEventLog.list).toHaveBeenCalledWith({ category: 'video', from: '2026-09-19T00:00:00.000Z', to: '2026-09-20' });
+    });
+
+    test('passes actor, channel and source through', async () => {
+      await request(app).get('/api/job-events').query({ actor: 'nzb', channel: 'pcrobec', source: 'NZB' });
+
+      expect(jobEventLog.list).toHaveBeenCalledWith({ actor: 'nzb', channel: 'pcrobec', source: 'NZB' });
     });
 
     test('passes level and order through', async () => {
@@ -86,8 +98,14 @@ describe('Job event routes', () => {
       ['an order outside the allowed set', { order: 'sideways' }],
       ['a non-numeric limit', { limit: 'lots' }],
       ['a limit above the maximum', { limit: '501' }],
-      ['a negative cursor', { before: '-1' }],
-      ['a fractional cursor', { after: '1.5' }],
+      ['a negative offset', { offset: '-1' }],
+      ['a fractional offset', { offset: '1.5' }],
+      ['a category outside the allowed set', { category: 'bogus' }],
+      ['a timestamp that is not a date', { from: 'yesterday-ish' }],
+      ['an over-long timestamp', { to: '2026-09-19T00:00:00.000Z'.padEnd(41, '0') }],
+      ['an over-long actor', { actor: 'x'.repeat(49) }],
+      ['an over-long channel', { channel: 'x'.repeat(256) }],
+      ['an over-long source', { source: 'x'.repeat(41) }],
       ['an over-long job id', { jobId: 'x'.repeat(37) }],
       ['an over-long youtube id', { youtubeId: 'x'.repeat(21) }],
       ['an over-long search', { q: 'x'.repeat(201) }],
@@ -117,6 +135,42 @@ describe('Job event routes', () => {
 
       expect(res.status).toBe(500);
       expect(res.body).toEqual({ error: 'Failed to list video/events log entries' });
+    });
+  });
+
+  describe('GET /api/job-events/facets', () => {
+    beforeEach(() => {
+      jobEventLog.facets = jest.fn().mockResolvedValue({ eventTypes: ['video.failed'], actors: [], channels: [], sources: ['NZB'] });
+    });
+
+    test('returns the filter options', async () => {
+      const res = await request(app).get('/api/job-events/facets');
+
+      expect(res.status).toBe(200);
+      expect(res.body.eventTypes).toEqual(['video.failed']);
+    });
+
+    test('runs the auth middleware', async () => {
+      await request(app).get('/api/job-events/facets');
+
+      expect(verifyToken).toHaveBeenCalled();
+    });
+
+    test('is refused when the auth middleware refuses', async () => {
+      verifyToken.mockImplementationOnce((req, res) => res.status(401).json({ error: 'no' }));
+
+      const res = await request(app).get('/api/job-events/facets');
+
+      expect(res.status).toBe(401);
+    });
+
+    test('answers 500 as { error } when reading fails', async () => {
+      jobEventLog.facets.mockRejectedValueOnce(new Error('boom'));
+
+      const res = await request(app).get('/api/job-events/facets');
+
+      expect(res.status).toBe(500);
+      expect(res.body).toEqual({ error: 'Failed to read video/events log filter options' });
     });
   });
 });

@@ -1,3 +1,4 @@
+const jobEventLog = require('./jobEventLog');
 const Job = require('../models/job');
 const Video = require('../models/video');
 const JobVideo = require('../models/jobvideo');
@@ -152,6 +153,8 @@ class VideoPersistence {
         }
       }
     }
+
+    jobEventLog.rememberVideo(videoInstance.youtubeId, { title: videoInstance.youTubeVideoName, channelName: videoInstance.youTubeChannelName });
 
     // Create JobVideo relationship if needed
     const shouldCreateJobVideo = alwaysCreateJobVideo || !videoExisted;

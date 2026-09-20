@@ -6,6 +6,11 @@ const MAX_YOUTUBE_ID_LENGTH = 20;
 const MAX_EVENT_TYPE_LENGTH = 64;
 const MAX_SEARCH_LENGTH = 200;
 const MAX_LIMIT = 500;
+const MAX_TIMESTAMP_LENGTH = 40;
+const MAX_ACTOR_LENGTH = 48;
+const MAX_CHANNEL_LENGTH = 255;
+const MAX_SOURCE_LENGTH = 40;
+const CATEGORIES = ['job', 'video', 'nzb', 'strm', 'cache'];
 const LEVELS = ['info', 'warn', 'error'];
 const ORDERS = ['asc', 'desc'];
 
@@ -16,6 +21,14 @@ function optionalString(query, name, maxLength) {
   if (typeof raw !== 'string') return { error: `${name} must be a single string` };
   if (raw.length > maxLength) return { error: `${name} must be at most ${maxLength} characters` };
   return { value: raw };
+}
+
+// Reads an optional ISO timestamp query param; returns { value } or { error }.
+function optionalTimestamp(query, name) {
+  const parsed = optionalString(query, name, MAX_TIMESTAMP_LENGTH);
+  if (parsed.error || parsed.value === undefined) return parsed;
+  if (Number.isNaN(Date.parse(parsed.value))) return { error: `${name} must be an ISO date or date-time` };
+  return parsed;
 }
 
 // Reads an optional non-negative integer query param; returns { value } or { error }.
@@ -39,10 +52,15 @@ function parseListQuery(query) {
     youtubeId: optionalString(query, 'youtubeId', MAX_YOUTUBE_ID_LENGTH),
     eventType: optionalString(query, 'eventType', MAX_EVENT_TYPE_LENGTH),
     q: optionalString(query, 'q', MAX_SEARCH_LENGTH),
+    category: optionalString(query, 'category', 8),
     level: optionalString(query, 'level', 8),
+    actor: optionalString(query, 'actor', MAX_ACTOR_LENGTH),
+    channel: optionalString(query, 'channel', MAX_CHANNEL_LENGTH),
+    source: optionalString(query, 'source', MAX_SOURCE_LENGTH),
     order: optionalString(query, 'order', 4),
-    before: optionalInteger(query, 'before'),
-    after: optionalInteger(query, 'after'),
+    from: optionalTimestamp(query, 'from'),
+    to: optionalTimestamp(query, 'to'),
+    offset: optionalInteger(query, 'offset'),
     limit: optionalInteger(query, 'limit', MAX_LIMIT),
   };
 
@@ -50,6 +68,9 @@ function parseListQuery(query) {
   if (failed) return { error: failed.error };
   if (fields.level.value !== undefined && !LEVELS.includes(fields.level.value)) {
     return { error: `level must be one of: ${LEVELS.join(', ')}` };
+  }
+  if (fields.category.value !== undefined && !CATEGORIES.includes(fields.category.value)) {
+    return { error: `category must be one of: ${CATEGORIES.join(', ')}` };
   }
   if (fields.order.value !== undefined && !ORDERS.includes(fields.order.value)) {
     return { error: `order must be one of: ${ORDERS.join(', ')}` };
@@ -79,8 +100,9 @@ function createJobEventRoutes({ verifyToken, jobEventLog }) {
    *     summary: List video/events log entries
    *     description: >
    *       Append-only log of each step in a job's or video's life, with millisecond
-   *       timestamps. Newest first by default. Page with `before` (older) or `after`
-   *       (newer, use with order=asc) using the returned nextCursor.
+   *       timestamps. Newest first by default; events on the same millisecond keep
+   *       the order they were written in. Page with `limit` and `offset`; `total`
+   *       is the number of events matching the filters.
    *     tags: [Jobs]
    *     parameters:
    *       - { in: query, name: jobId, schema: { type: string } }
@@ -88,8 +110,13 @@ function createJobEventRoutes({ verifyToken, jobEventLog }) {
    *       - { in: query, name: eventType, schema: { type: string }, description: "e.g. video.failed" }
    *       - { in: query, name: level, schema: { type: string, enum: [info, warn, error] } }
    *       - { in: query, name: q, schema: { type: string }, description: Substring match on message, video title and channel }
-   *       - { in: query, name: before, schema: { type: integer }, description: Only entries with id below this }
-   *       - { in: query, name: after, schema: { type: integer }, description: Only entries with id above this }
+   *       - { in: query, name: category, schema: { type: string, enum: [job, video, nzb, strm, cache] }, description: Event type family }
+   *       - { in: query, name: from, schema: { type: string, format: date-time }, description: Only events at or after this time }
+   *       - { in: query, name: to, schema: { type: string, format: date-time }, description: Only events at or before this time }
+   *       - { in: query, name: actor, schema: { type: string }, description: Who recorded the event (downloader, nzb, ...) }
+   *       - { in: query, name: channel, schema: { type: string }, description: Exact channel name }
+   *       - { in: query, name: source, schema: { type: string }, description: Job source label from /api/job-events/facets }
+   *       - { in: query, name: offset, schema: { type: integer, minimum: 0 } }
    *       - { in: query, name: order, schema: { type: string, enum: [asc, desc], default: desc } }
    *       - { in: query, name: limit, schema: { type: integer, minimum: 1, maximum: 500, default: 100 } }
    *     responses:
@@ -117,7 +144,7 @@ function createJobEventRoutes({ verifyToken, jobEventLog }) {
    *                       videoTitle: { type: string, nullable: true }
    *                       channelName: { type: string, nullable: true }
    *                       jobType: { type: string, nullable: true }
-   *                 nextCursor: { type: integer, nullable: true }
+   *                 total: { type: integer }
    *       400:
    *         description: Invalid query parameter
    *       500:
@@ -135,6 +162,28 @@ function createJobEventRoutes({ verifyToken, jobEventLog }) {
     } catch (err) {
       logger.error({ err, filters }, 'Failed to list video/events log entries');
       return res.status(500).json({ error: 'Failed to list video/events log entries' });
+    }
+  });
+
+  /**
+   * @swagger
+   * /api/job-events/facets:
+   *   get:
+   *     summary: Values available to the log's filter dropdowns
+   *     description: Distinct event types, actors and channel names present in the log, plus the job source labels.
+   *     tags: [Jobs]
+   *     responses:
+   *       200:
+   *         description: Filter option lists
+   *       500:
+   *         description: Failed to read the log
+   */
+  router.get('/api/job-events/facets', verifyToken, async (req, res) => {
+    try {
+      return res.json(await jobEventLog.facets());
+    } catch (err) {
+      logger.error({ err }, 'Failed to read video/events log filter options');
+      return res.status(500).json({ error: 'Failed to read video/events log filter options' });
     }
   });
 

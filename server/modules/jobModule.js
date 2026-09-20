@@ -17,6 +17,7 @@ const downloadCleanup = require('./download/downloadCleanup');
 const { serializeAuxData, parseAuxData } = require('./jobAuxData');
 const jobEventLog = require('./jobEventLog');
 const { EVENT_TYPES } = require('./jobEventLog/eventCatalog');
+const { singleVideoRefForJob } = require('./jobEventLog/jobVideoRef');
 const logger = require('../logger');
 
 // Scratch flag for ad-hoc verbose tracing (queue reorder/order investigation
@@ -623,7 +624,7 @@ class JobModule {
       return { success: false, error: error.message };
     }
 
-    jobEventLog.record(EVENT_TYPES.JOB_REMOVED, { jobId, jobType: job.jobType });
+    jobEventLog.record(EVENT_TYPES.JOB_REMOVED, { jobId, jobType: job.jobType, ...singleVideoRefForJob(job) });
     delete this.jobs[jobId];
     this.emitJobsUpdated(jobId, 'Removed');
     return { success: true };
@@ -1394,9 +1395,11 @@ class JobModule {
         timeCreated: job.timeCreated,
       });
       this.emitJobsUpdated(jobId, job.status);
-      jobEventLog.record(EVENT_TYPES.JOB_CREATED, { jobId, jobType: job.jobType, detail: { status: job.status } });
+      jobEventLog.rememberJob(jobId, job.jobType);
+      const videoRef = singleVideoRefForJob(job);
+      jobEventLog.record(EVENT_TYPES.JOB_CREATED, { jobId, jobType: job.jobType, ...videoRef, detail: { status: job.status } });
       if (job.status === 'In Progress') {
-        jobEventLog.record(EVENT_TYPES.JOB_STARTED, { jobId, jobType: job.jobType });
+        jobEventLog.record(EVENT_TYPES.JOB_STARTED, { jobId, jobType: job.jobType, ...videoRef });
       }
       return jobId;
     } catch (error) {
@@ -1411,13 +1414,14 @@ class JobModule {
   recordStatusChange(jobId, job, previousStatus, changedAt) {
     if (job.status === previousStatus || job.status === 'Pending') return;
     if (job.status === 'In Progress') {
-      jobEventLog.record(EVENT_TYPES.JOB_STARTED, { jobId, jobType: job.jobType, occurredAt: changedAt });
+      jobEventLog.record(EVENT_TYPES.JOB_STARTED, { jobId, jobType: job.jobType, ...singleVideoRefForJob(job), occurredAt: changedAt });
       return;
     }
     const failedStatuses = ['Error', 'Terminated', 'Killed', 'Failed'];
     jobEventLog.record(EVENT_TYPES.JOB_FINISHED, {
       jobId,
       jobType: job.jobType,
+      ...singleVideoRefForJob(job),
       occurredAt: changedAt,
       detail: {
         status: job.status,

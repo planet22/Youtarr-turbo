@@ -102,32 +102,61 @@ describe('jobEventLog', () => {
     });
   });
 
-  describe('snapshot', () => {
-    test('fills title and channel from the Video row when the caller gave none', async () => {
-      Video.findOne.mockResolvedValueOnce({ youTubeVideoName: 'A Title', youTubeChannelName: 'A Channel' });
-      jobEventLog.record('video.download_started', { jobId: 'j1', youtubeId: 'abc' });
-      await jobEventLog.flush();
-      expect(JobEvent.create).toHaveBeenCalledWith(expect.objectContaining({ video_title: 'A Title', channel_name: 'A Channel' }));
-    });
+  describe('snapshot captured at the moment of the event', () => {
+    const lastRow = () => JobEvent.create.mock.calls[JobEvent.create.mock.calls.length - 1][0];
 
-    test('does not query Videos when the caller supplied title and channel', async () => {
-      jobEventLog.record('video.failed', { youtubeId: 'abc', videoTitle: 'T', channelName: 'C' });
+    test('never looks anything up in the database when writing', async () => {
+      jobEventLog.record('video.download_started', { jobId: 'j1', youtubeId: 'abc' });
       await jobEventLog.flush();
       expect(Video.findOne).not.toHaveBeenCalled();
+      expect(Job.findOne).not.toHaveBeenCalled();
     });
 
-    test('fills job type from the Job row when the caller gave none', async () => {
-      Job.findOne.mockResolvedValueOnce({ jobType: 'Channel Downloads' });
+    test('uses the title and channel the caller supplied', async () => {
+      jobEventLog.record('video.failed', { youtubeId: 'abc', videoTitle: 'T', channelName: 'C' });
+      await jobEventLog.flush();
+      expect(lastRow()).toMatchObject({ video_title: 'T', channel_name: 'C' });
+    });
+
+    test('fills a missing title from what was remembered a moment before', async () => {
+      jobEventLog.rememberVideo('abc', { title: 'Remembered', channelName: 'Chan' });
+      jobEventLog.record('video.download_started', { youtubeId: 'abc' });
+      await jobEventLog.flush();
+      expect(lastRow()).toMatchObject({ video_title: 'Remembered', channel_name: 'Chan' });
+    });
+
+    test('lets a supplied title win over a remembered one', async () => {
+      jobEventLog.rememberVideo('abc', { title: 'Old' });
+      jobEventLog.record('video.failed', { youtubeId: 'abc', videoTitle: 'New' });
+      await jobEventLog.flush();
+      expect(lastRow().video_title).toBe('New');
+    });
+
+    test('remembers a title supplied on one event for the next', async () => {
+      jobEventLog.record('video.failed', { youtubeId: 'abc', videoTitle: 'Seen once' });
+      jobEventLog.record('video.deleted', { youtubeId: 'abc' });
+      await jobEventLog.flush();
+      expect(lastRow().video_title).toBe('Seen once');
+    });
+
+    test('leaves the title empty for a video nothing is known about', async () => {
+      jobEventLog.record('video.download_started', { youtubeId: 'never-seen' });
+      await jobEventLog.flush();
+      expect(lastRow().video_title).toBeNull();
+    });
+
+    test('fills the job type from a remembered job', async () => {
+      jobEventLog.rememberJob('j1', 'Channel Downloads');
       jobEventLog.record('job.started', { jobId: 'j1' });
       await jobEventLog.flush();
-      expect(JobEvent.create).toHaveBeenCalledWith(expect.objectContaining({ job_type: 'Channel Downloads' }));
+      expect(lastRow().job_type).toBe('Channel Downloads');
     });
 
-    test('still writes the row when the snapshot lookup throws', async () => {
-      Video.findOne.mockRejectedValueOnce(new Error('lookup failed'));
-      jobEventLog.record('video.download_started', { jobId: 'j1', youtubeId: 'abc' });
+    test('forgets the oldest entries beyond the cap', async () => {
+      for (let i = 0; i < 2001; i += 1) jobEventLog.rememberJob('job-' + i, 'T' + i);
+      jobEventLog.record('job.started', { jobId: 'job-0' });
       await jobEventLog.flush();
-      expect(JobEvent.create).toHaveBeenCalledTimes(1);
+      expect(lastRow().job_type).toBeNull();
     });
   });
 
@@ -136,6 +165,11 @@ describe('jobEventLog', () => {
       id: 5, occurred_at: new Date('2026-09-19T17:12:59.566Z'), job_id: 'j1', youtube_id: 'abc',
       event_type: 'nzb.untracked', level: 'info', actor: 'nzb', message: 'm', detail: '{"a":1}',
       video_title: 'T', channel_name: 'C', job_type: 'X', ...over,
+    });
+    const query = () => JobEvent.findAll.mock.calls[0][0];
+
+    beforeEach(() => {
+      JobEvent.count = jest.fn().mockResolvedValue(0);
     });
 
     test('maps a row to the API shape with an ISO millisecond timestamp and parsed detail', async () => {
@@ -154,44 +188,121 @@ describe('jobEventLog', () => {
       expect(events[0].detail).toBeNull();
     });
 
-    test('reports the last returned id as nextCursor when another page exists', async () => {
-      JobEvent.findAll.mockResolvedValueOnce([row({ id: 9 }), row({ id: 8 }), row({ id: 7 })]);
-      const { events, nextCursor } = await jobEventLog.list({ limit: 2 });
-      expect(events.map((e) => e.id)).toEqual([9, 8]);
-      expect(nextCursor).toBe(8);
+    test('reports how many events match, for paging', async () => {
+      JobEvent.count.mockResolvedValueOnce(1234);
+      const { total } = await jobEventLog.list({});
+      expect(total).toBe(1234);
     });
 
-    test('reports a null nextCursor on the final page', async () => {
-      JobEvent.findAll.mockResolvedValueOnce([row({ id: 9 })]);
-      const { nextCursor } = await jobEventLog.list({ limit: 2 });
-      expect(nextCursor).toBeNull();
+    test('counts with the same filters it lists with', async () => {
+      await jobEventLog.list({ jobId: 'j1' });
+      expect(JobEvent.count).toHaveBeenCalledWith({ where: query().where });
     });
 
-    test('orders newest-first by default', async () => {
+    test('orders newest first by default, keeping same-millisecond events in the order written', async () => {
       await jobEventLog.list({});
-      expect(JobEvent.findAll.mock.calls[0][0].order).toEqual([['id', 'DESC']]);
+      expect(query().order).toEqual([['occurred_at', 'DESC'], ['id', 'ASC']]);
     });
 
-    test('orders oldest-first when asked', async () => {
+    test('orders oldest first when asked, still ties in the order written', async () => {
       await jobEventLog.list({ order: 'asc' });
-      expect(JobEvent.findAll.mock.calls[0][0].order).toEqual([['id', 'ASC']]);
+      expect(query().order).toEqual([['occurred_at', 'ASC'], ['id', 'ASC']]);
     });
 
-    test('filters by job id and youtube id', async () => {
-      await jobEventLog.list({ jobId: 'j1', youtubeId: 'abc' });
-      expect(JobEvent.findAll.mock.calls[0][0].where).toMatchObject({ job_id: 'j1', youtube_id: 'abc' });
+    test('pages with limit and offset', async () => {
+      await jobEventLog.list({ limit: 25, offset: 50 });
+      expect(query()).toMatchObject({ limit: 25, offset: 50 });
+    });
+
+    test('defaults to the first page', async () => {
+      await jobEventLog.list({});
+      expect(query()).toMatchObject({ limit: 100, offset: 0 });
     });
 
     test('caps the page size', async () => {
       await jobEventLog.list({ limit: 99999 });
-      expect(JobEvent.findAll.mock.calls[0][0].limit).toBe(501);
+      expect(query().limit).toBe(500);
+    });
+
+    test('filters by job id and youtube id', async () => {
+      await jobEventLog.list({ jobId: 'j1', youtubeId: 'abc' });
+      expect(query().where).toMatchObject({ job_id: 'j1', youtube_id: 'abc' });
+    });
+
+    test('filters by an event type family', async () => {
+      await jobEventLog.list({ category: 'nzb' });
+      const { Op } = require('sequelize');
+      expect(query().where.event_type[Op.like]).toBe('nzb.%');
+    });
+
+    test('filters to a time range', async () => {
+      await jobEventLog.list({ from: '2026-09-19T00:00:00.000Z', to: '2026-09-19T23:59:59.999Z' });
+      const { Op } = require('sequelize');
+      const range = query().where.occurred_at;
+      expect(range[Op.gte]).toEqual(new Date('2026-09-19T00:00:00.000Z'));
+      expect(range[Op.lte]).toEqual(new Date('2026-09-19T23:59:59.999Z'));
+    });
+
+    test('filters by actor', async () => {
+      await jobEventLog.list({ actor: 'nzb' });
+      expect(query().where.actor).toBe('nzb');
+    });
+
+    test('filters by exact channel name', async () => {
+      await jobEventLog.list({ channel: 'pcrobec' });
+      expect(query().where.channel_name).toBe('pcrobec');
+    });
+
+    test('filters by exact event type', async () => {
+      await jobEventLog.list({ eventType: 'video.failed' });
+      expect(query().where.event_type).toBe('video.failed');
+    });
+
+    test('filters by a source label, matching the job types in that group', async () => {
+      await jobEventLog.list({ source: 'NZB' });
+      const { Op } = require('sequelize');
+      expect(query().where[Op.and][0][Op.or]).toEqual([{ job_type: { [Op.like]: 'Sonarr/Radarr: %' } }]);
+    });
+
+    test('a source with several job types matches any of them', async () => {
+      await jobEventLog.list({ source: 'Playlists' });
+      const { Op } = require('sequelize');
+      expect(query().where[Op.and][0][Op.or]).toHaveLength(2);
+    });
+
+    test('ignores an unknown source label', async () => {
+      await jobEventLog.list({ source: 'Nonsense' });
+      const { Op } = require('sequelize');
+      expect(query().where[Op.and]).toBeUndefined();
     });
 
     test('escapes LIKE wildcards in the search text', async () => {
       await jobEventLog.list({ q: '100%_x' });
       const { Op } = require('sequelize');
-      const clause = JobEvent.findAll.mock.calls[0][0].where[Op.or][0];
+      const clause = query().where[Op.or][0];
       expect(clause.message[Op.like]).toBe('%100\\%\\_x%');
+    });
+  });
+
+  describe('facets', () => {
+    test('offers the distinct event types, actors and channels found in the log', async () => {
+      JobEvent.findAll
+        .mockResolvedValueOnce([{ value: 'job.created' }, { value: 'video.failed' }])
+        .mockResolvedValueOnce([{ value: 'nzb' }])
+        .mockResolvedValueOnce([{ value: 'pcrobec' }]);
+      const facets = await jobEventLog.facets();
+      expect(facets).toMatchObject({ eventTypes: ['job.created', 'video.failed'], actors: ['nzb'], channels: ['pcrobec'] });
+    });
+
+    test('always offers every source label', async () => {
+      const facets = await jobEventLog.facets();
+      expect(facets.sources).toEqual(expect.arrayContaining(['Channels', 'NZB', 'Playlists']));
+    });
+
+    test('leaves out empty values', async () => {
+      JobEvent.findAll.mockResolvedValueOnce([{ value: 'a' }, { value: '' }, { value: null }]).mockResolvedValue([]);
+      const facets = await jobEventLog.facets();
+      expect(facets.eventTypes).toEqual(['a']);
     });
   });
 

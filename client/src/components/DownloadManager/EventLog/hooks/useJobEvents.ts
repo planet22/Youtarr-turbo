@@ -1,19 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import axios from 'axios';
-import type { JobEvent, JobEventFilters, JobEventPage } from '../../../../types/JobEvent';
+import type { JobEvent, JobEventFacets, JobEventFilters, JobEventPage } from '../../../../types/JobEvent';
 
-const PAGE_SIZE = 100;
+const NO_FACETS: JobEventFacets = { eventTypes: [], actors: [], channels: [], sources: [] };
 
 export interface UseJobEventsReturn {
   events: JobEvent[];
+  // Events matching the filters across every page
+  total: number;
+  // Values the filter dropdowns can offer, taken from the log itself
+  facets: JobEventFacets;
   loading: boolean;
-  loadingMore: boolean;
   error: string | null;
-  hasMore: boolean;
-  // True when the list is one job's or video's story (oldest first).
-  timeline: boolean;
-  loadMore: () => Promise<void>;
-  // Pulls in entries recorded since the list was loaded, without resetting it.
+  // Re-reads the current page without clearing it (used for live updates).
   refresh: () => Promise<void>;
 }
 
@@ -21,71 +20,68 @@ function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : 'Failed to load the events log';
 }
 
-interface MergeResult {
-  events: JobEvent[];
-  // True when the list was rebuilt from the page, so its cursor replaces ours.
-  restarted: boolean;
-  nextCursor: number | null;
-}
-
-// A page newer than what we hold. Prepends only the unseen entries; if the
-// whole page is unseen and more exist behind it, there is a gap, so start over.
-// Null means nothing new.
-function mergeNewest(current: JobEvent[], page: JobEventPage): MergeResult | null {
-  if (current.length === 0) return { events: page.events, restarted: true, nextCursor: page.nextCursor };
-  const newestKnown = current[0].id;
-  const fresh = page.events.filter((event) => event.id > newestKnown);
-  if (fresh.length === 0) return null;
-  if (fresh.length === page.events.length && page.nextCursor !== null) {
-    return { events: page.events, restarted: true, nextCursor: page.nextCursor };
-  }
-  return { events: [...fresh, ...current], restarted: false, nextCursor: null };
-}
-
 /**
- * Reads the video/events log. A list filtered to one job or video is a
- * timeline (oldest first, paged forward); anything else is the global log
- * (newest first, paged backward).
+ * Reads one page of the video/events log. `ascending` is chosen by the caller
+ * (oldest first when the list is filtered, newest first otherwise).
  */
-export function useJobEvents(token: string | null, filters: JobEventFilters): UseJobEventsReturn {
+export function useJobEvents(
+  token: string | null,
+  filters: JobEventFilters,
+  page: number,
+  pageSize: number,
+  ascending: boolean
+): UseJobEventsReturn {
   const [events, setEvents] = useState<JobEvent[]>([]);
-  const [nextCursor, setNextCursor] = useState<number | null>(null);
+  const [total, setTotal] = useState(0);
+  const [facets, setFacets] = useState<JobEventFacets>(NO_FACETS);
   const [loading, setLoading] = useState(false);
-  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const generationRef = useRef(0);
 
-  const timeline = Boolean(filters.jobId || filters.youtubeId);
-  const { jobId, youtubeId, level, q } = filters;
+  const { jobId, youtubeId, level, category, eventType, actor, channel, source, q, from, to } = filters;
 
-  const fetchPage = useCallback(
-    async (cursor: { before?: number; after?: number }) => {
-      const params: Record<string, string | number> = { limit: PAGE_SIZE, order: timeline ? 'asc' : 'desc' };
-      if (jobId) params.jobId = jobId;
-      if (youtubeId) params.youtubeId = youtubeId;
-      if (level) params.level = level;
-      if (q) params.q = q;
-      if (cursor.before !== undefined) params.before = cursor.before;
-      if (cursor.after !== undefined) params.after = cursor.after;
-      const response = await axios.get<JobEventPage>('/api/job-events', {
-        headers: { 'x-access-token': token },
-        params,
-      });
-      return response.data;
-    },
-    [token, timeline, jobId, youtubeId, level, q]
-  );
+  const fetchPage = useCallback(async (): Promise<JobEventPage> => {
+    const params: Record<string, string | number> = {
+      limit: pageSize,
+      offset: (page - 1) * pageSize,
+      order: ascending ? 'asc' : 'desc',
+    };
+    const optional: Record<string, string | undefined> = {
+      jobId, youtubeId, level, category, eventType, actor, channel, source, q, from, to,
+    };
+    Object.entries(optional).forEach(([name, value]) => {
+      if (value) params[name] = value;
+    });
+    const response = await axios.get<JobEventPage>('/api/job-events', {
+      headers: { 'x-access-token': token },
+      params,
+    });
+    return response.data;
+  }, [token, page, pageSize, ascending, jobId, youtubeId, level, category, eventType, actor, channel, source, q, from, to]);
+
+  const fetchFacets = useCallback(async () => {
+    const response = await axios.get<JobEventFacets>('/api/job-events/facets', {
+      headers: { 'x-access-token': token },
+    });
+    setFacets(response.data);
+  }, [token]);
+
+  useEffect(() => {
+    if (!token) return;
+    // Dropdown options are a convenience; the log still works without them.
+    fetchFacets().catch(() => {});
+  }, [token, fetchFacets]);
 
   useEffect(() => {
     if (!token) return;
     const generation = ++generationRef.current;
     setLoading(true);
     setError(null);
-    fetchPage({})
-      .then((page) => {
+    fetchPage()
+      .then((result) => {
         if (generation !== generationRef.current) return;
-        setEvents(page.events);
-        setNextCursor(page.nextCursor);
+        setEvents(result.events);
+        setTotal(result.total);
       })
       .catch((err: unknown) => {
         if (generation === generationRef.current) setError(errorMessage(err));
@@ -95,47 +91,19 @@ export function useJobEvents(token: string | null, filters: JobEventFilters): Us
       });
   }, [token, fetchPage]);
 
-  const loadMore = useCallback(async () => {
-    if (nextCursor === null || loadingMore) return;
-    const generation = generationRef.current;
-    setLoadingMore(true);
-    try {
-      const page = await fetchPage(timeline ? { after: nextCursor } : { before: nextCursor });
-      if (generation !== generationRef.current) return;
-      setEvents((current) => [...current, ...page.events]);
-      setNextCursor(page.nextCursor);
-    } catch (err: unknown) {
-      if (generation === generationRef.current) setError(errorMessage(err));
-    } finally {
-      setLoadingMore(false);
-    }
-  }, [fetchPage, nextCursor, loadingMore, timeline]);
-
   const refresh = useCallback(async () => {
     if (!token) return;
     const generation = generationRef.current;
     try {
-      if (timeline) {
-        // Newer entries belong at the end; if pages are still unloaded they
-        // will arrive through loadMore in order, so only append at the tail.
-        if (nextCursor !== null) return;
-        const lastId = events.length > 0 ? events[events.length - 1].id : 0;
-        const page = await fetchPage({ after: lastId });
-        if (generation !== generationRef.current || page.events.length === 0) return;
-        setEvents((current) => [...current, ...page.events]);
-        setNextCursor(page.nextCursor);
-        return;
-      }
-      const page = await fetchPage({});
+      const result = await fetchPage();
       if (generation !== generationRef.current) return;
-      const merged = mergeNewest(events, page);
-      if (!merged) return;
-      setEvents(merged.events);
-      if (merged.restarted) setNextCursor(merged.nextCursor);
+      setEvents(result.events);
+      setTotal(result.total);
+      fetchFacets().catch(() => {});
     } catch {
       // Keep what is on screen; the next broadcast retries.
     }
-  }, [token, timeline, nextCursor, events, fetchPage]);
+  }, [token, fetchPage, fetchFacets]);
 
-  return { events, loading, loadingMore, error, hasMore: nextCursor !== null, timeline, loadMore, refresh };
+  return { events, total, facets, loading, error, refresh };
 }

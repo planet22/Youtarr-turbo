@@ -625,6 +625,8 @@ describe('videoDownloadPostProcessFiles routing and finalize', () => {
       expect(mockRecordEvent).toHaveBeenCalledWith('video.file_finalized', {
         jobId: 'job-1',
         youtubeId: 'abc123',
+        videoTitle: 'Video Title',
+        channelName: 'Channel',
         detail: { filePath: completedPath(), fileSize: 4321 },
       });
     });

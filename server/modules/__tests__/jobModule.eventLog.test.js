@@ -95,6 +95,42 @@ describe('JobModule video/events log', () => {
     });
   });
 
+  describe('single-video jobs', () => {
+    const NZB_JOB = { jobType: 'Sonarr/Radarr: TV [abc]', status: 'Pending', data: { nzb: { youtubeId: 'abc', nzbName: 'Celebrity Juice S26E09' } } };
+
+    test('ties job.created to the video an NZB grab is for', async () => {
+      await jobModule.addJob({ ...NZB_JOB });
+
+      expect(callsOf('job.created')[0][1]).toMatchObject({ youtubeId: 'abc', videoTitle: 'Celebrity Juice S26E09' });
+    });
+
+    test('ties job.created to the only URL of a one-video job', async () => {
+      await jobModule.addJob({ jobType: 'Manually Added Urls', status: 'Pending', data: { urls: ['https://www.youtube.com/watch?v=WhPpqSPYDoQ'] } });
+
+      expect(callsOf('job.created')[0][1].youtubeId).toBe('WhPpqSPYDoQ');
+    });
+
+    test('leaves a multi-video job without a video', async () => {
+      await jobModule.addJob({ jobType: 'Channel Downloads', status: 'Pending', data: {} });
+
+      expect(callsOf('job.created')[0][1].youtubeId).toBeUndefined();
+    });
+
+    test('ties job.finished to the same video', async () => {
+      jobModule.jobs.j1 = { id: 'j1', jobType: 'Sonarr/Radarr: TV [abc]', status: 'In Progress', data: { nzb: { youtubeId: 'abc' } } };
+
+      await jobModule.updateJob('j1', { status: 'Complete' });
+
+      expect(callsOf('job.finished')[0][1].youtubeId).toBe('abc');
+    });
+
+    test('remembers the job type so later events can be stamped with it', async () => {
+      await jobModule.addJob({ ...NZB_JOB });
+
+      expect(jobEventLog.rememberJob).toHaveBeenCalledWith('uuid-1', 'Sonarr/Radarr: TV [abc]');
+    });
+  });
+
   describe('updateJob status changes', () => {
     it('records job.started when a Pending job flips to In Progress', async () => {
       jobModule.jobs.j1 = { id: 'j1', jobType: DOWNLOAD, status: 'Pending' };

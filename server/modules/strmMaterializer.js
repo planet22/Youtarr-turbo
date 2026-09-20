@@ -11,6 +11,7 @@ const nfoGenerator = require('./nfoGenerator');
 const videoPersistence = require('./videoPersistence');
 const jobEventLog = require('./jobEventLog');
 const { EVENT_TYPES } = require('./jobEventLog/eventCatalog');
+const { videoIdFromUrl } = require('./jobEventLog/jobVideoRef');
 const youtubeMetadataCache = require('./youtubeMetadataCache');
 const ratingMapper = require('./ratingMapper');
 const downloadSettingsResolver = require('./download/downloadSettingsResolver');
@@ -693,6 +694,8 @@ class StrmMaterializer {
           results.push({ ok: true, ...r });
         } catch (err) {
           logger.error({ err, url }, 'STRM materialize failed');
+          // No title here: lastVideoInfo may still describe the PREVIOUS video, and the log must not guess.
+          jobEventLog.record(EVENT_TYPES.VIDEO_FAILED, { jobId, youtubeId: videoIdFromUrl(url) || undefined, detail: { error: err.message, url } });
           // If metadata resolved before the failure (e.g. an NFO/thumbnail
           // write error, not a metadata-fetch error), lastVideoInfo still
           // holds this video's title - carry it onto the failure record

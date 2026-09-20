@@ -1,6 +1,7 @@
 const { AsyncLocalStorage } = require('async_hooks');
 const logger = require('../../logger');
 const { EVENT_TYPES, LEVELS, describeEvent } = require('./eventCatalog');
+const { SOURCES, SOURCE_LABELS } = require('./sourceLabels');
 
 // Append-only video/events log. Every call site is a single fire-and-forget
 // `jobEventLog.record(...)`: it returns immediately, never throws, and never
@@ -15,6 +16,8 @@ const MAX_JOB_TYPE_LENGTH = 255;
 const MAX_DETAIL_BYTES = 16 * 1024;
 const DEFAULT_RETENTION_DAYS = 180;
 const MAX_RETENTION_DAYS = 3650;
+const MAX_REMEMBERED = 2000;
+const MAX_FACET_VALUES = 500;
 const DEFAULT_PAGE_SIZE = 100;
 const MAX_PAGE_SIZE = 500;
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
@@ -51,6 +54,13 @@ function parseDetail(raw) {
 
 const escapeLike = (text) => text.replace(/[\\%_]/g, (ch) => `\\${ch}`);
 
+// Insertion-ordered map capped at MAX_REMEMBERED entries, oldest evicted first.
+function remember(map, key, value) {
+  map.delete(key);
+  map.set(key, value);
+  if (map.size > MAX_REMEMBERED) map.delete(map.keys().next().value);
+}
+
 class JobEventLog {
   constructor() {
     // Inserts run strictly in call order so row ids follow real event order
@@ -61,6 +71,8 @@ class JobEventLog {
     // whole operation is happening instead of threading a reason argument
     // through every function underneath it.
     this.contextStorage = new AsyncLocalStorage();
+    this.videoInfo = new Map();
+    this.jobTypes = new Map();
   }
 
   /**
@@ -106,6 +118,13 @@ class JobEventLog {
       }
       const occurredAt = fields.occurredAt ? new Date(fields.occurredAt) : new Date();
       const { actor, level, message } = describeEvent(eventType, fields);
+      // Everything is fixed here, at the moment of the event: what the caller
+      // knows first, then what was remembered a moment ago. Never looked up later.
+      const known = (fields.youtubeId && this.videoInfo.get(fields.youtubeId)) || {};
+      const videoTitle = fields.videoTitle || known.title;
+      const channelName = fields.channelName || known.channelName;
+      const jobType = fields.jobType || (fields.jobId && this.jobTypes.get(fields.jobId)) || undefined;
+      if (fields.youtubeId) this.rememberVideo(fields.youtubeId, { title: videoTitle, channelName });
       const entry = {
         occurred_at: occurredAt,
         job_id: truncate(fields.jobId, 36),
@@ -115,9 +134,9 @@ class JobEventLog {
         actor: truncate(actor, 48),
         message: truncate(message, MAX_MESSAGE_LENGTH),
         detail: serializeDetail(fields.detail),
-        video_title: truncate(fields.videoTitle, MAX_TITLE_LENGTH),
-        channel_name: truncate(fields.channelName, MAX_CHANNEL_LENGTH),
-        job_type: truncate(fields.jobType, MAX_JOB_TYPE_LENGTH),
+        video_title: truncate(videoTitle, MAX_TITLE_LENGTH),
+        channel_name: truncate(channelName, MAX_CHANNEL_LENGTH),
+        job_type: truncate(jobType, MAX_JOB_TYPE_LENGTH),
       };
       this.tail = this.tail.then(() => this.write(entry));
     } catch (err) {
@@ -130,72 +149,78 @@ class JobEventLog {
     return this.tail;
   }
 
+  // Inserts exactly what record() captured. Nothing is looked up here: every
+  // fact on the row was taken at the moment of the event, so it can never be
+  // wrong or missing because a Video/Job row changed or vanished in between.
   async write(entry) {
     try {
       const { JobEvent } = require('../../models');
-      await this.fillSnapshot(entry);
       await JobEvent.create(entry);
     } catch (err) {
       logger.warn({ err, eventType: entry.event_type, jobId: entry.job_id }, 'jobEventLog: failed to persist event');
     }
   }
 
-  // Best-effort: whatever the row can't be told by its caller is read from the
-  // live Video/Job row at write time, so it stays readable after those rows
-  // are deleted. Missing rows simply leave the snapshot columns null.
-  async fillSnapshot(entry) {
-    try {
-      const { Video, Job } = require('../../models');
-      if (entry.youtube_id && (!entry.video_title || !entry.channel_name)) {
-        const video = await Video.findOne({
-          where: { youtubeId: entry.youtube_id },
-          attributes: ['youTubeVideoName', 'youTubeChannelName'],
-        });
-        if (video) {
-          entry.video_title = entry.video_title || truncate(video.youTubeVideoName, MAX_TITLE_LENGTH);
-          entry.channel_name = entry.channel_name || truncate(video.youTubeChannelName, MAX_CHANNEL_LENGTH);
-        }
-      }
-      if (entry.job_id && !entry.job_type) {
-        const job = await Job.findOne({ where: { id: entry.job_id }, attributes: ['jobType'] });
-        if (job) entry.job_type = truncate(job.jobType, MAX_JOB_TYPE_LENGTH);
-      }
-    } catch (err) {
-      logger.debug({ err }, 'jobEventLog: snapshot lookup failed; storing the row without it');
-    }
+  // Synchronous, in-memory memory of what recent videos/jobs are called, fed
+  // by call sites that already hold the facts (a persisted Video, a new job).
+  // record() reads it instantly so an event that lacks a title can still be
+  // stamped with what was known at that moment - never with a later lookup.
+  rememberVideo(youtubeId, { title, channelName } = {}) {
+    if (!youtubeId || (!title && !channelName)) return;
+    const previous = this.videoInfo.get(youtubeId) || {};
+    remember(this.videoInfo, youtubeId, {
+      title: title || previous.title,
+      channelName: channelName || previous.channelName,
+    });
+  }
+
+  rememberJob(jobId, jobType) {
+    if (jobId && jobType) remember(this.jobTypes, jobId, jobType);
   }
 
   /**
-   * Cursor-paged read. Newest-first pages with `before`, oldest-first pages
-   * with `after`; ids are the cursor because they follow real event order.
+   * Page read. Ties on the same millisecond keep the order they were written
+   * in (insertion order), whichever direction the list runs.
    * @param {object} [filters]
    * @param {string} [filters.jobId]
    * @param {string} [filters.youtubeId]
-   * @param {string|string[]} [filters.eventType]
+   * @param {string} [filters.eventType]
+   * @param {string} [filters.category] - event type family: job, video, nzb, strm or cache
    * @param {string} [filters.level]
+   * @param {string} [filters.actor]
+   * @param {string} [filters.channel]
+   * @param {string} [filters.source] - a job source label (Channels, NZB, ...)
    * @param {string} [filters.q] - substring match on message, video title, channel name
-   * @param {number} [filters.before] - only rows with id < before
-   * @param {number} [filters.after] - only rows with id > after
-   * @param {'asc'|'desc'} [filters.order='desc']
+   * @param {string} [filters.from] - only events at or after this ISO time
+   * @param {string} [filters.to] - only events at or before this ISO time
+   * @param {'asc'|'desc'} [filters.order='desc'] - by time
    * @param {number} [filters.limit]
-   * @returns {Promise<{events: object[], nextCursor: number|null}>}
+   * @param {number} [filters.offset]
+   * @returns {Promise<{events: object[], total: number}>}
    */
   async list(filters = {}) {
     const { JobEvent } = require('../../models');
     const { Op } = require('sequelize');
 
     const limit = Math.min(MAX_PAGE_SIZE, Math.max(1, Math.floor(Number(filters.limit)) || DEFAULT_PAGE_SIZE));
+    const offset = Math.max(0, Math.floor(Number(filters.offset)) || 0);
     const order = filters.order === 'asc' ? 'ASC' : 'DESC';
     const where = {};
     if (filters.jobId) where.job_id = filters.jobId;
     if (filters.youtubeId) where.youtube_id = filters.youtubeId;
     if (filters.eventType) where.event_type = filters.eventType;
     if (filters.level) where.level = filters.level;
+    if (filters.category) where.event_type = { [Op.like]: `${escapeLike(filters.category)}.%` };
+    if (filters.actor) where.actor = filters.actor;
+    if (filters.channel) where.channel_name = filters.channel;
+    // A source label selects jobs by their type; an unknown label is ignored.
+    const sourcePatterns = filters.source && SOURCES[filters.source];
+    if (sourcePatterns) where[Op.and] = [{ [Op.or]: sourcePatterns.map((pattern) => ({ job_type: { [Op.like]: pattern } })) }];
 
-    const idBounds = {};
-    if (Number.isFinite(filters.before)) idBounds[Op.lt] = filters.before;
-    if (Number.isFinite(filters.after)) idBounds[Op.gt] = filters.after;
-    if (Reflect.ownKeys(idBounds).length > 0) where.id = idBounds;
+    const timeBounds = {};
+    if (filters.from) timeBounds[Op.gte] = new Date(filters.from);
+    if (filters.to) timeBounds[Op.lte] = new Date(filters.to);
+    if (Reflect.ownKeys(timeBounds).length > 0) where.occurred_at = timeBounds;
 
     const q = typeof filters.q === 'string' ? filters.q.trim() : '';
     if (q) {
@@ -207,13 +232,36 @@ class JobEventLog {
       ];
     }
 
-    // One extra row tells us whether another page exists without a count query.
-    const rows = await JobEvent.findAll({ where, order: [['id', order]], limit: limit + 1 });
-    const hasMore = rows.length > limit;
-    const page = hasMore ? rows.slice(0, limit) : rows;
-    const events = page.map((row) => this.toApiShape(row));
-    const nextCursor = hasMore ? events[events.length - 1].id : null;
-    return { events, nextCursor };
+    const [total, rows] = await Promise.all([
+      JobEvent.count({ where }),
+      JobEvent.findAll({ where, order: [['occurred_at', order], ['id', 'ASC']], limit, offset }),
+    ]);
+    return { events: rows.map((row) => this.toApiShape(row)), total };
+  }
+
+  /**
+   * The values each filter dropdown can offer, taken from the log itself.
+   * @returns {Promise<{eventTypes: string[], actors: string[], channels: string[], sources: string[]}>}
+   */
+  async facets() {
+    const { JobEvent } = require('../../models');
+    const { Op, fn, col } = require('sequelize');
+    const distinct = async (column) => {
+      const rows = await JobEvent.findAll({
+        attributes: [[fn('DISTINCT', col(column)), 'value']],
+        where: { [column]: { [Op.ne]: null } },
+        order: [[col(column), 'ASC']],
+        limit: MAX_FACET_VALUES,
+        raw: true,
+      });
+      return rows.map((row) => row.value).filter(Boolean);
+    };
+    const [eventTypes, actors, channels] = await Promise.all([
+      distinct('event_type'),
+      distinct('actor'),
+      distinct('channel_name'),
+    ]);
+    return { eventTypes, actors, channels, sources: SOURCE_LABELS };
   }
 
   toApiShape(row) {

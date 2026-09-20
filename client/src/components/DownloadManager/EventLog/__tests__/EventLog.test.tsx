@@ -29,11 +29,26 @@ const event = (id: number, over: Partial<JobEvent> = {}): JobEvent => ({
   ...over,
 });
 
-const respond = (events: JobEvent[], nextCursor: number | null = null) => {
-  mockedGet.mockResolvedValue({ data: { events, nextCursor } as JobEventPage });
+const respond = (events: JobEvent[], total = events.length) => {
+  mockedGet.mockImplementation((url: string) =>
+    Promise.resolve({
+      data: url === '/api/job-events/facets'
+        ? { eventTypes: ['video.failed'], actors: ['downloader'], channels: ['pcrobec'], sources: ['NZB', 'Channels'] }
+        : ({ events, total } as JobEventPage),
+    })
+  );
 };
 
-const lastParams = () => mockedGet.mock.calls[mockedGet.mock.calls.length - 1][1]?.params;
+// Facets (dropdown options) are fetched too; these helpers look only at the list requests.
+const listCalls = () => mockedGet.mock.calls.filter(([url]) => url === '/api/job-events');
+const lastParams = () => listCalls()[listCalls().length - 1][1]?.params;
+
+jest.mock('../../../shared/VideoModal', () => ({
+  __esModule: true,
+  default: ({ video, onClose }: { video: { title: string }; onClose: () => void }) =>
+    require('react').createElement('div', { 'data-testid': 'video-modal' }, video.title,
+      require('react').createElement('button', { onClick: onClose }, 'Close modal')),
+}));
 
 type Filter = (message: { destination?: string; type?: string }) => boolean;
 type Callback = (data: unknown) => void;
@@ -59,6 +74,7 @@ describe('EventLog page', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    window.localStorage.clear();
     subscriptions = [];
     respond([]);
   });
@@ -71,57 +87,56 @@ describe('EventLog page', () => {
     expect(screen.getByText('Message 1')).toBeInTheDocument();
   });
 
-  test('shows the entry count in the heading', async () => {
-    respond([event(2), event(1)]);
+  test('shows the total in the heading', async () => {
+    respond([event(2), event(1)], 250);
     renderPage();
 
-    expect(await screen.findByText(/Video \/ Events Log \(2 entries\)/)).toBeInTheDocument();
+    expect(await screen.findByText(/Video \/ Events Log \(250 events\)/)).toBeInTheDocument();
   });
 
-  test('marks the count as a minimum when more pages exist', async () => {
-    respond([event(2), event(1)], 1);
+  test('says nothing has been recorded when the log is empty', async () => {
     renderPage();
 
-    expect(await screen.findByText(/Video \/ Events Log \(2\+ entries\)/)).toBeInTheDocument();
+    expect(await screen.findByText('No events recorded yet')).toBeInTheDocument();
   });
 
-  test('says nothing has been recorded yet for an empty log', async () => {
-    renderPage();
+  test('says nothing matched when a filter is active', async () => {
+    renderPage('/downloads/log?job=job-1');
 
-    expect(await screen.findByText('No events recorded yet.')).toBeInTheDocument();
-  });
-
-  test('says nothing matched when filters are active', async () => {
-    renderPage('/downloads/log?level=error');
-
-    expect(await screen.findByText('No events recorded for these filters.')).toBeInTheDocument();
+    expect(await screen.findByText('No events found matching your filters')).toBeInTheDocument();
   });
 
   test('shows an error when loading fails', async () => {
     mockedGet.mockRejectedValue(new Error('Network Error'));
     renderPage();
 
-    expect(await screen.findByText('Network Error')).toBeInTheDocument();
+    expect(await screen.findByText(/Network Error/)).toBeInTheDocument();
   });
 
-  test('requests the newest page first for the global log', async () => {
+  test('lists the latest events first when nothing is filtered', async () => {
     renderPage();
 
-    await waitFor(() => expect(mockedGet).toHaveBeenCalled());
-    expect(lastParams()).toEqual({ limit: 100, order: 'desc' });
+    await waitFor(() => expect(listCalls().length).toBeGreaterThan(0));
+    expect(lastParams()).toMatchObject({ order: 'desc', offset: 0 });
   });
 
-  describe('deep links', () => {
-    test('a ?job= link loads that job as a timeline', async () => {
+  describe('narrowing the log', () => {
+    test('a ?job= link filters to that job, oldest first', async () => {
       respond([event(1), event(2)]);
       renderPage('/downloads/log?job=job-1');
 
       await screen.findByText('Message 1');
       expect(lastParams()).toMatchObject({ jobId: 'job-1', order: 'asc' });
-      expect(screen.getByRole('columnheader', { name: 'Since previous' })).toBeInTheDocument();
     });
 
-    test('a ?video= link loads that video as a timeline', async () => {
+    test('a ?job= link shows the gap between steps', async () => {
+      respond([event(1), event(2)]);
+      renderPage('/downloads/log?job=job-1');
+
+      expect(await screen.findByRole('columnheader', { name: 'Since previous' })).toBeInTheDocument();
+    });
+
+    test('a ?video= link filters to that video, oldest first', async () => {
       respond([event(1)]);
       renderPage('/downloads/log?video=abc123');
 
@@ -129,30 +144,37 @@ describe('EventLog page', () => {
       expect(lastParams()).toMatchObject({ youtubeId: 'abc123', order: 'asc' });
     });
 
-    test('shows the job as a chip with its job type', async () => {
-      respond([event(1)]);
-      renderPage('/downloads/log?job=job-1');
+    test('a saved level filter applies and reads oldest first', async () => {
+      window.localStorage.setItem('youtarr:eventLog:filter:level', JSON.stringify('error'));
+      renderPage();
 
-      expect(await screen.findByText('Job: Channel Downloads')).toBeInTheDocument();
+      await waitFor(() => expect(listCalls().length).toBeGreaterThan(0));
+      expect(lastParams()).toMatchObject({ level: 'error', order: 'asc' });
     });
 
-    test('a ?level= link filters by level', async () => {
-      renderPage('/downloads/log?level=warn');
+    test.each([
+      ['eventType', 'video.failed'],
+      ['source', 'NZB'],
+      ['actor', 'downloader'],
+      ['channel', 'pcrobec'],
+    ])('a saved %s filter applies', async (name, value) => {
+      window.localStorage.setItem('youtarr:eventLog:filter:' + name, JSON.stringify(value));
+      renderPage();
 
-      await waitFor(() => expect(mockedGet).toHaveBeenCalled());
-      expect(lastParams()).toMatchObject({ level: 'warn' });
+      await waitFor(() => expect(mockedGet).toHaveBeenCalledWith('/api/job-events', expect.anything()));
+      const call = mockedGet.mock.calls.find(([url]) => url === '/api/job-events');
+      expect(call?.[1]?.params).toMatchObject({ [name]: value });
     });
 
-    test('a ?q= link starts with that search text', async () => {
-      renderPage('/downloads/log?q=juice');
+    test('a saved date range is sent as instants', async () => {
+      window.localStorage.setItem('youtarr:eventLog:filter:dateFrom', JSON.stringify('2026-09-19'));
+      renderPage();
 
-      expect(await screen.findByRole('textbox', { name: 'Search' })).toHaveValue('juice');
-      expect(lastParams()).toMatchObject({ q: 'juice' });
+      await waitFor(() => expect(listCalls().length).toBeGreaterThan(0));
+      expect(new Date(lastParams().from).getTime()).toBe(new Date(2026, 8, 19, 0, 0, 0, 0).getTime());
     });
-  });
 
-  describe('narrowing the log', () => {
-    test('clicking a video title switches to that video\'s timeline', async () => {
+    test('clicking a video title switches to that video, oldest first', async () => {
       respond([event(1)]);
       renderPage();
 
@@ -161,68 +183,69 @@ describe('EventLog page', () => {
       await waitFor(() => expect(lastParams()).toMatchObject({ youtubeId: 'abc123', order: 'asc' }));
     });
 
-    test('clicking a job type switches to that job\'s timeline', async () => {
+    test('clicking a job label switches to that job', async () => {
       respond([event(1)]);
       renderPage();
 
-      await userEvent.click(await screen.findByRole('button', { name: 'Channel Downloads' }));
+      await userEvent.click(await screen.findByRole('button', { name: 'Channels' }));
 
       await waitFor(() => expect(lastParams()).toMatchObject({ jobId: 'job-1', order: 'asc' }));
     });
 
-    test('removing the job chip returns to the global log', async () => {
+    test('typing in the search box filters the log', async () => {
+      renderPage();
+      await waitFor(() => expect(listCalls().length).toBeGreaterThan(0));
+
+      fireEvent.change(screen.getByPlaceholderText(/Search events/), { target: { value: 'juice' } });
+
+      await waitFor(() => expect(lastParams()).toMatchObject({ q: 'juice', order: 'asc' }));
+    });
+  });
+
+  describe('video popup', () => {
+    test('clicking a thumbnail opens the video popup for that entry', async () => {
       respond([event(1)]);
-      renderPage('/downloads/log?job=job-1');
+      renderPage();
 
-      await userEvent.click(await screen.findByLabelText('Remove'));
+      await userEvent.click(await screen.findByTestId('video-thumbnail'));
 
-      await waitFor(() => expect(lastParams()).toEqual({ limit: 100, order: 'desc' }));
+      expect(screen.getByTestId('video-modal')).toHaveTextContent('Celebrity Juice S26E09');
     });
 
-    test('typing in the search box filters after a short pause', async () => {
-      jest.useFakeTimers();
-      try {
-        renderPage();
-        await act(async () => { await Promise.resolve(); });
+    test('the popup is closed until a thumbnail is clicked', async () => {
+      respond([event(1)]);
+      renderPage();
+      await screen.findByText('Message 1');
 
-        fireEvent.change(screen.getByRole('textbox', { name: 'Search' }), { target: { value: 'juice' } });
-        expect(lastParams()).not.toHaveProperty('q');
+      expect(screen.queryByTestId('video-modal')).not.toBeInTheDocument();
+    });
 
-        await act(async () => { jest.advanceTimersByTime(350); });
+    test('closing the popup removes it', async () => {
+      respond([event(1)]);
+      renderPage();
+      await userEvent.click(await screen.findByTestId('video-thumbnail'));
 
-        expect(lastParams()).toMatchObject({ q: 'juice' });
-      } finally {
-        jest.useRealTimers();
-      }
+      await userEvent.click(screen.getByRole('button', { name: 'Close modal' }));
+
+      expect(screen.queryByTestId('video-modal')).not.toBeInTheDocument();
     });
   });
 
   describe('paging', () => {
-    test('offers Load more when another page exists', async () => {
-      respond([event(2)], 2);
+    test('shows page controls when there is more than one page', async () => {
+      respond([event(2), event(1)], 500);
       renderPage();
 
-      expect(await screen.findByRole('button', { name: 'Load more' })).toBeInTheDocument();
+      expect(await screen.findAllByRole('button', { name: /next/i })).not.toHaveLength(0);
     });
 
-    test('offers no Load more on the last page', async () => {
-      respond([event(2)]);
+    test('asks for the next page by offset', async () => {
+      respond([event(2), event(1)], 500);
       renderPage();
 
-      await screen.findByText('Message 2');
-      expect(screen.queryByRole('button', { name: 'Load more' })).not.toBeInTheDocument();
-    });
+      await userEvent.click((await screen.findAllByRole('button', { name: /next/i }))[0]);
 
-    test('Load more requests the next older page and appends it', async () => {
-      respond([event(2)], 2);
-      renderPage();
-      await userEvent.click(await screen.findByRole('button', { name: 'Load more' }));
-
-      respond([event(1)]);
-      await userEvent.click(screen.getByRole('button', { name: 'Load more' }));
-
-      expect(await screen.findByText('Message 1')).toBeInTheDocument();
-      expect(lastParams()).toMatchObject({ before: 2 });
+      await waitFor(() => expect(lastParams().offset).toBeGreaterThan(0));
     });
   });
 

@@ -14,7 +14,10 @@ jest.mock('../../modules/jobModule', () => ({
   getJob: jest.fn(),
   saveJobOnly: jest.fn().mockResolvedValue(undefined),
 }));
-jest.mock('../../modules/nzbDiagnosticLog', () => ({}));
+jest.mock('../../modules/nzbDiagnosticLog', () => ({
+  resolveLogLimit: jest.fn(() => 20),
+  recordDiagnosticEvent: jest.fn().mockResolvedValue(undefined),
+}));
 jest.mock('../../modules/archiveModule', () => ({
   removeVideoFromArchive: jest.fn().mockResolvedValue(undefined),
 }));
@@ -130,6 +133,54 @@ describe('nzb.js video/events log', () => {
       await nzb.handleHistoryDeleteRequest(['job-1']);
 
       expect(callFor('nzb.history_removed')[1].occurredAt).toBe(job.data.nzb.historyRemovedAt);
+    });
+  });
+
+  describe('a grab that produced no video', () => {
+    const failedJob = (id) => ({
+      id,
+      status: 'Complete',
+      timeInitiated: Date.now(),
+      data: { nzb: { categoryName: 'Keep', youtubeId: 'abc123', nzbName: 'Celebrity Juice S26E09' }, videos: [] },
+    });
+
+    beforeEach(() => {
+      Video.findOne.mockResolvedValue(null);
+    });
+
+    it('records nzb.grab_failed with the reason so the failure shows in the log', async () => {
+      await nzb.computeNzbStatusDetail(failedJob('fail-1'));
+
+      expect(callFor('nzb.grab_failed')[1]).toMatchObject({
+        jobId: 'fail-1',
+        youtubeId: 'abc123',
+        videoTitle: 'Celebrity Juice S26E09',
+        detail: { categoryName: 'Keep' },
+      });
+    });
+
+    it('explains that no video file was produced', async () => {
+      await nzb.computeNzbStatusDetail(failedJob('fail-2'));
+
+      expect(callFor('nzb.grab_failed')[1].detail.message).toMatch(/no video file produced/);
+    });
+
+    it('records the failure only once however often the status is read', async () => {
+      const job = failedJob('fail-3');
+
+      await nzb.computeNzbStatusDetail(job);
+      await nzb.computeNzbStatusDetail(job);
+
+      expect(typesRecorded().filter((type) => type === 'nzb.grab_failed')).toHaveLength(1);
+    });
+
+    it('records nothing when the video was produced', async () => {
+      const job = failedJob('ok-1');
+      job.data.videos = [{ id: 7, youtubeId: 'abc123', filePath: '/data/x.strm' }];
+
+      await nzb.computeNzbStatusDetail(job);
+
+      expect(typesRecorded()).not.toContain('nzb.grab_failed');
     });
   });
 

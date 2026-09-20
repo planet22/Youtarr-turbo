@@ -70,7 +70,7 @@ function cleanJobTypeLabel(jobType: string): string {
 
 // Shared with the "Source" column and its filter dropdown, so the filter's
 // option list always matches exactly what's displayed in that column.
-function getJobSourceLabel(jobType: string): string {
+export function getJobSourceLabel(jobType: string): string {
   if (jobType.startsWith('Auto-retry')) return 'Auto-retry';
   if (jobType.includes('Channel Downloads')) return 'Channels';
   if (jobType.includes('Manually Added Urls')) {

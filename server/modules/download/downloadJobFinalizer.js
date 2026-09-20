@@ -60,8 +60,10 @@ function stderrHasOnlyBenignWarnings(stderrBuffer = '') {
 
 // One log entry per failed video (and one more for those handed to an
 // auto-retry job), written once the failure is final and diagnosed.
-function recordFailedVideoEvents(jobId, failedVideosList) {
+function recordFailedVideoEvents(jobId, failedVideosList, diagnoses = []) {
   for (const failed of failedVideosList || []) {
+    // Same "likely cause" advice Download History shows for the failure.
+    const diagnosis = diagnoses.find((entry) => entry.key === failed.diagnosisKey);
     jobEventLog.record(EVENT_TYPES.VIDEO_FAILED, {
       jobId,
       youtubeId: failed.youtubeId,
@@ -70,6 +72,9 @@ function recordFailedVideoEvents(jobId, failedVideosList) {
       detail: {
         error: failed.error,
         diagnosisKey: failed.diagnosisKey,
+        diagnosisTitle: diagnosis && diagnosis.title,
+        diagnosisMessage: diagnosis && diagnosis.message,
+        url: failed.url || undefined,
         autoRetryQueued: Boolean(failed.autoRetryQueued),
       },
     });
@@ -81,6 +86,24 @@ function recordFailedVideoEvents(jobId, failedVideosList) {
         channelName: failed.channel,
       });
     }
+  }
+}
+
+// One entry per video that downloaded, carrying its size, how long it took and
+// the average rate - the figures Download History shows in its Speed column.
+function recordDownloadedVideoEvents(jobId, videoData) {
+  for (const video of videoData || []) {
+    jobEventLog.record(EVENT_TYPES.VIDEO_DOWNLOADED, {
+      jobId,
+      youtubeId: video.youtubeId,
+      videoTitle: video.youTubeVideoName,
+      channelName: video.youTubeChannelName,
+      detail: {
+        fileSize: video.fileSize ? Number(video.fileSize) : undefined,
+        downloadDurationSeconds: video.downloadDurationSeconds,
+        avgDownloadMBps: video.avgDownloadMBps,
+      },
+    });
   }
 }
 
@@ -281,7 +304,8 @@ async function finalizeDownloadJob({
     }
 
     logger.info({ jobType, jobId }, 'Job complete (with or without errors)');
-    recordFailedVideoEvents(jobId, failedVideosList);
+    recordDownloadedVideoEvents(jobId, videoData);
+    recordFailedVideoEvents(jobId, failedVideosList, diagnoses);
 
     const flags = computeOutcomeFlags({
       code,

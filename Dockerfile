@@ -1,5 +1,5 @@
 # ---- Base Node ----
-FROM node:20-slim AS base
+FROM node:24-slim AS base
 WORKDIR /app
 RUN npm install -g npm@11.15.0 --ignore-scripts
 
@@ -49,7 +49,7 @@ FROM python:3.11-slim AS apprise
 RUN pip install --no-cache-dir --target=/opt/apprise apprise
 
 # ---- Release ----
-FROM node:20-slim AS release
+FROM node:24-slim AS release
 WORKDIR /app
 
 # Install runtime dependencies
@@ -68,7 +68,7 @@ WORKDIR /app
 # default, and the base image may list its repos either in the newer
 # DEB822 format (/etc/apt/sources.list.d/debian.sources) or the legacy
 # single-file /etc/apt/sources.list depending on which Debian release
-# the node:20-slim tag currently tracks, so both are handled here.
+# the node:24-slim tag currently tracks, so both are handled here.
 #
 # fonts-dejavu-core: provides /usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf,
 # used by ensurePlaceholderSegment's drawtext filter (the "Loading..." text

@@ -40,6 +40,7 @@ import { TuningBenchmarkTable } from './components/TuningBenchmarkTable';
 import { NetworkTuningBenchmarkTable } from './components/NetworkTuningBenchmarkTable';
 import { TuningHistoryTable } from './components/TuningHistoryTable';
 import { SegmentTimingTestButton } from './components/SegmentTimingTestButton';
+import { ValidatedNumberField } from './components/ValidatedNumberField';
 
 type YtstreamConfig = ConfigState['ytstream'];
 
@@ -800,19 +801,17 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
                   field: 'httpChunkSizeMiB' | 'concurrentFragments' | 'throttledRateKBps' | 'socketTimeoutSeconds',
                   fallback: number
                 ) => ({
-                  value: String(ytstream[field] ?? fallback),
-                  onChange: (e: React.ChangeEvent<HTMLInputElement>) => {
-                    const parsed = Number.parseInt(e.target.value, 10);
-                    setYtstream({ [field]: Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback } as Partial<YtstreamConfig>);
-                  },
+                  value: ytstream[field] ?? fallback,
+                  min: 0,
+                  fallback,
+                  onCommit: (committed: number) => setYtstream({ [field]: committed } as Partial<YtstreamConfig>),
                 });
                 return (
                   <>
                     <Grid item xs={12} sm={6} md={3}>
                       <Box className="flex items-center gap-1">
-                        <TextField
+                        <ValidatedNumberField
                           fullWidth
-                          type="number"
                           label="HTTP chunk size (MiB)"
                           name="ytstreamHttpChunkSizeMiB"
                           {...numericFieldProps('httpChunkSizeMiB', 0)}
@@ -830,9 +829,8 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
 
                     <Grid item xs={12} sm={6} md={3}>
                       <Box className="flex items-center gap-1">
-                        <TextField
+                        <ValidatedNumberField
                           fullWidth
-                          type="number"
                           label="Concurrent fragments"
                           name="ytstreamConcurrentFragments"
                           {...numericFieldProps('concurrentFragments', 0)}
@@ -850,9 +848,8 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
 
                     <Grid item xs={12} sm={6} md={3}>
                       <Box className="flex items-center gap-1">
-                        <TextField
+                        <ValidatedNumberField
                           fullWidth
-                          type="number"
                           label="Throttled rate (KB/s)"
                           name="ytstreamThrottledRateKBps"
                           {...numericFieldProps('throttledRateKBps', 0)}
@@ -870,9 +867,8 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
 
                     <Grid item xs={12} sm={6} md={3}>
                       <Box className="flex items-center gap-1">
-                        <TextField
+                        <ValidatedNumberField
                           fullWidth
-                          type="number"
                           label="Socket timeout (seconds)"
                           name="ytstreamSocketTimeoutSeconds"
                           {...numericFieldProps('socketTimeoutSeconds', 0)}
@@ -1085,16 +1081,14 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
 
       <Grid item xs={12} sm={6} md={3}>
         <Box className="flex items-center gap-1">
-          <TextField
+          <ValidatedNumberField
             fullWidth
-            type="number"
             label="History retention (days)"
             name="ytstreamHistoryRetentionDays"
-            value={String(ytstream.historyRetentionDays ?? 90)}
-            onChange={(e) => {
-              const parsed = Number.parseInt(e.target.value, 10);
-              setYtstream({ historyRetentionDays: Number.isFinite(parsed) && parsed > 0 ? parsed : 90 });
-            }}
+            value={ytstream.historyRetentionDays ?? 90}
+            min={1}
+            fallback={90}
+            onCommit={(committed) => setYtstream({ historyRetentionDays: committed })}
             disabled={disabled}
             helperText="Stream history entries older than this are pruned nightly."
             inputProps={{ min: 1 }}

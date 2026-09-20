@@ -402,12 +402,24 @@ describe('YtstreamSettingsSection controls', () => {
       expect(lastYtstream(onConfigChange)).toMatchObject({ [field]: 5 });
     });
 
-    it('falls back to zero for a negative number', async () => {
+    it('falls back to zero for a negative number once the field is left', async () => {
       const { user, onConfigChange } = setup({ defaultMode: 'hls-buffer' });
 
       await user.type(screen.getByLabelText('HTTP chunk size (MiB)'), '-');
+      await user.tab();
 
       expect(lastYtstream(onConfigChange)).toMatchObject({ httpChunkSizeMiB: 0 });
+    });
+
+    it('lets a network field be cleared and retyped without snapping back to zero', async () => {
+      const { user, onConfigChange } = setup({ defaultMode: 'direct', throttledRateKBps: 50 });
+      const input = screen.getByLabelText('Throttled rate (KB/s)');
+
+      await user.clear(input);
+      await user.type(input, '75');
+
+      expect(input).toHaveValue(75);
+      expect(lastYtstream(onConfigChange)).toMatchObject({ throttledRateKBps: 75 });
     });
 
     it('sets the history retention', async () => {
@@ -418,12 +430,24 @@ describe('YtstreamSettingsSection controls', () => {
       expect(lastYtstream(onConfigChange)).toMatchObject({ historyRetentionDays: 900 });
     });
 
-    it('falls back to 90 days for a retention that is not a positive number', async () => {
+    it('falls back to 90 days for a retention that is not a positive number once the field is left', async () => {
       const { user, onConfigChange } = setup({ historyRetentionDays: 5 });
 
       await user.clear(screen.getByLabelText('History retention (days)'));
+      await user.tab();
 
       expect(lastYtstream(onConfigChange)).toMatchObject({ historyRetentionDays: 90 });
+    });
+
+    it('lets the retention be cleared and retyped without resetting to 90', async () => {
+      const { user, onConfigChange } = setup({ historyRetentionDays: 5 });
+      const input = screen.getByLabelText('History retention (days)');
+
+      await user.clear(input);
+      await user.type(input, '30');
+
+      expect(input).toHaveValue(30);
+      expect(lastYtstream(onConfigChange)).toMatchObject({ historyRetentionDays: 30 });
     });
 
     describe('revert to STRM after (hours)', () => {

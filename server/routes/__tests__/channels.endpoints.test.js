@@ -181,6 +181,15 @@ describe('channel routes: remaining endpoints', () => {
       expect(res.body).toEqual({ id: 'UC1' });
       expect(channelModule.getChannelInfo).toHaveBeenCalledWith('UC1', true);
     });
+
+    it('answers 500 with the reason instead of leaving the request hanging when it fails', async () => {
+      channelModule.getChannelInfo.mockRejectedValue(new Error('yt-dlp failed'));
+
+      const res = await makeApp().get('/getchannelinfo/UC1');
+
+      expect(res.status).toBe(500);
+      expect(res.body).toEqual({ error: 'yt-dlp failed' });
+    });
   });
 
   describe('channel settings', () => {

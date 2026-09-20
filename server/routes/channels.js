@@ -306,11 +306,18 @@ module.exports = function createChannelRoutes({ verifyToken, channelModule, arch
    *     responses:
    *       200:
    *         description: Channel information
+   *       500:
+   *         description: Failed to get channel information
    */
   router.get('/getchannelinfo/:channelId', verifyToken, async (req, res) => {
     const channelId = req.params.channelId;
-    const channelInfo = await channelModule.getChannelInfo(channelId, true);
-    res.json(channelInfo);
+    try {
+      const channelInfo = await channelModule.getChannelInfo(channelId, true);
+      res.json(channelInfo);
+    } catch (error) {
+      logger.error({ err: error, channelId }, 'Error getting channel info');
+      res.status(500).json({ error: error.message });
+    }
   });
 
   /**

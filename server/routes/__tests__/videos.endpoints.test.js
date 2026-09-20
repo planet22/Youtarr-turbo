@@ -599,7 +599,7 @@ describe('videos routes: remaining endpoints', () => {
       await supertest(app).post('/api/auto-removal/dry-run').send({
         autoRemovalEnabled: true,
         autoRemovalVideoAgeThreshold: 30,
-        autoRemovalFreeSpaceThreshold: 5,
+        autoRemovalFreeSpaceThreshold: '5GB',
         autoRemovalWatchedEnabled: false,
         autoRemovalWatchedMinDaysSinceWatched: 7,
         autoRemovalWatchedMinVideoAgeDays: 14,
@@ -611,13 +611,60 @@ describe('videos routes: remaining endpoints', () => {
         overrides: {
           autoRemovalEnabled: true,
           autoRemovalVideoAgeThreshold: 30,
-          autoRemovalFreeSpaceThreshold: 5,
+          autoRemovalFreeSpaceThreshold: '5GB',
           autoRemovalWatchedEnabled: false,
           autoRemovalWatchedMinDaysSinceWatched: 7,
           autoRemovalWatchedMinVideoAgeDays: 14,
           autoRemovalKeepRecentCount: 3,
         },
       });
+    });
+
+    it.each([
+      ['autoRemovalVideoAgeThreshold', 'abc'],
+      ['autoRemovalVideoAgeThreshold', '30days'],
+      ['autoRemovalVideoAgeThreshold', -1],
+      ['autoRemovalVideoAgeThreshold', 1.5],
+      ['autoRemovalFreeSpaceThreshold', 5],
+      ['autoRemovalFreeSpaceThreshold', '5TB'],
+      ['autoRemovalFreeSpaceThreshold', 'lots'],
+      ['autoRemovalWatchedMinDaysSinceWatched', 'x'],
+      ['autoRemovalWatchedMinVideoAgeDays', {}],
+      ['autoRemovalKeepRecentCount', '3.5'],
+    ])('rejects %s = %p with 400 and runs nothing', async (field, value) => {
+      const { app } = makeApp();
+
+      const res = await supertest(app).post('/api/auto-removal/dry-run').send({ [field]: value });
+
+      expect(res.status).toBe(400);
+      expect(res.body).toEqual({ success: false, error: `Invalid ${field}` });
+      expect(videoDeletionModule.performAutomaticCleanup).not.toHaveBeenCalled();
+    });
+
+    it('accepts blank and zero overrides, which the settings page sends for "off"', async () => {
+      const { app } = makeApp();
+
+      const res = await supertest(app).post('/api/auto-removal/dry-run').send({
+        autoRemovalVideoAgeThreshold: '',
+        autoRemovalFreeSpaceThreshold: '',
+        autoRemovalWatchedMinDaysSinceWatched: null,
+        autoRemovalWatchedMinVideoAgeDays: '',
+        autoRemovalKeepRecentCount: 0,
+      });
+
+      expect(res.status).toBe(200);
+    });
+
+    it('accepts numbers given as digit strings and storage sizes with a unit', async () => {
+      const { app } = makeApp();
+
+      const res = await supertest(app).post('/api/auto-removal/dry-run').send({
+        autoRemovalVideoAgeThreshold: '30',
+        autoRemovalFreeSpaceThreshold: '500MB',
+        autoRemovalKeepRecentCount: '3',
+      });
+
+      expect(res.status).toBe(200);
     });
 
     it.each([
@@ -1276,13 +1323,21 @@ describe('videos routes: remaining endpoints', () => {
       expect(downloadModule.doChannelAndPlaylistDownloads).not.toHaveBeenCalled();
     });
 
-    it.each([0, 51, 'abc', -1])('rejects the video count %p', async (videoCount) => {
+    it.each([0, 51, 'abc', -1, '25abc', 1.9, '1.9', null, ''])('rejects the video count %p', async (videoCount) => {
       const { app } = makeApp();
 
       const res = await post(app, { overrideSettings: { videoCount } });
 
       expect(res.status).toBe(400);
       expect(res.body.error).toBe('Invalid video count. Must be between 1 and 50');
+    });
+
+    it('passes the video count on as a number', async () => {
+      const { app, downloadModule } = makeApp();
+
+      await post(app, { overrideSettings: { videoCount: '25' } });
+
+      expect(downloadModule.doChannelAndPlaylistDownloads).toHaveBeenCalledWith({ overrideSettings: { videoCount: 25 } });
     });
 
     it.each([1, 50, '25'])('accepts the video count %p', async (videoCount) => {

@@ -11,6 +11,17 @@ const MAX_STRM_BULK_VIDEO_IDS = 500;
 // Same bound for the bulk delete and purge routes.
 const MAX_BULK_VIDEO_IDS = 500;
 
+// A non-negative whole number given as a number or a string of digits
+// ('25' yes; '25abc', '1.9', 1.9, -1 no). Returns null when it is not one.
+function parseWholeNumber(value) {
+  if (typeof value === 'number') return Number.isInteger(value) && value >= 0 ? value : null;
+  if (typeof value === 'string' && /^\d+$/.test(value.trim())) return Number(value.trim());
+  return null;
+}
+
+// Storage thresholds are written as a whole number plus unit, e.g. '500MB' or '10GB'.
+const STORAGE_THRESHOLD_PATTERN = /^\d+(MB|GB)$/;
+
 // Video validation rate limiter
 const videoValidationLimiter = rateLimit({
   windowMs: 1 * 60 * 1000, // 1 minute
@@ -502,8 +513,8 @@ module.exports = function createVideoRoutes({ verifyToken, videosModule, downloa
    *                 type: integer
    *                 description: Age threshold in days
    *               autoRemovalFreeSpaceThreshold:
-   *                 type: integer
-   *                 description: Free space threshold in GB
+   *                 type: string
+   *                 description: Free space threshold as a whole number plus unit, e.g. 500MB or 10GB. Empty or null for none.
    *               autoRemovalWatchedEnabled:
    *                 type: boolean
    *                 description: Enable watched-based removal
@@ -665,6 +676,18 @@ module.exports = function createVideoRoutes({ verifyToken, videosModule, downloa
         autoRemovalWatchedMinVideoAgeDays,
         autoRemovalKeepRecentCount
       } = req.body || {};
+
+      // null or '' mean "not set" (the settings page sends '' for a blank field).
+      const invalidOverride = [
+        ['autoRemovalVideoAgeThreshold', autoRemovalVideoAgeThreshold, (v) => parseWholeNumber(v) !== null],
+        ['autoRemovalFreeSpaceThreshold', autoRemovalFreeSpaceThreshold, (v) => typeof v === 'string' && STORAGE_THRESHOLD_PATTERN.test(v)],
+        ['autoRemovalWatchedMinDaysSinceWatched', autoRemovalWatchedMinDaysSinceWatched, (v) => parseWholeNumber(v) !== null],
+        ['autoRemovalWatchedMinVideoAgeDays', autoRemovalWatchedMinVideoAgeDays, (v) => parseWholeNumber(v) !== null],
+        ['autoRemovalKeepRecentCount', autoRemovalKeepRecentCount, (v) => parseWholeNumber(v) !== null],
+      ].find(([, value, isValid]) => value !== undefined && value !== null && value !== '' && !isValid(value));
+      if (invalidOverride) {
+        return res.status(400).json({ success: false, error: `Invalid ${invalidOverride[0]}` });
+      }
 
       const coerceBoolean = (value) => {
         if (typeof value === 'boolean') return value;
@@ -1238,12 +1261,14 @@ module.exports = function createVideoRoutes({ verifyToken, videosModule, downloa
         }
       }
       if (overrideSettings.videoCount !== undefined) {
-        const count = parseInt(overrideSettings.videoCount);
-        if (isNaN(count) || count < 1 || count > 50) {
+        const count = parseWholeNumber(overrideSettings.videoCount);
+        if (count === null || count < 1 || count > 50) {
           return res.status(400).json({
             error: 'Invalid video count. Must be between 1 and 50'
           });
         }
+        // Pass the validated number on, not whatever string/number was sent.
+        overrideSettings.videoCount = count;
       }
     }
 

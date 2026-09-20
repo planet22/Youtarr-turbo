@@ -1,4 +1,5 @@
 const { Video } = require('../models');
+const { sequelize } = require('../db');
 const fs = require('fs').promises;
 const path = require('path');
 const logger = require('../logger');
@@ -567,9 +568,12 @@ class VideoDeletionModule {
       const channelId = video.channel_id;
       const youtubeId = video.youtubeId;
 
-      await JobVideo.destroy({ where: { video_id: videoId } });
-      await VideoWatchStatus.destroy({ where: { video_id: videoId } });
-      await video.destroy();
+      // One transaction, so a failure partway cannot leave a half-purged video.
+      await sequelize.transaction(async (transaction) => {
+        await JobVideo.destroy({ where: { video_id: videoId }, transaction });
+        await VideoWatchStatus.destroy({ where: { video_id: videoId }, transaction });
+        await video.destroy({ transaction });
+      });
 
       // yt-dlp's download-archive otherwise still remembers this video, so a
       // later backfillFromCompleteList run (server startup, or the daily

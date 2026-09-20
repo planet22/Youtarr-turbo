@@ -24,6 +24,8 @@ describe('VideoDeletionModule STRM revert, cache expiry and purge', () => {
   let archiveModule;
   let m3uGenerator;
   let configValues;
+  let sequelize;
+  const TRANSACTION = { id: 'tx' };
 
   const write = (p, content = 'x') => fs.writeFileSync(p, content);
   const exists = (p) => fs.existsSync(p);
@@ -61,6 +63,8 @@ describe('VideoDeletionModule STRM revert, cache expiry and purge', () => {
     archiveModule = { removeVideoFromArchive: jest.fn().mockResolvedValue(undefined) };
     m3uGenerator = { generateChannelM3UInBackground: jest.fn() };
 
+    sequelize = { transaction: jest.fn(async (work) => work(TRANSACTION)) };
+    jest.doMock('../../db', () => ({ sequelize }));
     jest.doMock('../../models', () => ({ Video, JobVideo, VideoWatchStatus }));
     jest.doMock('../configModule', () => ({ directoryPath: dir, getConfig: jest.fn(() => configValues) }));
     jest.doMock('../archiveModule', () => archiveModule);
@@ -376,9 +380,32 @@ describe('VideoDeletionModule STRM revert, cache expiry and purge', () => {
       const result = await videoDeletionModule.purgeVideoById(1);
 
       expect(result).toEqual({ success: true, videoId: 1, channelId: 'UC1' });
-      expect(JobVideo.destroy).toHaveBeenCalledWith({ where: { video_id: 1 } });
-      expect(VideoWatchStatus.destroy).toHaveBeenCalledWith({ where: { video_id: 1 } });
+      expect(JobVideo.destroy).toHaveBeenCalledWith(expect.objectContaining({ where: { video_id: 1 } }));
+      expect(VideoWatchStatus.destroy).toHaveBeenCalledWith(expect.objectContaining({ where: { video_id: 1 } }));
       expect(video.destroy).toHaveBeenCalled();
+    });
+
+    it('deletes all three rows inside one transaction', async () => {
+      const video = makeVideo({ removed: true });
+      Video.findByPk.mockResolvedValue(video);
+
+      await videoDeletionModule.purgeVideoById(1);
+
+      expect(sequelize.transaction).toHaveBeenCalledTimes(1);
+      expect(JobVideo.destroy).toHaveBeenCalledWith({ where: { video_id: 1 }, transaction: TRANSACTION });
+      expect(VideoWatchStatus.destroy).toHaveBeenCalledWith({ where: { video_id: 1 }, transaction: TRANSACTION });
+      expect(video.destroy).toHaveBeenCalledWith({ transaction: TRANSACTION });
+    });
+
+    it('fails without touching the archive when the video row cannot be deleted', async () => {
+      const video = makeVideo({ removed: true });
+      video.destroy.mockRejectedValue(new Error('locked'));
+      Video.findByPk.mockResolvedValue(video);
+
+      const result = await videoDeletionModule.purgeVideoById(1);
+
+      expect(result).toEqual({ success: false, videoId: 1, error: 'locked' });
+      expect(archiveModule.removeVideoFromArchive).not.toHaveBeenCalled();
     });
 
     it('removes dependent rows before the video row', async () => {

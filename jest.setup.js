@@ -20,6 +20,7 @@ jest.mock('./server/modules/jobEventLog', () => {
   return {
     record: jest.fn(),
     flush: jest.fn(() => Promise.resolve()),
+    runWithContext: jest.fn((ctx, fn) => fn()),
     list: jest.fn(() => Promise.resolve({ events: [], nextCursor: null })),
     prune: jest.fn(() => Promise.resolve(0)),
     getRetentionDays: jest.fn(() => 180),

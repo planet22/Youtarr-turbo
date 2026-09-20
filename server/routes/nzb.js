@@ -10,6 +10,8 @@ const jobModule = require('../modules/jobModule');
 const nzbFeedModule = require('../modules/nzbFeedModule');
 const nzbThumbnailProbe = require('../modules/nzbThumbnailProbe');
 const nzbDiagnosticLog = require('../modules/nzbDiagnosticLog');
+const jobEventLog = require('../modules/jobEventLog');
+const { EVENT_TYPES } = require('../modules/jobEventLog/eventCatalog');
 const { nzbDownloadJobLabel } = require('../modules/download/jobTypes');
 const ChannelVideo = require('../models/channelvideo');
 const Video = require('../models/video');
@@ -228,6 +230,14 @@ function stageForSonarrImport(job, categoryName, videoRow) {
     // before - unrelated to this flag, and left as-is.
     if (!job.data.nzb.importedAt) {
       job.data.nzb.importedAt = Date.now();
+      jobEventLog.record(EVENT_TYPES.NZB_IMPORT_DETECTED, {
+        jobId: job.id,
+        youtubeId: job.data.nzb.youtubeId,
+        videoTitle: videoRow?.youTubeVideoName,
+        channelName: videoRow?.youTubeChannelName,
+        occurredAt: job.data.nzb.importedAt,
+        detail: { stagedPath: job.data.nzb.stagedPath },
+      });
     }
   }
   const filePath = videoRow?.filePath;
@@ -253,6 +263,13 @@ function stageForSonarrImport(job, categoryName, videoRow) {
       }
     }
     job.data.nzb.stagedPath = stagedPath;
+    jobEventLog.record(EVENT_TYPES.NZB_STAGED_FOR_IMPORT, {
+      jobId: job.id,
+      youtubeId: job.data.nzb.youtubeId,
+      videoTitle: videoRow?.youTubeVideoName,
+      channelName: videoRow?.youTubeChannelName,
+      detail: { stagedPath, sourcePath: filePath, categoryName },
+    });
     return stagedPath;
   } catch (err) {
     logger.warn({ err, filePath }, 'nzb: failed to stage file for Sonarr/Radarr import - reporting the real library path instead, so Sonarr/Radarr\'s import will move it out of Youtarr\'s library');
@@ -350,8 +367,24 @@ async function untrackFromYoutarrLibrary(job, videoRow) {
     } else {
       logger.info({ jobId: job.id, videoId, counts }, 'nzb: untrackFromYoutarrLibrary - destroyed tracking rows');
     }
+    // Title/channel are passed explicitly: the Video row is already gone, so
+    // the log's own write-time lookup could no longer find them.
+    jobEventLog.record(EVENT_TYPES.NZB_UNTRACKED, {
+      jobId: job.id,
+      youtubeId: videoRow.youtubeId,
+      videoTitle: videoRow.youTubeVideoName,
+      channelName: videoRow.youTubeChannelName,
+      detail: { trigger: 'Sonarr/Radarr history delete', counts },
+    });
   } catch (err) {
     logger.warn({ err, jobId: job.id, videoId }, 'nzb: failed to remove untracked video from Youtarr DB');
+    jobEventLog.record(EVENT_TYPES.NZB_UNTRACK_FAILED, {
+      jobId: job.id,
+      youtubeId: videoRow.youtubeId,
+      videoTitle: videoRow.youTubeVideoName,
+      channelName: videoRow.youTubeChannelName,
+      detail: { error: err.message, counts },
+    });
     return { outcome: 'error', counts };
   }
   if (videoRow?.youtubeId) {
@@ -510,6 +543,15 @@ async function reconcileMovedUntrackedVideo(videoRow) {
     }
   }
 
+  // Title/channel passed explicitly: the Video row was just deleted above.
+  jobEventLog.record(EVENT_TYPES.NZB_UNTRACKED, {
+    jobId: matchedJobId,
+    youtubeId: videoRow.youtubeId,
+    videoTitle: videoRow.youTubeVideoName,
+    channelName: videoRow.youTubeChannelName,
+    detail: { trigger: 'file moved away by Sonarr/Radarr (no history-delete call received)', counts },
+  });
+
   await cleanupEmptyDirsAfterImport(videoRow.filePath);
 
   // Mirror untrackFromYoutarrLibrary's own bookkeeping on the job record, so
@@ -625,6 +667,12 @@ async function handleHistoryDeleteRequest(jobIds) {
       job.data.nzb.historyRemoved = true;
       job.data.nzb.historyRemovedAt = Date.now();
       job.status = 'Deleted';
+      jobEventLog.record(EVENT_TYPES.NZB_HISTORY_REMOVED, {
+        jobId,
+        youtubeId: job.data.nzb.youtubeId,
+        videoTitle: job.data.nzb.nzbName,
+        occurredAt: job.data.nzb.historyRemovedAt,
+      });
       const category = findCategory(categories, { name: job.data.nzb.categoryName });
       if ((category?.importStrategy || 'hardlink') === 'untracked') {
         const videoRow = await resolveNzbVideoRow(job);
@@ -1382,6 +1430,12 @@ module.exports = function createNzbRoutes() {
             // old job's history under today's (or the default) strategy.
             nzb: { categoryName: category.name, youtubeId, nzbName: nzbName || youtubeId, importStrategy: category.importStrategy || 'hardlink' },
           },
+        });
+        jobEventLog.record(EVENT_TYPES.NZB_GRAB_REQUESTED, {
+          jobId,
+          youtubeId,
+          videoTitle: nzbName || youtubeId,
+          detail: { categoryName: category.name, importStrategy: category.importStrategy || 'hardlink', nzbName, season, ep },
         });
         res.json({ status: true, nzo_ids: [String(jobId)] });
       } catch (err) {

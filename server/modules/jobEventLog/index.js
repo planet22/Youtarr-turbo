@@ -1,3 +1,4 @@
+const { AsyncLocalStorage } = require('async_hooks');
 const logger = require('../../logger');
 const { EVENT_TYPES, LEVELS, describeEvent } = require('./eventCatalog');
 
@@ -56,6 +57,24 @@ class JobEventLog {
     // even though each write is async. occurred_at is captured synchronously
     // in record(), so a delayed insert still carries the true event time.
     this.tail = Promise.resolve();
+    // Ambient context (see runWithContext) so a caller can say once WHY a
+    // whole operation is happening instead of threading a reason argument
+    // through every function underneath it.
+    this.contextStorage = new AsyncLocalStorage();
+  }
+
+  /**
+   * Runs fn with an ambient context that record() applies to every event
+   * recorded inside it (including across awaits): ctx.actor becomes the
+   * event's actor and ctx.reason its detail.reason, unless the call itself
+   * already set them. e.g. the nightly auto-removal wraps its run in
+   * { actor: 'auto-removal', reason: 'automatic removal' }.
+   * @param {{actor?: string, reason?: string}} ctx
+   * @param {Function} fn
+   * @returns {*} whatever fn returns
+   */
+  runWithContext(ctx, fn) {
+    return this.contextStorage.run(ctx, fn);
   }
 
   /**
@@ -75,6 +94,16 @@ class JobEventLog {
    */
   record(eventType, fields = {}) {
     try {
+      const ctx = this.contextStorage.getStore();
+      if (ctx) {
+        fields = {
+          ...fields,
+          actor: fields.actor || ctx.actor,
+          detail: ctx.reason && !(fields.detail && fields.detail.reason)
+            ? { ...fields.detail, reason: ctx.reason }
+            : fields.detail,
+        };
+      }
       const occurredAt = fields.occurredAt ? new Date(fields.occurredAt) : new Date();
       const { actor, level, message } = describeEvent(eventType, fields);
       const entry = {

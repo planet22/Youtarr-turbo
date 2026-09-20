@@ -111,7 +111,10 @@ function initialize(deps = {}) {
   }, async () => {
     logger.info('Running automatic video cleanup cron job');
     try {
-      const result = await videoDeletionModule.performAutomaticCleanup();
+      const result = await jobEventLog.runWithContext(
+        { actor: 'auto-removal', reason: 'automatic removal' },
+        () => videoDeletionModule.performAutomaticCleanup()
+      );
 
       if (result.totalDeleted > 0) {
         logger.info({
@@ -160,7 +163,10 @@ function initialize(deps = {}) {
     confirm: false,
   }, async () => {
     try {
-      const result = await videoDeletionModule.sweepExpiredCachedVideos();
+      const result = await jobEventLog.runWithContext(
+        { actor: 'strm-cache-expiry', reason: 'STRM cache-on-play expiry' },
+        () => videoDeletionModule.sweepExpiredCachedVideos()
+      );
       if (result.reverted > 0 || result.failed > 0) {
         logger.info(result, 'STRM cache-on-play expiry sweep completed');
       }

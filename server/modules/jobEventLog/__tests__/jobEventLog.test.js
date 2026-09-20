@@ -195,6 +195,53 @@ describe('jobEventLog', () => {
     });
   });
 
+  describe('runWithContext', () => {
+    it('applies the ambient actor to events recorded inside it', async () => {
+      jobEventLog.runWithContext({ actor: 'auto-removal' }, () => jobEventLog.record('video.deleted', { youtubeId: 'abc' }));
+      await jobEventLog.flush();
+      expect(JobEvent.create.mock.calls[0][0].actor).toBe('auto-removal');
+    });
+
+    it('applies the ambient reason as detail.reason and into the message', async () => {
+      jobEventLog.runWithContext({ reason: 'automatic removal' }, () => jobEventLog.record('video.deleted', { youtubeId: 'abc' }));
+      await jobEventLog.flush();
+      expect(JobEvent.create.mock.calls[0][0].message).toBe('Video deleted - automatic removal');
+    });
+
+    it('keeps the ambient context across awaits', async () => {
+      await jobEventLog.runWithContext({ actor: 'nightly' }, async () => {
+        await Promise.resolve();
+        await new Promise((resolve) => setImmediate(resolve));
+        jobEventLog.record('video.deleted', { youtubeId: 'abc' });
+      });
+      await jobEventLog.flush();
+      expect(JobEvent.create.mock.calls[0][0].actor).toBe('nightly');
+    });
+
+    it('lets an explicit actor on the call win over the ambient one', async () => {
+      jobEventLog.runWithContext({ actor: 'ambient' }, () => jobEventLog.record('video.deleted', { youtubeId: 'abc', actor: 'explicit' }));
+      await jobEventLog.flush();
+      expect(JobEvent.create.mock.calls[0][0].actor).toBe('explicit');
+    });
+
+    it('lets an explicit detail.reason win over the ambient one', async () => {
+      jobEventLog.runWithContext({ reason: 'ambient' }, () => jobEventLog.record('video.deleted', { youtubeId: 'abc', detail: { reason: 'explicit' } }));
+      await jobEventLog.flush();
+      expect(JSON.parse(JobEvent.create.mock.calls[0][0].detail).reason).toBe('explicit');
+    });
+
+    it('does not leak the context to events recorded outside it', async () => {
+      jobEventLog.runWithContext({ actor: 'auto-removal' }, () => {});
+      jobEventLog.record('video.deleted', { youtubeId: 'abc' });
+      await jobEventLog.flush();
+      expect(JobEvent.create.mock.calls[0][0].actor).toBe('library');
+    });
+
+    it('returns whatever the wrapped function returns', async () => {
+      await expect(jobEventLog.runWithContext({ actor: 'x' }, async () => 42)).resolves.toBe(42);
+    });
+  });
+
   describe('retention', () => {
     test('defaults to 180 days when config has no value', () => {
       expect(jobEventLog.getRetentionDays()).toBe(180);

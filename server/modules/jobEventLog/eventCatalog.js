@@ -20,6 +20,7 @@ const EVENT_TYPES = Object.freeze({
   VIDEO_FAILED: 'video.failed',
   VIDEO_AUTO_RETRY_QUEUED: 'video.auto_retry_queued',
   VIDEO_DELETED: 'video.deleted',
+  VIDEO_REVERTED_TO_STRM: 'video.reverted_to_strm',
   // STRM
   STRM_CREATED: 'strm.created',
   STRM_CACHE_ON_PLAY_QUEUED: 'strm.cache_on_play_queued',
@@ -80,7 +81,13 @@ const EVENT_CATALOG = {
   },
   [EVENT_TYPES.VIDEO_DELETED]: {
     actor: 'library',
-    message: ({ detail = {} }) => `Video deleted${suffix(detail.reason, '- %s')}`,
+    message: ({ detail = {} }) =>
+      `${detail.purged ? 'Video record purged (file was already missing)' : 'Video deleted'}${suffix(detail.reason, '- %s')}`,
+  },
+
+  [EVENT_TYPES.VIDEO_REVERTED_TO_STRM]: {
+    actor: 'library',
+    message: ({ detail = {} }) => `Downloaded file removed, restored to STRM playback${suffix(detail.reason, '- %s')}`,
   },
 
   [EVENT_TYPES.STRM_CREATED]: { actor: 'strm', message: () => 'STRM file created' },
@@ -92,7 +99,7 @@ const EVENT_CATALOG = {
   [EVENT_TYPES.NZB_GRAB_REQUESTED]: {
     actor: 'nzb',
     message: ({ detail = {} }) =>
-      `Grab requested by Sonarr/Radarr${suffix(detail.categoryName, 'for category %s')}${suffix(detail.importStrategy, '(import strategy: %s)')}`,
+      `Grab accepted from Sonarr/Radarr${suffix(detail.categoryName, 'for category %s')}${suffix(detail.importStrategy, '(import strategy: %s)')}`,
   },
   [EVENT_TYPES.NZB_STAGED_FOR_IMPORT]: {
     actor: 'nzb',

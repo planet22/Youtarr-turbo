@@ -9,6 +9,8 @@ const strmGenerator = require('./strmGenerator');
 const strmMediaInfoCache = require('./strmMediaInfoCache');
 const nfoGenerator = require('./nfoGenerator');
 const videoPersistence = require('./videoPersistence');
+const jobEventLog = require('./jobEventLog');
+const { EVENT_TYPES } = require('./jobEventLog/eventCatalog');
 const youtubeMetadataCache = require('./youtubeMetadataCache');
 const ratingMapper = require('./ratingMapper');
 const downloadSettingsResolver = require('./download/downloadSettingsResolver');
@@ -534,6 +536,14 @@ class StrmMaterializer {
     } catch (err) {
       logger.error({ err, youtubeId: meta.id }, 'STRM: channelvideos upsert failed');
     }
+
+    jobEventLog.record(EVENT_TYPES.STRM_CREATED, {
+      jobId: options.jobId,
+      youtubeId: meta.id,
+      videoTitle: videoRow.youTubeVideoName,
+      channelName: videoRow.youTubeChannelName,
+      detail: { strmPath, fileSize },
+    });
 
     return {
       youtubeId: meta.id,

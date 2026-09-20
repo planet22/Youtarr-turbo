@@ -118,7 +118,7 @@ const ChannelVideo = require('../../models/channelvideo');
 
 const flushPromises = () => new Promise((resolve) => queueMicrotask(resolve));
 
-async function settleAsync(iterations = 5) {
+async function settleAsync(iterations = 30) {
   for (let i = 0; i < iterations; i += 1) {
     await flushPromises();
   }

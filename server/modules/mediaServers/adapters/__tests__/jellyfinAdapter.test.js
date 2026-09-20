@@ -344,3 +344,57 @@ describe('JellyfinAdapter', () => {
     });
   });
 });
+
+describe('JellyfinAdapter plugin and scheduled-task management', () => {
+  const cfg = { jellyfinUrl: 'http://jf:8096', jellyfinApiKey: 'KEY' };
+  const authHeaders = { Authorization: expect.stringMatching(/^MediaBrowser .*Token="KEY"/) };
+
+  beforeEach(() => jest.clearAllMocks());
+
+  test('listPlugins gets /Plugins with the auth header', async () => {
+    axios.get.mockResolvedValueOnce({ data: [{ Id: 'p1' }] });
+    await expect(new JellyfinAdapter(cfg).listPlugins()).resolves.toEqual([{ Id: 'p1' }]);
+    expect(axios.get).toHaveBeenCalledWith('http://jf:8096/Plugins', expect.objectContaining({ headers: authHeaders }));
+  });
+
+  test('getPluginConfiguration gets the plugin configuration by id', async () => {
+    axios.get.mockResolvedValueOnce({ data: { A: 1 } });
+    await expect(new JellyfinAdapter(cfg).getPluginConfiguration('abc')).resolves.toEqual({ A: 1 });
+    expect(axios.get).toHaveBeenCalledWith('http://jf:8096/Plugins/abc/Configuration', expect.objectContaining({ headers: authHeaders }));
+  });
+
+  test('setPluginConfiguration posts the configuration object', async () => {
+    axios.post.mockResolvedValueOnce({});
+    await new JellyfinAdapter(cfg).setPluginConfiguration('abc', { A: 2 });
+    expect(axios.post).toHaveBeenCalledWith(
+      'http://jf:8096/Plugins/abc/Configuration',
+      { A: 2 },
+      expect.objectContaining({ headers: authHeaders })
+    );
+  });
+
+  test('listScheduledTasks gets /ScheduledTasks', async () => {
+    axios.get.mockResolvedValueOnce({ data: [{ Id: 't1' }] });
+    await expect(new JellyfinAdapter(cfg).listScheduledTasks()).resolves.toEqual([{ Id: 't1' }]);
+    expect(axios.get).toHaveBeenCalledWith('http://jf:8096/ScheduledTasks', expect.objectContaining({ headers: authHeaders }));
+  });
+
+  test('stopScheduledTask deletes the running-task entry for that id', async () => {
+    axios.delete.mockResolvedValueOnce({});
+    await new JellyfinAdapter(cfg).stopScheduledTask('t1');
+    expect(axios.delete).toHaveBeenCalledWith(
+      'http://jf:8096/ScheduledTasks/Running/t1',
+      expect.objectContaining({ headers: authHeaders })
+    );
+  });
+
+  test('startScheduledTask posts to the running-tasks endpoint for that id', async () => {
+    axios.post.mockResolvedValueOnce({});
+    await new JellyfinAdapter(cfg).startScheduledTask('t1');
+    expect(axios.post).toHaveBeenCalledWith(
+      'http://jf:8096/ScheduledTasks/Running/t1',
+      null,
+      expect.objectContaining({ headers: authHeaders })
+    );
+  });
+});

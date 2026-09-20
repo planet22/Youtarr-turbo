@@ -531,15 +531,20 @@ describe('ytdlpModule', () => {
       expect(result1.success).toBe(true);
     });
 
-    it('prevents update during active downloads', async () => {
+    it('still updates while downloads are in progress', async () => {
       jobModule.getInProgressJobId.mockReturnValue('some-job-id');
 
-      const result = await ytdlpModule.performUpdate();
+      const mockProcess = createMockProcess();
+      spawn.mockReturnValue(mockProcess);
 
-      expect(result.success).toBe(false);
-      expect(result.reason).toBe('skipped');
-      expect(result.message).toBe('Cannot update while downloads are in progress. Please wait for downloads to complete.');
-      expect(spawn).not.toHaveBeenCalled();
+      const updatePromise = ytdlpModule.performUpdate();
+
+      mockProcess.stdout.emit('data', 'yt-dlp is up to date');
+      mockProcess.emit('close', 0);
+
+      const result = await updatePromise;
+      expect(result.success).toBe(true);
+      expect(spawn).toHaveBeenCalledWith('yt-dlp', ['--update-to', 'stable@latest'], expect.any(Object));
     });
 
     it('allows update when no downloads are in progress', async () => {
@@ -673,18 +678,6 @@ describe('ytdlpModule', () => {
       await updatePromise;
 
       expect(ytdlpModule.isUpdateInProgress()).toBe(false);
-    });
-  });
-
-  describe('isDownloadInProgress', () => {
-    it('returns true when a job is in progress', () => {
-      jobModule.getInProgressJobId.mockReturnValue('some-job-id');
-      expect(ytdlpModule.isDownloadInProgress()).toBe(true);
-    });
-
-    it('returns false when no job is in progress', () => {
-      jobModule.getInProgressJobId.mockReturnValue(null);
-      expect(ytdlpModule.isDownloadInProgress()).toBe(false);
     });
   });
 

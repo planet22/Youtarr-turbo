@@ -181,6 +181,15 @@ const setupServer = async ({ authEnabled = 'false', passwordHash = null } = {}) 
   jest.doMock('node-cron', () => ({ schedule: jest.fn() }));
   jest.doMock('../modules/mediaServers/watchStatusScheduler', () => ({ scheduleTask: jest.fn(), subscribe: jest.fn() }));
   jest.doMock('../modules/channel/channelBackdropBackfill', () => ({ subscribe: jest.fn() }));
+  jest.doMock('../modules/strmMaterializer', () => ({}));
+  jest.doMock('../models/video', () => ({}));
+  jest.doMock('../modules/apiKeyModule', () => ({}));
+  jest.doMock('../routes/nzb', () => () => require('express').Router());
+  jest.doMock('../routes/ytstream', () => () => require('express').Router());
+  // ytdlpOptions route deps that transitively load fs-extra, which the minimal fs stub can't satisfy
+  ['networkTuningBenchmark', 'streamTuningBenchmark', 'streamEncoderTuning', 'hardwareCapabilityTester', 'hardwareDecodeModule'].forEach((name) => {
+    jest.doMock('../modules/' + name, () => ({}));
+  });
   jest.doMock('express-rate-limit', () => jest.fn(() => (req, res, next) => next()));
 
   const serverModule = require('../server');

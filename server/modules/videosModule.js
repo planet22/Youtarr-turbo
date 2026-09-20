@@ -107,7 +107,7 @@ class VideosModule {
     // when it was actually downloaded, falling back to the job that
     // produced it, falling back to its YouTube publish date for videos
     // backfilled before last_downloaded_at existed.
-    const ADDED_DATE_EXPR = "COALESCE(Videos.last_downloaded_at, Jobs.timeCreated, STR_TO_DATE(Videos.originalDate, '%Y%m%d'))";
+    const ADDED_DATE_EXPR = 'COALESCE(Videos.last_downloaded_at, Jobs.timeCreated, STR_TO_DATE(Videos.originalDate, \'%Y%m%d\'))';
 
     try {
       const offset = (page - 1) * limit;
@@ -577,6 +577,9 @@ class VideosModule {
         for (const video of videos) {
           const entry = video.is_strm ? stealthCacheByYoutubeId.get(video.youtubeId) : null;
           video.hasStealthCache = Boolean(entry);
+          // Byte-range stealth cache only: an encode cut off early leaves a
+          // partial file the Library page marks as not a full copy.
+          video.stealthCachePartial = Boolean(entry && entry.partial);
           // Real facts about the hidden cache file itself - the Library
           // page's size column shows this instead of the "STRM" placeholder
           // for a stealth-cached row (still genuinely STRM - hasStealthCache/
@@ -679,11 +682,11 @@ class VideosModule {
     if (dateFrom) {
       // upload_date is yt-dlp's YYYYMMDD text, same format/comparison as
       // getVideosPaginated's Videos.originalDate handling.
-      metadataWhere.push(`JSON_UNQUOTE(JSON_EXTRACT(raw_info_json, '$.upload_date')) >= :dateFrom`);
+      metadataWhere.push('JSON_UNQUOTE(JSON_EXTRACT(raw_info_json, \'$.upload_date\')) >= :dateFrom');
       metadataReplacements.dateFrom = dateFrom.replace(/-/g, '');
     }
     if (dateTo) {
-      metadataWhere.push(`JSON_UNQUOTE(JSON_EXTRACT(raw_info_json, '$.upload_date')) <= :dateTo`);
+      metadataWhere.push('JSON_UNQUOTE(JSON_EXTRACT(raw_info_json, \'$.upload_date\')) <= :dateTo');
       metadataReplacements.dateTo = dateTo.replace(/-/g, '');
     }
     if (addedDateFrom) {
@@ -769,6 +772,7 @@ class VideosModule {
         existing.cachedVideoAt = entry.mtime;
         existing.cachedVideoFilePath = entry.filePath;
         existing.cachedVideoFileSize = entry.size;
+        existing.cachedVideoPartial = entry.partial === true;
       } else if (!bareCandidateUnverifiable && !trackedIdSet.has(entry.youtubeId)) {
         const entryMs = new Date(entry.mtime).getTime();
         if (addedFromMs !== null && entryMs < addedFromMs) continue;
@@ -783,6 +787,7 @@ class VideosModule {
           cachedVideoAt: entry.mtime,
           cachedVideoFilePath: entry.filePath,
           cachedVideoFileSize: entry.size,
+          cachedVideoPartial: entry.partial === true,
         });
       }
     }
@@ -860,6 +865,7 @@ class VideosModule {
         cachedVideoAt: candidate.cachedVideoAt,
         cachedVideoAgo: formatRelativeTimeAgo(candidate.cachedVideoAt),
         cachedVideoExpiresAt: computeExpiresAt(candidate.cachedVideoAt, cacheOnPlayExpiryHours),
+        cachedVideoPartial: candidate.cachedVideoPartial === true,
       };
     });
   }
@@ -1834,6 +1840,19 @@ class VideosModule {
    * deliberately does NOT fetch fresh metadata for uncached videos, to
    * avoid a full-library yt-dlp fetch spree (same reasoning as
    * backfillResolutionTags).
+   *
+   * Also regenerates each STRM video's `.strmtool.json` sidecar (see
+   * strmMediaInfoCache.js) from that same cached info.json - reusing it
+   * for both files, no extra cost. Picks up the CURRENT `ytstream`/`strm`
+   * config (e.g. `container` now correctly resolving to `hls` for
+   * hls/hls-buffer, fixed 2026-09-14 - see docs/YTSTREAM.md's Probe
+   * shortcut section), not whatever was true when the .strm was originally
+   * materialized. Unlike NFO (which Sonarr/Radarr owns for an NZB grab and
+   * strmMaterializer therefore skips - see its skipMediaSidecarFiles doc
+   * comment), `.strmtool.json` is a Jellyfin-plugin-only cache no external
+   * tool manages, so it's safe to regenerate for every STRM video
+   * regardless of how it was imported. Never touches the `.strm` file
+   * itself - only its sidecar.
    */
   async regenerateVideoMetadataFiles(arg = {}) {
     const opts = typeof arg === 'number' ? { timeLimit: arg } : arg;
@@ -1847,6 +1866,21 @@ class VideosModule {
     this._metadataRegenRunning = true;
 
     const nfoGenerator = require('./nfoGenerator');
+    const strmGenerator = require('./strmGenerator');
+    const strmMediaInfoCache = require('./strmMediaInfoCache');
+    const youtubeMetadataCache = require('./youtubeMetadataCache');
+    const cfg = configModule.getConfig();
+    const strmCfg = cfg.strm || {};
+    const canRegenerateStrmTool = strmCfg.target !== 'youtube' && strmCfg.writeMediaInfoCache !== false;
+    const ytstreamParams = canRegenerateStrmTool ? strmGenerator.resolveYtstreamParams(cfg, {}) : null;
+    // Diagnostic (temporary) - totalStrmToolRegenerated has come back 0 on
+    // real runs with no clear reason from the summary log alone; this
+    // exposes the actual gate values so the next run settles whether
+    // canRegenerateStrmTool is really false, or something downstream of it.
+    logger.info(
+      { strmTarget: strmCfg.target, strmWriteMediaInfoCache: strmCfg.writeMediaInfoCache, canRegenerateStrmTool },
+      'Metadata regeneration: .strmtool.json regen gate'
+    );
     const startTime = Date.now();
     const startedAtIso = new Date(startTime).toISOString();
     const logProgress = (message) => {
@@ -1864,6 +1898,19 @@ class VideosModule {
     let totalSkippedNoCache = 0;
     let totalSkippedNoFile = 0;
     let totalErrors = 0;
+    let totalStrmToolRegenerated = 0;
+    // Videos whose .strmtool.json was checked (via updateContainerOnly, the
+    // no-cached-metadata fallback) and found to already have the correct
+    // container - distinct from totalSkippedNoCache, which only means the
+    // NFO couldn't be rebuilt. Surfaced separately so the UI doesn't imply
+    // these videos were left untouched when they were in fact verified.
+    let totalStrmToolAlreadyCorrect = 0;
+    // Diagnostic (temporary) - settles whether totalStrmToolRegenerated
+    // matching totalRegenerated exactly means "that's genuinely all the
+    // is_strm videos in this library" or "the no-cached-metadata fallback
+    // isn't actually reaching STRM videos" - independent of cache
+    // availability, so it's the ground truth either way.
+    let totalStrmVideosScanned = 0;
     let result;
 
     try {
@@ -1881,7 +1928,7 @@ class VideosModule {
         const videos = await Video.findAll({
           attributes: [
             'id', 'youtubeId', 'filePath', 'youTubeChannelName',
-            'season', 'episode', 'normalized_rating', 'rating_source',
+            'season', 'episode', 'normalized_rating', 'rating_source', 'is_strm', 'removed',
           ],
           limit: CHUNK_SIZE,
           offset,
@@ -1892,8 +1939,12 @@ class VideosModule {
         for (const video of videos) {
           checkTimeLimit();
           totalScanned++;
+          if (video.is_strm) totalStrmVideosScanned++;
 
-          if (!video.filePath) {
+          // A deleted/missing video keeps its stale filePath; writing sidecars
+          // for it would resurrect orphan .nfo/.strmtool.json files next to a
+          // media file that is gone.
+          if (!video.filePath || video.removed) {
             totalSkippedNoFile++;
             continue; // no downloaded/materialized file to attach an .nfo to
           }
@@ -1904,8 +1955,37 @@ class VideosModule {
             const content = await fs.readFile(infoPath, 'utf8');
             jsonData = JSON.parse(content);
           } catch {
-            totalSkippedNoCache++;
-            continue;
+            // No on-disk info.json - STRM materialization
+            // (strmMaterializer.js) never writes one, but every yt-dlp
+            // metadata fetch anywhere in the app (STRM materialize, real
+            // downloads, URL validation, ytstream sessions, the video
+            // modal) caches the same full extraction into the
+            // youtube_metadata_cache DB table via
+            // youtubeMetadataCache.cacheRawInfoJson - try that before
+            // falling back to a container-only patch.
+            const dbCached = await youtubeMetadataCache.getCachedRawInfoJson(video.youtubeId);
+            if (dbCached && dbCached.data) {
+              jsonData = dbCached.data;
+            } else {
+              totalSkippedNoCache++;
+              // Truly no cached metadata anywhere (DB row expired/never
+              // written) - the NFO can't be rebuilt, but .strmtool.json's
+              // container field is derived purely from the global
+              // ytstream config (see strmMediaInfoCache.js's
+              // _resolveContainer), never per-video metadata - patch it
+              // in place on the existing sidecar rather than skipping
+              // entirely.
+              if (canRegenerateStrmTool && video.is_strm) {
+                try {
+                  const outcome = strmMediaInfoCache.updateContainerOnly(video.filePath, ytstreamParams);
+                  if (outcome === 'written') totalStrmToolRegenerated++;
+                  else if (outcome === 'already-correct') totalStrmToolAlreadyCorrect++;
+                } catch (err) {
+                  logger.warn({ err, youtubeId: video.youtubeId }, 'Failed to patch .strmtool.json container without cached metadata');
+                }
+              }
+              continue;
+            }
           }
 
           jsonData.normalized_rating = video.normalized_rating;
@@ -1928,6 +2008,15 @@ class VideosModule {
             totalErrors++;
             logger.warn({ err, youtubeId: video.youtubeId }, 'Failed to regenerate NFO file');
           }
+
+          if (canRegenerateStrmTool && video.is_strm) {
+            try {
+              const cachePath = strmMediaInfoCache.writeMediaInfoCacheFile(video.filePath, jsonData, ytstreamParams);
+              if (cachePath) totalStrmToolRegenerated++;
+            } catch (err) {
+              logger.warn({ err, youtubeId: video.youtubeId }, 'Failed to regenerate .strmtool.json sidecar');
+            }
+          }
         }
 
         offset += CHUNK_SIZE;
@@ -1938,7 +2027,8 @@ class VideosModule {
 
       const elapsed = Math.round((Date.now() - startTime) / 1000);
       logger.info({
-        elapsed, totalScanned, totalRegenerated, totalSkippedNoCache, totalSkippedNoFile, totalErrors,
+        elapsed, totalScanned, totalRegenerated, totalSkippedNoCache, totalSkippedNoFile, totalErrors, totalStrmToolRegenerated,
+        totalStrmToolAlreadyCorrect, totalStrmVideosScanned,
       }, 'Metadata regeneration completed');
 
       result = {
@@ -1947,6 +2037,8 @@ class VideosModule {
         skippedNoCache: totalSkippedNoCache,
         skippedNoFile: totalSkippedNoFile,
         errors: totalErrors,
+        strmToolRegenerated: totalStrmToolRegenerated,
+        strmToolAlreadyCorrect: totalStrmToolAlreadyCorrect,
         timeElapsed: elapsed,
         trigger,
         startedAt: startedAtIso,
@@ -1964,6 +2056,8 @@ class VideosModule {
           skippedNoCache: totalSkippedNoCache,
           skippedNoFile: totalSkippedNoFile,
           errors: totalErrors,
+          strmToolRegenerated: totalStrmToolRegenerated,
+          strmToolAlreadyCorrect: totalStrmToolAlreadyCorrect,
           timeElapsed: elapsed,
           trigger,
           startedAt: startedAtIso,
@@ -1978,6 +2072,8 @@ class VideosModule {
         regenerated: totalRegenerated,
         skippedNoCache: totalSkippedNoCache,
         skippedNoFile: totalSkippedNoFile,
+        strmToolRegenerated: totalStrmToolRegenerated,
+        strmToolAlreadyCorrect: totalStrmToolAlreadyCorrect,
         errors: totalErrors,
         timeElapsed: elapsed,
         trigger,

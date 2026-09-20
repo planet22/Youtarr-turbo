@@ -29,7 +29,7 @@ Thank you for your interest in contributing to Youtarr! This document will help 
 
 ```bash
 # Clone the repository
-git clone https://github.com/DialmasterOrg/Youtarr.git
+git clone https://github.com/planet22/Youtarr-turbo.git
 cd Youtarr
 
 # Build the development Docker image
@@ -498,7 +498,6 @@ Don't interpret silence as approval to proceed with major changes.
 
 ### Questions and Discussion
 
-- **Discord Server**: Join our [Discord community](https://discord.gg/68rvWnYMtD) for real-time help and discussion
 - **GitHub Issues**: For bug reports, feature requests, and questions
 - **Existing Issues**: Search before creating new issues to avoid duplicates
 
@@ -529,14 +528,8 @@ If you get stuck or need help:
 ### Repository Youtarr-Turbo
 - [GitHub Repository](https://github.com/planet22/Youtarr-turbo)
 - [Issue Tracker](https://github.com/planet22/Youtarr-turbo/issues)
-### orginal
-- [GitHub Repository](https://github.com/DialmasterOrg/Youtarr)
-- [Issue Tracker](https://github.com/DialmasterOrg/Youtarr/issues)
 - [Changelog](CHANGELOG.md)
 
-### Support the Project
-- [GitHub Sponsors](https://github.com/sponsors/DialmasterOrg)
-- [Patreon](https://www.patreon.com/ChrisDial)
 
 ## License
 

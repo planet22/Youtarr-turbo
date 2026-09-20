@@ -1,9 +1,9 @@
 import React from 'react';
 import { Box, Typography, Chip, Checkbox, Stack, IconButton, Tooltip } from '../../ui';
-import { AlertCircle as ErrorOutlineIcon, Trash2 as DeleteIcon, Ghost as StealthCacheIcon } from 'lucide-react';
-import { Database as MetadataCacheIcon, Storage as CachedVideoIcon, ClearCache as ClearCacheIcon } from '../../../lib/icons';
+import { AlertCircle as ErrorOutlineIcon, Trash2 as DeleteIcon } from 'lucide-react';
+import { Database as MetadataCacheIcon, ClearCache as ClearCacheIcon } from '../../../lib/icons';
 import { formatDuration, formatYTDate } from '../../../utils';
-import { formatAddedDateTime, formatFileSize, formatExpiresIn } from '../../../utils/formatters';
+import { formatAddedDateTime, formatFileSize } from '../../../utils/formatters';
 import { getDisplayPath } from '../../../utils/paths';
 import { getMediaTypeInfo } from '../../../utils/videoStatus';
 import { getEnabledChannelId } from '../../../utils/enabledChannels';
@@ -16,6 +16,7 @@ import AvailabilityChip from '../../shared/AvailabilityChip';
 import WatchedChip from '../../shared/WatchedChip';
 import { SHARED_STATUS_CHIP_SMALL_STYLE } from '../../shared/chipStyles';
 import ChannelNameDisplay from './ChannelNameDisplay';
+import CacheStatusChip from './CacheStatusChip';
 
 export interface VideosListMobileProps {
   videos: VideoData[];
@@ -362,36 +363,28 @@ function VideosListMobile({
                     </IconButton>
                   </Tooltip>
                 )}
-                {video.hasCachedVideo && (
-                  <Tooltip title="Opportunistically cached from STRM - will automatically revert to STRM when it expires. Click for details.">
-                    <Chip
-                      size="small"
-                      icon={<CachedVideoIcon size={12} />}
-                      label={formatExpiresIn(video.cachedVideoExpiresAt) ?? 'Cached'}
-                      variant="outlined"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onOpenCacheDetail(video.youtubeId, 'video');
-                      }}
-                      style={{ ...compactStatusChipStyle, cursor: 'pointer' }}
-                    />
-                  </Tooltip>
-                )}
-                {video.hasStealthCache && (
-                  <Tooltip title="Stealth-cached — playback served locally via Youtarr; still STRM, hidden from media server scans. Click for details.">
-                    <Chip
-                      size="small"
-                      icon={<StealthCacheIcon size={12} color="#9c27b0" />}
-                      label={video.stealthCacheFileSize ? formatFileSize(video.stealthCacheFileSize) : 'Cached'}
-                      variant="outlined"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onOpenCacheDetail(video.youtubeId, 'video');
-                      }}
-                      style={{ ...compactStatusChipStyle, borderColor: '#9c27b0', color: '#9c27b0', cursor: 'pointer' }}
-                    />
-                  </Tooltip>
-                )}
+                <CacheStatusChip
+                  video={video}
+                  kind="cached"
+                  isTracked={isTracked}
+                  iconSize={12}
+                  style={compactStatusChipStyle}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onOpenCacheDetail(video.youtubeId, 'video');
+                  }}
+                />
+                <CacheStatusChip
+                  video={video}
+                  kind="stealth"
+                  isTracked={isTracked}
+                  iconSize={12}
+                  style={compactStatusChipStyle}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onOpenCacheDetail(video.youtubeId, 'video');
+                  }}
+                />
               </Stack>
               <Box style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 4 }}>
                 <Typography

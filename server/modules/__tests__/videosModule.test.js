@@ -16,6 +16,8 @@ describe('VideosModule', () => {
   let mockExecFile;
   let mockChannel;
   let mockChannelThumbnails;
+  let mockStrmGenerator;
+  let mockStrmMediaInfoCache;
 
   beforeEach(() => {
     jest.resetModules();
@@ -86,6 +88,14 @@ describe('VideosModule', () => {
       writeEpisodeNfoFile: jest.fn()
     };
 
+    mockStrmGenerator = {
+      resolveYtstreamParams: jest.fn().mockReturnValue({ mode: 'direct', quality: '1080', container: 'mp4', transcode: 'copy' })
+    };
+
+    mockStrmMediaInfoCache = {
+      writeMediaInfoCacheFile: jest.fn()
+    };
+
     mockMessageEmitter = {
       emitMessage: jest.fn()
     };
@@ -134,9 +144,18 @@ describe('VideosModule', () => {
 
     jest.doMock('../nfoGenerator', () => mockNfoGenerator);
 
+    jest.doMock('../strmGenerator', () => mockStrmGenerator);
+
+    jest.doMock('../strmMediaInfoCache', () => mockStrmMediaInfoCache);
+
     jest.doMock('../messageEmitter', () => mockMessageEmitter);
 
     jest.doMock('../m3uGenerator', () => mockM3uGenerator);
+
+    // Loading the real nzb routes pulls in fs-extra, which the minimal fs stub below can't satisfy
+    jest.doMock('../../routes/nzb', () => ({
+      reconcileMovedUntrackedVideo: jest.fn().mockResolvedValue(false),
+    }));
 
     // Mock logger
     jest.doMock('../../logger', () => mockLogger);
@@ -411,7 +430,7 @@ describe('VideosModule', () => {
       const query = mockSequelize.query.mock.calls[0][0];
       const replacements = mockSequelize.query.mock.calls[0][1].replacements;
 
-      const addedDateExpr = "COALESCE(Videos.last_downloaded_at, Jobs.timeCreated, STR_TO_DATE(Videos.originalDate, '%Y%m%d'))";
+      const addedDateExpr = 'COALESCE(Videos.last_downloaded_at, Jobs.timeCreated, STR_TO_DATE(Videos.originalDate, \'%Y%m%d\'))';
       expect(query).toContain(`${addedDateExpr} >= :addedDateFrom`);
       expect(query).toContain(`${addedDateExpr} <= :addedDateTo`);
       // Unlike originalDate's stripped-string comparison, these compare
@@ -1330,11 +1349,13 @@ describe('VideosModule', () => {
         .mockResolvedValueOnce(chunk3)
         // Post-pass stale cached-video reconciliation query (see
         // reconcileRemovedCachedVideo) - no stale rows in this scenario.
+        .mockResolvedValueOnce([])
+        // Post-pass NZB "moved untracked video" reconciliation query - none either.
         .mockResolvedValueOnce([]);
 
       const result = await VideosModule.backfillVideoMetadata();
 
-      expect(mockVideo.findAll).toHaveBeenCalledTimes(4);
+      expect(mockVideo.findAll).toHaveBeenCalledTimes(5);
       expect(result.processed).toBe(2500);
     });
 
@@ -1818,6 +1839,19 @@ describe('VideosModule', () => {
       }));
     });
 
+    test('skips removed videos so no sidecars are written next to a deleted media file', async () => {
+      mockVideo.count.mockResolvedValueOnce(1);
+      mockVideo.findAll.mockResolvedValueOnce([
+        { id: 1, youtubeId: 'gone123', filePath: '/test/output/dir/Video [gone123].strm', season: null, is_strm: true, removed: true }
+      ]);
+
+      const result = await VideosModule.regenerateVideoMetadataFiles({ trigger: 'manual' });
+
+      expect(mockFs.readFile).not.toHaveBeenCalled();
+      expect(mockNfoGenerator.writeVideoNfoFile).not.toHaveBeenCalled();
+      expect(result).toEqual(expect.objectContaining({ scanned: 1, regenerated: 0, skippedNoFile: 1 }));
+    });
+
     test('counts a failed write as an error without throwing', async () => {
       mockVideo.count.mockResolvedValueOnce(1);
       mockVideo.findAll.mockResolvedValueOnce([
@@ -1852,6 +1886,61 @@ describe('VideosModule', () => {
         })
       );
       expect(VideosModule._metadataRegenRunning).toBe(false);
+    });
+
+    test('also regenerates the .strmtool.json sidecar for a STRM video, from the same cached metadata', async () => {
+      mockVideo.count.mockResolvedValueOnce(1);
+      mockVideo.findAll.mockResolvedValueOnce([
+        {
+          id: 1,
+          youtubeId: 'abc123',
+          filePath: '/test/output/dir/Video [abc123].strm',
+          season: null,
+          is_strm: true
+        }
+      ]);
+      const cachedMeta = { title: 'Video' };
+      mockFs.readFile.mockResolvedValueOnce(JSON.stringify(cachedMeta));
+      mockNfoGenerator.writeVideoNfoFile.mockReturnValue(true);
+      mockStrmMediaInfoCache.writeMediaInfoCacheFile.mockReturnValue('/test/output/dir/Video [abc123].strmtool.json');
+
+      const result = await VideosModule.regenerateVideoMetadataFiles({ trigger: 'manual' });
+
+      expect(mockStrmMediaInfoCache.writeMediaInfoCacheFile).toHaveBeenCalledWith(
+        '/test/output/dir/Video [abc123].strm',
+        expect.objectContaining({ title: 'Video' }),
+        expect.objectContaining({ mode: 'direct' })
+      );
+      expect(result).toEqual(expect.objectContaining({ strmToolRegenerated: 1 }));
+    });
+
+    test('does not touch the .strmtool.json sidecar for a real (non-STRM) download', async () => {
+      mockVideo.count.mockResolvedValueOnce(1);
+      mockVideo.findAll.mockResolvedValueOnce([
+        { id: 1, youtubeId: 'abc123', filePath: '/test/output/dir/Video [abc123].mp4', season: null, is_strm: false }
+      ]);
+      mockFs.readFile.mockResolvedValueOnce(JSON.stringify({ title: 'Video' }));
+      mockNfoGenerator.writeVideoNfoFile.mockReturnValue(true);
+
+      const result = await VideosModule.regenerateVideoMetadataFiles({ trigger: 'manual' });
+
+      expect(mockStrmMediaInfoCache.writeMediaInfoCacheFile).not.toHaveBeenCalled();
+      expect(result).toEqual(expect.objectContaining({ strmToolRegenerated: 0 }));
+    });
+
+    test('skips the .strmtool.json sidecar entirely when strm.target is "youtube" (no ytstream URL to cache media info for)', async () => {
+      mockConfigModule.getConfig.mockReturnValue({ strm: { target: 'youtube' } });
+      mockVideo.count.mockResolvedValueOnce(1);
+      mockVideo.findAll.mockResolvedValueOnce([
+        { id: 1, youtubeId: 'abc123', filePath: '/test/output/dir/Video [abc123].strm', season: null, is_strm: true }
+      ]);
+      mockFs.readFile.mockResolvedValueOnce(JSON.stringify({ title: 'Video' }));
+      mockNfoGenerator.writeVideoNfoFile.mockReturnValue(true);
+
+      const result = await VideosModule.regenerateVideoMetadataFiles({ trigger: 'manual' });
+
+      expect(mockStrmMediaInfoCache.writeMediaInfoCacheFile).not.toHaveBeenCalled();
+      expect(result).toEqual(expect.objectContaining({ strmToolRegenerated: 0 }));
     });
   });
 

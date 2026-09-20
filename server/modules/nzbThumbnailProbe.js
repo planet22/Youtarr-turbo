@@ -4,6 +4,7 @@ const ytDlpRunner = require('./ytDlpRunner');
 const nzbFeedModule = require('./nzbFeedModule');
 const youtubeMetadataCache = require('./youtubeMetadataCache');
 const createConcurrencyLimiter = require('./subscriptionImport/concurrencyLimiter');
+const configModule = require('./configModule');
 
 /**
  * Best-effort resolution detection for the yt-dlp flat-playlist search
@@ -135,6 +136,20 @@ async function cacheGet(youtubeId) {
   }
 }
 
+// nzb.videoResolutionCacheLimit (Settings -> Sonarr/Radarr/Prowlarr (NZB) ->
+// NZB Video Cache), 100-10,000 - replaces the old in-memory Map's 5000-entry
+// manual LRU eviction now that this cache is a DB table (see
+// create-nzb-resolution-cache migration's doc comment). Read live per call,
+// same pattern as nzb.js's nzbDebug.
+const DEFAULT_VIDEO_RESOLUTION_CACHE_LIMIT = 5000;
+
+function resolveVideoResolutionCacheLimit(cfg) {
+  const raw = cfg?.nzb?.videoResolutionCacheLimit;
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return DEFAULT_VIDEO_RESOLUTION_CACHE_LIMIT;
+  return Math.min(10000, Math.max(100, Math.round(n)));
+}
+
 function cacheSet(youtubeId, value) {
   const { NzbResolutionCache } = require('../models');
   NzbResolutionCache.upsert({
@@ -142,6 +157,20 @@ function cacheSet(youtubeId, value) {
     definition: value.definition,
     height_tier: value.heightTier,
     source: value.source,
+  }).then(async () => {
+    // Lazy prune on every write rather than a timer, same approach as
+    // nzbDiagnosticLog.js's eviction - an extra count+delete per write is
+    // negligible against yt-dlp/thumbnail-probe latency.
+    const max = resolveVideoResolutionCacheLimit(configModule.getConfig());
+    const count = await NzbResolutionCache.count();
+    if (count > max) {
+      const stale = await NzbResolutionCache.findAll({
+        attributes: ['youtube_id'],
+        order: [['createdAt', 'ASC']],
+        limit: count - max,
+      });
+      await NzbResolutionCache.destroy({ where: { youtube_id: stale.map((row) => row.youtube_id) } });
+    }
   }).catch((err) => {
     logger.warn({ err, youtubeId }, 'nzb: failed to persist resolution cache entry');
   });
@@ -267,4 +296,22 @@ async function fillUnknownDefinitions(results, { useThumb = true, useExtract = t
   return needsProbe.length;
 }
 
-module.exports = { probeDefinition, probeViaExtraction, fillUnknownDefinitions };
+/** Total cached rows - Settings UI's "NZB Video Cache" count. */
+async function countResolutionCache() {
+  const { NzbResolutionCache } = require('../models');
+  return NzbResolutionCache.count();
+}
+
+/** Bulk clear-all - Settings UI's "Clear NZB Video Cache" button. */
+async function clearResolutionCache() {
+  const { NzbResolutionCache } = require('../models');
+  return NzbResolutionCache.destroy({ truncate: true });
+}
+
+module.exports = {
+  probeDefinition,
+  probeViaExtraction,
+  fillUnknownDefinitions,
+  countResolutionCache,
+  clearResolutionCache,
+};

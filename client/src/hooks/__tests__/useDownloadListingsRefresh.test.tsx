@@ -20,7 +20,7 @@ describe('useDownloadListingsRefresh', () => {
   };
 
   const wrapper = ({ children }: { children: React.ReactNode }) => (
-    <WebSocketContext.Provider value={{ socket: null, subscribe, unsubscribe }}>
+    <WebSocketContext.Provider value={{ socket: null, isConnected: false, subscribe, unsubscribe }}>
       {children}
     </WebSocketContext.Provider>
   );

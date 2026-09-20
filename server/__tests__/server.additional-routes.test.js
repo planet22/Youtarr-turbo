@@ -327,6 +327,15 @@ const createServerModule = ({
         jest.doMock('node-cron', () => ({ schedule: jest.fn() }));
         jest.doMock('../modules/mediaServers/watchStatusScheduler', () => ({ scheduleTask: jest.fn(), subscribe: jest.fn() }));
         jest.doMock('../modules/channel/channelBackdropBackfill', () => ({ subscribe: jest.fn() }));
+        jest.doMock('../modules/strmMaterializer', () => ({}));
+        // ytdlpOptions route deps that transitively load fs-extra, which the minimal fs stub can't satisfy
+        ['networkTuningBenchmark', 'streamTuningBenchmark', 'streamEncoderTuning', 'hardwareCapabilityTester', 'hardwareDecodeModule'].forEach((name) => {
+          jest.doMock('../modules/' + name, () => ({}));
+        });
+        jest.doMock('../routes/nzb', () => () => require('express').Router());
+        jest.doMock('../routes/ytstream', () => () => require('express').Router());
+        jest.doMock('../modules/apiKeyModule', () => ({}));
+        jest.doMock('../models/video', () => ({}));
         jest.doMock('express-rate-limit', () => jest.fn(() => (req, res, next) => next()));
         jest.doMock('multer', () => Object.assign(jest.fn(() => ({ single: jest.fn(() => (req, res, next) => next()) })), {
           memoryStorage: jest.fn(() => ({})),
@@ -1127,21 +1136,12 @@ describe('server routes - channel video ignore operations', () => {
 
   describe('POST /api/channels/:channelId/videos/bulk-ignore', () => {
     test('bulk ignores multiple channel videos successfully', async () => {
-      const mockChannelVideo1 = {
-        channel_id: 'UCtest123',
-        youtube_id: 'video1',
-        update: jest.fn().mockResolvedValue()
-      };
-      const mockChannelVideo2 = {
-        channel_id: 'UCtest123',
-        youtube_id: 'video2',
-        update: jest.fn().mockResolvedValue()
-      };
-
       const channelVideoMock = {
-        findOne: jest.fn()
-          .mockResolvedValueOnce(mockChannelVideo1)
-          .mockResolvedValueOnce(mockChannelVideo2)
+        findAll: jest.fn().mockResolvedValue([
+          { channel_id: 'UCtest123', youtube_id: 'video1' },
+          { channel_id: 'UCtest123', youtube_id: 'video2' }
+        ]),
+        update: jest.fn().mockResolvedValue([2])
       };
 
       const archiveMock = {
@@ -1165,15 +1165,11 @@ describe('server routes - channel video ignore operations', () => {
 
       await bulkIgnoreHandler(req, res);
 
-      expect(channelVideoMock.findOne).toHaveBeenCalledTimes(2);
-      expect(mockChannelVideo1.update).toHaveBeenCalledWith({
-        ignored: true,
-        ignored_at: expect.any(Date)
-      });
-      expect(mockChannelVideo2.update).toHaveBeenCalledWith({
-        ignored: true,
-        ignored_at: expect.any(Date)
-      });
+      expect(channelVideoMock.findAll).toHaveBeenCalledTimes(1);
+      expect(channelVideoMock.update).toHaveBeenCalledWith(
+        { ignored: true, ignored_at: expect.any(Date) },
+        { where: { channel_id: 'UCtest123', youtube_id: ['video1', 'video2'] } }
+      );
       expect(archiveMock.addVideoToArchive).toHaveBeenCalledWith('video1');
       expect(archiveMock.addVideoToArchive).toHaveBeenCalledWith('video2');
       expect(res.statusCode).toBe(200);
@@ -1188,16 +1184,11 @@ describe('server routes - channel video ignore operations', () => {
     });
 
     test('handles partial success when some videos are not found', async () => {
-      const mockChannelVideo1 = {
-        channel_id: 'UCtest123',
-        youtube_id: 'video1',
-        update: jest.fn().mockResolvedValue()
-      };
-
       const channelVideoMock = {
-        findOne: jest.fn()
-          .mockResolvedValueOnce(mockChannelVideo1)
-          .mockResolvedValueOnce(null)
+        findAll: jest.fn().mockResolvedValue([
+          { channel_id: 'UCtest123', youtube_id: 'video1' }
+        ]),
+        update: jest.fn().mockResolvedValue([1])
       };
 
       const archiveMock = {
@@ -1297,7 +1288,7 @@ describe('server routes - channel video ignore operations', () => {
 
     test('handles error during bulk ignore operation', async () => {
       const channelVideoMock = {
-        findOne: jest.fn().mockRejectedValue(new Error('Database error'))
+        findAll: jest.fn().mockRejectedValue(new Error('Database error'))
       };
 
       const { app } = await createServerModule({ channelVideoMock });

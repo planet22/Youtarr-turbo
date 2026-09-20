@@ -1,6 +1,6 @@
-# Youtarr Backup and Restore
+# Youtarr-Turbo Backup and Restore
 
-This guide explains how to backup and restore your Youtarr installation, enabling disaster recovery and migration to new systems.
+This guide explains how to backup and restore your Youtarr-Turbo installation, enabling disaster recovery and migration to new systems.
 
 ## Requirements
 
@@ -60,7 +60,7 @@ On Debian/Ubuntu, install jq with: `sudo apt install jq`
 - They're typically stored on external/NAS storage
 - They can be re-downloaded if lost (though this takes time)
 
-Your playlist subscriptions and per-server sync state live in the database, so they're covered by the database dump. The generated `.m3u` files under `__playlists__/` in your output directory are not backed up, but Youtarr rewrites them on the next sync, so there's nothing to restore.
+Your playlist subscriptions and per-server sync state live in the database, so they're covered by the database dump. The generated `.m3u` files under `__playlists__/` in your output directory are not backed up, but Youtarr-Turbo rewrites them on the next sync, so there's nothing to restore.
 
 ## Backup Options
 
@@ -147,7 +147,7 @@ Skips the confirmation prompt. Use with caution in scripts.
    nano .env
    ```
 
-5. **Start Youtarr:**
+5. **Start Youtarr-Turbo:**
    ```bash
    ./start.sh
    ```
@@ -158,7 +158,7 @@ If your system drive fails but your video files survive (on external/NAS storage
 
 1. **Install fresh OS and Docker**
 
-2. **Clone Youtarr:**
+2. **Clone Youtarr-Turbo:**
    ```bash
    git clone https://github.com/planet22/Youtarr-turbo.git
    cd Youtarr-turbo
@@ -175,7 +175,7 @@ If your system drive fails but your video files survive (on external/NAS storage
    # Update if the path has changed
    ```
 
-5. **Start Youtarr:**
+5. **Start Youtarr-Turbo:**
    ```bash
    ./start.sh
    ```
@@ -207,7 +207,7 @@ youtarr-backup-YYYYMMDD-HHMMSS/
 
 ## ARM/Apple Silicon Notes
 
-Youtarr automatically detects ARM architecture (Apple Silicon, Raspberry Pi) and handles it appropriately:
+Youtarr-Turbo automatically detects ARM architecture (Apple Silicon, Raspberry Pi) and handles it appropriately:
 
 - **Backup:** Works the same on all architectures
 - **Restore:** Uses named volumes for MariaDB on ARM (instead of bind mounts)
@@ -236,7 +236,7 @@ Consider these best practices:
 
 ### "No .env file found"
 
-The backup script requires Youtarr to be initialized first:
+The backup script requires Youtarr-Turbo to be initialized first:
 
 ```bash
 ./start.sh  # Initialize Youtarr
@@ -272,7 +272,7 @@ sudo ./scripts/restore.sh backup.tar.gz
 
 If the database import fails:
 
-1. Try starting Youtarr normally (it will create a fresh database):
+1. Try starting Youtarr-Turbo normally (it will create a fresh database):
    ```bash
    ./start.sh
    ```

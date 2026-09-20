@@ -217,7 +217,7 @@ module.exports = function createSetupRoutes({ configModule, setupTokenModule, se
 
       res.json({
         token: sessionToken,
-        message: 'Setup complete! You can now access Youtarr normally.',
+        message: 'Setup complete! You can now access Youtarr-Turbo normally.',
         username: trimmedUsername
       });
     } catch (err) {

@@ -74,36 +74,46 @@ export const JellyfinSubfolderMappings: React.FC<JellyfinSubfolderMappingsProps>
 
   const hasCredentials = Boolean(jellyfinUrl.trim() && jellyfinApiKey.trim() && token);
 
+  // Debounced so a real request only fires once the user pauses typing in the
+  // URL/API key/user ID fields, and the AbortController actually cancels the
+  // in-flight request on the next keystroke (or unmount) instead of merely
+  // ignoring its result - each request otherwise ties up a server-side
+  // connection attempt to whatever host was entered for up to
+  // REQUEST_TIMEOUT_MS (30s), and without cancellation those pile up one per
+  // keystroke.
   useEffect(() => {
     if (!hasCredentials) {
       setJellyfinLibraries([]);
       return;
     }
-    let cancelled = false;
     setLoadingLibraries(true);
     setLibrariesError(null);
-    axios
-      .post<{ libraries: JellyfinLibrary[] }>(
-        '/api/mediaservers/jellyfin/libraries',
-        { jellyfinUrl: jellyfinUrl.trim(), jellyfinApiKey: jellyfinApiKey.trim(), jellyfinUserId: jellyfinUserId.trim() || undefined },
-        { headers: { 'x-access-token': token || '' } }
-      )
-      .then((res) => {
-        if (!cancelled) setJellyfinLibraries(res.data.libraries || []);
-      })
-      .catch((err: unknown) => {
-        if (cancelled) return;
-        const message =
-          (axios.isAxiosError(err) && err.response?.data?.error) ||
-          'Failed to load Jellyfin libraries';
-        setLibrariesError(typeof message === 'string' ? message : 'Failed to load Jellyfin libraries');
-        setJellyfinLibraries([]);
-      })
-      .finally(() => {
-        if (!cancelled) setLoadingLibraries(false);
-      });
+    const abortController = new AbortController();
+    const debounceTimer = setTimeout(() => {
+      axios
+        .post<{ libraries: JellyfinLibrary[] }>(
+          '/api/mediaservers/jellyfin/libraries',
+          { jellyfinUrl: jellyfinUrl.trim(), jellyfinApiKey: jellyfinApiKey.trim(), jellyfinUserId: jellyfinUserId.trim() || undefined },
+          { headers: { 'x-access-token': token || '' }, signal: abortController.signal }
+        )
+        .then((res) => {
+          setJellyfinLibraries(res.data.libraries || []);
+        })
+        .catch((err: unknown) => {
+          if (axios.isCancel(err)) return;
+          const message =
+            (axios.isAxiosError(err) && err.response?.data?.error) ||
+            'Failed to load Jellyfin libraries';
+          setLibrariesError(typeof message === 'string' ? message : 'Failed to load Jellyfin libraries');
+          setJellyfinLibraries([]);
+        })
+        .finally(() => {
+          setLoadingLibraries(false);
+        });
+    }, 500);
     return () => {
-      cancelled = true;
+      clearTimeout(debounceTimer);
+      abortController.abort();
     };
   }, [hasCredentials, jellyfinUrl, jellyfinApiKey, jellyfinUserId, token]);
 

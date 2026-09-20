@@ -9,6 +9,9 @@ jest.mock('../../models/channel', () => {
   return MockChannel;
 });
 
+// m3uGenerator pulls in models/index.js, whose associations need real models
+jest.mock('../m3uGenerator', () => ({}));
+
 jest.mock('../configModule', () => ({
   directoryPath: '/mock/youtube/output',
   config: {

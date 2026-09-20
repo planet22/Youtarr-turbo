@@ -256,6 +256,15 @@ const createServerModule = ({
         jest.doMock('../modules/cronJobs', () => cronJobsMock);
         jest.doMock('../modules/mediaServers/watchStatusScheduler', () => watchStatusSchedulerMock);
         jest.doMock('../modules/channel/channelBackdropBackfill', () => ({ subscribe: jest.fn() }));
+        jest.doMock('../modules/strmMaterializer', () => ({}));
+        // ytdlpOptions route deps that transitively load fs-extra, which the minimal fs stub can't satisfy
+        ['networkTuningBenchmark', 'streamTuningBenchmark', 'streamEncoderTuning', 'hardwareCapabilityTester', 'hardwareDecodeModule'].forEach((name) => {
+          jest.doMock('../modules/' + name, () => ({}));
+        });
+        jest.doMock('../routes/nzb', () => () => require('express').Router());
+        jest.doMock('../routes/ytstream', () => () => require('express').Router());
+        jest.doMock('../modules/apiKeyModule', () => ({}));
+        jest.doMock('../models/video', () => ({}));
         jest.doMock('../modules/webSocketServer.js', () => jest.fn());
         jest.doMock('node-cron', () => cronMock);
         jest.doMock('express-rate-limit', () => Object.assign(rateLimitMiddleware, { ipKeyGenerator: rateLimitMiddleware.ipKeyGenerator }));
@@ -537,6 +546,13 @@ describe('server initialization', () => {
       protectedFilter: 'off',
       missingFilter: 'off',
       watchedFilter: 'off',
+      addedDateFrom: null,
+      addedDateTo: null,
+      metadataCacheFilter: 'off',
+      cachedVideoFilter: 'off',
+      metadataOnlyFilter: 'off',
+      showUntracked: false,
+      strmFilter: 'off'
     });
 
     expect(res.statusCode).toBe(200);
@@ -634,6 +650,13 @@ describe('server initialization', () => {
       protectedFilter: 'off',
       missingFilter: 'off',
       watchedFilter: 'off',
+      addedDateFrom: null,
+      addedDateTo: null,
+      metadataCacheFilter: 'off',
+      cachedVideoFilter: 'off',
+      metadataOnlyFilter: 'off',
+      showUntracked: false,
+      strmFilter: 'off'
     });
 
     expect(res.statusCode).toBe(200);

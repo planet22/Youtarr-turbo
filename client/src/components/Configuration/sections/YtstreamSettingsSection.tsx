@@ -55,6 +55,7 @@ interface Props {
 export const DEFAULT_YTSTREAM: YtstreamConfig = {
   defaultMode: 'direct',
   container: 'mp4',
+  probeShortcutContainerOverride: null,
   transcode: '',
   quality: null,
   qualityStrictness: 'fallback',
@@ -68,6 +69,7 @@ export const DEFAULT_YTSTREAM: YtstreamConfig = {
   throttledRateKBps: 0,
   socketTimeoutSeconds: 0,
   calculatedLength: false,
+  hlsMasterPlaylist: true,
   hotSwapToCache: false,
   serveCachedFile: false,
   probeShortcut: false,
@@ -77,7 +79,12 @@ export const DEFAULT_YTSTREAM: YtstreamConfig = {
   backfillMissingSegments: false,
   finalizeToMp4: false,
   stealthCache: false,
+  bufferStartAfterSegments: 3,
   debugLogging: false,
+  byteRangeDeliverAsFile: false,
+  byteRangeResumeCache: false,
+  audioLanguage: '',
+  youtubeHlsProxy: 'off',
   forceKeyframesByHardwareMode: {},
 };
 
@@ -88,6 +95,10 @@ const MODE_TOOLTIPS: Record<string, string> = {
   'direct-redirect': 'Resolves a playback URL and sends the player a 302 straight to it. Youtarr-Turbo never touches the bytes: lightest mode on resources. No cookies/Referer travel with the redirect (age-restricted/members-only videos fail); anything after the redirect is invisible to Youtarr-Turbo\'s logs.',
   hls: 'Re-streams through yt-dlp\'s DASH formats + ffmpeg, quality beyond progressive\'s ceiling, writing real HLS segment files to disk instead of a live pipe: fixes players (Jellyfin included) that won\'t tolerate a live pipe\'s startup wait. Requires a working ffmpeg on the host; fails outright (502) if unavailable, no fallback to Direct. Costs local disk space per active stream. Backfill missing segments (below) can apply once Hot-swap to cached file gives it a local source.',
   'hls-buffer': 'Same as Enhanced HLS, but an independent fetch starts immediately and pulls the whole video once, unthrottled, into a local MPEG-TS buffer file that becomes the permanent download; continues even if playback seeks early or stops. Calculated length is always on for this mode. Backfill and Finalize .ts to .mp4 (below) can both apply once buffered.',
+  'hls-byterange': 'Experimental. A simpler alternative to Enhanced HLS: ffmpeg writes one growing fragmented-MP4 file plus a manifest (#EXT-X-MAP/#EXT-X-BYTERANGE) describing byte ranges into it, instead of many small segment files. Forward-only - no seek-restart support. The well-supported variant: an HLS-aware player reads duration/seek info from the manifest, not from Content-Length. Container is ignored (always fMP4).',
+  'hls-byterange-file': 'Same underlying growing fragmented-MP4 file as Byte-range HLS, but skips the manifest entirely - the URL serves that file directly via plain HTTP Range requests, so playback starts in seconds. Real tradeoff: without a manifest or a finished random-access index, a player has no reliable way to seek into anything it hasn\'t already sequentially buffered through (seeking backward into already-buffered content should work; forward seeks past that point likely will not). Container is fixed to Matroska.',
+  'youtube-hls': 'Serves YouTube\'s OWN HLS playlist for the video: no ffmpeg, no yt-dlp media download, no local file. YouTube\'s playlist lists every segment and its duration up front, so a player (Jellyfin included) sees the exact length immediately, can seek anywhere, and starts as soon as the first segment arrives. Only the small playlist passes through Youtarr-Turbo; the player fetches segments directly from YouTube, so it must reach YouTube from the same network as this server (URLs can be IP-bound and expire after a few hours). Limited to what YouTube offers over HLS (H.264, up to 1080p); age-restricted or members-only videos need cookies. Stream quality picks the variant; Container, Transcode and the hardware settings are ignored.',
+  'download-cache': 'Experimental. No streaming at all: downloads (and, if Transcode is H.264, re-encodes) the whole video once, then serves the finished file directly with normal HTTP Range support. Every request - including the first - blocks until that finishes, so there is a real delay before any bytes reach the player. Container is ignored; always mp4.',
 };
 
 /**
@@ -164,6 +175,13 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
   };
 
   const mode = ytstream.defaultMode || 'direct';
+  // Playback mode dropdown value: mode=hls-byterange has two dropdown
+  // entries (manifest vs plain-file) backed by the SAME defaultMode value,
+  // distinguished only by ytstream.byteRangeDeliverAsFile - this synthetic
+  // value is what the dropdown itself shows/reacts to; `mode` above (the
+  // real config value) stays 'hls-byterange' for both, and everything
+  // keyed off `mode` (modeCompat, isExperimentalMode, etc.) is unaffected.
+  const modeSelectValue = mode === 'hls-byterange' && ytstream.byteRangeDeliverAsFile ? 'hls-byterange-file' : mode;
   const forceH264 = ytstream.transcode === 'h264';
   // Single source of truth for every mode-gated field - see
   // getModeFieldCompatibility (server/routes/ytstream.js). Disabled state
@@ -173,6 +191,12 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
   // Distinct from modeCompat: "does this mode run an ffmpeg encode at all"
   // - used for tuning-benchmark messaging and the Recommended badge.
   const enhancedMode = mode === 'hls' || mode === 'hls-buffer';
+  // Two standalone experimental modes (see byteRangeHlsMode.js/
+  // downloadCacheMode.js) - not part of getModeFieldCompatibility's
+  // isHlsFamily/isDirectFamily split, so Transcode/Hardware encoder/Tuning
+  // read as "ignored" from that hook even though both of these modes do
+  // use them. Overridden below, client-side only.
+  const isExperimentalMode = mode === 'hls-byterange' || mode === 'download-cache';
 
   useEffect(() => {
     if (modeCompat.calculatedLength?.status === 'forced' && ytstream.calculatedLength !== true) {
@@ -180,6 +204,15 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [modeCompat.calculatedLength?.status, ytstream.calculatedLength]);
+
+  // Byte-range Plain file is pinned to Matroska in the UI: keep the saved
+  // container in step with what the (locked) Container dropdown shows.
+  useEffect(() => {
+    if (modeSelectValue === 'hls-byterange-file' && ytstream.container !== 'mkv') {
+      setYtstream({ container: 'mkv' });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modeSelectValue, ytstream.container]);
 
   const currentHardwareMode = ytstream.hardwareMode || 'none';
   // Maps Stream quality to the tuning matrix's resolution keys (480-2160).
@@ -252,11 +285,25 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
           <InputLabel>Playback mode</InputLabel>
           <Box className="flex items-center gap-1">
             <Select
-              value={mode}
+              value={modeSelectValue}
               label="Playback mode"
-              onChange={(e: SelectChangeEvent<string>) =>
-                setYtstream({ defaultMode: e.target.value as 'direct' | 'direct-redirect' | 'hls' | 'hls-buffer' })
-              }
+              onChange={(e: SelectChangeEvent<string>) => {
+                const v = e.target.value;
+                // hls-byterange has two dropdown entries backed by the
+                // SAME defaultMode value - the plain-file entry just also
+                // flips byteRangeDeliverAsFile on. See modeSelectValue's
+                // own comment above.
+                if (v === 'hls-byterange-file') {
+                  setYtstream({ defaultMode: 'hls-byterange', byteRangeDeliverAsFile: true });
+                } else if (v === 'hls-byterange') {
+                  setYtstream({ defaultMode: 'hls-byterange', byteRangeDeliverAsFile: false });
+                } else {
+                  setYtstream({
+                    defaultMode: v as 'direct' | 'direct-redirect' | 'hls' | 'hls-buffer' | 'download-cache' | 'youtube-hls',
+                    byteRangeDeliverAsFile: false,
+                  });
+                }
+              }}
               className="flex-1 min-w-0"
               disabled={disabled}
             >
@@ -266,9 +313,13 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
                   hls-buffer is a strict superset. Code untouched, just
                   removed from this picker. */}
               <MenuItem value="hls-buffer">Enhanced HLS + Buffered</MenuItem>
+              <MenuItem value="hls-byterange">Byte-range HLS (experimental)</MenuItem>
+              <MenuItem value="hls-byterange-file">Byte-range Plain file</MenuItem>
+              <MenuItem value="download-cache">Download &amp; cache (experimental)</MenuItem>
+              <MenuItem value="youtube-hls">YouTube HLS passthrough</MenuItem>
             </Select>
             <InfoTooltip
-              text={MODE_TOOLTIPS[mode] || MODE_TOOLTIPS.direct}
+              text={MODE_TOOLTIPS[modeSelectValue] || MODE_TOOLTIPS.direct}
               onMobileClick={onMobileTooltipClick}
             />
           </Box>
@@ -280,23 +331,26 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
           <InputLabel>Container</InputLabel>
           <Box className="flex items-center gap-1">
             <Select
-              value={ytstream.container || 'mp4'}
+              value={modeSelectValue === 'hls-byterange-file' ? 'mkv' : (ytstream.container || 'mp4')}
               label="Container"
               onChange={(e: SelectChangeEvent<string>) =>
                 setYtstream({ container: e.target.value as 'mp4' | 'ts' | 'mkv' })
               }
               className="flex-1 min-w-0"
-              disabled={disabled || modeCompat.container?.status !== 'optional'}
+              disabled={disabled || modeSelectValue === 'hls-byterange-file' || modeCompat.container?.status !== 'optional'}
             >
-              <MenuItem value="mp4">MP4</MenuItem>
-              <MenuItem value="ts">MPEG-TS</MenuItem>
+              {modeSelectValue !== 'hls-byterange-file' && <MenuItem value="mp4">MP4</MenuItem>}
+              {modeSelectValue !== 'hls-byterange-file' && <MenuItem value="ts">MPEG-TS</MenuItem>}
               {mode !== 'hls' && mode !== 'hls-buffer' && (
                 <MenuItem value="mkv">Matroska</MenuItem>
               )}
             </Select>
             <InfoTooltip
               text={
-                'Matroska (mkv, Enhanced-only) accepts any video/audio codec pair: useful for Copy when the source isn\'t H.264.'
+                (modeSelectValue === 'hls-byterange-file'
+                  ? 'Byte-range Plain file always uses Matroska: it writes a growing .mkv with the real duration in its header, so Jellyfin sees the correct length at once; the final size is declared up front, so a forward seek waits for the download to reach that point. '
+                  : '')
+                + 'Matroska (mkv, Enhanced-only) accepts any video/audio codec pair: useful for Copy when the source isn\'t H.264.'
                 + (mode === 'hls-buffer'
                   ? ' For Enhanced HLS + Buffered: this only picks the live segment format; the permanent download is always MPEG-TS.'
                   : '')
@@ -350,7 +404,7 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
                 setYtstream({ transcode: e.target.value as '' | 'copy' | 'h264' })
               }
               className="flex-1 min-w-0"
-              disabled={disabled || modeCompat.transcode?.status !== 'optional'}
+              disabled={disabled || (modeCompat.transcode?.status !== 'optional' && !isExperimentalMode)}
             >
               <MenuItem value="">Auto (match download codec setting)</MenuItem>
               <MenuItem value="copy">Always remux (copy, no re-encode)</MenuItem>
@@ -458,7 +512,7 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
                 })
               }
               className="flex-1 min-w-0"
-              disabled={disabled || modeCompat.hardwareMode?.status !== 'optional'}
+              disabled={disabled || (modeCompat.hardwareMode?.status !== 'optional' && !(isExperimentalMode && forceH264))}
             >
               <MenuItem value="none">Software (libx264)</MenuItem>
               <MenuItem value="qsv">Intel Quick Sync (h264_qsv)</MenuItem>
@@ -515,7 +569,7 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
                 setYtstream({ tuning: e.target.value as 'fast' | 'balanced' | 'quality' })
               }
               className="flex-1 min-w-0"
-              disabled={disabled || modeCompat.tuning?.status !== 'optional'}
+              disabled={disabled || (modeCompat.tuning?.status !== 'optional' && !(isExperimentalMode && forceH264))}
             >
               {[
                 { value: 'fast', label: 'Fast (real-time safe)' },
@@ -573,9 +627,10 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
         </Grid>
       )}
 
-      {/* Cache on play / Hot-swap / Probe shortcut: grouped as their own
-          Switch row, not intermingled with the Select dropdowns above. */}
-      <Grid item xs={12} md={4}>
+      {/* Cache on play / Hot-swap / Probe shortcut / HLS master playlist:
+          grouped as their own Switch row (md=3 so all four fit on one
+          line), not intermingled with the Select dropdowns above. */}
+      <Grid item xs={12} md={3}>
         <Box className="flex items-center gap-1">
           <FormControlLabel
             control={
@@ -597,32 +652,7 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
         </Box>
       </Grid>
 
-      {/* Always disabled currently: its only 'optional' case is mode=hls,
-          hidden from the picker above. Kept visible, not hidden - live
-          again the moment hls returns, no further wiring needed. */}
-      <Grid item xs={12} md={4}>
-        <Box className="flex items-center gap-1">
-          <FormControlLabel
-            control={
-              <Switch
-                checked={ytstream.hotSwapToCache ?? false}
-                onChange={(e) => setYtstream({ hotSwapToCache: e.target.checked })}
-                disabled={disabled || modeCompat.hotSwapToCache?.status !== 'optional'}
-              />
-            }
-            label="Hot-swap to cached file"
-          />
-          <InfoTooltip
-            text={
-              'If the Cache on play download finishes while this video is still playing, the session switches to producing the rest from the local file instead of the network: same picture, no restart, faster. No effect unless Cache on play is also enabled.'
-              + (modeCompat.hotSwapToCache?.reason ? ` For the current Playback mode (${mode}): ${modeCompat.hotSwapToCache.reason}` : '')
-            }
-            onMobileClick={onMobileTooltipClick}
-          />
-        </Box>
-      </Grid>
-
-      <Grid item xs={12} md={4}>
+      <Grid item xs={12} md={3}>
         {/* No forcedFieldStyle: probeShortcut has no query-string override
             path (see evaluateProbeShortcut) and is never in a .strm URL. */}
         <Box className="flex items-center gap-1">
@@ -638,9 +668,31 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
           />
           <InfoTooltip
             text={
-              'A media server\'s metadata probe (Jellyfin\'s ffprobe, etc.) hitting a .strm can trigger real work against YouTube just to read codec info. Every .strm this app writes carries a marker that lets the server detect a probe regardless of this setting; the toggle controls only what happens once one is detected: on serves a tiny cached clip instead, off treats it like any other request.'
+              'A media server\'s metadata probe (Jellyfin\'s ffprobe, etc.) hitting a .strm triggers a real HLS session the same as playback would (the probe response is the session\'s own real playlist, served before any segment is encoded). Every .strm this app writes carries a marker that lets the server detect a probe regardless of this setting; the toggle controls only whether a detected probe gets this fast instant-playlist response (on) or is treated like any other request (off, full mode/quality resolution runs first).'
               + (modeCompat.probeShortcut?.reason ? ` For the current Playback mode (${mode}): ${modeCompat.probeShortcut.reason}` : '')
               + ' Existing .strm files need to be rewritten (re-download, or a channel resync) to pick up the marker.'
+            }
+            onMobileClick={onMobileTooltipClick}
+          />
+        </Box>
+      </Grid>
+
+      <Grid item xs={12} md={3}>
+        <Box className="flex items-center gap-1">
+          <FormControlLabel
+            control={
+              <Switch
+                checked={ytstream.hlsMasterPlaylist ?? true}
+                onChange={(e) => setYtstream({ hlsMasterPlaylist: e.target.checked })}
+                disabled={disabled || modeCompat.hlsMasterPlaylist?.status !== 'optional'}
+              />
+            }
+            label="HLS master playlist"
+          />
+          <InfoTooltip
+            text={
+              'Wraps the real media playlist in a thin HLS master playlist (BANDWIDTH + RESOLUTION) instead of serving it directly - the more broadly-compatible HLS shape, and it stops Jellyfin guessing a ~20 Mbps default bandwidth that can force needless transcoding. BANDWIDTH is a heuristic estimate (encodes are quality-targeted, not fixed-bitrate); RESOLUTION comes from the same source-resolution lookup the encoder itself uses. CODECS is never declared, since the exact profile/level varies per hardware encoder.'
+              + (modeCompat.hlsMasterPlaylist?.reason ? ` For the current Playback mode (${mode}): ${modeCompat.hlsMasterPlaylist.reason}` : '')
             }
             onMobileClick={onMobileTooltipClick}
           />
@@ -885,7 +937,7 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
             </Select>
           </FormControl>
           <InfoTooltip
-            text="Where a live session's segment files are written. OS temp directory is fastest but can be small/volatile; Youtarr-Turbo's persistent cache folder avoids that. Segments are cleaned up on the same idle schedule either way; this only changes where they live."
+            text="Where a live session's segment files are written. OS temp directory is fastest but can be small/volatile; Youtarr-Turbo's persistent cache folder avoids that. Segments are cleaned up on the same idle schedule either way; this only changes where they live. For Byte-range Plain file, the Persistent cache folder also makes the encode write straight into the stealth cache (no copy when it finishes)."
             onMobileClick={onMobileTooltipClick}
           />
         </Box>
@@ -957,6 +1009,73 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
         </Box>
       </Grid>
 
+      {modeSelectValue === 'hls-byterange-file' && (
+        <Grid item xs={12} sm={6} md={3}>
+          <Box className="flex items-center gap-1 md:mt-5 md:min-h-[48px]">
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={ytstream.byteRangeResumeCache ?? false}
+                  onChange={(e) => setYtstream({ byteRangeResumeCache: e.target.checked })}
+                  disabled={disabled}
+                />
+              }
+              label="Resume partial cache"
+            />
+            <InfoTooltip
+              text="When a Byte-range Plain file encode is cut off early (idle timeout, forced stop), its partial result stays in the hidden cache. With this on, the next request re-encodes only from near where it stopped and stitches the new tail onto the cached part, instead of starting over from 0:00. Works for both MP4 and MKV (MKV splices whole clusters at a keyframe, so it needs no extra tools and is quick). If the result fails validation, the existing partial is left untouched. Off: a partial cache entry is ignored and a fresh encode from the start runs."
+              onMobileClick={onMobileTooltipClick}
+            />
+          </Box>
+        </Grid>
+      )}
+
+      {mode === 'youtube-hls' && (
+        <Grid item xs={12} md={4}>
+          <FormControl fullWidth>
+            <InputLabel>Route through Youtarr</InputLabel>
+            <Box className="flex items-center gap-1">
+              <Select
+                value={ytstream.youtubeHlsProxy || 'off'}
+                label="Route through Youtarr"
+                onChange={(e: SelectChangeEvent<string>) => setYtstream({ youtubeHlsProxy: e.target.value as 'off' | 'proxy' | 'serve' })}
+                className="flex-1 min-w-0"
+                disabled={disabled}
+              >
+                <MenuItem value="off">Off (player goes straight to YouTube)</MenuItem>
+                <MenuItem value="proxy">Proxy playlists</MenuItem>
+                <MenuItem value="serve">Serve segment URLs</MenuItem>
+              </Select>
+              <InfoTooltip
+                text="Off: only the master playlist comes from Youtarr; Jellyfin fetches everything else from YouTube, so nothing about the playback shows on the Streaming page. Proxy playlists: Youtarr also serves the video and audio playlists, so each play and its viewers show on the Streaming page; segments still go straight from YouTube. Serve segment URLs: additionally every segment request goes through Youtarr, which answers with a redirect to YouTube (no video data passes through Youtarr). The Streaming page then shows the playback position and an estimated data rate (marked ~). Adds a small delay per segment."
+                onMobileClick={onMobileTooltipClick}
+              />
+            </Box>
+          </FormControl>
+        </Grid>
+      )}
+
+      {mode === 'youtube-hls' && (
+        <Grid item xs={12} md={4}>
+          <Box className="flex items-center gap-1">
+            <TextField
+              fullWidth
+              label="Audio language"
+              name="ytstreamAudioLanguage"
+              value={ytstream.audioLanguage || ''}
+              onChange={(e) => setYtstream({ audioLanguage: e.target.value })}
+              placeholder="en"
+              disabled={disabled}
+              helperText='Leave blank for the original audio. Use a language code such as "en", "de", "es" or "pt-BR" to pick a dubbed track.'
+            />
+            <InfoTooltip
+              text="Many YouTube videos carry dubbed audio tracks in several languages. YouTube HLS passthrough serves one of them: the language set here when the video offers it, otherwise the original. A region-less code such as en matches en-US and en-GB. The Youtarr log lists the languages each video offers and which one was chosen."
+              onMobileClick={onMobileTooltipClick}
+            />
+          </Box>
+        </Grid>
+      )}
+
       <Grid item xs={12}>
         <Divider className="my-2" />
         <Typography variant="subtitle2" color="textSecondary" className="mb-1">
@@ -1009,13 +1128,13 @@ export const YtstreamSettingsSection: React.FC<Props> = ({
               const parsed = Number.parseInt(raw, 10);
               setStrm({ cacheOnPlayExpiryHours: Number.isFinite(parsed) && parsed > 0 ? parsed : null });
             }}
-            disabled={disabled || !((modeCompat.cacheOnPlay?.status !== 'ignored' && cacheOnPlay) || mode === 'hls-buffer')}
+            disabled={disabled || !((modeCompat.cacheOnPlay?.status !== 'ignored' && cacheOnPlay) || mode === 'hls-buffer' || modeSelectValue === 'hls-byterange-file')}
             placeholder="Never"
-            helperText="Blank = never auto-expire. A nightly sweep (2:10 AM) removes cache-on-play downloads and Enhanced HLS + Buffered untracked-video cache files older than this."
+            helperText="Blank = never auto-expire. A nightly sweep (2:10 AM) removes cache-on-play downloads, Enhanced HLS + Buffered untracked-video cache files, and Byte-range Plain file cache entries older than this."
             inputProps={{ min: 1 }}
           />
           <InfoTooltip
-            text="How long a cache-on-play download stays a real file before Youtarr-Turbo auto-reverts it to STRM (never touches a genuine/forced download, regardless of age). Also governs how long Enhanced HLS + Buffered's untracked-video cache files (no library entry to revert, so just deleted) are kept before the same nightly sweep removes them. One setting governs both."
+            text="How long a cache-on-play download stays a real file before Youtarr-Turbo auto-reverts it to STRM (never touches a genuine/forced download, regardless of age). Also governs how long Enhanced HLS + Buffered's untracked-video cache files (no library entry to revert, so just deleted) are kept before the same nightly sweep removes them; Byte-range Plain file's hidden cache entries age out the same way. One setting governs all of them."
             onMobileClick={onMobileTooltipClick}
           />
         </Box>

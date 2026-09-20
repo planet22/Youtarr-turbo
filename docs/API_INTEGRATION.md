@@ -1,6 +1,6 @@
 # API Integration Guide
 
-This guide covers how to use Youtarr's API for external integrations, including bookmarklets, mobile shortcuts, and automation tools.
+This guide covers how to use Youtarr-Turbo's API for external integrations, including bookmarklets, mobile shortcuts, and automation tools.
 
 ## Table of Contents
 - [Overview](#overview)
@@ -15,7 +15,7 @@ This guide covers how to use Youtarr's API for external integrations, including 
 
 ## Overview
 
-Youtarr provides an API endpoint that allows you to add YouTube videos to your download queue from external tools. This enables workflows like:
+Youtarr-Turbo provides an API endpoint that allows you to add YouTube videos to your download queue from external tools. This enables workflows like:
 
 - **Browser Bookmarklet**: One-click download while browsing YouTube
 - **Apple Shortcuts**: Share videos from the YouTube app on iOS
@@ -38,7 +38,7 @@ API keys are the recommended authentication method for external integrations. Th
 
 #### Creating an API Key
 
-1. Navigate to **Settings -> API Keys** in Youtarr
+1. Navigate to **Settings -> API Keys** in Youtarr-Turbo
 2. Click **Create Key**
 3. Enter a descriptive name (e.g., "iPhone Shortcut", "Bookmarklet")
 4. **Important**: Copy and save the key immediately - it will not be shown again!
@@ -167,19 +167,19 @@ The response includes standard rate limit headers:
 
 ## Bookmarklet Setup
 
-A bookmarklet is a browser bookmark that runs JavaScript when clicked. Youtarr generates a ready-to-use bookmarklet when you create an API key.
+A bookmarklet is a browser bookmark that runs JavaScript when clicked. Youtarr-Turbo generates a ready-to-use bookmarklet when you create an API key.
 
 ### Installation
 
-1. Create an API key in Youtarr
-2. In the success dialog, drag the **"📥 Send to Youtarr"** button to your bookmarks bar
+1. Create an API key in Youtarr-Turbo
+2. In the success dialog, drag the **"📥 Send to Youtarr-Turbo"** button to your bookmarks bar
 3. Alternatively, copy the bookmarklet code and create a bookmark manually
 
 ### Usage
 
 1. Navigate to any YouTube video page
 2. Click the bookmarklet in your bookmarks bar
-3. An alert will confirm the video was added to Youtarr
+3. An alert will confirm the video was added to Youtarr-Turbo
 
 ### Manual Bookmarklet Code
 
@@ -223,7 +223,7 @@ Replace `YOUR_API_KEY` and `https://your-youtarr-server.com` with your values.
 4. Add **"Show Notification"** to confirm success
 5. Enable "Show in Share Sheet" and select YouTube
 
-Now you can share videos from the YouTube app directly to Youtarr!
+Now you can share videos from the YouTube app directly to Youtarr-Turbo!
 
 ### Android (Tasker/Automate)
 
@@ -332,7 +332,7 @@ action:
 3. **Rotate Keys**: If a key is compromised, delete it immediately and create a new one
 4. **Use Descriptive Names**: Name your keys by purpose (e.g., "iPhone", "Work Laptop") so you can identify and revoke specific keys if needed
 5. **Monitor Usage**: Check the "Last Used" column to identify unused or suspicious keys
-6. **External Auth Proxies**: If using Cloudflare Zero Trust, Authelia, or similar, you'll need to bypass authentication for `/api/videos/download`. This is safe because Youtarr's API key authentication still protects the endpoint. See [Troubleshooting](#cors-error--blocked-by-external-auth-cloudflare-zero-trust-authelia-etc) for setup instructions.
+6. **External Auth Proxies**: If using Cloudflare Zero Trust, Authelia, or similar, you'll need to bypass authentication for `/api/videos/download`. This is safe because Youtarr-Turbo's API key authentication still protects the endpoint. See [Troubleshooting](#cors-error--blocked-by-external-auth-cloudflare-zero-trust-authelia-etc) for setup instructions.
 
 ## Troubleshooting
 
@@ -340,7 +340,7 @@ action:
 The bookmarklet only works on youtube.com or youtu.be pages. Make sure you're on a video page.
 
 ### "Connection failed" Alert
-- Check your Youtarr server is running and accessible
+- Check your Youtarr-Turbo server is running and accessible
 - Verify the server URL in your bookmarklet is correct
 - Check browser console for CORS errors
 
@@ -354,11 +354,11 @@ The bookmarklet only works on youtube.com or youtu.be pages. Make sure you're on
 
 ### CORS Error / Blocked by External Auth (Cloudflare Zero Trust, Authelia, etc.)
 
-If you're running Youtarr behind an authentication proxy like Cloudflare Zero Trust, Authelia, or similar, bookmarklets and external API calls will fail with CORS errors because:
+If you're running Youtarr-Turbo behind an authentication proxy like Cloudflare Zero Trust, Authelia, or similar, bookmarklets and external API calls will fail with CORS errors because:
 
 1. The bookmarklet runs from `youtube.com` (cross-origin)
 2. Browser sends a preflight OPTIONS request (no auth headers)
-3. Your auth proxy blocks the request before it reaches Youtarr
+3. Your auth proxy blocks the request before it reaches Youtarr-Turbo
 
 **Solution for Cloudflare Zero Trust:**
 
@@ -370,7 +370,7 @@ If you're running Youtarr behind an authentication proxy like Cloudflare Zero Tr
    - **Selector**: Everyone
 4. Save the application
 
-The `/api/videos/download` endpoint is still protected by Youtarr's API key authentication, so this bypass is safe.
+The `/api/videos/download` endpoint is still protected by Youtarr-Turbo's API key authentication, so this bypass is safe.
 
 **Solution for other auth proxies (Authelia, Authentik, etc.):**
 

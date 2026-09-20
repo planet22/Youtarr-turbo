@@ -87,15 +87,29 @@ function getModeFieldCompatibility({ mode, transcode }) {
       status: 'forced',
       reason: `${mode} builds a real .m3u8 playlist - without this, a player sees ffmpeg's own raw growing playlist instead of a pre-declared exact-duration one, and can "join near the live edge" on reconnect (a real forward jump, displayed position stuck behind it), regardless of how this setting is configured.`,
     }
-    : (mode === 'direct' || mode === 'direct-redirect')
+    : (mode === 'hls-byterange' || mode === 'download-cache')
       ? {
         status: 'ignored',
-        reason: `${mode} mode uses the stream's own real length (whatever the upstream/player's own fetch reports), not an estimate.`,
+        reason: mode === 'hls-byterange'
+          ? 'The manifest (or, for Plain file, the growing file itself) carries its own duration - there is no estimated Content-Length to calculate.'
+          : 'The finished file is served whole with its real Content-Length - there is nothing to estimate.',
       }
       : {
-        status: 'optional',
-        reason: 'A genuine trade-off: reports an estimated size/duration upfront and answers seeks faster (but only approximately) by restarting at the estimated timestamp.',
+        status: 'ignored',
+        reason: `${mode} mode uses the stream's own real length (whatever the upstream/player's own fetch reports), not an estimate.`,
       };
+
+  // Experimental modes are intercepted in routes/ytstream.js before the
+  // cached-file check runs, so it never gets a chance to apply to them.
+  fields.serveCachedFile = (mode === 'hls-byterange' || mode === 'download-cache' || mode === 'youtube-hls')
+    ? {
+      status: 'ignored',
+      reason: 'This mode handles playback (and its own hidden cache) entirely on its own - the already-downloaded-file check never runs for it.',
+    }
+    : {
+      status: 'optional',
+      reason: 'Serves a video that is already fully downloaded straight from its real local file instead of live-proxying or re-transcoding it.',
+    };
 
   fields.probeShortcut = !isHlsFamily
     ? {
@@ -111,6 +125,18 @@ function getModeFieldCompatibility({ mode, transcode }) {
         status: 'optional',
         reason: 'Skips a real yt-dlp/ffmpeg session for a detected metadata probe, serving a tiny cached clip in the right codec instead.',
       };
+
+  fields.hlsMasterPlaylist = isHlsFamily
+    ? {
+      status: 'optional',
+      reason: 'Wraps the real media playlist in a thin HLS master playlist (BANDWIDTH/RESOLUTION) instead of serving it directly.',
+    }
+    : {
+      status: 'ignored',
+      reason: mode === 'youtube-hls'
+        ? 'YouTube\'s own playlist is served as-is (one variant); there is no local media playlist to wrap.'
+        : `${mode} mode never produces an m3u8 playlist to wrap.`,
+    };
 
   const encodeFieldsIgnoredReason = 'This mode never runs an ffmpeg encode - there\'s nothing here for Container/Transcode/Hardware encoder/Encoding tuning to apply to.';
   fields.container = !isHlsFamily
@@ -147,15 +173,25 @@ function getModeFieldCompatibility({ mode, transcode }) {
   // own independent fetch already produces the same permanent file
   // cache-on-play would, unconditionally, so the STRM background download
   // is always skipped for it.
-  fields.cacheOnPlay = mode === 'hls-buffer'
-    ? {
+  // hls-byterange/download-cache are intercepted before any cache-on-play
+  // logic runs (see the experimental-mode block in routes/ytstream.js), so
+  // the trigger never fires for them.
+  if (mode === 'hls-buffer') {
+    fields.cacheOnPlay = {
       status: 'ignored',
       reason: 'Enhanced HLS + Buffered\'s own fetch always finalizes into the same permanent file cache-on-play would have downloaded - the STRM background download is always skipped for this mode, regardless of this setting.',
-    }
-    : {
+    };
+  } else if (mode === 'hls-byterange' || mode === 'download-cache' || mode === 'youtube-hls') {
+    fields.cacheOnPlay = {
+      status: 'ignored',
+      reason: 'This mode handles playback (and its own hidden cache) entirely on its own - the STRM cache-on-play background download is never triggered for it.',
+    };
+  } else {
+    fields.cacheOnPlay = {
       status: 'optional',
       reason: 'Enqueues a real background download of this video on play, so later plays use the cached file instead of live-proxying it again.',
     };
+  }
 
   // Only hls/hls-buffer produce real numbered segment files at all
   // (see SEGMENT_STATUS_MODES) - a forward seek in any of them can strand

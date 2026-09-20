@@ -1,16 +1,18 @@
-# Youtarr - TURBO
+# Youtarr-Turbo - TURBO
 
-> **This is Youtarr Turbo**, a fork of upstream Youtarr (based on v1.80.0) with additional features — STRM/live-transcoded streaming, hardware acceleration, Sonarr/Radarr integration, and more. See [TURBO.md](TURBO.md) for everything this fork adds on top of what's described below.
 
-Youtarr is a self-hosted YouTube downloader that automatically downloads videos from your favorite channels and playlists. It provides metadata for multiple media servers, mirrors your subscribed YouTube playlists into Plex, Jellyfin, and Emby as native playlists, pulls watch status back from those servers so you can filter your library by what's been watched, and offers optional Plex integration for automatic library refreshes. Learn more at [youtarr.com](https://youtarr.com).
+![Backend Coverage](https://img.shields.io/badge/Backend_Coverage-72%25-yellow)
+![Frontend Coverage](https://img.shields.io/badge/Frontend_Coverage-80%25-yellow)
+![CI Status](https://github.com/planet22/Youtarr-turbo/workflows/CI%20-%20Lint%20and%20Test/badge.svg)
+> **This is Youtarr-Turbo**, a fork of upstream Youtarr (based on v1.80.0) with additional features — STRM/live-transcoded streaming, hardware acceleration, Sonarr/Radarr integration, and more. See [TURBO.md](TURBO.md) for everything this fork adds on top of what's described below.
+
+Youtarr-Turbo is a self-hosted YouTube downloader that automatically downloads videos from your favorite channels and playlists. It provides metadata for multiple media servers, mirrors your subscribed YouTube playlists into Plex, Jellyfin, and Emby as native playlists, pulls watch status back from those servers so you can filter your library by what's been watched, and offers optional Plex integration for automatic library refreshes.
 
 > **Quick guides:** [Streaming (STRM + ytstream)](docs/GETTING_STARTED_STREAMING.md) · [Sonarr/Radarr via NZB](docs/GETTING_STARTED_NZB.md) · [Channel & Playlist Settings](docs/GETTING_STARTED_CHANNELS_PLAYLISTS.md)
 
-> **Like Youtarr?** Consider [supporting the project on Patreon](https://www.patreon.com/c/ChrisDial) to help keep it free and actively developed!
-
 https://github.com/user-attachments/assets/a80548fc-bcf9-4ad0-889c-dbd5aac250ee
 
-## Why Youtarr?
+## Why Youtarr-Turbo?
 
 - **No Ads or Tracking**: Watch YouTube content without interruptions
 - **Offline Viewing**: Access your videos anytime, even without internet
@@ -23,26 +25,25 @@ https://github.com/user-attachments/assets/a80548fc-bcf9-4ad0-889c-dbd5aac250ee
 
 - **Smart Downloads**: Pre-validate manually pasted URLs with metadata preview before downloading
 - **Channel Subscriptions**: Subscribe to channels and auto-download new videos, shorts, and streams with per-tab controls
-- **Playlist Subscriptions**: Subscribe to YouTube playlists and auto-download their videos into the right channel folders; Youtarr mirrors each playlist into Plex, Jellyfin, and Emby as a native playlist and writes a universal `.m3u` file for any other player
+- **Playlist Subscriptions**: Subscribe to YouTube playlists and auto-download their videos into the right channel folders; Youtarr-Turbo mirrors each playlist into Plex, Jellyfin, and Emby as a native playlist and writes a universal `.m3u` file for any other player
 - **Browse Channels**: View and search all videos from subscribed channels with advanced filtering, tabbed views for Videos/Shorts/Streams, and contextual publish date accuracy tips
-- **Find on YouTube**: Search YouTube from inside Youtarr on the Find Channels on YouTube and Find Videos on YouTube pages; video results show which ones are already downloaded or missing, and a click subscribes to a channel or queues a download
+- **Find on YouTube**: Search YouTube from inside Youtarr-Turbo on the Find Channels on YouTube and Find Videos on YouTube pages; video results show which ones are already downloaded or missing, and a click subscribes to a channel or queues a download
 - **In-App Playback**: Click any thumbnail to open a detail modal with extended metadata and in-browser streaming of downloaded videos; no media server required
 - **Channel Grouping & Multi-Library Support**: Organize channels into custom subfolders (e.g., `__kids`, `__music`, `__news`) to create separate media server libraries
 - **Smart Organization**: Videos organized by channel with metadata and thumbnails
 - **SponsorBlock Integration**: Remove sponsored segments automatically
 - **Quality Control**: Global and per-channel resolution settings (360p to 4K)
 - **Download History**: Track what you've downloaded with smart duplicate prevention
-- **Watch Status Sync**: Pull per-video watched state from Plex, Jellyfin, and Emby (every user on the server, not just yours), show a Watched chip on listing pages, and filter your library by watched or unwatched. One-way sync; Youtarr never writes back to your servers
+- **Watch Status Sync**: Pull per-video watched state from Plex, Jellyfin, and Emby (every user on the server, not just yours), show a Watched chip on listing pages, and filter your library by watched or unwatched. One-way sync; Youtarr-Turbo never writes back to your servers
 - **Metadata Generation**: NFO files, poster images and embedded MP4 metadata for all media servers
 - **Scheduled Downloads**: Configure automatic downloads on your schedule (cron-based)
 - **Auto-Cleanup**: Age, free-space, and watched-based removal of videos with dry-run previews, plus per-video and per-channel protection and keep-recent guards
-- **Filesystem Rescan**: Move, rename, or convert downloaded files outside Youtarr (e.g., `.mp4` to `.mkv`) and trigger a rescan from Settings -> Maintenance & Rescan to reconcile the database; daily and startup scans pick up changes automatically
+- **Filesystem Rescan**: Move, rename, or convert downloaded files outside Youtarr-Turbo (e.g., `.mp4` to `.mkv`) and trigger a rescan from Settings -> Maintenance & Rescan to reconcile the database; daily and startup scans pick up changes automatically
 - **Discord Notifications**: Optional webhook alerts for new downloads
 - **Web Interface**: Manage everything through a responsive (PC or mobile) web UI
 - **Secure Access**: Built-in authentication with admin controls
 - **REST API**: Full API with interactive [Swagger/OpenAPI documentation](http://localhost:3087/swagger) for automation and integrations
 - **Platform Flexible**: Configurable storage paths and guides for deployment to multiple platforms and architectures
-- **Unraid Ready**: Community Applications template (via DialmasterOrg repo) with headless-friendly credential presets
 - **Powered by yt-dlp**: Uses [yt-dlp](https://github.com/yt-dlp/yt-dlp) under the hood for YouTube integration and downloads
 - **Content Ratings**: Add per-video and per-channel content ratings (normalized to common media-server values like `G`, `PG`, `PG-13`, `R`, `NC-17`, `TV-*`). Ratings can be set per-download, via channel defaults, or derived from yt-dlp metadata; they show up as badges and can be used for automated policies.
 
@@ -54,7 +55,7 @@ Youtarr predates [Pinchflat](https://github.com/kieraneglin/pinchflat) (first co
 
 You'll need Docker, Docker Compose, Git, and a Bash shell (Git Bash on Windows). See the [Installation Guide](docs/INSTALLATION.md) for prerequisites, install methods, initial setup, and updating.
 
-> **Heads up:** Youtarr runs exclusively via Docker; direct `npm start`/Node deployments are unsupported.
+> **Heads up:** Youtarr-Turbo runs exclusively via Docker; direct `npm start`/Node deployments are unsupported.
 
 > Want to try unreleased features? See [Using Development Builds](docs/DEVELOPMENT.md#using-development-builds) for the bleeding-edge `dev-latest` image.
 
@@ -80,7 +81,6 @@ You'll need Docker, Docker Compose, Git, and a Bash shell (Git Bash on Windows).
 ### Platform Guides
 - [Synology NAS](docs/platforms/synology.md) - DSM 7+ optimized setup
 - [Unraid](docs/platforms/unraid.md) - Community Applications template
-- [Asustor NAS](docs/platforms/asustor.md) - App Central community package
 - [External Database](docs/platforms/external-db.md) - Using existing MariaDB/MySQL
 
 ### Advanced Topics
@@ -93,15 +93,14 @@ You'll need Docker, Docker Compose, Git, and a Bash shell (Git Bash on Windows).
 ### Help & Support
 - [Troubleshooting Guide](docs/TROUBLESHOOTING.md) - Common issues and solutions
 - [GitHub Issues](https://github.com/planet22/Youtarr-turbo/issues) - Report bugs or request features
-- [Discord Server](https://discord.gg/68rvWnYMtD) - Join the community for help and discussion
 
 ## Contributing
 
-Interested in contributing to Youtarr? We welcome contributions of all kinds!
+Interested in contributing to Youtarr-Turbo? We welcome contributions of all kinds!
 
 - [Contributing Guide](CONTRIBUTING.md) - How to contribute, coding standards, and development workflow
 - [Development Guide](docs/DEVELOPMENT.md) - Technical setup and architecture details
-- [Contributors](CONTRIBUTORS.md) - People who have helped build Youtarr
+- [Contributors](CONTRIBUTORS.md) - People who have helped build Youtarr-Turbo
 
 ## Screenshots
 
@@ -133,7 +132,7 @@ Interested in contributing to Youtarr? We welcome contributions of all kinds!
 
 ## Legal Disclaimer
 
-Youtarr is not affiliated with YouTube or Plex. Users are responsible for ensuring their use complies with YouTube's Terms of Service and applicable copyright laws. This tool is intended for personal use with content you have the right to download.
+Youtarr-Turbo is not affiliated with YouTube or Plex. Users are responsible for ensuring their use complies with YouTube's Terms of Service and applicable copyright laws. This tool is intended for personal use with content you have the right to download.
 
 ## License
 

@@ -2,7 +2,7 @@ const { Video } = require('../models');
 const fs = require('fs').promises;
 const path = require('path');
 const logger = require('../logger');
-const { isVideoDirectory, cleanupEmptyChannelDirectory, cleanupEmptyParents, isSubfolderDir, listSubdirectories, removeDirectoryResilient } = require('./filesystem');
+const { isVideoDirectory, cleanupEmptyChannelDirectory, cleanupEmptyParents, removeEmptyDescendants, isSubfolderDir, listSubdirectories, removeDirectoryResilient } = require('./filesystem');
 const m3uGenerator = require('./m3uGenerator');
 
 class VideoDeletionModule {
@@ -639,6 +639,7 @@ class VideoDeletionModule {
    */
   async getVideosOlderThanThreshold(ageInDays, excludeIds = [], minFileSizeBytes = 0) {
     const { Sequelize, sequelize } = require('../db.js');
+    const { DOWNLOAD_TIME_SQL } = require('./autoRemovalQueries');
 
     try {
       const excludeClause = excludeIds && excludeIds.length > 0
@@ -656,7 +657,7 @@ class VideoDeletionModule {
           Videos.youTubeVideoName,
           Videos.youTubeChannelName,
           Videos.fileSize,
-          COALESCE(Videos.last_downloaded_at, Jobs.timeCreated, STR_TO_DATE(Videos.originalDate, '%Y%m%d')) AS timeCreated
+          ${DOWNLOAD_TIME_SQL} AS timeCreated
         FROM Videos
         LEFT JOIN JobVideos ON Videos.id = JobVideos.video_id
         LEFT JOIN Jobs ON Jobs.id = JobVideos.job_id
@@ -664,8 +665,8 @@ class VideoDeletionModule {
         WHERE Videos.removed = 0
           AND Videos.protected = 0
           AND COALESCE(ProtChannel.auto_removal_protected, 0) = 0
-          AND COALESCE(Videos.last_downloaded_at, Jobs.timeCreated, STR_TO_DATE(Videos.originalDate, '%Y%m%d')) IS NOT NULL
-          AND COALESCE(Videos.last_downloaded_at, Jobs.timeCreated, STR_TO_DATE(Videos.originalDate, '%Y%m%d')) < DATE_SUB(NOW(), INTERVAL :ageInDays DAY)
+          AND ${DOWNLOAD_TIME_SQL} IS NOT NULL
+          AND ${DOWNLOAD_TIME_SQL} < DATE_SUB(NOW(), INTERVAL :ageInDays DAY)
 ${excludeClause}${minSizeClause}        ORDER BY timeCreated ASC
       `;
 
@@ -698,6 +699,7 @@ ${excludeClause}${minSizeClause}        ORDER BY timeCreated ASC
    */
   async getOldestVideos(limit, excludeIds = [], minFileSizeBytes = 0) {
     const { Sequelize, sequelize } = require('../db.js');
+    const { DOWNLOAD_TIME_SQL } = require('./autoRemovalQueries');
 
     try {
       const excludeClause = excludeIds && excludeIds.length > 0
@@ -714,13 +716,13 @@ ${excludeClause}${minSizeClause}        ORDER BY timeCreated ASC
           Videos.youTubeVideoName,
           Videos.youTubeChannelName,
           Videos.fileSize,
-          COALESCE(Videos.last_downloaded_at, Jobs.timeCreated, STR_TO_DATE(Videos.originalDate, '%Y%m%d')) AS timeCreated
+          ${DOWNLOAD_TIME_SQL} AS timeCreated
         FROM Videos
         LEFT JOIN JobVideos ON Videos.id = JobVideos.video_id
         LEFT JOIN Jobs ON Jobs.id = JobVideos.job_id
         WHERE Videos.removed = 0
           AND Videos.protected = 0
-          AND COALESCE(Videos.last_downloaded_at, Jobs.timeCreated, STR_TO_DATE(Videos.originalDate, '%Y%m%d')) IS NOT NULL
+          AND ${DOWNLOAD_TIME_SQL} IS NOT NULL
 ${excludeClause}${minSizeClause}        ORDER BY timeCreated ASC
         LIMIT :limit
       `;
@@ -758,6 +760,7 @@ ${excludeClause}${minSizeClause}        ORDER BY timeCreated ASC
     const baseDir = configModule.directoryPath;
     const removed = [];
     const errors = [];
+    const prunedDescendants = [];
 
     if (!baseDir) {
       logger.debug('[Orphan Cleanup] No output directory configured, skipping');
@@ -775,6 +778,7 @@ ${excludeClause}${minSizeClause}        ORDER BY timeCreated ASC
           try {
             const channelDirs = await listSubdirectories(dir);
             for (const channelDir of channelDirs) {
+              prunedDescendants.push(...await removeEmptyDescendants(channelDir));
               const wasRemoved = await cleanupEmptyChannelDirectory(channelDir, baseDir, {
                 includeIgnorableFiles: true
               });
@@ -790,6 +794,11 @@ ${excludeClause}${minSizeClause}        ORDER BY timeCreated ASC
           }
         } else {
           // Root-level channel directory
+          // Hidden top-level dirs (.youtarr_tmp, .nzb_staging) hold in-flight work;
+          // only the emptiness check below applies to them.
+          if (!dirName.startsWith('.')) {
+            prunedDescendants.push(...await removeEmptyDescendants(dir));
+          }
           const wasRemoved = await cleanupEmptyChannelDirectory(dir, baseDir, {
             includeIgnorableFiles: true
           });
@@ -797,6 +806,10 @@ ${excludeClause}${minSizeClause}        ORDER BY timeCreated ASC
             removed.push(dir);
           }
         }
+      }
+
+      if (prunedDescendants.length > 0) {
+        logger.info({ count: prunedDescendants.length, directories: prunedDescendants }, '[Orphan Cleanup] Removed empty season/video directories');
       }
 
       if (removed.length > 0) {

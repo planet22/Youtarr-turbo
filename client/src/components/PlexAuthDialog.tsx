@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   Dialog,
   DialogTitle,
@@ -27,6 +27,19 @@ const PlexAuthDialog: React.FC<PlexAuthDialogProps> = ({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+  const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const closeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+      }
+      if (closeTimeoutRef.current) {
+        clearTimeout(closeTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const handlePlexAuth = async () => {
     setLoading(true);
@@ -51,15 +64,18 @@ const PlexAuthDialog: React.FC<PlexAuthDialogProps> = ({
       const maxAttempts = 30; // 2.5 minutes total
 
       // Poll the server every 5 seconds to check if the PIN is claimed
-      const intervalId = setInterval(async () => {
+      pollIntervalRef.current = setInterval(async () => {
         try {
           const checkRes = await fetch(`/plex/check-pin/${pinId}`);
           const { authToken } = await checkRes.json();
-          
+
           if (authToken) {
-            clearInterval(intervalId);
+            if (pollIntervalRef.current) {
+              clearInterval(pollIntervalRef.current);
+              pollIntervalRef.current = null;
+            }
             authWindow?.close();
-            
+
             if (authToken === 'invalid') {
               setError('Invalid Plex Account. You must use the Plex account that has access to your Plex server.');
               setLoading(false);
@@ -68,23 +84,29 @@ const PlexAuthDialog: React.FC<PlexAuthDialogProps> = ({
               setSuccess(true);
               setLoading(false);
               onSuccess(authToken);
-              
+
               // Close dialog after a brief delay to show success
-              setTimeout(() => {
+              closeTimeoutRef.current = setTimeout(() => {
                 onClose();
               }, 1500);
             }
           } else {
             attempts++;
             if (attempts >= maxAttempts) {
-              clearInterval(intervalId);
+              if (pollIntervalRef.current) {
+                clearInterval(pollIntervalRef.current);
+                pollIntervalRef.current = null;
+              }
               setError('Authentication timeout. Please try again.');
               authWindow?.close();
               setLoading(false);
             }
           }
         } catch (err) {
-          clearInterval(intervalId);
+          if (pollIntervalRef.current) {
+            clearInterval(pollIntervalRef.current);
+            pollIntervalRef.current = null;
+          }
           setError('Failed to check authentication status. Please try again.');
           authWindow?.close();
           setLoading(false);

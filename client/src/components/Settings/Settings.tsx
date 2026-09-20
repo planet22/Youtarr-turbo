@@ -49,6 +49,7 @@ import { FILENAME_PRESETS } from '../../utils/filenameTemplate/presets';
 import { validatePrefix } from '../../utils/filenameTemplate/validate';
 import { SETTINGS_PAGES, SettingsIndex } from './SettingsIndex';
 import { MaintenanceSection } from './MaintenanceSection';
+import { ScheduledTasksSection } from './ScheduledTasksSection';
 import { ResolutionTagBackfillSection } from './ResolutionTagBackfillSection';
 import { ChannelImageRegenSection } from './ChannelImageRegenSection';
 import { MetadataRegenSection } from './MetadataRegenSection';
@@ -512,9 +513,10 @@ export function Settings({ token }: SettingsProps) {
             element={
               <>
                 <MaintenanceSection token={token} />
+                <ScheduledTasksSection token={token} />
                 <ResolutionTagBackfillSection token={token} />
                 <ChannelImageRegenSection token={token} />
-                <MetadataRegenSection token={token} />
+                <MetadataRegenSection token={token} config={config} onConfigChange={handleConfigChange} />
                 <CompactHistorySection token={token} />
               </>
             }

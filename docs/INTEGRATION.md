@@ -1,11 +1,11 @@
-# How to wire this package into Youtarr
+# How to wire this package into Youtarr-Turbo
 
-Copy files from this package into a Youtarr checkout, then apply the small patches below.
+Copy files from this package into a Youtarr-Turbo checkout, then apply the small patches below.
 
 ## 1. Copy files
 
 ```text
-config/config.example.json.patch.md     → apply keys into config/config.example.json
+config/config.example.json               → add the strm/ytstream keys
 server/modules/strmGenerator.js         → server/modules/strmGenerator.js
 server/modules/strmMaterializer.js      → server/modules/strmMaterializer.js
 server/routes/strm.js                   → server/routes/strm.js
@@ -115,7 +115,7 @@ curl -I "http://localhost:3087/api/strm/dQw4w9WgXcQ"
 # expect 302 when yt-dlp can resolve
 ```
 
-## 8b. Additive: `/api/ytstream/:id` (direct + ffmpeg playback)
+## 8b. Additive: `/api/ytstream/:id` (direct, HLS, byte-range and YouTube HLS playback)
 
 This is a separate, optional route — it does not replace or modify anything
 from steps 1-8. Copy in addition to the STRM files above:
@@ -133,13 +133,14 @@ const createYtStreamRoutes = require('./ytstream');
 app.use(createYtStreamRoutes({ verifyToken }));
 ```
 
-Add the `ytstream` config block from `config/config.example.json.patch.md`.
+Add the `ytstream` config block from `config/config.example.json`.
 See `docs/YTSTREAM.md` for full behavior, and the "Installing ffmpeg"
-section there if `mode=ffmpeg` reports it's unavailable.
+section there if `mode=hls`/`hls-buffer`/`hls-byterange` reports it's unavailable.
 
 ```bash
 curl -I "http://localhost:3087/api/ytstream/dQw4w9WgXcQ"                 # mode=direct (default): expect 302
-curl -I "http://localhost:3087/api/ytstream/dQw4w9WgXcQ?mode=ffmpeg"     # mode=ffmpeg: expect 200 + streamed body
+curl -I "http://localhost:3087/api/ytstream/dQw4w9WgXcQ?mode=hls-buffer" # mode=hls-buffer: expect 200 + an HLS playlist
+curl -I "http://localhost:3087/api/ytstream/dQw4w9WgXcQ?mode=youtube-hls" # mode=youtube-hls: expect 200 + YouTube's HLS playlist (no ffmpeg needed)
 ```
 
 ## 9. Optional UI (later)

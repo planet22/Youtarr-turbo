@@ -281,7 +281,7 @@ describe('MediaServerPlaylistSection', () => {
     );
 
     expect(
-      screen.getByText(/Enter the Emby URL and API key above/i)
+      screen.getByText(/Requires Emby URL and API key above/i)
     ).toBeInTheDocument();
   });
 

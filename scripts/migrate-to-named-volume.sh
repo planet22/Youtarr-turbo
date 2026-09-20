@@ -121,8 +121,8 @@ wait_for_db_ready() {
   local waited=0
 
   while [[ $waited -lt $max_wait ]]; do
-    if docker exec youtarr-db mysqladmin ping -h localhost -P "$db_port" -u "$db_user" -p"$db_password" &>/dev/null; then
-      if docker exec youtarr-db mysql -h 127.0.0.1 -P "$db_port" -u "$db_user" -p"$db_password" -e "SELECT 1;" &>/dev/null; then
+    if docker exec youtarr-turbo-db mysqladmin ping -h localhost -P "$db_port" -u "$db_user" -p"$db_password" &>/dev/null; then
+      if docker exec youtarr-turbo-db mysql -h 127.0.0.1 -P "$db_port" -u "$db_user" -p"$db_password" -e "SELECT 1;" &>/dev/null; then
         return 0
       fi
     fi
@@ -139,7 +139,7 @@ wait_for_db_ready() {
 db_running_but_auth_rejected() {
   local db_port="$1"
   local probe_output
-  probe_output=$(docker exec youtarr-db mysqladmin ping \
+  probe_output=$(docker exec youtarr-turbo-db mysqladmin ping \
     -h 127.0.0.1 -P "$db_port" \
     -u __youtarr_migrate_probe -p__not_a_real_password 2>&1) || true
   [[ "$probe_output" == *"Access denied"* ]]
@@ -336,7 +336,7 @@ if ! wait_for_db_ready "$DB_USER" "$DB_PASSWORD" "$DB_PORT"; then
 fi
 
 : > "$ERROR_LOG"
-if ! SOURCE_TABLE_COUNT=$(docker exec youtarr-db mysql -N -B -h 127.0.0.1 -P "$DB_PORT" -u "$DB_USER" -p"$DB_PASSWORD" "$DB_NAME" \
+if ! SOURCE_TABLE_COUNT=$(docker exec youtarr-turbo-db mysql -N -B -h 127.0.0.1 -P "$DB_PORT" -u "$DB_USER" -p"$DB_PASSWORD" "$DB_NAME" \
   -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='$DB_NAME';" 2>"$ERROR_LOG"); then
   yt_error "Could not inspect source database tables."
   print_error_log "$ERROR_LOG"
@@ -366,7 +366,7 @@ TARGET_DB_CHARSET="utf8mb4"
 TARGET_DB_COLLATION="utf8mb4_unicode_ci"
 
 : > "$ERROR_LOG"
-SOURCE_DB_DEFAULTS=$(docker exec youtarr-db mysql -N -B -h 127.0.0.1 -P "$DB_PORT" -u "$DB_USER" -p"$DB_PASSWORD" \
+SOURCE_DB_DEFAULTS=$(docker exec youtarr-turbo-db mysql -N -B -h 127.0.0.1 -P "$DB_PORT" -u "$DB_USER" -p"$DB_PASSWORD" \
   -e "SELECT DEFAULT_CHARACTER_SET_NAME, DEFAULT_COLLATION_NAME FROM information_schema.SCHEMATA WHERE SCHEMA_NAME='$DB_NAME';" 2>"$ERROR_LOG") || {
   yt_error "Could not read source database default charset/collation."
   print_error_log "$ERROR_LOG"
@@ -389,7 +389,7 @@ else
 fi
 
 : > "$ERROR_LOG"
-if ! docker exec youtarr-db mysqldump \
+if ! docker exec youtarr-turbo-db mysqldump \
   --single-transaction \
   --routines --triggers --events \
   -P "$DB_PORT" -u "$DB_USER" -p"$DB_PASSWORD" "$DB_NAME" > "$DUMP_PATH" 2>"$ERROR_LOG"; then
@@ -408,7 +408,7 @@ yt_success "Database dump created."
 SOURCE_COUNTS_FILE="$STAGING_DIR/source_counts.tsv"
 : > "$SOURCE_COUNTS_FILE"
 : > "$ERROR_LOG"
-SOURCE_TABLE_LIST=$(docker exec youtarr-db mysql -N -B -h 127.0.0.1 -P "$DB_PORT" -u "$DB_USER" -p"$DB_PASSWORD" \
+SOURCE_TABLE_LIST=$(docker exec youtarr-turbo-db mysql -N -B -h 127.0.0.1 -P "$DB_PORT" -u "$DB_USER" -p"$DB_PASSWORD" \
   -e "SELECT table_name FROM information_schema.tables WHERE table_schema='$DB_NAME' AND table_type='BASE TABLE';" 2>"$ERROR_LOG") || {
   yt_error "Could not enumerate source tables for verification."
   print_error_log "$ERROR_LOG"
@@ -418,7 +418,7 @@ SOURCE_TABLE_LIST=$(docker exec youtarr-db mysql -N -B -h 127.0.0.1 -P "$DB_PORT
 
 while IFS= read -r table; do
   [ -z "$table" ] && continue
-  count=$(docker exec youtarr-db mysql -N -B -h 127.0.0.1 -P "$DB_PORT" -u "$DB_USER" -p"$DB_PASSWORD" "$DB_NAME" \
+  count=$(docker exec youtarr-turbo-db mysql -N -B -h 127.0.0.1 -P "$DB_PORT" -u "$DB_USER" -p"$DB_PASSWORD" "$DB_NAME" \
     -e "SELECT COUNT(*) FROM \`$table\`;" 2>"$ERROR_LOG") || {
     yt_error "Could not count rows in source table: $table"
     print_error_log "$ERROR_LOG"
@@ -470,7 +470,7 @@ fi
 # Belt-and-suspenders: the up-front docker-volume-inspect check guesses the project
 # name; if Compose ended up reusing a stale volume under a slightly different name,
 # our DROP/CREATE below would wipe whatever was in it. Refuse instead.
-TARGET_TABLE_COUNT=$(docker exec youtarr-db mysql -N -B -h 127.0.0.1 -P "$DB_PORT" -u "$DB_USER" -p"$DB_PASSWORD" \
+TARGET_TABLE_COUNT=$(docker exec youtarr-turbo-db mysql -N -B -h 127.0.0.1 -P "$DB_PORT" -u "$DB_USER" -p"$DB_PASSWORD" \
   -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='$DB_NAME';" 2>/dev/null || echo "")
 if [[ "$TARGET_TABLE_COUNT" =~ ^[0-9]+$ ]] && [[ "$TARGET_TABLE_COUNT" -gt 0 ]]; then
   yt_error "Target named-volume database is not empty: $TARGET_TABLE_COUNT tables already in '$DB_NAME'."
@@ -481,7 +481,7 @@ if [[ "$TARGET_TABLE_COUNT" =~ ^[0-9]+$ ]] && [[ "$TARGET_TABLE_COUNT" -gt 0 ]];
 fi
 
 : > "$ERROR_LOG"
-if ! docker exec youtarr-db mysql -h 127.0.0.1 -P "$DB_PORT" -u "$DB_USER" -p"$DB_PASSWORD" \
+if ! docker exec youtarr-turbo-db mysql -h 127.0.0.1 -P "$DB_PORT" -u "$DB_USER" -p"$DB_PASSWORD" \
   -e "DROP DATABASE IF EXISTS \`$DB_NAME\`; CREATE DATABASE \`$DB_NAME\` CHARACTER SET $TARGET_DB_CHARSET COLLATE $TARGET_DB_COLLATION;" 2>"$ERROR_LOG"; then
   yt_error "Failed to prepare named-volume database for import."
   print_error_log "$ERROR_LOG"
@@ -491,7 +491,7 @@ if ! docker exec youtarr-db mysql -h 127.0.0.1 -P "$DB_PORT" -u "$DB_USER" -p"$D
 fi
 
 : > "$ERROR_LOG"
-if ! docker exec -i youtarr-db mysql -h 127.0.0.1 -P "$DB_PORT" -u "$DB_USER" -p"$DB_PASSWORD" "$DB_NAME" < "$DUMP_PATH" 2>"$ERROR_LOG"; then
+if ! docker exec -i youtarr-turbo-db mysql -h 127.0.0.1 -P "$DB_PORT" -u "$DB_USER" -p"$DB_PASSWORD" "$DB_NAME" < "$DUMP_PATH" 2>"$ERROR_LOG"; then
   yt_error "SQL import failed."
   print_error_log "$ERROR_LOG"
   print_post_rename_failure_help
@@ -499,7 +499,7 @@ if ! docker exec -i youtarr-db mysql -h 127.0.0.1 -P "$DB_PORT" -u "$DB_USER" -p
   exit 1
 fi
 
-TABLE_COUNT=$(docker exec youtarr-db mysql -N -B -h 127.0.0.1 -P "$DB_PORT" -u "$DB_USER" -p"$DB_PASSWORD" "$DB_NAME" \
+TABLE_COUNT=$(docker exec youtarr-turbo-db mysql -N -B -h 127.0.0.1 -P "$DB_PORT" -u "$DB_USER" -p"$DB_PASSWORD" "$DB_NAME" \
   -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='$DB_NAME';" 2>/dev/null || echo "0")
 if [[ ! "$TABLE_COUNT" =~ ^[0-9]+$ ]] || [[ "$TABLE_COUNT" -lt 1 ]]; then
   yt_error "Import verification failed: no tables found."
@@ -522,7 +522,7 @@ MISMATCH_REPORT="$STAGING_DIR/mismatch.txt"
 MISMATCH_COUNT=0
 while IFS=$'\t' read -r table src_count; do
   [ -z "$table" ] && continue
-  tgt_count=$(docker exec youtarr-db mysql -N -B -h 127.0.0.1 -P "$DB_PORT" -u "$DB_USER" -p"$DB_PASSWORD" "$DB_NAME" \
+  tgt_count=$(docker exec youtarr-turbo-db mysql -N -B -h 127.0.0.1 -P "$DB_PORT" -u "$DB_USER" -p"$DB_PASSWORD" "$DB_NAME" \
     -e "SELECT COUNT(*) FROM \`$table\`;" 2>/dev/null) || tgt_count="MISSING"
   if [[ "$tgt_count" != "$src_count" ]]; then
     printf '  %s: source=%s target=%s\n' "$table" "$src_count" "$tgt_count" >> "$MISMATCH_REPORT"

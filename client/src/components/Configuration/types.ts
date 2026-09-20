@@ -104,13 +104,57 @@ export interface YtstreamDryRunPlan {
   steps: YtstreamDryRunStep[];
 }
 
-export interface YtstreamDryRunResult {
+export interface YtstreamDryRunStandardResult {
   youtubeId: string;
   probed: boolean;
+  experimental?: false;
   plan: YtstreamDryRunPlan;
   formatSelectors: Record<string, string>;
   hls: { sessionKey: string; sessionAlreadyActive: boolean } | null;
   wouldCall: string;
+}
+
+/**
+ * The same endpoint's answer for the modes with their own module (YouTube HLS
+ * passthrough, Byte-range, Download & cache), which never go through
+ * resolvePlaybackPlan - there is no `plan`. Which fields are present depends on
+ * the mode; see describeRun / describeByteRangeRun on the server.
+ */
+export interface YtstreamDryRunExperimentalResult {
+  youtubeId: string;
+  probed: boolean;
+  experimental: true;
+  mode: string;
+  requested: Record<string, unknown>;
+  wouldCall: string;
+  settings?: Record<string, unknown>;
+  ignoredSettings?: string[];
+  delivery?: string;
+  sessionKey?: string;
+  cacheKey?: string;
+  playlistCached?: boolean;
+  error?: string;
+  cache?: { exists: boolean; complete: boolean | null; sizeBytes: number | null; resumable?: boolean; resumeFailedBefore?: boolean };
+  session?: { running: boolean; persistedComplete: boolean; openRequests: number } | null;
+  choice?: {
+    servedAs?: string;
+    routing?: string;
+    chosenHeight?: number | null;
+    chosenCodecs?: string | null;
+    offeredHeights?: number[];
+    audio?: {
+      videoLanguage?: string | null;
+      requestedLanguage?: string | null;
+      chosen?: { language: string | null; name: string | null; reason: string } | null;
+      offered?: Array<{ language: string | null; name: string | null }>;
+    };
+  };
+}
+
+export type YtstreamDryRunResult = YtstreamDryRunStandardResult | YtstreamDryRunExperimentalResult;
+
+export function isExperimentalDryRun(result: YtstreamDryRunResult): result is YtstreamDryRunExperimentalResult {
+  return result.experimental === true;
 }
 
 export interface SponsorBlockCategories {

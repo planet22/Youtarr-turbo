@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Alert, Box, Button, Typography } from '../../../ui';
-import { YtstreamDryRunResult } from '../../types';
+import { YtstreamDryRunResult, YtstreamDryRunStandardResult, isExperimentalDryRun } from '../../types';
+import { ExperimentalDryRunPreview } from './ExperimentalDryRunPreview';
 
 interface YtstreamDryRunPreviewProps {
   result: YtstreamDryRunResult;
@@ -49,7 +50,12 @@ function groupConsecutiveSteps(steps: { step: string; detail: string }[]): StepG
   return groups;
 }
 
-export const YtstreamDryRunPreview: React.FC<YtstreamDryRunPreviewProps> = ({ result }) => {
+/** Picks the view for the kind of answer the simulate endpoint gave. */
+export const YtstreamDryRunPreview: React.FC<YtstreamDryRunPreviewProps> = ({ result }) => (
+  isExperimentalDryRun(result) ? <ExperimentalDryRunPreview result={result} /> : <StandardDryRunPreview result={result} />
+);
+
+const StandardDryRunPreview: React.FC<{ result: YtstreamDryRunStandardResult }> = ({ result }) => {
   const [showTechnical, setShowTechnical] = useState(false);
   const { plan, formatSelectors, hls, wouldCall } = result;
   const stepGroups = groupConsecutiveSteps(plan.steps);

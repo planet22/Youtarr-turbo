@@ -37,7 +37,7 @@ const colorMap: Record<string, string> = {
   initial: '',
 };
 
-export interface TypographyProps extends React.HTMLAttributes<HTMLElement> {
+export interface TypographyProps extends React.HTMLAttributes<HTMLElement>, Pick<React.AnchorHTMLAttributes<HTMLAnchorElement>, 'href' | 'target' | 'rel'> {
   variant?: TypographyVariant;
   component?: keyof React.JSX.IntrinsicElements | React.ElementType;
   color?: string;

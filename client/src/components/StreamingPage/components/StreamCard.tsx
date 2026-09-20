@@ -1,10 +1,10 @@
 import React from 'react';
 import { Chip, Tooltip, IconButton, Box, Typography } from '../../ui';
 import { Stop as StopIcon, Search as ProbeIcon } from '../../../lib/icons';
-import { formatFileSize } from '../../../utils/formatters';
 import { StreamSnapshot } from '../../../hooks/useActiveStreams';
 import {
-  formatBytesPerSecond,
+  formatStreamRate,
+  formatStreamTotal,
   parseClientLabel,
   isLikelyProbeRequest,
   formatModeLabel,
@@ -13,7 +13,8 @@ import {
 } from '../utils';
 import { useStreamRowActions } from '../hooks/useStreamRowActions';
 import { STATE_CHIP_COLOR, STATE_CHIP_LABEL } from './StreamsTable';
-import { SegmentActivityStrip } from './SegmentActivityGrid';
+import { SegmentActivityStrip, segmentVariantForMode } from './SegmentActivityGrid';
+import { ByteRangeProgressStrip } from './ByteRangeProgressGrid';
 import StreamCardLayout, { StreamCardStat } from './StreamCardLayout';
 import StreamFormatChips from './StreamFormatChips';
 
@@ -22,10 +23,11 @@ export interface StreamCardProps {
   token: string | null;
   onStopped: (id: string) => void;
   onOpenSegments: (streamId: string) => void;
+  onOpenByteRange?: (streamId: string) => void;
 }
 
 /** Grid-view counterpart to StreamsTable's row - same data/actions, card layout. */
-function StreamCard({ stream, token, onStopped, onOpenSegments }: StreamCardProps) {
+function StreamCard({ stream, token, onStopped, onOpenSegments, onOpenByteRange }: StreamCardProps) {
   const { elapsed, stopping, handleStop } = useStreamRowActions(stream, token, onStopped);
 
   return (
@@ -70,13 +72,20 @@ function StreamCard({ stream, token, onStopped, onOpenSegments }: StreamCardProp
 
       <Box className="grid grid-cols-2 gap-x-2 gap-y-1">
         <StreamCardStat label="Duration" value={elapsed} />
-        <StreamCardStat label="Rate" value={formatBytesPerSecond(stream.bytesPerSecond)} />
-        <StreamCardStat label="Total" value={formatFileSize(stream.bytesTransferred) || '0MB'} />
+        <StreamCardStat label="Rate" value={formatStreamRate(stream)} />
+        <StreamCardStat label="Total" value={formatStreamTotal(stream)} />
       </Box>
 
       <Box style={{ marginTop: 'auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
         {stream.segments ? (
-          <SegmentActivityStrip segments={stream.segments} onClick={() => onOpenSegments(stream.streamId)} />
+          <SegmentActivityStrip segments={stream.segments} variant={segmentVariantForMode(stream.mode)} onClick={() => onOpenSegments(stream.streamId)} />
+        ) : stream.mode === 'hls-byterange' && onOpenByteRange ? (
+          <ByteRangeProgressStrip
+            youtubeId={stream.youtubeId}
+            sessionKey={stream.streamId}
+            token={token}
+            onClick={() => onOpenByteRange(stream.streamId)}
+          />
         ) : (
           <Typography variant="caption" style={{ color: 'var(--muted-foreground)' }}>—</Typography>
         )}

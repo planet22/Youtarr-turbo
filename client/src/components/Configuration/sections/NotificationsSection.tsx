@@ -1,4 +1,4 @@
-import React, { useState, ChangeEvent } from 'react';
+import React, { useState, useRef, useEffect, ChangeEvent } from 'react';
 import {
   FormControlLabel,
   Switch,
@@ -76,6 +76,15 @@ export const NotificationsSection: React.FC<NotificationsSectionProps> = ({
   // Delete confirmation modal
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleteIndex, setDeleteIndex] = useState<number | null>(null);
+  // Pending "clear success status" timeouts, keyed by webhook index
+  const testStatusTimeoutsRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
+
+  useEffect(() => {
+    return () => {
+      testStatusTimeoutsRef.current.forEach((timeoutId) => clearTimeout(timeoutId));
+      testStatusTimeoutsRef.current.clear();
+    };
+  }, []);
 
   // Normalize appriseUrls to always be an array of objects
   const normalizeAppriseUrls = (urls: any): AppriseUrlEntry[] => {
@@ -195,12 +204,17 @@ export const NotificationsSection: React.FC<NotificationsSectionProps> = ({
           [index]: { status: 'success', message: 'Sent successfully!' }
         }));
         // Clear success status after 5 seconds
-        setTimeout(() => {
+        const existingTimeout = testStatusTimeoutsRef.current.get(index);
+        if (existingTimeout) {
+          clearTimeout(existingTimeout);
+        }
+        testStatusTimeoutsRef.current.set(index, setTimeout(() => {
+          testStatusTimeoutsRef.current.delete(index);
           setWebhookTestStatus(prev => ({
             ...prev,
             [index]: { status: 'idle' }
           }));
-        }, 5000);
+        }, 5000));
       } else {
         const error = await response.json();
         setWebhookTestStatus(prev => ({

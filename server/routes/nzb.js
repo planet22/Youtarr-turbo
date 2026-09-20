@@ -13,6 +13,9 @@ const nzbDiagnosticLog = require('../modules/nzbDiagnosticLog');
 const { nzbDownloadJobLabel } = require('../modules/download/jobTypes');
 const ChannelVideo = require('../models/channelvideo');
 const Video = require('../models/video');
+const { parseAuxData } = require('../modules/jobAuxData');
+const archiveModule = require('../modules/archiveModule');
+const { cleanupEmptyParents } = require('../modules/filesystem');
 const { formatBytes } = require('../modules/notifications/utils');
 
 /**
@@ -80,14 +83,14 @@ function minAllowedCountAtLeast(needed) {
 
 // nzb.resolutionDetection.{fixed,thumb,extract} (Settings -> Sonarr/Radarr/
 // Prowlarr (NZB) -> Video Actual Resolution) - see configSchema.ts's default
-// for the full fallback-chain explanation. All default true for configs
-// saved before this setting existed.
+// for the full fallback-chain explanation. fixed/thumb default true and
+// extract defaults false for configs saved before this setting existed.
 function getResolutionDetectionConfig(cfg) {
   const rd = cfg.nzb?.resolutionDetection || {};
   return {
     fixed: rd.fixed !== false,
     thumb: rd.thumb !== false,
-    extract: rd.extract !== false,
+    extract: rd.extract === true,
   };
 }
 
@@ -252,8 +255,30 @@ function stageForSonarrImport(job, categoryName, videoRow) {
     job.data.nzb.stagedPath = stagedPath;
     return stagedPath;
   } catch (err) {
-    logger.warn({ err, filePath }, "nzb: failed to stage file for Sonarr/Radarr import - reporting the real library path instead, so Sonarr/Radarr's import will move it out of Youtarr's library");
+    logger.warn({ err, filePath }, 'nzb: failed to stage file for Sonarr/Radarr import - reporting the real library path instead, so Sonarr/Radarr\'s import will move it out of Youtarr\'s library');
     return filePath;
+  }
+}
+
+/**
+ * Once Sonarr/Radarr's import has moved a grab's file away, the season/video
+ * folders it lived in are left empty. Walks up from the file's folder removing
+ * each one that is now truly empty, stopping at the library root - a folder
+ * that still holds anything (including the file, if the import hasn't moved
+ * it yet) ends the walk, so calling this early is harmless. Best-effort.
+ * @param {string|null|undefined} filePath - The grab's former library file path
+ */
+async function cleanupEmptyDirsAfterImport(filePath) {
+  const baseDir = configModule.directoryPath;
+  if (!filePath || !baseDir) return;
+  const resolvedBase = path.resolve(baseDir);
+  const resolvedDir = path.resolve(path.dirname(filePath));
+  // Never walk upward from a path outside the library root.
+  if (!resolvedDir.startsWith(resolvedBase + path.sep)) return;
+  try {
+    await cleanupEmptyParents(resolvedDir, resolvedBase);
+  } catch (err) {
+    logger.warn({ err, filePath }, 'nzb: failed to clean up empty folders after import');
   }
 }
 
@@ -331,12 +356,12 @@ async function untrackFromYoutarrLibrary(job, videoRow) {
   }
   if (videoRow?.youtubeId) {
     try {
-      const archiveModule = require('../modules/archiveModule');
       await archiveModule.removeVideoFromArchive(videoRow.youtubeId);
     } catch (err) {
       logger.warn({ err, youtubeId: videoRow.youtubeId }, 'nzb: failed to remove untracked video from yt-dlp archive');
     }
   }
+  await cleanupEmptyDirsAfterImport(videoRow?.filePath);
   return { outcome: counts.videoCount > 0 ? 'destroyed' : 'zero-rows-matched', counts };
 }
 
@@ -385,7 +410,6 @@ async function untrackFromYoutarrLibrary(job, videoRow) {
 async function reconcileMovedUntrackedVideo(videoRow) {
   if (!videoRow?.id) return false;
   const { JobVideo, Job, VideoWatchStatus } = require('../models');
-  const { parseAuxData } = require('../modules/jobAuxData');
 
   const jobVideos = await JobVideo.findAll({ where: { video_id: videoRow.id } });
   if (!jobVideos.length) {
@@ -477,7 +501,6 @@ async function reconcileMovedUntrackedVideo(videoRow) {
 
   if (videoRow.youtubeId) {
     try {
-      const archiveModule = require('../modules/archiveModule');
       await archiveModule.removeVideoFromArchive(videoRow.youtubeId);
     } catch (err) {
       logger.warn(
@@ -486,6 +509,8 @@ async function reconcileMovedUntrackedVideo(videoRow) {
       );
     }
   }
+
+  await cleanupEmptyDirsAfterImport(videoRow.filePath);
 
   // Mirror untrackFromYoutarrLibrary's own bookkeeping on the job record, so
   // the Download History page (computeNzbStatusDetail below) can tell this
@@ -609,6 +634,14 @@ async function handleHistoryDeleteRequest(jobIds) {
         );
         const result = await untrackFromYoutarrLibrary(job, videoRow);
         logger.info({ jobId, result }, 'nzb: processed untracked video in response to history delete request');
+        // Status is now 'Deleted', which jobModule.saveJobs() doesn't treat
+        // as a completed job - so its next pass (triggered by any in-progress
+        // job update, i.e. within seconds) would re-upsert this job's stale
+        // job.data.videos and bring the Video + JobVideo rows straight back.
+        // Clearing them matches what a restart does (videos are reloaded
+        // from the JobVideo rows just deleted); Download History falls back
+        // to job.data.nzb for the row's title/thumbnail.
+        job.data.videos = [];
       } else {
         logger.info({ jobId }, 'nzb: hid history entry in response to delete request (hardlink strategy - library video untouched)');
       }
@@ -708,7 +741,7 @@ function titleMatchesEpisodeCode(title, season, ep) {
  * @returns {{season: number|null, ep: number|null, matchedText: string|null}}
  */
 function findAnySeasonEpisode(title) {
-  let m = /\bs0*(\d+)\s*[.\-]?\s*e0*(\d+)\b/i.exec(title);
+  let m = /\bs0*(\d+)\s*[.-]?\s*e0*(\d+)\b/i.exec(title);
   if (m) return { season: Number(m[1]), ep: Number(m[2]), matchedText: m[0] };
 
   m = /\bs(?:eason|eries)?\.?\s*0*(\d+)\D{0,20}?e(?:p(?:isode)?)?\.?\s*0*(\d+)\b/i.exec(title);
@@ -793,15 +826,19 @@ function applyLocalTitleFilter(results, query, opts = {}) {
 // about the underlying yt-dlp/API fetch, not this file's category-level
 // filtering. Recorded for every real search (query non-blank), regardless
 // of whether additionalLocalFilter is even on, so the raw candidate list is
-// always inspectable - not just the ones that got rejected.
-const MAX_SEARCH_TRACES = 20;
+// always inspectable - not just the ones that got rejected. Row cap is
+// nzb.diagnosticLogLimits.searchTraces (Settings -> Sonarr/Radarr/Prowlarr
+// (NZB)), read live per call so a config change takes effect without a
+// restart.
 
 async function recordSearchTrace(trace) {
-  await nzbDiagnosticLog.recordDiagnosticEvent('trace', trace, MAX_SEARCH_TRACES);
+  const max = nzbDiagnosticLog.resolveLogLimit(configModule.getConfig(), 'searchTraces');
+  await nzbDiagnosticLog.recordDiagnosticEvent('trace', trace, max);
 }
 
 async function getRecentSearchTraces() {
-  return nzbDiagnosticLog.getDiagnosticEvents('trace', MAX_SEARCH_TRACES);
+  const max = nzbDiagnosticLog.resolveLogLimit(configModule.getConfig(), 'searchTraces');
+  return nzbDiagnosticLog.getDiagnosticEvents('trace', max);
 }
 
 // Rolling list of NZB grabs that completed with nothing to show for it (see
@@ -811,30 +848,34 @@ async function getRecentSearchTraces() {
 // the regular Download History page has no way to surface since the job
 // itself isn't marked Error/Terminated. Deduped by job id (recordedFailedGrabJobIds)
 // so Sonarr/Radarr's repeated history polling doesn't push the same failure
-// in over and over.
-const MAX_FAILED_GRABS = 20;
+// in over and over. Row cap is nzb.diagnosticLogLimits.failedGrabs.
 // Dedup only, not the log itself (that's nzb_diagnostic_log now) - reset on
 // restart, so a job whose failure was already recorded before a restart can
 // in theory be recorded a second time by the next history poll. Harmless:
-// worst case is one duplicate row that ages out of the last-20 window like
+// worst case is one duplicate row that ages out of the capped window like
 // any other.
 const recordedFailedGrabJobIds = new Set();
 
 async function recordFailedGrab(job, message) {
   if (recordedFailedGrabJobIds.has(job.id)) return;
   recordedFailedGrabJobIds.add(job.id);
+  const max = nzbDiagnosticLog.resolveLogLimit(configModule.getConfig(), 'failedGrabs');
   await nzbDiagnosticLog.recordDiagnosticEvent('failedGrab', {
     jobId: String(job.id),
     categoryName: job.data?.nzb?.categoryName || null,
     youtubeId: job.data?.nzb?.youtubeId || null,
     nzbName: job.data?.nzb?.nzbName || null,
     message,
-    timestamp: Date.now(),
-  }, MAX_FAILED_GRABS);
+    // When the grab started, not when a history poll first noticed it failed -
+    // the poll can be delayed, and after a restart (dedup set is empty) it
+    // would re-stamp an old failure as "just now".
+    timestamp: new Date(job.timeInitiated).getTime() || Date.now(),
+  }, max);
 }
 
 async function getRecentFailedGrabs() {
-  return nzbDiagnosticLog.getDiagnosticEvents('failedGrab', MAX_FAILED_GRABS);
+  const max = nzbDiagnosticLog.resolveLogLimit(configModule.getConfig(), 'failedGrabs');
+  return nzbDiagnosticLog.getDiagnosticEvents('failedGrab', max);
 }
 
 /**
@@ -1559,3 +1600,4 @@ module.exports.computeNzbStatusDetail = computeNzbStatusDetail;
 // Consumed by videosModule's real-time file check - see this function's own
 // doc comment for why the reconciliation can't just live inside nzb.js.
 module.exports.reconcileMovedUntrackedVideo = reconcileMovedUntrackedVideo;
+module.exports.handleHistoryDeleteRequest = handleHistoryDeleteRequest;

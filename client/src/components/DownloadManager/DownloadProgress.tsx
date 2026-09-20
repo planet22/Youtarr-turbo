@@ -275,6 +275,30 @@ const DownloadProgress: React.FC<DownloadProgressProps> = ({
     );
   }, []);
 
+  // Tracks the pending "clear progress" timeout so a new payload can cancel
+  // a stale one instead of letting both fire and race each other.
+  const progressClearTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const scheduleProgressClear = useCallback(() => {
+    if (progressClearTimeoutRef.current) {
+      clearTimeout(progressClearTimeoutRef.current);
+    }
+    progressClearTimeoutRef.current = setTimeout(() => {
+      progressClearTimeoutRef.current = null;
+      setShowProgress(false);
+      setCurrentProgress(null);
+      setVideoCount({ current: 0, total: 0, completed: 0, skipped: 0, skippedThisChannel: 0 });
+    }, 2000);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (progressClearTimeoutRef.current) {
+        clearTimeout(progressClearTimeoutRef.current);
+      }
+    };
+  }, []);
+
   const applyPayload = useCallback(
     (payload: DownloadProgressPayload) => {
       // Clear previous summary if explicitly requested
@@ -328,25 +352,13 @@ const DownloadProgress: React.FC<DownloadProgressProps> = ({
         // Handle completion or failure
         if (progress.state === 'complete') {
           // Clear progress after a delay to show final summary
-          setTimeout(() => {
-            setShowProgress(false);
-            setCurrentProgress(null);
-            setVideoCount({ current: 0, total: 0, completed: 0, skipped: 0, skippedThisChannel: 0 });
-          }, 2000);
+          scheduleProgressClear();
         } else if (progress.state === 'warning') {
           // Clear progress after a delay to show final summary with warnings
-          setTimeout(() => {
-            setShowProgress(false);
-            setCurrentProgress(null);
-            setVideoCount({ current: 0, total: 0, completed: 0, skipped: 0, skippedThisChannel: 0 });
-          }, 2000);
+          scheduleProgressClear();
         } else if (progress.state === 'terminated') {
           // Clear progress after a delay to show final state and allow summary to display
-          setTimeout(() => {
-            setShowProgress(false);
-            setCurrentProgress(null);
-            setVideoCount({ current: 0, total: 0, completed: 0, skipped: 0, skippedThisChannel: 0 });
-          }, 2000);
+          scheduleProgressClear();
         } else if (progress.state === 'failed' || progress.state === 'error') {
           // Show error state
           setShowProgress(false);
@@ -390,7 +402,7 @@ const DownloadProgress: React.FC<DownloadProgressProps> = ({
         }
       }
     },
-    [downloadInitiatedRef]
+    [downloadInitiatedRef, scheduleProgressClear]
   );
 
   // Bumped per live broadcast; lets the seed skip probes that raced a message.

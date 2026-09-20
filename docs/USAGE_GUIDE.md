@@ -1,25 +1,54 @@
-# Youtarr Usage Guide
+# Youtarr-Turbo Usage Guide
 
-This guide provides step-by-step instructions for common tasks in Youtarr. After completing the [Installation Guide](INSTALLATION.md), use this guide to learn how to use Youtarr's features effectively.
+This guide provides step-by-step instructions for common tasks in Youtarr-Turbo. After completing the [Installation Guide](INSTALLATION.md), use this guide to learn how to use Youtarr-Turbo's features effectively.
 
 ## Table of Contents
 
-- [Download Individual Videos](#download-individual-videos)
-- [Subscribe to Channels](#subscribe-to-channels)
-- [Import YouTube Subscriptions](#import-youtube-subscriptions)
-- [Subscribe to Playlists](#subscribe-to-playlists)
-- [Configure Automation](#configure-automation)
-- [Configure SponsorBlock](#configure-sponsorblock)
-- [Enable Download Notifications](#enable-download-notifications)
-- [Re-download Missing Videos](#re-download-missing-videos)
-- [Rescan Files on Disk](#rescan-files-on-disk)
-- [Organize Channels with Multi-Library Support](#organize-channels-with-multi-library-support)
-- [Browse and Filter Channel Videos](#browse-and-filter-channel-videos)
-- [Find Videos on YouTube](#find-videos-on-youtube)
-- [Preview and Play Videos](#preview-and-play-videos)
-- [Track Watch Status from Media Servers](#track-watch-status-from-media-servers)
-- [External Access with API Keys](#external-access-with-api-keys)
-- [Content Ratings](#content-ratings)
+- [Youtarr-Turbo Usage Guide](#youtarr-turbo-usage-guide)
+  - [Table of Contents](#table-of-contents)
+  - [Download Individual Videos](#download-individual-videos)
+  - [Subscribe to Channels](#subscribe-to-channels)
+    - [Channel playlist file (.m3u)](#channel-playlist-file-m3u)
+  - [Import YouTube Subscriptions](#import-youtube-subscriptions)
+    - [Method 1: Google Takeout CSV](#method-1-google-takeout-csv)
+    - [Method 2: Cookies File](#method-2-cookies-file)
+    - [Reviewing Channels](#reviewing-channels)
+    - [Import Progress](#import-progress)
+    - [Error Handling](#error-handling)
+  - [Subscribe to Playlists](#subscribe-to-playlists)
+    - [Add a playlist](#add-a-playlist)
+    - [Where the videos are saved](#where-the-videos-are-saved)
+    - [The playlist detail page](#the-playlist-detail-page)
+    - [Playlist files (.m3u)](#playlist-files-m3u)
+    - [Syncing to Plex, Jellyfin, and Emby](#syncing-to-plex-jellyfin-and-emby)
+  - [Configure Automation](#configure-automation)
+  - [Configure SponsorBlock](#configure-sponsorblock)
+  - [Enable Download Notifications](#enable-download-notifications)
+  - [Re-download Missing Videos](#re-download-missing-videos)
+  - [Rescan Files on Disk](#rescan-files-on-disk)
+  - [Organize Channels with Multi-Library Support](#organize-channels-with-multi-library-support)
+    - [Why Use Multi-Library Support?](#why-use-multi-library-support)
+    - [How to Set Up Multi-Library Organization](#how-to-set-up-multi-library-organization)
+  - [Browse and Filter Channel Videos](#browse-and-filter-channel-videos)
+    - [Using the Channel Video Browser](#using-the-channel-video-browser)
+    - [Ignore Videos from Auto-Downloads](#ignore-videos-from-auto-downloads)
+  - [Find Videos on YouTube](#find-videos-on-youtube)
+  - [Preview and Play Videos](#preview-and-play-videos)
+  - [Track Watch Status from Media Servers](#track-watch-status-from-media-servers)
+    - [How it works](#how-it-works)
+    - [Settings](#settings)
+    - [Where it shows up](#where-it-shows-up)
+    - [What determines if a video is "watched"](#what-determines-if-a-video-is-watched)
+  - [Common tasks](#common-tasks)
+    - [Backfilling ratings for existing videos](#backfilling-ratings-for-existing-videos)
+  - [Content Ratings](#content-ratings)
+  - [External Access with API Keys](#external-access-with-api-keys)
+    - [Create an API Key](#create-an-api-key)
+    - [Install a Browser Bookmarklet](#install-a-browser-bookmarklet)
+    - [Set Up Mobile Shortcuts](#set-up-mobile-shortcuts)
+    - [Manage Your API Keys](#manage-your-api-keys)
+  - [Next Steps](#next-steps)
+  - [Getting Help](#getting-help)
 
 ## Download Individual Videos
 
@@ -40,7 +69,7 @@ Download specific YouTube videos manually without subscribing to channels.
 4. **Click "Start Download"**
    - The download will begin immediately
    - Progress is displayed in real-time
-   - You can continue using Youtarr while downloads run in the background
+   - You can continue using Youtarr-Turbo while downloads run in the background
 
 ## Subscribe to Channels
 
@@ -76,7 +105,7 @@ Subscribe to YouTube channels to automatically download new videos as they're pu
 ### Channel playlist file (.m3u)
 
 Enable "Generate channel playlist file (.m3u)" in a channel's settings to have
-Youtarr write a `<Channel Name>.m3u` playlist at the top of that channel's
+Youtarr-Turbo write a `<Channel Name>.m3u` playlist at the top of that channel's
 folder, listing every downloaded video (oldest first by default, or newest
 first). Jellyfin and Emby import the file automatically as a playlist, but
 only from certain library types (Jellyfin: "Mixed Movies and Shows" or Music,
@@ -87,12 +116,12 @@ recommendation) the server ignores the file, though it still opens in any
 [Emby](media-servers/emby.md#channel-playlist-files-m3u) guides for the
 library-type tradeoff. The file updates after downloads and deletions and
 refreshes nightly after the scheduled file rescan; files deleted outside
-Youtarr drop out of the playlist at the next refresh.
+Youtarr-Turbo drop out of the playlist at the next refresh.
 Turning the setting off (or unsubscribing from the channel) deletes the file.
 
 ## Import YouTube Subscriptions
 
-Bulk-import channels from your existing YouTube subscriptions instead of adding them one at a time. Youtarr supports two import methods: a Google Takeout CSV file or a one-time cookies file upload.
+Bulk-import channels from your existing YouTube subscriptions instead of adding them one at a time. Youtarr-Turbo supports two import methods: a Google Takeout CSV file or a one-time cookies file upload.
 
 1. **Open the import page**
    - Go to the Channels & Playlists page
@@ -135,7 +164,7 @@ Fetch your subscription list directly from YouTube using a cookies file. This is
 
 ### Reviewing Channels
 
-After uploading, Youtarr displays a review table with all discovered channels.
+After uploading, Youtarr-Turbo displays a review table with all discovered channels.
 
 - Each channel shows a thumbnail and name
 - Channels you are already subscribed to are marked with an "already subscribed" badge and cannot be selected
@@ -152,7 +181,7 @@ When you are satisfied with your selections, click **Import selected** to begin.
 
 ### Import Progress
 
-Once the import starts, Youtarr processes the selected channels as a background job.
+Once the import starts, Youtarr-Turbo processes the selected channels as a background job.
 
 - A progress bar and per-channel status list update in real time
 - Each channel shows a success, error, or skipped icon as it completes
@@ -165,7 +194,7 @@ Individual channel errors (for example, bot detection or network timeouts) are d
 
 ## Subscribe to Playlists
 
-Subscribe to a YouTube playlist and Youtarr tracks its videos, downloads them, and mirrors the playlist into Plex, Jellyfin, and Emby as a native playlist. It also writes a standard `.m3u` file so any other player can open the list.
+Subscribe to a YouTube playlist and Youtarr-Turbo tracks its videos, downloads them, and mirrors the playlist into Plex, Jellyfin, and Emby as a native playlist. It also writes a standard `.m3u` file so any other player can open the list.
 
 ### Add a playlist
 
@@ -180,7 +209,7 @@ Subscribe to a YouTube playlist and Youtarr tracks its videos, downloads them, a
 
 3. **Subscribe**
    - The dialog shows which media servers the playlist will sync to. If you haven't connected any, the videos still download and a `.m3u` file is still written; you just won't get a native server playlist.
-   - Click **Subscribe**. Youtarr pulls in the video list and opens the playlist's detail page.
+   - Click **Subscribe**. Youtarr-Turbo pulls in the video list and opens the playlist's detail page.
 
 > Click the **?** icon on the Playlists tab for an in-app summary of how playlists work.
 
@@ -189,11 +218,11 @@ Subscribe to a YouTube playlist and Youtarr tracks its videos, downloads them, a
 Playlists don't get their own folder. Each video is saved under the channel that uploaded it, so a playlist that pulls from five channels lands in five channel folders.
 
 - If you're already subscribed to that channel, the video uses that channel's subfolder and quality settings.
-- If you're not, the video uses the playlist's default subfolder (your global default unless you change it), and Youtarr creates a hidden channel record behind the scenes to keep future downloads organized.
+- If you're not, the video uses the playlist's default subfolder (your global default unless you change it), and Youtarr-Turbo creates a hidden channel record behind the scenes to keep future downloads organized.
 
 The same video never downloads twice just because it shows up in a playlist.
 
-Private, deleted, and members-only videos can't be accessed, so Youtarr leaves them out of the list and never downloads them. The video count reflects only the videos Youtarr can see.
+Private, deleted, and members-only videos can't be accessed, so Youtarr-Turbo leaves them out of the list and never downloads them. The video count reflects only the videos Youtarr-Turbo can see.
 
 ### The playlist detail page
 
@@ -201,7 +230,7 @@ Open a playlist to manage it:
 
 - **Refresh from YouTube**: re-fetches the live playlist, updates the video list, then re-syncs and rewrites the `.m3u`. It doesn't download anything.
 - **Download new**: downloads every tracked video you don't already have. A settings dialog lets you confirm resolution and other options first.
-- **Auto-download new videos**: turn this on and Youtarr keeps the playlist current on your regular download schedule (see [Configure Automation](#configure-automation)).
+- **Auto-download new videos**: turn this on and Youtarr-Turbo keeps the playlist current on your regular download schedule (see [Configure Automation](#configure-automation)).
 - **Playlist settings**: set a subfolder, resolution, download type, and default rating for this playlist. A video's own channel settings take precedence; these apply when the channel has no override. The download type also decides whether the playlist syncs to media servers as a video or music playlist (see [Switching a playlist's download type](MEDIA_SERVER_PLAYLISTS.md#switching-a-playlists-download-type)).
 - **Sync chips**: one per media server. Click to enable or disable sync for that server, or click an unconfigured server to jump to its settings.
 - **Public on media servers**: makes the playlist visible to other users on Jellyfin and Emby. Plex playlists are always created under one account and shared manually, so this setting doesn't affect Plex.
@@ -211,19 +240,19 @@ In the video list you can sort newest- or oldest-first, filter by download state
 
 ### Playlist files (.m3u)
 
-For every playlist you subscribe to, Youtarr writes a `.m3u` file into a `__playlists__` folder next to your videos. It uses relative paths, so it keeps working if you move your library, and it's written whether or not you've connected a media server. The file lists every item you've actually downloaded, in playlist order: one entry each, using the file that matches the playlist's Download Type (the MP3 for MP3 Only playlists, the video file otherwise) and falling back to the other format so nothing is dropped. Any player that reads `.m3u` (VLC, mpv, Kodi, and most media servers) can open it.
+For every playlist you subscribe to, Youtarr-Turbo writes a `.m3u` file into a `__playlists__` folder next to your videos. It uses relative paths, so it keeps working if you move your library, and it's written whether or not you've connected a media server. The file lists every item you've actually downloaded, in playlist order: one entry each, using the file that matches the playlist's Download Type (the MP3 for MP3 Only playlists, the video file otherwise) and falling back to the other format so nothing is dropped. Any player that reads `.m3u` (VLC, mpv, Kodi, and most media servers) can open it.
 
 ### Syncing to Plex, Jellyfin, and Emby
 
 Connect a media server under Settings first, then turn on sync for the playlists you want. A video has to be in your media server's library before it can be added to the synced playlist, so a fresh download might take a scan cycle to show up.
 
-Playlists set to **MP3 Only** sync as music playlists; your server needs a music-type library that includes the Youtarr output directory. The playlist's Download Type setting decides its media-server playlist type, so changing it later switches the synced playlist too. See [Audio-only playlists](MEDIA_SERVER_PLAYLISTS.md#audio-only-playlists) and [Switching a playlist's download type](MEDIA_SERVER_PLAYLISTS.md#switching-a-playlists-download-type).
+Playlists set to **MP3 Only** sync as music playlists; your server needs a music-type library that includes the Youtarr-Turbo output directory. The playlist's Download Type setting decides its media-server playlist type, so changing it later switches the synced playlist too. See [Audio-only playlists](MEDIA_SERVER_PLAYLISTS.md#audio-only-playlists) and [Switching a playlist's download type](MEDIA_SERVER_PLAYLISTS.md#switching-a-playlists-download-type).
 
-For per-server setup (API keys, user IDs, the Plex playlist visibility scope), the public/private model, and how Youtarr handles playlist changes, see [Media Server Playlists](MEDIA_SERVER_PLAYLISTS.md).
+For per-server setup (API keys, user IDs, the Plex playlist visibility scope), the public/private model, and how Youtarr-Turbo handles playlist changes, see [Media Server Playlists](MEDIA_SERVER_PLAYLISTS.md).
 
 ## Configure Automation
 
-Set up automatic downloads on a schedule so Youtarr checks for new videos periodically.
+Set up automatic downloads on a schedule so Youtarr-Turbo checks for new videos periodically.
 
 1. **Visit the Settings page**
    - Click "Settings" in the navigation menu
@@ -296,7 +325,7 @@ Get Discord notifications when new videos finish downloading.
    - Choose the channel for notifications
    - Copy the webhook URL
 
-2. **Open Youtarr Settings -> Notifications**
+2. **Open Youtarr-Turbo Settings -> Notifications**
 
 3. **Enable notifications**
    - Toggle notifications on
@@ -308,18 +337,18 @@ Get Discord notifications when new videos finish downloading.
    - Click "Send Test Notification" to verify delivery
    - Check your Discord channel for the test message
 
-**Note**: Youtarr sends notifications after successful downloads that include at least one new video. It won't spam for every single video - notifications are batched per download job.
+**Note**: Youtarr-Turbo sends notifications after successful downloads that include at least one new video. It won't spam for every single video - notifications are batched per download job.
 
 ## Re-download Missing Videos
 
 Videos can become "missing" if they're manually deleted from disk. This feature helps you recover them by fetching the file from YouTube again. The same flow also works for videos still on disk (the new download replaces the existing file, which is handy for upgrading quality); videos that have been removed from YouTube are skipped automatically.
 
-> **Note**: If the file still exists somewhere (you moved it, renamed its folder, or converted it to a different format), use [Rescan Files on Disk](#rescan-files-on-disk) instead. Rescan reconciles Youtarr's database with what's already on disk without re-downloading.
+> **Note**: If the file still exists somewhere (you moved it, renamed its folder, or converted it to a different format), use [Rescan Files on Disk](#rescan-files-on-disk) instead. Rescan reconciles Youtarr-Turbo's database with what's already on disk without re-downloading.
 
 1. **Identify missing videos**
    - Go to "Downloaded Videos" or a specific channel's video page
    - Look for videos marked with a cloud-off icon (indicates missing from disk)
-   - The video metadata is still in Youtarr's database, but the file is gone
+   - The video metadata is still in Youtarr-Turbo's database, but the file is gone
 
 2. **Select videos to re-download**
    - Check the boxes next to the videos you want to fetch
@@ -336,7 +365,7 @@ Videos can become "missing" if they're manually deleted from disk. This feature 
 
 ## Rescan Files on Disk
 
-Use this when you've moved, renamed, or converted downloaded files outside Youtarr and want Youtarr's database to catch up with what's actually on disk. The rescan walks your downloads folder and updates Youtarr's view of which files exist and where; it does not re-download anything. It also probes files for their actual resolution, so on libraries downloaded before that was tracked, the quality chips on video listings fill in gradually as the nightly rescan works through them.
+Use this when you've moved, renamed, or converted downloaded files outside Youtarr-Turbo and want Youtarr-Turbo's database to catch up with what's actually on disk. The rescan walks your downloads folder and updates Youtarr-Turbo's view of which files exist and where; it does not re-download anything. It also probes files for their actual resolution, so on libraries downloaded before that was tracked, the quality chips on video listings fill in gradually as the nightly rescan works through them.
 
 Common cases:
 - You converted `.mp4` files to `.mkv` (or another supported container) using ffmpeg.
@@ -347,9 +376,9 @@ Common cases:
 2. Click **Rescan files on disk**
 3. The page shows progress in real time and a summary of the last run (videos updated, files marked missing)
 
-A scan also runs daily on a schedule and once at server startup, so changes you make outside Youtarr will eventually be picked up even if you don't trigger a manual rescan.
+A scan also runs daily on a schedule and once at server startup, so changes you make outside Youtarr-Turbo will eventually be picked up even if you don't trigger a manual rescan.
 
-**Supported file extensions**: `.mp4`, `.webm`, `.mkv`, `.m4v`, `.avi` for video, plus `.mp3` for audio-only downloads. Youtarr only writes `.mp4` (or `.mp3` for audio-only), but the rescan recognizes any of these so transcoding outside Youtarr won't orphan your library. Files must keep the `[<youtube-id>]` segment in their filename (the 11-character ID in brackets that yt-dlp writes by default) for Youtarr to match them back to the database.
+**Supported file extensions**: `.mp4`, `.webm`, `.mkv`, `.m4v`, `.avi` for video, plus `.mp3` for audio-only downloads. Youtarr-Turbo only writes `.mp4` (or `.mp3` for audio-only), but the rescan recognizes any of these so transcoding outside Youtarr-Turbo won't orphan your library. Files must keep the `[<youtube-id>]` segment in their filename (the 11-character ID in brackets that yt-dlp writes by default) for Youtarr-Turbo to match them back to the database.
 
 **When to use this vs. Re-download Missing Videos**:
 - File is **gone** (deleted): use [Re-download Missing Videos](#re-download-missing-videos).
@@ -402,7 +431,7 @@ Explore all videos available from your subscribed channels, even if you haven't 
 
 ### Using the Channel Video Browser
 
-**Note:** *By default Youtarr only fetches the most recent 50 videos data per tab. To fetch ALL video data, click the `Refresh All` button.*
+**Note:** *By default Youtarr-Turbo only fetches the most recent 50 videos data per tab. To fetch ALL video data, click the `Refresh All` button.*
 
 1. **Navigate to a channel**
    - Go to the Channels & Playlists page
@@ -422,7 +451,7 @@ Explore all videos available from your subscribed channels, even if you haven't 
 
 4. **Live status indicators**
    - Videos currently streaming show a **LIVE** indicator
-   - Youtarr won't download live streams until they finish
+   - Youtarr-Turbo won't download live streams until they finish
 
 5. **Download from the browser**
    - Select specific videos you want to download
@@ -455,7 +484,7 @@ Mark specific videos to exclude them from automatic channel downloads.
 
 ## Find Videos on YouTube
 
-Search YouTube from inside Youtarr and see which results you already have, which are missing, and which are new.
+Search YouTube from inside Youtarr-Turbo and see which results you already have, which are missing, and which are new.
 
 1. **Open Find Videos on YouTube**
    - In the sidebar, expand **Videos** and click **Find Videos on YouTube**
@@ -487,10 +516,10 @@ Click any thumbnail on the Videos page or a channel page to open a video detail 
    - Description, tags, view count, likes, resolution, fps, file sizes, and related file paths
    - For downloaded videos, the modal shows the downloaded format's dimensions from the video metadata, with the quality tier alongside when it isn't obvious from the numbers (e.g. `608x1080 (1080p)` for a vertical video); video listings show a small tier chip based on the file's measured on-disk resolution
    - For downloaded videos, data is served from the cached `.info.json`
-   - For videos not yet downloaded, Youtarr fetches metadata on demand via yt-dlp (this can take a few seconds on the first open)
+   - For videos not yet downloaded, Youtarr-Turbo fetches metadata on demand via yt-dlp (this can take a few seconds on the first open)
 
 3. **In-browser playback**
-   - Downloaded videos stream directly from Youtarr through the built-in player; no media server required
+   - Downloaded videos stream directly from Youtarr-Turbo through the built-in player; no media server required
    - Playback is authenticated via your existing session
 
 4. **Actions from the modal**
@@ -499,15 +528,15 @@ Click any thumbnail on the Videos page or a channel page to open a video detail 
 
 ## Track Watch Status from Media Servers
 
-If you've connected Plex, Jellyfin, or Emby, Youtarr can pull watch status from them: which videos have been played, how far through, and when. The sync is one-way; Youtarr only reads from your servers and never writes anything back.
+If you've connected Plex, Jellyfin, or Emby, Youtarr-Turbo can pull watch status from them: which videos have been played, how far through, and when. The sync is one-way; Youtarr-Turbo only reads from your servers and never writes anything back.
 
 ### How it works
 
-- On a schedule (every 4 hours by default) Youtarr asks each connected server who has watched what and stores the results.
+- On a schedule (every 4 hours by default) Youtarr-Turbo asks each connected server who has watched what and stores the results.
 - Only videos a server actually reports on get recorded. A video with no watch data means "never synced" or "unknown", not "unwatched".
-- By default Youtarr syncs every user account on the server, not just yours. Jellyfin and Emby report full detail (played, percent watched, last watched) for every user. Plex reports full detail for the server owner; other Plex accounts come from the server's play history, which only records completed plays, so those users show as watched or not with no in-progress positions.
-- Videos Youtarr marks as missing still sync. If a file was moved somewhere Youtarr can't see but a media server still has it, its watch status keeps updating; files are recognized by the `[video-id]` at the end of the filename, so this works even if the file was renamed.
-- Watching a video in Youtarr's built-in player doesn't mark it watched. Watch status only comes from your media servers.
+- By default Youtarr-Turbo syncs every user account on the server, not just yours. Jellyfin and Emby report full detail (played, percent watched, last watched) for every user. Plex reports full detail for the server owner; other Plex accounts come from the server's play history, which only records completed plays, so those users show as watched or not with no in-progress positions.
+- Videos Youtarr-Turbo marks as missing still sync. If a file was moved somewhere Youtarr-Turbo can't see but a media server still has it, its watch status keeps updating; files are recognized by the `[video-id]` at the end of the filename, so this works even if the file was renamed.
+- Watching a video in Youtarr-Turbo's built-in player doesn't mark it watched. Watch status only comes from your media servers.
 
 ### Settings
 
@@ -525,23 +554,23 @@ Open **Settings -> Watch Status** to:
 - On the Videos page and channel pages, the **Watched** filter chip cycles through three states: off, show only watched, or hide watched.
 - On a playlist page, use the **Watched** dropdown (All / Watched / Not watched) next to the **Show** control.
 
-When you filter for unwatched videos, the results include videos that have never been synced. Youtarr can't tell "not watched" apart from "no data yet", so it errs on the side of showing them.
+When you filter for unwatched videos, the results include videos that have never been synced. Youtarr-Turbo can't tell "not watched" apart from "no data yet", so it errs on the side of showing them.
 
 ### What determines if a video is "watched"
 
-Youtarr doesn't decide this; it shows whatever your media servers report. All three servers mark a video played once playback passes a percentage threshold (90% by default), and each one lets you change it:
+Youtarr-Turbo doesn't decide this; it shows whatever your media servers report. All three servers mark a video played once playback passes a percentage threshold (90% by default), and each one lets you change it:
 
 - **Plex**: Settings -> Library -> **Video Played Threshold**
 - **Emby**: Emby Server -> Library, edit the library, then **Max resume percentage** at the bottom of the dialog (this one is per-library)
 - **Jellyfin**: Server -> Playback -> Resume -> **Maximum resume percentage**
 
-On Emby and Jellyfin the same setting also controls resume: stop after the threshold and the title counts as fully played instead of resumable. If you finished a video and it isn't showing as watched in Youtarr, check this setting on the server you played it on, then run a sync.
+On Emby and Jellyfin the same setting also controls resume: stop after the threshold and the title counts as fully played instead of resumable. If you finished a video and it isn't showing as watched in Youtarr-Turbo, check this setting on the server you played it on, then run a sync.
 
 ## Common tasks
 
 - Set a per-download override: When downloading manually, use the download/settings dialog to pick a rating or clear it (NR) for that specific download.
 - Configure a channel default: Open a channel, click the settings (gear) and set `Default Rating` to apply to that channel's future downloads.
-- Upgrading from an older Youtarr version: If you upgraded and want ratings populated for existing videos, run the backfill script described below.
+- Upgrading from an older Youtarr-Turbo version: If you upgraded and want ratings populated for existing videos, run the backfill script described below.
 
 ### Backfilling ratings for existing videos
 
@@ -553,10 +582,10 @@ The script must be run inside the Docker container:
 
 ```bash
 # Preview what would change (no database writes) — run this first!
-docker exec youtarr node scripts/backfill-ratings.js --dry-run
+docker exec youtarr-turbo node scripts/backfill-ratings.js --dry-run
 
 # Run for real (consider using screen/tmux for large libraries)
-docker exec -it youtarr node scripts/backfill-ratings.js
+docker exec -it youtarr-turbo node scripts/backfill-ratings.js
 ```
 
 **`--dry-run` flag** — Previews changes without modifying the database and shows how many videos need backfilling. Always run this first.
@@ -571,7 +600,7 @@ docker exec -it youtarr node scripts/backfill-ratings.js
 
 ## Content Ratings
 
-Youtarr now supports content ratings for videos and channels. Ratings are normalized to common media-server values (for example `G`, `PG`, `PG-13`, `R`, `NC-17`, and `TV-*`) and surfaced in the UI as badges and in the video metadata. They can also be used to drive automated policies or filter downloads.
+Youtarr-Turbo now supports content ratings for videos and channels. Ratings are normalized to common media-server values (for example `G`, `PG`, `PG-13`, `R`, `NC-17`, and `TV-*`) and surfaced in the UI as badges and in the video metadata. They can also be used to drive automated policies or filter downloads.
 
 How ratings are determined (priority):
 
@@ -581,7 +610,7 @@ How ratings are determined (priority):
 4. NR / Not Rated — no rating could be determined; treated as unrated/null.
 
 ## External Access with API Keys
-Send videos to Youtarr from anywhere using API keys. This enables one-click downloads from browser bookmarklets, mobile shortcuts, and automation tools.
+Send videos to Youtarr-Turbo from anywhere using API keys. This enables one-click downloads from browser bookmarklets, mobile shortcuts, and automation tools.
 
 > **Note**: API keys currently support **single video downloads only**. Playlists and channels require the web UI.
 
@@ -604,7 +633,7 @@ Send videos to Youtarr from anywhere using API keys. This enables one-click down
 After creating an API key, you can set up a bookmarklet to send videos with one click:
 
 1. **Get the bookmarklet**
-   - In the key creation dialog, drag the "📥 Send to Youtarr" button to your bookmarks bar
+   - In the key creation dialog, drag the "📥 Send to Youtarr-Turbo" button to your bookmarks bar
    - Or copy the bookmarklet code and create a bookmark manually
 
 2. **Use the bookmarklet**
@@ -617,12 +646,12 @@ After creating an API key, you can set up a bookmarklet to send videos with one 
 **Apple Shortcuts (iOS/macOS)**:
 1. Create a new Shortcut
 2. Add "Get URLs from Input" for Share Sheet integration
-3. Add "Get Contents of URL" with your Youtarr server URL and API key
+3. Add "Get Contents of URL" with your Youtarr-Turbo server URL and API key
 4. Enable "Show in Share Sheet" for YouTube
 
 **Android (Tasker/Automate)**:
 1. Create an HTTP Request action
-2. Configure POST to your Youtarr download endpoint
+2. Configure POST to your Youtarr-Turbo download endpoint
 3. Include your API key in the headers
 
 For detailed setup instructions and code examples, see the [API Integration Guide](API_INTEGRATION.md).
@@ -636,7 +665,7 @@ For detailed setup instructions and code examples, see the [API Integration Guid
 
 ## Next Steps
 
-Now that you know how to use Youtarr's features, check out these guides for advanced topics:
+Now that you know how to use Youtarr-Turbo's features, check out these guides for advanced topics:
 
 - [Configuration Reference](CONFIG.md) - Detailed explanation of all settings
 - [API Integration Guide](API_INTEGRATION.md) - Bookmarklets, mobile shortcuts, and automation
@@ -649,4 +678,3 @@ Now that you know how to use Youtarr's features, check out these guides for adva
 
 - [Troubleshooting Guide](TROUBLESHOOTING.md) - Common issues and solutions
 - [GitHub Issues](https://github.com/planet22/Youtarr-turbo/issues) - Report bugs or request features
-- [Discord Server](https://discord.gg/68rvWnYMtD) - Join the community for help and discussion

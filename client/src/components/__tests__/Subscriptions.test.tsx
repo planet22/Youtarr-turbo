@@ -350,15 +350,15 @@ describe('Subscriptions Component', () => {
   describe('View Mode Toggle', () => {
     test('renders view mode toggle buttons on desktop', () => {
       renderSubscriptions();
-      expect(screen.getByLabelText('List view')).toBeInTheDocument();
-      expect(screen.getByLabelText('Grid view')).toBeInTheDocument();
+      expect(screen.getByLabelText('Table View')).toBeInTheDocument();
+      expect(screen.getByLabelText('Grid View')).toBeInTheDocument();
     });
 
     test('renders the mobile view mode toggle on mobile', () => {
       (useMediaQuery as jest.Mock).mockReturnValue(true);
       renderSubscriptions();
-      expect(screen.getByLabelText('List view')).toBeInTheDocument();
-      expect(screen.getByLabelText('Grid view')).toBeInTheDocument();
+      expect(screen.getByLabelText('Table View')).toBeInTheDocument();
+      expect(screen.getByLabelText('Grid View')).toBeInTheDocument();
     });
 
     test('switches to grid view when grid button clicked', async () => {
@@ -375,7 +375,7 @@ describe('Subscriptions Component', () => {
 
       renderSubscriptions();
 
-      await user.click(screen.getByLabelText('Grid view'));
+      await user.click(screen.getByLabelText('Grid View'));
 
       await waitFor(() => {
         expect(screen.getByTestId(`channel-card-${mockChannels[0].url}`)).toBeInTheDocument();

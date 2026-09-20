@@ -1,6 +1,85 @@
 const schedule = require('node-cron');
 const logger = require('../logger');
 
+// Registry behind the Maintenance page's "Scheduled tasks" table: every job
+// below is registered through defineTask, which schedules it exactly as
+// before and also lets it be run on demand. State is in-memory (resets on
+// restart).
+const tasks = new Map();
+const runners = new Map();
+
+// Next occurrence of a daily "M H * * *" expression in server-local time (the
+// zone node-cron schedules in), or null for any other shape.
+function nextDailyRun(cronExpression, now = new Date()) {
+  const match = /^(\d{1,2}) (\d{1,2}) \* \* \*$/.exec(cronExpression);
+  if (!match) return null;
+  const next = new Date(now);
+  next.setHours(Number(match[2]), Number(match[1]), 0, 0);
+  if (next <= now) next.setDate(next.getDate() + 1);
+  return next.toISOString();
+}
+
+async function runTask(id, trigger) {
+  const task = tasks.get(id);
+  if (!task) return { started: false, reason: 'unknown' };
+  if (task.running) {
+    logger.warn({ taskId: id, trigger }, 'Scheduled task already running, skipping this trigger');
+    return { started: false, reason: 'running' };
+  }
+
+  task.running = true;
+  task.lastTrigger = trigger;
+  task.lastStartedAt = new Date().toISOString();
+  try {
+    await runners.get(id)();
+    task.lastStatus = 'ok';
+    task.lastError = null;
+  } catch (err) {
+    task.lastStatus = 'error';
+    task.lastError = err.message;
+    logger.error({ err, taskId: id }, 'Scheduled task failed');
+  } finally {
+    task.running = false;
+    task.lastFinishedAt = new Date().toISOString();
+  }
+  return { started: true };
+}
+
+function defineTask({ id, label, description, cron, confirm }, run) {
+  tasks.set(id, {
+    id, label, description, cron, confirm,
+    running: false,
+    lastTrigger: null,
+    lastStartedAt: null,
+    lastFinishedAt: null,
+    lastStatus: null,
+    lastError: null,
+  });
+  runners.set(id, run);
+  schedule.schedule(cron, async () => {
+    await runTask(id, 'scheduled');
+  });
+}
+
+function getTasks() {
+  return Array.from(tasks.values()).map((task) => ({
+    ...task,
+    nextRun: nextDailyRun(task.cron),
+  }));
+}
+
+/**
+ * Starts a task in the background and returns immediately.
+ * @returns {{started: boolean, reason?: 'unknown'|'running'}}
+ */
+function runTaskNow(id) {
+  const task = tasks.get(id);
+  if (!task) return { started: false, reason: 'unknown' };
+  if (task.running) return { started: false, reason: 'running' };
+  void runTask(id, 'manual');
+  return { started: true };
+}
+
 /**
  * Initialize all scheduled cron jobs for the application
  * This module centralizes all cron job definitions for better maintainability
@@ -22,7 +101,13 @@ function initialize(deps = {}) {
   // ============================================================================
   // AUTOMATIC VIDEO CLEANUP - 2:00 AM Daily
   // ============================================================================
-  schedule.schedule('0 2 * * *', async () => {
+  defineTask({
+    id: 'auto-removal',
+    label: 'Automatic video cleanup',
+    description: 'Deletes videos per the auto-removal settings (age, watched, free space), then removes empty folders. Permanently deletes files.',
+    cron: '0 2 * * *',
+    confirm: true,
+  }, async () => {
     logger.info('Running automatic video cleanup cron job');
     try {
       const result = await videoDeletionModule.performAutomaticCleanup();
@@ -66,7 +151,13 @@ function initialize(deps = {}) {
   // threshold is unset/0 - see videoDeletionModule.sweepExpiredCachedVideos.
   // Runs 10 minutes after the main auto-removal pass so both nightly jobs
   // don't race on the same rows.
-  schedule.schedule('10 2 * * *', async () => {
+  defineTask({
+    id: 'strm-cache-expiry',
+    label: 'STRM cache-on-play expiry',
+    description: 'Reverts expired cache-on-play downloads back to STRM and clears expired untracked HLS buffer files.',
+    cron: '10 2 * * *',
+    confirm: false,
+  }, async () => {
     try {
       const result = await videoDeletionModule.sweepExpiredCachedVideos();
       if (result.reverted > 0 || result.failed > 0) {
@@ -94,7 +185,13 @@ function initialize(deps = {}) {
   // ============================================================================
   // SESSION CLEANUP - 3:00 AM Daily
   // ============================================================================
-  schedule.schedule('0 3 * * *', async () => {
+  defineTask({
+    id: 'session-cleanup',
+    label: 'Session cleanup',
+    description: 'Removes expired and long-inactive login sessions.',
+    cron: '0 3 * * *',
+    confirm: false,
+  }, async () => {
     try {
       const result = await db.Session.destroy({
         where: {
@@ -127,7 +224,13 @@ function initialize(deps = {}) {
   // row here, with no natural cap the way the job-history table has. Retention
   // is configurable (Settings -> Streaming -> ytstream.historyRetentionDays),
   // defaulting to 90 days when unset.
-  schedule.schedule('15 3 * * *', async () => {
+  defineTask({
+    id: 'stream-history-prune',
+    label: 'Stream history prune',
+    description: 'Removes stream-history rows older than the configured retention.',
+    cron: '15 3 * * *',
+    confirm: false,
+  }, async () => {
     if (!db.StreamHistory) return;
     try {
       const configuredDays = configModule.getConfig().ytstream?.historyRetentionDays;
@@ -159,7 +262,13 @@ function initialize(deps = {}) {
   // fetched. Single source of truth: server/modules/youtubeMetadataCache.js
   // (also read by the Library page's per-video expiry countdown).
   const { YOUTUBE_METADATA_CACHE_RETENTION_DAYS } = require('./youtubeMetadataCache');
-  schedule.schedule('20 3 * * *', async () => {
+  defineTask({
+    id: 'metadata-cache-prune',
+    label: 'Untracked metadata cache prune',
+    description: 'Removes stale entries from the untracked-video YouTube metadata cache.',
+    cron: '20 3 * * *',
+    confirm: false,
+  }, async () => {
     if (!db.YoutubeMetadataCache) return;
     try {
       const retentionDays = YOUTUBE_METADATA_CACHE_RETENTION_DAYS;
@@ -179,7 +288,13 @@ function initialize(deps = {}) {
   // ============================================================================
   // VIDEO METADATA BACKFILL - 3:30 AM Daily
   // ============================================================================
-  schedule.schedule('30 3 * * *', async () => {
+  defineTask({
+    id: 'metadata-backfill',
+    label: 'Video metadata backfill',
+    description: 'Starts the video metadata backfill (runs in the background).',
+    cron: '30 3 * * *',
+    confirm: false,
+  }, async () => {
     logger.info('Starting scheduled video metadata backfill');
     try {
       // Run asynchronously without blocking - the method handles its own async flow
@@ -202,7 +317,13 @@ function initialize(deps = {}) {
   // ============================================================================
   // YT-DLP AUTO-UPDATE - 4:00 AM Daily (only when enabled in config)
   // ============================================================================
-  schedule.schedule('0 4 * * *', async () => {
+  defineTask({
+    id: 'ytdlp-update',
+    label: 'yt-dlp auto-update',
+    description: 'Updates yt-dlp. Does nothing unless auto-update is enabled in settings.',
+    cron: '0 4 * * *',
+    confirm: false,
+  }, async () => {
     try {
       // Skip on platforms that manage yt-dlp themselves (e.g., Elfhosted)
       if (configModule.isElfhostedPlatform()) {
@@ -267,5 +388,7 @@ function initialize(deps = {}) {
 }
 
 module.exports = {
-  initialize
+  initialize,
+  getTasks,
+  runTaskNow
 };

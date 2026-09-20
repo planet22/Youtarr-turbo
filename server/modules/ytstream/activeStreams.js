@@ -34,6 +34,7 @@
 const fs = require('fs');
 const logger = require('../../logger');
 const messageEmitter = require('../messageEmitter');
+const youtubeMetadataCache = require('../youtubeMetadataCache');
 const { streamDebug } = require('./streamDebug');
 const { killAllChildProcesses } = require('./processRegistry');
 
@@ -168,33 +169,19 @@ function computeSegmentStatus(session) {
 
 /**
  * Fills in `titleById` (in place) for any youtubeId still missing a title
- * after the Video-table lookup, from youtube_metadata_cache's cached yt-dlp
- * info blob - the fallback source for videos not (or no longer) in the
- * library: an NZB-only grab that was only ever streamed/buffered, or a video
- * whose Video row has since been removed (e.g. via Obliterate). Without this,
- * those rows permanently showed the bare YouTube id instead of a title, even
- * though the title was sitting right there in the metadata cache.
+ * after the Video-table lookup, from youtube_metadata_cache - the fallback
+ * source for videos not (or no longer) in the library: an NZB-only grab
+ * that was only ever streamed/buffered, or a video whose Video row has
+ * since been removed (e.g. via Obliterate). Without this, those rows
+ * permanently showed the bare YouTube id instead of a title, even though
+ * the title was sitting right there in the metadata cache.
  */
-async function fillMissingTitlesFromMetadataCache(youtubeIds, titleById, lookupModels) {
+async function fillMissingTitlesFromMetadataCache(youtubeIds, titleById) {
   const missing = youtubeIds.filter((id) => !titleById[id]);
-  if (!missing.length || !lookupModels || !lookupModels.YoutubeMetadataCache) return;
-  try {
-    const rows = await lookupModels.YoutubeMetadataCache.findAll({
-      where: { youtube_id: missing },
-      attributes: ['youtube_id', 'raw_info_json'],
-    });
-    for (const row of rows) {
-      if (!row.raw_info_json) continue;
-      try {
-        const info = JSON.parse(row.raw_info_json);
-        if (info && info.title) titleById[row.youtube_id] = info.title;
-      } catch (err) {
-        logger.warn({ err, youtubeId: row.youtube_id }, 'ytstream: failed to parse cached raw_info_json for title fallback');
-      }
-    }
-  } catch (err) {
-    logger.warn({ err }, 'ytstream: failed to resolve fallback titles from metadata cache');
-  }
+  if (!missing.length) return;
+  const titles = await youtubeMetadataCache.getCachedTitles(missing);
+  streamDebug({ requested: missing.length, found: Object.keys(titles).length }, 'ytstream: fillMissingTitlesFromMetadataCache resolved titles from the metadata cache');
+  Object.assign(titleById, titles);
 }
 
 // Stream History: persisted audit trail for ytstream playback sessions,
@@ -243,6 +230,24 @@ async function persistStreamHistoryEnd(entry, reason, errorMessage) {
   }
 }
 
+/**
+ * The segment grid of a youtube-hls row whose segments are routed through
+ * Youtarr (youtubeHlsProxy = serve), in the same shape as an hls session's, so
+ * the Streaming page's segment strip and popup work unchanged: "encoded" means
+ * the player has requested that segment.
+ */
+function segmentGridStatus(grid) {
+  return {
+    totalSegments: grid.total,
+    segmentDurationSeconds: grid.durationSeconds,
+    encoded: [...grid.requested],
+    bufferedThroughIndex: 0,
+    bufferComplete: false,
+    currentSegmentIndex: grid.current,
+    backfillSegmentIndex: null,
+  };
+}
+
 function snapshotStream(entry) {
   const hlsSession = SEGMENT_STATUS_MODES.has(entry.mode) ? hlsSessions.get(entry.streamId) : null;
   return {
@@ -262,8 +267,12 @@ function snapshotStream(entry) {
     startedAt: entry.startedAt,
     bytesTransferred: entry.bytesTransferred,
     bytesPerSecond: entry.bytesPerSecond,
+    // youtube-hls with segments routed through Youtarr: the totals are
+    // estimated from segment durations and the playlist's bitrate.
+    bytesEstimated: entry.bytesEstimated || false,
+    playbackSeconds: entry.playbackSeconds === undefined ? null : entry.playbackSeconds,
     lastActivityAt: entry.lastActivityAt,
-    segments: hlsSession ? computeSegmentStatus(hlsSession) : null,
+    segments: hlsSession ? computeSegmentStatus(hlsSession) : (entry.segmentGrid ? segmentGridStatus(entry.segmentGrid) : null),
   };
 }
 
@@ -303,9 +312,29 @@ function ensureStatsTicker() {
 }
 
 function addStreamEntry(entry) {
+  // Seeded at creation so bytes sent before the first stats tick still count
+  // toward the rate (otherwise a short fast transfer shows 0 throughput).
+  entry.history = [{ t: Date.now(), bytes: entry.bytesTransferred || 0 }];
   activeStreams.set(entry.streamId, entry);
   messageEmitter.emitMessage('broadcast', null, 'server', 'streamStarted', snapshotStream(entry));
   ensureStatsTicker();
+}
+
+/**
+ * Per-chunk byte counter for a tracked entry (the Streaming page's "Total"
+ * and, via the throughput window, its speed). Every mode should feed it what
+ * was actually read for a response, never the length a response WOULD send:
+ * players open `bytes=0-` or a whole segment and abort part way, so counting
+ * up front overstates both. Safe when `entry` is missing (already untracked).
+ * @param {object|undefined} entry
+ * @returns {(bytes: number) => void}
+ */
+function createBytesCounter(entry) {
+  return (bytes) => {
+    if (!entry) return;
+    entry.bytesTransferred += bytes;
+    entry.lastActivityAt = Date.now();
+  };
 }
 
 function trackStream(entry) {
@@ -463,6 +492,7 @@ module.exports = {
   persistStreamHistoryEnd,
   snapshotStream,
   trackStream,
+  createBytesCounter,
   trackPendingRequest,
   updateStream,
   failStreamThenUntrack,

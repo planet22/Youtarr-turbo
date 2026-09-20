@@ -9,8 +9,10 @@ describe('DEFAULT_CONFIG alignment with config.example.json', () => {
   const exampleConfig = JSON.parse(fs.readFileSync(examplePath, 'utf8')) as Record<string, unknown>;
   delete exampleConfig['//comment'];
 
-  // plexUrl is platform-managed and not in the client schema.
-  const SERVER_ONLY_FIELDS = new Set<string>(['plexUrl']);
+  // plexUrl is platform-managed; username is auth-managed (server/routes/setup.js,
+  // server/modules/authState.js) - neither is edited via the general Settings
+  // form, so neither is in CONFIG_FIELDS/DEFAULT_CONFIG.
+  const SERVER_ONLY_FIELDS = new Set<string>(['plexUrl', 'username']);
 
   // Runtime-derived fields populated by the server at /getconfig time
   // (not persisted to config.json, intentionally absent from the template).

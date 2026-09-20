@@ -125,7 +125,7 @@ describe('VideosListMobile', () => {
     });
     fireEvent.click(screen.getByRole('button', { name: 'Cached metadata' }));
     expect(onOpenCacheDetail).toHaveBeenCalledWith('abc', 'metadata');
-    fireEvent.click(screen.getByRole('button', { name: 'Cached video' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Cached' }));
     expect(onOpenCacheDetail).toHaveBeenCalledWith('abc', 'video');
     fireEvent.click(screen.getByTestId('DeleteIcon'));
     expect(onDeleteSingle).toHaveBeenCalledWith(1);

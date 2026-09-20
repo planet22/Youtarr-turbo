@@ -314,7 +314,7 @@ describe('InitialSetup Component', () => {
     test('displays the post-setup access footer', () => {
       render(<InitialSetup onSetupComplete={mockOnSetupComplete} />);
 
-      expect(screen.getByText(/after setup, you can access youtarr normally/i)).toBeInTheDocument();
+      expect(screen.getByText(/after setup, you can access youtarr-turbo normally/i)).toBeInTheDocument();
     });
   });
 });

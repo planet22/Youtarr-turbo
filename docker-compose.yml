@@ -25,15 +25,23 @@
 # 3) Hardware-accelerated transcoding (QSV/VAAPI):
 # If your host has an Intel iGPU and you want to use hardware transcoding for STRM
 # playback or post-download transcode, uncomment the `devices` section below.
+# If you're also running as a non-root user (YOUTARR_UID/YOUTARR_GID above), passing
+# the device through is not enough by itself: /dev/dri/card0 and /dev/dri/renderD128
+# are typically owned root:video and root:<render-group>, and those device nodes are
+# usually not world-writable, so a non-root container user also needs to be a member
+# of those groups to actually open them. Uncomment the `group_add` section below too,
+# and check the actual group name/GID on your host with `ls -la /dev/dri` (run
+# `getent group render` or `getent group video` on the host if the group shows as a
+# bare number instead of a name inside the container).
 
 networks:
   default:
-    name: youtarr-network
+    name: youtarr-turbo-network
 
 services:
   youtarr-db:
     image: mariadb:10.3
-    container_name: youtarr-db
+    container_name: youtarr-turbo-db
     restart: unless-stopped
     environment:
       MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-123qweasd}
@@ -57,7 +65,7 @@ services:
 
   youtarr:
     image: ${YOUTARR_IMAGE:-ghcr.io/planet22/youtarr-turbo:latest}
-    container_name: youtarr
+    container_name: youtarr-turbo
     restart: unless-stopped
     # Optional: Run as specific UID:GID for security (defaults to root if not set for backwards compatibility with existing users)
     user: "${YOUTARR_UID:-0}:${YOUTARR_GID:-0}"
@@ -68,7 +76,7 @@ services:
       # DEPRECATED but retained for backwards compatibility with old images for now
       IN_DOCKER_CONTAINER: 1
       TZ: ${TZ:-UTC}
-      DB_HOST: ${DB_HOST:-youtarr-db}
+      DB_HOST: ${DB_HOST:-youtarr-turbo-db}
       DB_PORT: ${DB_PORT:-3321}
       DB_USER: ${DB_USER:-root}
       DB_PASSWORD: ${DB_PASSWORD:-123qweasd}
@@ -103,3 +111,10 @@ services:
     # Uncomment to enable Intel QSV/VAAPI hardware transcoding (see note 3 above):
     # devices:
     #   - /dev/dri:/dev/dri
+    # Only needed alongside YOUTARR_UID/YOUTARR_GID (non-root) above - see note 3.
+    # "video" resolves by name; the render group usually doesn't exist in the
+    # container's own /etc/group, so give its numeric host GID instead (find it
+    # with `ls -la /dev/dri` or `getent group render` on the host).
+    # group_add:
+    #   - video
+    #   - "105"

@@ -1,6 +1,6 @@
 # Jellyfin Integration Guide
 
-Complete guide for integrating Youtarr with Jellyfin Media Server.
+Complete guide for integrating Youtarr-Turbo with Jellyfin Media Server.
 
 ## Table of Contents
 - [Overview](#overview)
@@ -13,7 +13,7 @@ Complete guide for integrating Youtarr with Jellyfin Media Server.
 
 ## Overview
 
-Youtarr provides full Jellyfin support through:
+Youtarr-Turbo provides full Jellyfin support through:
 - NFO metadata files with complete video information
 - Channel poster artwork
 - Optional channel and video backdrop art
@@ -34,15 +34,15 @@ Youtarr provides full Jellyfin support through:
 
 #### Choosing a library type
 
-Youtarr writes each video as a standalone "movie" with its own NFO metadata, so two Jellyfin content types can read the library:
+Youtarr-Turbo writes each video as a standalone "movie" with its own NFO metadata, so two Jellyfin content types can read the library:
 
-- **`Movies` (current recommendation)**: the most reliable option. Every video displays as a movie with full metadata and artwork. Limitation: Jellyfin will NOT automatically import Youtarr's optional per-channel `.m3u` playlist files; Jellyfin only imports playlist files from libraries whose content type is Mixed or Music. See [Channel Playlist Files (.m3u)](#channel-playlist-files-m3u).
+- **`Movies` (current recommendation)**: the most reliable option. Every video displays as a movie with full metadata and artwork. Limitation: Jellyfin will NOT automatically import Youtarr-Turbo's optional per-channel `.m3u` playlist files; Jellyfin only imports playlist files from libraries whose content type is Mixed or Music. See [Channel Playlist Files (.m3u)](#channel-playlist-files-m3u).
 - **`Mixed Movies and Shows`**: automatically imports the per-channel `.m3u` files as Jellyfin playlists, but comes with real risks. [Jellyfin's own documentation](https://jellyfin.org/docs/general/server/media/mixed-movies-and-shows/) says this library type "is broken and deprecated" and recommends against using it, and its TV-detection heuristics can misclassify channel content as TV series: video titles that look episode-like ("Season 3", "Episode 12") or folder names starting with digits can be picked up as episodes, and a single misdetected video folder can flip an entire channel folder into displaying as a series. This tends to work on smaller libraries and break as the library grows, since more titles means more chances for a false match.
 - **`Shows`**: not currently supported. Writing videos and metadata in a way that is compatible with Shows-type libraries is on our roadmap but is not supported yet.
 
 ### Step 2: Add Folders
 
-Add your Youtarr download directory:
+Add your Youtarr-Turbo download directory:
 1. Click "Add" under Folders
 2. Browse to your YouTube directory
 3. For subfolders, add specific paths:
@@ -67,7 +67,7 @@ In the library settings:
 **Metadata savers**:
 - **Disable**: Nfo
 
-> **Warning**: Do NOT enable the Nfo metadata saver. Youtarr generates and maintains the `.nfo` file for every video it downloads. If the saver is enabled, Jellyfin will update and overwrite those files with its own data, which can cause problems for your library.
+> **Warning**: Do NOT enable the Nfo metadata saver. Youtarr-Turbo generates and maintains the `.nfo` file for every video it downloads. If the saver is enabled, Jellyfin will update and overwrite those files with its own data, which can cause problems for your library.
 
 **Image fetchers**:
 - Disable all internet fetchers
@@ -90,7 +90,7 @@ Jellyfin reads NFO files containing:
 
 ### Artwork Support
 
-Youtarr provides:
+Youtarr-Turbo provides:
 - **`poster.jpg`**: Channel artwork in each channel folder
 - **`<VIDEO NAME>.jpg`**: Video thumbnail in each video folder
 - **`backdrop.jpg`**: Channel background art from the YouTube channel banner, written when "Create backdrop images" is enabled in Settings -> Core (off by default)
@@ -104,23 +104,23 @@ The library and metadata setup above is all you need for downloaded videos to sh
 ### Step 1: Create a Jellyfin API key
 
 1. In Jellyfin, go to **Dashboard -> API Keys**
-2. Create a new key for Youtarr and copy it
+2. Create a new key for Youtarr-Turbo and copy it
 
-### Step 2: Connect Jellyfin in Youtarr
+### Step 2: Connect Jellyfin in Youtarr-Turbo
 
-1. In Youtarr, open **Settings -> Jellyfin Integration**
+1. In Youtarr-Turbo, open **Settings -> Jellyfin Integration**
 2. Enter the **Jellyfin URL** (e.g., `http://192.168.1.100:8096`) and the **API key** from Step 1
-3. Open the **Jellyfin User** dropdown and pick the account that should own the playlists. (Youtarr loads the user list from your server; you can also enter the user ID by hand.)
-4. (Optional) Leave **Video Library IDs** blank. Youtarr matches downloaded videos to Jellyfin items across all your libraries.
+3. Open the **Jellyfin User** dropdown and pick the account that should own the playlists. (Youtarr-Turbo loads the user list from your server; you can also enter the user ID by hand.)
+4. (Optional) Leave **Video Library IDs** blank. Youtarr-Turbo matches downloaded videos to Jellyfin items across all your libraries.
 5. Click **Test Connection**, then turn on **Enable Jellyfin integration**
 
-Once connected, open a playlist in Youtarr and turn on its Jellyfin sync chip. See [Media Server Playlists](../MEDIA_SERVER_PLAYLISTS.md) for how syncing, ordering, and updates work.
+Once connected, open a playlist in Youtarr-Turbo and turn on its Jellyfin sync chip. See [Media Server Playlists](../MEDIA_SERVER_PLAYLISTS.md) for how syncing, ordering, and updates work.
 
-Connecting Jellyfin also enables watch status sync: Youtarr periodically pulls per-video watch state (played, percent watched, last watched) for every user on the server and shows it as Watched chips and filters on its listing pages. It's one-way; Youtarr never marks anything watched on Jellyfin. Jellyfin decides when a video counts as played: **Maximum resume percentage** under Server -> Playback -> Resume. Settings live under **Settings -> Watch Status**; see [Track Watch Status from Media Servers](../USAGE_GUIDE.md#track-watch-status-from-media-servers).
+Connecting Jellyfin also enables watch status sync: Youtarr-Turbo periodically pulls per-video watch state (played, percent watched, last watched) for every user on the server and shows it as Watched chips and filters on its listing pages. It's one-way; Youtarr-Turbo never marks anything watched on Jellyfin. Jellyfin decides when a video counts as played: **Maximum resume percentage** under Server -> Playback -> Resume. Settings live under **Settings -> Watch Status**; see [Track Watch Status from Media Servers](../USAGE_GUIDE.md#track-watch-status-from-media-servers).
 
 ### Visibility
 
-A playlist marked **Public** in Youtarr is visible to all users on the server; a **Private** one is visible only to the configured user account.
+A playlist marked **Public** in Youtarr-Turbo is visible to all users on the server; a **Private** one is visible only to the configured user account.
 
 ## Channel Playlist Files (.m3u)
 
@@ -184,6 +184,19 @@ Organize content by type:
    ```
 3. Disable other metadata providers
 4. Manually refresh metadata for items
+
+### STRM Video Misbehaves After Changing Playback Mode
+
+**Problem**: After switching the streaming Playback mode or container (for example HLS to Matroska), existing STRM items in Jellyfin show a wrong or missing duration, get transcoded unnecessarily, or won't start. This normally only happens while experimenting; a library that has always used one mode isn't affected.
+
+**Cause**: The StrmToolTurbo plugin reads each item's `.strmtool.json` sidecar instead of probing the stream, and those files still declare the old container.
+
+**Solutions**:
+1. Go to **Settings -> Maintenance & Rescan -> Regenerate video metadata** in Youtarr-Turbo and click **Regenerate video metadata** (**Write Jellyfin StrmTool cache** must be on).
+2. Go to **Settings -> Jellyfin -> StrmToolTurbo Plugin**, turn on **Force refresh: ignore existing media streams**, leave **Force refresh: ignore cache** off, click **Save to Jellyfin**, then **Run extraction now**.
+3. Restart the Jellyfin client if it still behaves as before.
+
+See [Switching modes on an existing library](../GETTING_STARTED_STREAMING.md#switching-modes-on-an-existing-library) for the full explanation.
 
 ### Channel .m3u Not Appearing as a Playlist
 

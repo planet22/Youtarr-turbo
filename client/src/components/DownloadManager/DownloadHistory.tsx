@@ -12,8 +12,9 @@ import {
   Box,
   Collapse,
   Link,
+  Button,
 } from '../ui';
-import { ChevronDown, Eye as ShowEmptyIcon } from 'lucide-react';
+import { ChevronDown, Eye as ShowEmptyIcon, X as ClearIcon } from 'lucide-react';
 import { Job, FailedVideo } from '../../types/Job';
 import { VideoData } from '../../types/VideoData';
 import { formatDownloadSpeed, formatByteSize } from '../../utils/formatters';
@@ -43,6 +44,11 @@ interface DownloadHistoryProps {
   isMobile: boolean;
   token?: string | null;
   onVideoDeleted?: () => void;
+  // Narrows the list to this single job (e.g. deep-linked from the NZB page's
+  // Failed Grabs table) and overrides every other filter, so a saved filter
+  // can never hide the linked job.
+  jobIdFilter?: string | null;
+  onClearJobIdFilter?: () => void;
 }
 
 function cleanJobTypeLabel(jobType: string): string {
@@ -282,6 +288,8 @@ const DownloadHistory: React.FC<DownloadHistoryProps> = ({
   isMobile,
   token = null,
   onVideoDeleted,
+  jobIdFilter = null,
+  onClearJobIdFilter,
 }) => {
   const [modalVideo, setModalVideo] = useState<VideoData | null>(null);
   // Persisted the same way as the search box above, so switching away from
@@ -338,7 +346,7 @@ const DownloadHistory: React.FC<DownloadHistoryProps> = ({
 
   const normalizedSearch = listState.search.trim().toLowerCase();
 
-  const jobsToDisplay = jobsForSourceOptions
+  const filteredJobs = jobsForSourceOptions
     .filter((job) => (sourceFilter ? getJobSourceLabel(job.jobType) === sourceFilter : true))
     .filter((job) => (statusFilter ? job.status === statusFilter : true))
     .filter((job) => (normalizedSearch ? jobSearchBlob(job).includes(normalizedSearch) : true))
@@ -370,10 +378,23 @@ const DownloadHistory: React.FC<DownloadHistoryProps> = ({
       return job.data.videos.length > 0 || getDisplayableFailedVideos(job).length > 0;
     });
 
-  const hasActiveFilters = Boolean(sourceFilter || statusFilter || dateFrom || dateTo || showNoVideoJobs);
+  const jobsToDisplay = jobIdFilter ? jobs.filter((job) => job.id === jobIdFilter) : filteredJobs;
+
+  const hasActiveFilters = Boolean(jobIdFilter || sourceFilter || statusFilter || dateFrom || dateTo || showNoVideoJobs);
 
   const filterConfigs = useMemo<FilterConfig[]>(
     () => [
+      // Only present while a job link is active, so the filter chip / badge /
+      // Clear All all account for it. Clear All calls onChange(false).
+      ...(jobIdFilter
+        ? [{
+            id: 'toggle' as const,
+            label: 'Single job only',
+            icon: <ClearIcon size={16} />,
+            value: true,
+            onChange: () => onClearJobIdFilter?.(),
+          }]
+        : []),
       { id: 'select', label: 'Source', value: sourceFilter, options: sourceOptions, onChange: setSourceFilter },
       { id: 'select', label: 'Status', value: statusFilter, options: statusOptions, onChange: setStatusFilter },
       // Jobs have no "published date" of their own (a job can cover several
@@ -390,7 +411,7 @@ const DownloadHistory: React.FC<DownloadHistoryProps> = ({
       },
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [sourceFilter, sourceOptions.join('|'), statusFilter, statusOptions.join('|'), dateFrom, dateTo, showNoVideoJobs]
+    [jobIdFilter, sourceFilter, sourceOptions.join('|'), statusFilter, statusOptions.join('|'), dateFrom, dateTo, showNoVideoJobs]
   );
 
   const totalPages = Math.max(1, Math.ceil(jobsToDisplay.length / itemsPerPage));
@@ -408,7 +429,7 @@ const DownloadHistory: React.FC<DownloadHistoryProps> = ({
   React.useEffect(() => {
     setCurrentPage(1);
     setVisibleCount(itemsPerPage);
-  }, [showNoVideoJobs, sourceFilter, statusFilter, normalizedSearch, dateFrom, dateTo, itemsPerPage]);
+  }, [showNoVideoJobs, sourceFilter, statusFilter, normalizedSearch, dateFrom, dateTo, itemsPerPage, jobIdFilter]);
 
   React.useEffect(() => {
     if (!useInfiniteScroll) {
@@ -968,6 +989,17 @@ const DownloadHistory: React.FC<DownloadHistoryProps> = ({
       <Typography variant={isMobile ? 'h6' : 'h5'} align="center">
         Download History ({jobsToDisplay.length} job{jobsToDisplay.length === 1 ? '' : 's'})
       </Typography>
+      {jobIdFilter && (
+        <div className="flex items-center justify-center gap-2 pt-2">
+          <Typography variant="body2" color="textSecondary">
+            Showing a single job
+          </Typography>
+          <Button variant="outlined" size="small" onClick={onClearJobIdFilter}>
+            <ClearIcon size={14} style={{ marginRight: 4 }} />
+            Show all jobs
+          </Button>
+        </div>
+      )}
     </div>
   );
 

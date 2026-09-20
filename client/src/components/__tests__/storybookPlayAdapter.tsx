@@ -15,6 +15,7 @@ type StoryModule = {
  */
 const mockWebSocketContext = {
   socket: null,
+  isConnected: false,
   subscribe: () => {},
   unsubscribe: () => {},
 };

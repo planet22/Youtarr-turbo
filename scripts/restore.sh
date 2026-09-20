@@ -215,7 +215,7 @@ fi
 
 # Check if containers are running
 CONTAINERS_RUNNING=false
-if docker ps --format '{{.Names}}' | grep -qE '^youtarr(-db)?$'; then
+if docker ps --format '{{.Names}}' | grep -qE '^youtarr-turbo(-db)?$'; then
     CONTAINERS_RUNNING=true
     yt_error "Youtarr containers are still running!"
     yt_detail "Stop them first with: ./stop.sh"
@@ -365,9 +365,9 @@ elif [[ -f "$BACKUP_DIR/database/youtarr.sql" ]]; then
     WAITED=0
     while [[ $WAITED -lt $MAX_WAIT ]]; do
         # First check if mysqladmin ping works
-        if docker exec youtarr-db mysqladmin ping -h localhost -P "$DB_PORT" -u "$DB_USER" -p"$DB_PASSWORD" &>/dev/null; then
+        if docker exec youtarr-turbo-db mysqladmin ping -h localhost -P "$DB_PORT" -u "$DB_USER" -p"$DB_PASSWORD" &>/dev/null; then
             # Then verify we can actually connect and run a query
-            if docker exec youtarr-db mysql -h 127.0.0.1 -P "$DB_PORT" -u "$DB_USER" -p"$DB_PASSWORD" -e "SELECT 1;" &>/dev/null; then
+            if docker exec youtarr-turbo-db mysql -h 127.0.0.1 -P "$DB_PORT" -u "$DB_USER" -p"$DB_PASSWORD" -e "SELECT 1;" &>/dev/null; then
                 break
             fi
         fi
@@ -391,7 +391,7 @@ elif [[ -f "$BACKUP_DIR/database/youtarr.sql" ]]; then
 
     # Drop and recreate database to ensure clean import
     yt_info "Preparing database..."
-    DB_PREP_OUTPUT=$(docker exec youtarr-db mysql -h 127.0.0.1 -P "$DB_PORT" -u "$DB_USER" -p"$DB_PASSWORD" \
+    DB_PREP_OUTPUT=$(docker exec youtarr-turbo-db mysql -h 127.0.0.1 -P "$DB_PORT" -u "$DB_USER" -p"$DB_PASSWORD" \
         -e "DROP DATABASE IF EXISTS $DB_NAME; CREATE DATABASE $DB_NAME CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;" 2>&1) || true
     if [[ -z "$DB_PREP_OUTPUT" ]] || [[ "$DB_PREP_OUTPUT" == *"Warning"* ]]; then
         yt_success "Database prepared for import"
@@ -401,7 +401,7 @@ elif [[ -f "$BACKUP_DIR/database/youtarr.sql" ]]; then
 
     # Import the SQL dump
     yt_info "Importing SQL dump (this may take a moment)..."
-    IMPORT_ERROR=$(docker exec -i youtarr-db mysql -h 127.0.0.1 -P "$DB_PORT" -u "$DB_USER" -p"$DB_PASSWORD" "$DB_NAME" < "$BACKUP_DIR/database/youtarr.sql" 2>&1)
+    IMPORT_ERROR=$(docker exec -i youtarr-turbo-db mysql -h 127.0.0.1 -P "$DB_PORT" -u "$DB_USER" -p"$DB_PASSWORD" "$DB_NAME" < "$BACKUP_DIR/database/youtarr.sql" 2>&1)
     IMPORT_STATUS=$?
     if [[ $IMPORT_STATUS -eq 0 ]]; then
         yt_success "Database imported successfully"

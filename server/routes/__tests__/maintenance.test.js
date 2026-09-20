@@ -15,6 +15,7 @@ describe('Maintenance routes', () => {
   let mockVideosModule;
   let mockConfigModule;
   let mockJobModule;
+  let mockCronJobs;
   let mockVerifyToken;
 
   beforeEach(() => {
@@ -35,6 +36,10 @@ describe('Maintenance routes', () => {
       previewCompactHistory: jest.fn().mockReturnValue({ totalJobs: 0, compactableCount: 0 }),
       compactHistory: jest.fn().mockResolvedValue({ success: true, deletedCount: 0 })
     };
+    mockCronJobs = {
+      getTasks: jest.fn().mockReturnValue([]),
+      runTaskNow: jest.fn()
+    };
     mockVerifyToken = (req, res, next) => next();
 
     const createMaintenanceRoutes = require('../maintenance');
@@ -45,7 +50,8 @@ describe('Maintenance routes', () => {
       verifyToken: mockVerifyToken,
       videosModule: mockVideosModule,
       configModule: mockConfigModule,
-      jobModule: mockJobModule
+      jobModule: mockJobModule,
+      cronJobs: mockCronJobs
     }));
   });
 
@@ -257,6 +263,44 @@ describe('Maintenance routes', () => {
       const res = await request(app).post('/api/maintenance/compact-history');
 
       expect(res.status).toBe(500);
+    });
+  });
+
+  describe('GET /api/maintenance/tasks', () => {
+    test('returns the scheduled tasks', async () => {
+      mockCronJobs.getTasks.mockReturnValue([{ id: 'session-cleanup', label: 'Session cleanup' }]);
+
+      const res = await request(app).get('/api/maintenance/tasks');
+
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ tasks: [{ id: 'session-cleanup', label: 'Session cleanup' }] });
+    });
+  });
+
+  describe('POST /api/maintenance/tasks/:id/run', () => {
+    test('returns 202 when the task starts', async () => {
+      mockCronJobs.runTaskNow.mockReturnValue({ started: true });
+
+      const res = await request(app).post('/api/maintenance/tasks/session-cleanup/run');
+
+      expect(res.status).toBe(202);
+      expect(mockCronJobs.runTaskNow).toHaveBeenCalledWith('session-cleanup');
+    });
+
+    test('returns 409 when the task is already running', async () => {
+      mockCronJobs.runTaskNow.mockReturnValue({ started: false, reason: 'running' });
+
+      const res = await request(app).post('/api/maintenance/tasks/session-cleanup/run');
+
+      expect(res.status).toBe(409);
+    });
+
+    test('returns 404 for an unknown task', async () => {
+      mockCronJobs.runTaskNow.mockReturnValue({ started: false, reason: 'unknown' });
+
+      const res = await request(app).post('/api/maintenance/tasks/nope/run');
+
+      expect(res.status).toBe(404);
     });
   });
 });

@@ -250,9 +250,9 @@ describe('DownloadHistory', () => {
   test('handles pagination with many jobs', async () => {
     const user = userEvent.setup();
 
-    // Create 15 jobs to test pagination (12 per page)
+    // Create 20 jobs to test pagination (16 per page)
     // All jobs need videos to avoid being filtered out
-    const manyJobs: Job[] = Array.from({ length: 15 }, (_, i) => ({
+    const manyJobs: Job[] = Array.from({ length: 20 }, (_, i) => ({
       id: `job-${i}`,
       jobType: 'Channel Downloads',
       status: 'Completed',
@@ -275,22 +275,22 @@ describe('DownloadHistory', () => {
 
     render(<DownloadHistory {...defaultProps} jobs={manyJobs} />);
 
-    // Should show first 12 jobs on page 1
+    // Should show first 16 jobs on page 1
     let tableRows = screen.getAllByRole('row');
-    expect(tableRows).toHaveLength(13); // 1 header + 12 jobs
+    expect(tableRows).toHaveLength(17); // 1 header + 16 jobs
 
     // Find pagination
-    const pagination = screen.getByRole('navigation');
+    const [pagination] = screen.getAllByRole('navigation'); // top and bottom pagination bars
     expect(pagination).toBeInTheDocument();
 
     // Find and click page 2 button
-    const page2Button = screen.getByLabelText(/go to page 2/i);
+    const [page2Button] = screen.getAllByLabelText(/go to page 2/i);
     await user.click(page2Button);
 
-    // Should now show remaining 3 jobs
+    // Should now show remaining 4 jobs
     await waitFor(() => {
       const updatedRows = screen.getAllByRole('row');
-      expect(updatedRows).toHaveLength(4); // 1 header + 3 jobs
+      expect(updatedRows).toHaveLength(5); // 1 header + 4 jobs
     });
   });
 
@@ -376,11 +376,11 @@ describe('DownloadHistory', () => {
     expect(allText).toMatch(/\d{1,2}:\d{2}\s*(AM|PM)/);
   });
 
-  test('resets pagination when checkbox changes', async () => {
+  test('resets pagination when the no-videos toggle changes', async () => {
     const user = userEvent.setup();
 
     // Create enough jobs - mix of with videos and without
-    const manyJobs: Job[] = Array.from({ length: 15 }, (_, i) => ({
+    const manyJobs: Job[] = Array.from({ length: 20 }, (_, i) => ({
       id: `job-${i}`,
       jobType: 'Channel Downloads',
       status: 'Completed',
@@ -404,27 +404,28 @@ describe('DownloadHistory', () => {
     render(<DownloadHistory {...defaultProps} jobs={manyJobs} />);
 
     // Navigate to page 2
-    const page2Button = screen.getByLabelText(/go to page 2/i);
+    const [page2Button] = screen.getAllByLabelText(/go to page 2/i);
     await user.click(page2Button);
 
     // Wait for page change
     await waitFor(() => {
       const rows = screen.getAllByRole('row');
-      expect(rows).toHaveLength(4); // 1 header + 3 jobs on page 2
+      expect(rows).toHaveLength(5); // 1 header + 4 jobs on page 2
     });
 
-    // Click the checkbox - this should reset to page 1
-    const checkbox = screen.getByRole('checkbox', { name: 'Show jobs with no videos' });
-    await user.click(checkbox);
+    // Flip the toggle (behind the Filters panel) - this should reset to page 1
+    await user.click(screen.getByTestId('video-list-filters-button'));
+    await user.click(screen.getByRole('button', { name: 'Show jobs with no videos' }));
 
     // Should reset to page 1
     await waitFor(() => {
       const rows = screen.getAllByRole('row');
-      expect(rows.length).toBeGreaterThanOrEqual(13); // At least 1 header + 12 jobs on page 1
+      expect(rows.length).toBeGreaterThanOrEqual(17); // At least 1 header + 16 jobs on page 1
     });
   });
 
-  test('handles jobs with undefined or null data', () => {
+  test('handles jobs with undefined or null data', async () => {
+    const user = userEvent.setup();
     const jobsWithBadData: Job[] = [
       {
         id: 'job-no-data',
@@ -450,12 +451,16 @@ describe('DownloadHistory', () => {
 
     render(<DownloadHistory {...defaultProps} jobs={jobsWithBadData} />);
 
-    // Should render without crashing and show "None" for videos
+    // Jobs without videos are hidden by default; reveal them via the Filters panel
+    await user.click(screen.getByTestId('video-list-filters-button'));
+    await user.click(screen.getByRole('button', { name: 'Show jobs with no videos' }));
+
+    // Should render without crashing and show the no-new-videos status for these jobs
     const tableCells = screen.getAllByRole('cell');
     const cellTexts = tableCells.map(cell => cell.textContent || '');
 
-    // Should have "None" for jobs without videos
-    expect(cellTexts.filter(text => text === 'None').length).toBeGreaterThanOrEqual(2);
+    // Both jobs completed without videos
+    expect(cellTexts.filter(text => text === 'Completed - no new videos').length).toBeGreaterThanOrEqual(2);
   });
 
   test('filters jobs correctly with the no-videos toggle', async () => {
@@ -580,10 +585,8 @@ describe('DownloadHistory', () => {
     await user.click(screen.getByRole('button', { name: /Filter by Source/i }));
     await user.click(screen.getByTestId('filter-menu-Channels'));
 
-    await waitFor(() => {
-      expect(screen.getByText('Channel Vid')).toBeInTheDocument();
-      expect(screen.queryByText('Manual Vid')).not.toBeInTheDocument();
-    });
+    await waitFor(() => expect(screen.queryByText('Manual Vid')).not.toBeInTheDocument());
+    expect(screen.getByText('Channel Vid')).toBeInTheDocument();
   });
 
   describe('API Source Indicator', () => {
@@ -1024,7 +1027,7 @@ describe('DownloadHistory', () => {
       );
 
       expect(screen.getAllByText(adviceMessage)).toHaveLength(1);
-      expect(screen.getByText(/Broken Video/)).toBeInTheDocument();
+      expect(screen.getAllByText(/Broken Video/)[0]).toBeInTheDocument();
     });
 
     test('shows the raw error for undiagnosed failures in the expanded row', () => {
@@ -1070,6 +1073,56 @@ describe('DownloadHistory', () => {
 
       expect(screen.getByText('1 failed')).toBeInTheDocument();
       expect(screen.getByText(adviceMessage)).toBeInTheDocument();
+    });
+  });
+  describe('jobIdFilter', () => {
+    test('shows only the matching job, even one hidden by the no-video filter', () => {
+      render(<DownloadHistory {...defaultProps} jobs={sampleJobs} jobIdFilter="job-2" />);
+
+      expect(screen.getByText(/Download History \(1 job\)/)).toBeInTheDocument();
+    });
+
+    test('shows an empty message when the job id is unknown', () => {
+      render(<DownloadHistory {...defaultProps} jobs={sampleJobs} jobIdFilter="missing" />);
+
+      expect(screen.getByText('No jobs found matching your filters')).toBeInTheDocument();
+    });
+
+    test('calls onClearJobIdFilter when Show all jobs is clicked', async () => {
+      const onClearJobIdFilter = jest.fn();
+      render(
+        <DownloadHistory
+          {...defaultProps}
+          jobs={sampleJobs}
+          jobIdFilter="job-2"
+          onClearJobIdFilter={onClearJobIdFilter}
+        />
+      );
+
+      await userEvent.click(screen.getByRole('button', { name: /show all jobs/i }));
+      expect(onClearJobIdFilter).toHaveBeenCalledTimes(1);
+    });
+
+    test('Clear All also clears the job filter', async () => {
+      const onClearJobIdFilter = jest.fn();
+      render(
+        <DownloadHistory
+          {...defaultProps}
+          jobs={sampleJobs}
+          jobIdFilter="job-2"
+          onClearJobIdFilter={onClearJobIdFilter}
+        />
+      );
+
+      await userEvent.click(screen.getByTestId('video-list-filters-button'));
+      await userEvent.click(await screen.findByTestId('video-list-clear-filters'));
+      expect(onClearJobIdFilter).toHaveBeenCalledTimes(1);
+    });
+
+    test('does not render the Show all jobs button without a job filter', () => {
+      render(<DownloadHistory {...defaultProps} jobs={sampleJobs} />);
+
+      expect(screen.queryByRole('button', { name: /show all jobs/i })).not.toBeInTheDocument();
     });
   });
 });

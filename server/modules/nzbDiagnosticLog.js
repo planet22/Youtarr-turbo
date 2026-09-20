@@ -1,5 +1,18 @@
 const logger = require('../logger');
 
+// Mirrors client/src/config/configSchema.ts's nzb.diagnosticLogLimits default
+// and clamp range - kept here since this is the module both call sites
+// (server/routes/nzb.js, server/modules/videoSearchModule.js) already go
+// through to read/write these logs.
+const DEFAULT_LOG_LIMITS = { recentQueries: 50, searchTraces: 20, failedGrabs: 20 };
+
+function resolveLogLimit(cfg, key) {
+  const raw = cfg?.nzb?.diagnosticLogLimits?.[key];
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return DEFAULT_LOG_LIMITS[key];
+  return Math.min(100, Math.max(1, Math.round(n)));
+}
+
 // Shared read/write/prune for the nzb_diagnostic_log table - backs the NZB
 // diagnostics page's Recent Queries (videoSearchModule.js), Search Filter
 // Debug traces, and Failed Grabs (both nzb.js) tables. Previously each of
@@ -50,4 +63,36 @@ async function getDiagnosticEvents(kind, max) {
   }
 }
 
-module.exports = { recordDiagnosticEvent, getDiagnosticEvents };
+// The three kinds this table holds - see recordDiagnosticEvent's callers in
+// nzb.js/videoSearchModule.js. Settings UI's "Diagnostic Log Limits" clear
+// button resets all three together, since they're presented there as one
+// group of settings.
+const ALL_KINDS = ['query', 'trace', 'failedGrab'];
+
+/** Clears one kind only - e.g. the NZB page's Failed Grabs "Delete all" button. */
+async function clearDiagnosticEvents(kind) {
+  if (!ALL_KINDS.includes(kind)) throw new Error(`Unknown diagnostic log kind: ${kind}`);
+  const { NzbDiagnosticLog } = require('../models');
+  return NzbDiagnosticLog.destroy({ where: { kind } });
+}
+
+/** Total rows across all three log kinds - Settings UI's row count. */
+async function countAllDiagnosticEvents() {
+  const { NzbDiagnosticLog } = require('../models');
+  return NzbDiagnosticLog.count({ where: { kind: ALL_KINDS } });
+}
+
+/** Bulk clear-all - Settings UI's "Clear Diagnostic Logs" button. */
+async function clearAllDiagnosticEvents() {
+  const { NzbDiagnosticLog } = require('../models');
+  return NzbDiagnosticLog.destroy({ where: { kind: ALL_KINDS } });
+}
+
+module.exports = {
+  recordDiagnosticEvent,
+  getDiagnosticEvents,
+  resolveLogLimit,
+  countAllDiagnosticEvents,
+  clearAllDiagnosticEvents,
+  clearDiagnosticEvents,
+};

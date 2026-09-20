@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const logger = require('../logger');
 const { resolveQualityHeight } = require('./ytstream/formatSelection');
+const { estimateVideoBandwidthBps } = require('./ytstream/videoBandwidthEstimate');
 
 /**
  * Maps a yt-dlp codec tag (e.g. "avc1.640028", "mp4a.40.2", "vp09.00.10.08")
@@ -105,10 +106,118 @@ class StrmMediaInfoCache {
       data.runTimeTicks = Math.round(meta.duration * 10_000_000);
     }
 
-    const container = ytstreamParams.container || (videoFormat && videoFormat.ext) || null;
+    const container = this._resolveContainer(ytstreamParams, videoFormat && videoFormat.ext);
     if (container) data.container = container;
 
+    // Aggregate overall bitrate - Jellyfin's MediaSourceInfo has a
+    // top-level Bitrate alongside per-MediaStream BitRate; this cache
+    // previously only ever set the latter. Best-effort addition: could not
+    // confirm the exact field name the jinlin-teck/StrmTool plugin's own
+    // MediaInfoCacheData wrapper expects for this (repo not locatable to
+    // verify), so this follows the SAME camelCase convention as this
+    // wrapper's other own fields (size/runTimeTicks/container, which do
+    // have confirmed [JsonPropertyName] overrides) rather than guessing
+    // blind. Harmless no-op if the plugin doesn't read it. Investigated
+    // because a live PlaybackInfo capture showed Jellyfin's own computed
+    // sourceBitrate as 216 (bps) for a real ~10 Mbps stream - implausibly
+    // low in a way that matches this repo's own prior documented "Size:
+    // 162 Bytes" bug (reflecting the tiny .strm pointer file, not the
+    // real media) - plausible same bug class, unconfirmed root cause.
+    const totalBitrateBps = [videoStream, audioStream]
+      .filter(Boolean)
+      .reduce((sum, stream) => sum + (stream.BitRate || 0), 0);
+    if (totalBitrateBps > 0) data.bitrate = totalBitrateBps;
+
     return data;
+  }
+
+  /**
+   * mode=hls/hls-buffer serve a genuine HLS playlist (m3u8 + segments),
+   * never a flat file - declaring the real session's own `container`
+   * setting (mp4/mkv/ts) here would be the exact same lie the old
+   * probe-shortcut synthetic clip told Jellyfin (see probeShortcut.js's
+   * doc comment/MAJOR CORRECTION note): this plugin trusts this cache
+   * file INSTEAD OF ever probing the .strm URL, so a wrong value here
+   * can't be corrected later by a real probe the way the ffprobe path
+   * can - Jellyfin would cache "flat file" permanently and fail outright
+   * the moment it tries a non-Direct-Play transcode against the real
+   * (HLS-shaped) URL.
+   *
+   * Deliberately independent of per-video yt-dlp metadata (formats/
+   * duration/etc.) - only ytstreamParams (global config) decides this -
+   * see updateContainerOnly, which relies on that to fix this field even
+   * when no cached metadata exists to rebuild the rest of the file.
+   * @private
+   */
+  _resolveContainer(ytstreamParams, fallbackContainer) {
+    // mode=hls-byterange (byteRangeHlsMode.js) has TWO delivery styles for
+    // the same underlying encode - see that module's own doc comment.
+    // byteRangeDeliverAsFile=false (default): a genuine m3u8 playlist, not
+    // a flat file - same "genuine playlist" reasoning as hls/hls-buffer
+    // above. byteRangeDeliverAsFile=true: the opposite - a genuine flat,
+    // Range-servable file is served directly, same as download-cache.
+    // Getting either branch backwards for this mode reproduces the exact
+    // Container-misdetection bug this whole investigation started from.
+    if (ytstreamParams.mode === 'hls-byterange') {
+      if (!ytstreamParams.byteRangeDeliverAsFile) return 'hls';
+      // Plain file: fMP4, or Matroska when Container is set to mkv.
+      return ytstreamParams.container === 'mkv' ? 'mkv' : 'mp4';
+    }
+    // mode=youtube-hls (youtubeHlsMode.js) serves YouTube's own m3u8 playlist.
+    if (ytstreamParams.mode === 'youtube-hls') return 'hls';
+    const isHlsMode = ytstreamParams.mode === 'hls' || ytstreamParams.mode === 'hls-buffer';
+    // mode=download-cache (downloadCacheMode.js) always serves a real,
+    // complete .mp4 - unlike every other mode, it ignores the configured
+    // Container setting entirely (see that module's own doc comment), so
+    // the ignored setting must not leak into this cache either.
+    if (ytstreamParams.mode === 'download-cache') return 'mp4';
+    return isHlsMode ? 'hls' : (ytstreamParams.container || fallbackContainer || null);
+  }
+
+  /**
+   * Patches JUST the `container` field of an EXISTING `.strmtool.json`
+   * sidecar to match the current ytstream config, without needing cached
+   * yt-dlp metadata - unlike mediaStreams/size/runTimeTicks, container
+   * never depended on per-video metadata (see _resolveContainer), so this
+   * is safe to do even when there's nothing to rebuild the rest of the
+   * file from. Used by regenerateVideoMetadataFiles for STRM videos with
+   * no cached info.json - the majority of a STRM-only library, since STRM
+   * materialization (strmMaterializer.js) never persists into the
+   * info.json cache the way a full download's post-processing does.
+   * @param {string} mediaBasePath
+   * @param {{mode:string, container:string}} ytstreamParams
+   * @returns {'written'|'already-correct'|'no-sidecar'|'write-failed'} distinguishes four
+   *   real outcomes a caller needs for accurate reporting - a bare boolean
+   *   previously collapsed "checked and already correct" into the same
+   *   false as "never checked at all, no sidecar existed to check", which
+   *   made regenerateVideoMetadataFiles's UI-facing skip count misleading
+   *   (most "skipped" videos had in fact been verified correct).
+   */
+  updateContainerOnly(mediaBasePath, ytstreamParams) {
+    const cachePath = this.getMediaInfoCachePath(mediaBasePath);
+    let data;
+    try {
+      data = JSON.parse(fs.readFileSync(cachePath, 'utf8'));
+    } catch (err) {
+      logger.info({ cachePath, err: err.message }, 'STRM media info cache container patch: no existing sidecar to read');
+      return 'no-sidecar';
+    }
+    const container = this._resolveContainer(ytstreamParams, data.container);
+    if (container === data.container) {
+      logger.info({ cachePath, container }, 'STRM media info cache container patch: already correct, no write needed');
+      return 'already-correct';
+    }
+    const previousContainer = data.container;
+    data.container = container;
+    data.timestamp = new Date().toISOString();
+    try {
+      fs.writeFileSync(cachePath, JSON.stringify(data, null, 2), 'utf8');
+    } catch (err) {
+      logger.warn({ err, cachePath }, 'STRM media info cache container patch failed');
+      return 'write-failed';
+    }
+    logger.info({ cachePath, previousContainer, container }, 'STRM media info cache container patch: written');
+    return 'written';
   }
 
   /** @private */
@@ -164,8 +273,25 @@ class StrmMediaInfoCache {
       stream.AverageFrameRate = format.fps;
       stream.RealFrameRate = format.fps;
     }
-    const bitrateKbps = format.tbr || format.vbr;
-    if (bitrateKbps) stream.BitRate = Math.round(bitrateKbps * 1000);
+    // transcode=h264 re-encodes at QP=15/quality tuning (see
+    // streamEncoderTuning.js) - genuinely quality-targeted, not
+    // bitrate-targeted, so the SOURCE format's own bitrate (format.tbr)
+    // has no real relationship to what this app's own encoder actually
+    // produces. Declaring it anyway understated real output by ~2x in a
+    // live 1080p test (10,332,348 bps measured vs ~5,000,000 declared) -
+    // plausibly why Jellyfin's own remux (a pure -codec:v:0 copy of
+    // whatever this encoder produced) hit AVPlayer's CoreMediaErrorDomain
+    // -12318 "Segment exceeds specified bandwidth for variant" mid-
+    // playback, if it inherits its variant's BANDWIDTH from this same
+    // declared BitRate. estimateVideoBandwidthBps is the SAME
+    // real-output-informed estimate hlsMasterPlaylist.js's own BANDWIDTH
+    // attribute uses, kept in sync via one shared tier table.
+    // transcode=copy passes the source through untouched, so format.tbr
+    // stays accurate there.
+    const bitrateBps = ytstreamParams.transcode === 'h264' && format.height
+      ? estimateVideoBandwidthBps(format.height)
+      : (format.tbr || format.vbr) * 1000;
+    if (bitrateBps) stream.BitRate = Math.round(bitrateBps);
     return stream;
   }
 

@@ -333,6 +333,71 @@ module.exports = function createConfigRoutes({ verifyToken, configModule, valida
   });
 
   /**
+   * Bulk count/clear for the Settings UI's "Diagnostic Log Limits" section -
+   * the coarse "start fresh" escape hatch for all three nzb_diagnostic_log
+   * kinds together (Recent Queries, Search Detail/Debug, Failed Grabs).
+   */
+  router.get('/api/nzb/diagnostic-logs', verifyToken, async (req, res, next) => {
+    try {
+      const nzbDiagnosticLog = require('../modules/nzbDiagnosticLog');
+      const count = await nzbDiagnosticLog.countAllDiagnosticEvents();
+      res.json({ count });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.delete('/api/nzb/diagnostic-logs', verifyToken, async (req, res, next) => {
+    try {
+      const nzbDiagnosticLog = require('../modules/nzbDiagnosticLog');
+      await nzbDiagnosticLog.clearAllDiagnosticEvents();
+      res.json({ success: true });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  /**
+   * Clears just the Failed Grabs log - the NZB page's "Delete all" button on
+   * that table (unlike DELETE /api/nzb/diagnostic-logs, which clears all
+   * three kinds).
+   */
+  router.delete('/api/nzb/failed-grabs', verifyToken, async (req, res, next) => {
+    try {
+      const nzbDiagnosticLog = require('../modules/nzbDiagnosticLog');
+      const removed = await nzbDiagnosticLog.clearDiagnosticEvents('failedGrab');
+      res.json({ removed });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  /**
+   * Bulk count/clear for the Settings UI's "NZB Video Cache" section - the
+   * nzb_resolution_cache table (nzbThumbnailProbe.js's per-video thumb/
+   * extract resolution findings).
+   */
+  router.get('/api/nzb/resolution-cache', verifyToken, async (req, res, next) => {
+    try {
+      const nzbThumbnailProbe = require('../modules/nzbThumbnailProbe');
+      const count = await nzbThumbnailProbe.countResolutionCache();
+      res.json({ count });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.delete('/api/nzb/resolution-cache', verifyToken, async (req, res, next) => {
+    try {
+      const nzbThumbnailProbe = require('../modules/nzbThumbnailProbe');
+      await nzbThumbnailProbe.clearResolutionCache();
+      res.json({ success: true });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  /**
    * @swagger
    * /api/config/filename-preview:
    *   post:

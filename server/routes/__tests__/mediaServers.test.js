@@ -408,3 +408,106 @@ describe('POST /api/mediaservers/watch-status/sync', () => {
     );
   });
 });
+
+describe('StrmToolTurbo routes', () => {
+  const STATUS_PATH = '/api/mediaservers/jellyfin/strmtoolturbo';
+  const savedJellyfin = { jellyfinEnabled: true, jellyfinUrl: 'http://jf:8096', jellyfinApiKey: 'KEY' };
+
+  const buildStrmDeps = (strmOverrides = {}, config = savedJellyfin) => {
+    const strmToolTurbo = {
+      getStatus: jest.fn().mockResolvedValue({ installed: true }),
+      saveConfiguration: jest.fn().mockResolvedValue({ maxConcurrentExtract: 8 }),
+      runExtraction: jest.fn().mockResolvedValue(undefined),
+      stopExtraction: jest.fn().mockResolvedValue(undefined),
+      ...strmOverrides,
+    };
+    const deps = buildDeps({ configModule: { getConfig: jest.fn().mockReturnValue(config) }, mediaServers: { strmToolTurbo } });
+    return { deps, strmToolTurbo };
+  };
+
+  const call = async (method, path, deps, body) => {
+    const handler = getHandler(method, path, deps);
+    const res = createResponse();
+    await handler({ log: loggerMock, body }, res);
+    return res;
+  };
+
+  test('GET returns the plugin status', async () => {
+    const { deps } = buildStrmDeps();
+    const res = await call('get', STATUS_PATH, deps);
+    expect(res.json).toHaveBeenCalledWith({ installed: true });
+  });
+
+  test('GET returns 400 when Jellyfin is not enabled', async () => {
+    const { deps, strmToolTurbo } = buildStrmDeps({}, {});
+    const res = await call('get', STATUS_PATH, deps);
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(strmToolTurbo.getStatus).not.toHaveBeenCalled();
+  });
+
+  test('GET returns 502 when Jellyfin rejects the API key', async () => {
+    const rejected = Object.assign(new Error('403'), { isAxiosError: true, response: { status: 403 } });
+    const { deps } = buildStrmDeps({ getStatus: jest.fn().mockRejectedValue(rejected) });
+    const res = await call('get', STATUS_PATH, deps);
+    expect(res.status).toHaveBeenCalledWith(502);
+  });
+
+  test('GET returns 502 when Jellyfin is unreachable', async () => {
+    const unreachable = Object.assign(new Error('connect ECONNREFUSED'), { isAxiosError: true });
+    const { deps } = buildStrmDeps({ getStatus: jest.fn().mockRejectedValue(unreachable) });
+    const res = await call('get', STATUS_PATH, deps);
+    expect(res.status).toHaveBeenCalledWith(502);
+  });
+
+  test('GET returns 500 on an unexpected error', async () => {
+    const { deps } = buildStrmDeps({ getStatus: jest.fn().mockRejectedValue(new Error('boom')) });
+    const res = await call('get', STATUS_PATH, deps);
+    expect(res.status).toHaveBeenCalledWith(500);
+  });
+
+  test('PUT config passes the body through and returns the saved settings', async () => {
+    const { deps, strmToolTurbo } = buildStrmDeps();
+    const res = await call('put', `${STATUS_PATH}/config`, deps, { maxConcurrentExtract: 8 });
+    expect(strmToolTurbo.saveConfiguration).toHaveBeenCalledWith(expect.anything(), { maxConcurrentExtract: 8 });
+    expect(res.json).toHaveBeenCalledWith({ config: { maxConcurrentExtract: 8 } });
+  });
+
+  test('PUT config maps a validation error to its status code', async () => {
+    const invalid = Object.assign(new Error('maxConcurrentExtract must be a whole number from 1 to 50'), { name: 'StrmToolTurboError', statusCode: 400 });
+    const { deps } = buildStrmDeps({ saveConfiguration: jest.fn().mockRejectedValue(invalid) });
+    const res = await call('put', `${STATUS_PATH}/config`, deps, { maxConcurrentExtract: 0 });
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json).toHaveBeenCalledWith({ error: invalid.message });
+  });
+
+  test('POST run starts the task and returns 202', async () => {
+    const { deps, strmToolTurbo } = buildStrmDeps();
+    const res = await call('post', `${STATUS_PATH}/run`, deps);
+    expect(strmToolTurbo.runExtraction).toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(202);
+    expect(res.json).toHaveBeenCalledWith({ started: true });
+  });
+
+  test('POST stop requests cancellation and returns 202', async () => {
+    const { deps, strmToolTurbo } = buildStrmDeps();
+    const res = await call('post', `${STATUS_PATH}/stop`, deps);
+    expect(strmToolTurbo.stopExtraction).toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(202);
+    expect(res.json).toHaveBeenCalledWith({ stopping: true });
+  });
+
+  test('POST stop returns 409 when the task is not running', async () => {
+    const idle = Object.assign(new Error('The extraction task is not running'), { name: 'StrmToolTurboError', statusCode: 409 });
+    const { deps } = buildStrmDeps({ stopExtraction: jest.fn().mockRejectedValue(idle) });
+    const res = await call('post', `${STATUS_PATH}/stop`, deps);
+    expect(res.status).toHaveBeenCalledWith(409);
+    expect(res.json).toHaveBeenCalledWith({ error: idle.message });
+  });
+
+  test('POST run returns 409 when the task is already running', async () => {
+    const running = Object.assign(new Error('The extraction task is already running'), { name: 'StrmToolTurboError', statusCode: 409 });
+    const { deps } = buildStrmDeps({ runExtraction: jest.fn().mockRejectedValue(running) });
+    const res = await call('post', `${STATUS_PATH}/run`, deps);
+    expect(res.status).toHaveBeenCalledWith(409);
+  });
+});

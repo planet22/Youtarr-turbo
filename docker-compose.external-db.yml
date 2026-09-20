@@ -1,3 +1,16 @@
+# NOTE ON DUPLICATION: this file repeats the full `youtarr` service block
+# from docker-compose.yml instead of overriding just the DB env vars (unlike
+# docker-compose.arm.yml, which is a thin volume-only override). That's
+# intentional, not copy-paste debt: this file is used two ways (see
+# docs/DOCKER.md) - layered via `-f docker-compose.yml -f
+# docker-compose.external-db.yml` (start-with-external-db.sh), AND
+# downloaded standalone and renamed straight to docker-compose.yml for a
+# single-file external-DB deployment. The second usage has no base file to
+# merge with, so this file must stay fully self-contained. It also
+# deliberately omits the `youtarr-db` service entirely (there's no Compose
+# merge directive to delete a service inherited from a base file), which a
+# thin override couldn't do either way.
+#
 # IMPORTANT NOTES:
 # By default the youtarr service runs as ROOT (UID 0, GID 0) for compatibility with existing setups.
 # For improved security, you can set YOUTARR_UID and YOUTARR_GID environment variables to run the container as a non-root user.
@@ -17,7 +30,7 @@
 services:
   youtarr:
     image: ${YOUTARR_IMAGE:-ghcr.io/planet22/youtarr-turbo:latest}
-    container_name: youtarr
+    container_name: youtarr-turbo
     restart: unless-stopped
     # Optional: Run as specific UID:GID for security (defaults to root if not set per previous behavior)
     user: "${YOUTARR_UID:-0}:${YOUTARR_GID:-0}"
@@ -68,4 +81,4 @@ services:
 
 networks:
   default:
-    name: youtarr-network
+    name: youtarr-turbo-network

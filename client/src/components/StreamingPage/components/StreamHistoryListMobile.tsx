@@ -1,6 +1,6 @@
 import React from 'react';
 import { Box, Chip, Tooltip, Typography, Checkbox } from '../../ui';
-import { formatFileSize } from '../../../utils/formatters';
+import { formatByteSize } from '../../../utils/formatters';
 import { StreamHistoryRow } from '../../../hooks/useStreamHistory';
 import { parseClientLabel, formatModeLabel, formatModeChipLabel, modeChipColor } from '../utils';
 import { resultChipFor, formatStarted, formatDuration } from './StreamHistoryTable';
@@ -114,7 +114,7 @@ function StreamHistoryListMobile({ rows, selectedIds, onToggleSelect }: StreamHi
               </Tooltip>
 
               <Typography variant="caption" style={{ fontSize: '0.65rem', color: 'var(--muted-foreground)' }}>
-                {formatStarted(row.startedAt)} · {formatDuration(row)} · {formatFileSize(row.bytesTransferred) || '0MB'}
+                {formatStarted(row.startedAt)} · {formatDuration(row)} · {formatByteSize(row.bytesTransferred ?? 0)}
               </Typography>
             </Box>
           </Box>

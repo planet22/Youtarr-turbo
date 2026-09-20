@@ -29,10 +29,13 @@ class StrmGenerator {
    * @param {object} [opts]
    * @param {'youtube'|'ytstream'} [opts.target]
    * @param {string} [opts.proxyBaseUrl]
-   * @param {'direct'|'direct-redirect'|'hls'|'hls-buffer'} [opts.ytstreamMode] - overrides ytstream.defaultMode
+   * @param {'direct'|'direct-redirect'|'hls'|'hls-buffer'|'hls-byterange'|'download-cache'} [opts.ytstreamMode] - overrides ytstream.defaultMode
    * @param {'mp4'|'ts'} [opts.ytstreamContainer] - overrides ytstream.container
    * @param {'copy'|'h264'} [opts.ytstreamTranscode] - overrides ytstream.transcode
    * @param {boolean} [opts.ytstreamFakeLength] - overrides ytstream.calculatedLength
+   * @param {boolean} [opts.ytstreamByteRangeDeliverAsFile] - overrides
+   *   ytstream.byteRangeDeliverAsFile (mode=hls-byterange only - see
+   *   byteRangeHlsMode.js)
    * @param {string} [opts.quality] - overrides resolved quality (else derived
    *   from strm.quality / preferredResolution)
    * @returns {string} file contents (includes trailing newline)
@@ -85,7 +88,7 @@ class StrmGenerator {
    * resolution logic.
    * @param {object} cfg - configModule.getConfig()
    * @param {object} [opts] - same opts shape as buildStrmContent
-   * @returns {{mode: string, quality: string, container: string, transcode: string, calculatedLength: boolean}}
+   * @returns {{mode: string, quality: string, container: string, transcode: string, calculatedLength: boolean, byteRangeDeliverAsFile: boolean}}
    */
   resolveYtstreamParams(cfg, opts = {}) {
     const strmCfg = cfg.strm || {};
@@ -107,7 +110,14 @@ class StrmGenerator {
 
     const calculatedLength = Boolean(opts.ytstreamFakeLength ?? ytCfg.calculatedLength);
 
-    return { mode, quality, container, transcode, calculatedLength };
+    // mode=hls-byterange only (see byteRangeHlsMode.js) - false (default)
+    // serves an HLS manifest, true serves the growing file directly with
+    // no manifest at all. strmMediaInfoCache.js's _resolveContainer must
+    // stay in lockstep with this exact value (hls vs mp4) or Jellyfin gets
+    // told the wrong thing about what's actually being served.
+    const byteRangeDeliverAsFile = Boolean(opts.ytstreamByteRangeDeliverAsFile ?? ytCfg.byteRangeDeliverAsFile);
+
+    return { mode, quality, container, transcode, calculatedLength, byteRangeDeliverAsFile };
   }
 
   /**
@@ -120,11 +130,14 @@ class StrmGenerator {
    * @private
    */
   _buildYtstreamPath(id, cfg, opts = {}) {
-    const { mode, quality, container, transcode, calculatedLength } = this.resolveYtstreamParams(cfg, opts);
+    const { mode, quality, container, transcode, calculatedLength, byteRangeDeliverAsFile } = this.resolveYtstreamParams(cfg, opts);
 
     const params = new URLSearchParams({ mode, quality, container, transcode });
     if (calculatedLength) {
       params.set('calculatedLength', '1');
+    }
+    if (byteRangeDeliverAsFile) {
+      params.set('deliverAsFile', '1');
     }
     return `/api/ytstream/${encodeURIComponent(id)}?${params.toString()}`;
   }

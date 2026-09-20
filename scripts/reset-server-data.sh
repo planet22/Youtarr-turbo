@@ -40,7 +40,7 @@ echo "Resetting Youtarr server data..."
 # (production, dev, and ARM). We operate on names directly instead of via
 # `docker compose down` so the script works even when required env vars
 # (e.g. YOUTUBE_OUTPUT_DIR) or compose files are missing.
-YOUTARR_CONTAINERS=(youtarr-dev youtarr youtarr-db-dev youtarr-db)
+YOUTARR_CONTAINERS=(youtarr-turbo-dev youtarr-turbo youtarr-turbo-db-dev youtarr-turbo-db)
 YOUTARR_VOLUMES=(youtarr_youtarr-db-data-dev youtarr_youtarr-db-data)
 
 if command -v docker &>/dev/null && docker info &>/dev/null; then

@@ -7,11 +7,10 @@ import {
   Download as DownloadIcon,
   Clock as ScheduleIcon,
   AlarmCheck as AlarmOnIcon,
-  Ghost as StealthCacheIcon,
 } from 'lucide-react';
-import { Database as MetadataCacheIcon, Storage as CachedVideoIcon, ClearCache as ClearCacheIcon } from '../../../lib/icons';
+import { Database as MetadataCacheIcon, ClearCache as ClearCacheIcon } from '../../../lib/icons';
 import { formatDuration, formatYTDate } from '../../../utils';
-import { formatAddedDateTime, formatFileSize, formatExpiresIn } from '../../../utils/formatters';
+import { formatAddedDateTime, formatFileSize } from '../../../utils/formatters';
 import { getDisplayPath } from '../../../utils/paths';
 import { getMediaTypeInfo } from '../../../utils/videoStatus';
 import { getEnabledChannelId } from '../../../utils/enabledChannels';
@@ -23,6 +22,7 @@ import ThumbnailClickOverlay from '../../shared/ThumbnailClickOverlay';
 import AvailabilityChip from '../../shared/AvailabilityChip';
 import { SHARED_STATUS_CHIP_SMALL_STYLE } from '../../shared/chipStyles';
 import ChannelNameDisplay from './ChannelNameDisplay';
+import CacheStatusChip from './CacheStatusChip';
 import WatchedChip from '../../shared/WatchedChip';
 
 export interface VideoCardProps {
@@ -357,36 +357,28 @@ function VideoCard({
                 </IconButton>
               </Tooltip>
             )}
-            {video.hasCachedVideo && (
-              <Tooltip title="Opportunistically cached from STRM - will automatically revert to STRM when it expires. Click for details.">
-                <Chip
-                  size="small"
-                  icon={<CachedVideoIcon size={14} />}
-                  label={formatExpiresIn(video.cachedVideoExpiresAt) ?? 'Cached'}
-                  variant="outlined"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onOpenCacheDetail(video.youtubeId, 'video');
-                  }}
-                  style={{ ...SHARED_STATUS_CHIP_SMALL_STYLE, cursor: 'pointer' }}
-                />
-              </Tooltip>
-            )}
-            {video.hasStealthCache && (
-              <Tooltip title="Stealth-cached — playback served locally via Youtarr; still STRM, hidden from media server scans. Click for details.">
-                <Chip
-                  size="small"
-                  icon={<StealthCacheIcon size={14} color="#9c27b0" />}
-                  label={video.stealthCacheFileSize ? formatFileSize(video.stealthCacheFileSize) : 'Cached'}
-                  variant="outlined"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onOpenCacheDetail(video.youtubeId, 'video');
-                  }}
-                  style={{ ...SHARED_STATUS_CHIP_SMALL_STYLE, borderColor: '#9c27b0', color: '#9c27b0', cursor: 'pointer' }}
-                />
-              </Tooltip>
-            )}
+            <CacheStatusChip
+              video={video}
+              kind="cached"
+              isTracked={isTracked}
+              iconSize={14}
+              style={SHARED_STATUS_CHIP_SMALL_STYLE}
+              onClick={(e) => {
+                e.stopPropagation();
+                onOpenCacheDetail(video.youtubeId, 'video');
+              }}
+            />
+            <CacheStatusChip
+              video={video}
+              kind="stealth"
+              isTracked={isTracked}
+              iconSize={14}
+              style={SHARED_STATUS_CHIP_SMALL_STYLE}
+              onClick={(e) => {
+                e.stopPropagation();
+                onOpenCacheDetail(video.youtubeId, 'video');
+              }}
+            />
           </Box>
           {isTracked && video.id !== null && !video.removed && (
             <Tooltip title="Delete video from disk">

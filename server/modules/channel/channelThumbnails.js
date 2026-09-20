@@ -1,7 +1,7 @@
 const fs = require('fs-extra');
 const fsPromises = fs.promises;
 const path = require('path');
-const { execSync } = require('child_process');
+const { resizeImageWithFfmpeg } = require('../imageResizer');
 const configModule = require('../configModule');
 const logger = require('../../logger');
 const {
@@ -30,10 +30,7 @@ class ChannelThumbnails {
     );
 
     try {
-      execSync(
-        `${configModule.ffmpegPath} -loglevel error -y -i "${realImagePath}" -vf "scale=iw*0.4:ih*0.4" -q:v 2 "${smallImagePath}"`,
-        { stdio: 'inherit' }
-      );
+      resizeImageWithFfmpeg(realImagePath, smallImagePath, 0.4);
       await fsPromises.rename(smallImagePath, realImagePath);
       logger.debug({ channelId }, 'Channel thumbnail resized successfully');
     } catch (err) {
@@ -443,12 +440,14 @@ class ChannelThumbnails {
     const { Video } = require('../../models');
     const videos = await Video.findAll({
       where: { channel_id: channel.channel_id },
-      attributes: ['filePath', 'youtubeId'],
+      attributes: ['filePath', 'youtubeId', 'removed'],
       raw: true,
     });
 
     for (const video of videos) {
-      if (!video.filePath || !video.youtubeId) continue;
+      // Skip deleted/missing videos: their stale filePath would otherwise get a
+      // thumbnail written back next to a media file that no longer exists.
+      if (!video.filePath || !video.youtubeId || video.removed) continue;
 
       const parsed = path.parse(video.filePath);
       if (!fs.existsSync(parsed.dir)) continue; // video's own folder is gone - nothing to write into

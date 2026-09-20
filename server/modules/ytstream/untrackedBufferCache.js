@@ -13,6 +13,12 @@ const path = require('path');
 const logger = require('../../logger');
 const configModule = require('../configModule');
 const { HLS_UNTRACKED_BUFFER_CACHE_DIR } = require('./paths');
+const { streamDebug } = require('./streamDebug');
+const {
+  listByteRangeCacheEntries,
+  deleteByteRangeCacheForVideo,
+  sweepExpiredByteRangeCache,
+} = require('./byteRangeCacheIndex');
 
 function getUntrackedBufferCachePath(youtubeId) {
   return path.join(HLS_UNTRACKED_BUFFER_CACHE_DIR, `${youtubeId}.ts`);
@@ -34,9 +40,14 @@ function getUntrackedBufferCacheMp4Path(youtubeId) {
  */
 function findWarmUntrackedBufferCache(youtubeId) {
   const mp4Path = getUntrackedBufferCacheMp4Path(youtubeId);
-  if (fs.existsSync(mp4Path)) return mp4Path;
+  if (fs.existsSync(mp4Path)) {
+    streamDebug({ youtubeId, filePath: mp4Path }, 'ytstream: findWarmUntrackedBufferCache found a warm .mp4');
+    return mp4Path;
+  }
   const tsPath = getUntrackedBufferCachePath(youtubeId);
-  return fs.existsSync(tsPath) ? tsPath : null;
+  const found = fs.existsSync(tsPath) ? tsPath : null;
+  streamDebug({ youtubeId, filePath: found }, found ? 'ytstream: findWarmUntrackedBufferCache found a warm .ts' : 'ytstream: findWarmUntrackedBufferCache found nothing');
+  return found;
 }
 
 /**
@@ -74,6 +85,10 @@ async function sweepExpiredUntrackedBufferCache() {
       }
     }
   }
+  // mode=hls-byterange's stealth cache ages out under the same TTL.
+  const byteRangeResult = await sweepExpiredByteRangeCache(cutoffMs);
+  deleted += byteRangeResult.deleted;
+  freedBytes += byteRangeResult.freedBytes;
   if (deleted > 0) {
     logger.info({ deleted, freedBytes, thresholdHours }, 'ytstream: swept expired untracked buffer cache files');
   }
@@ -89,7 +104,12 @@ async function sweepExpiredUntrackedBufferCache() {
 async function getUntrackedBufferCacheStat(youtubeId) {
   try {
     const filePath = findWarmUntrackedBufferCache(youtubeId);
-    if (!filePath) return { exists: false, size: null, mtime: null };
+    if (!filePath) {
+      const byteRangeEntry = newestEntry((await listByteRangeCacheEntries()).filter((e) => e.youtubeId === youtubeId));
+      return byteRangeEntry
+        ? { exists: true, size: byteRangeEntry.size, mtime: byteRangeEntry.mtime, partial: byteRangeEntry.partial === true }
+        : { exists: false, size: null, mtime: null };
+    }
     const stat = await fs.promises.stat(filePath);
     if (!stat.isFile()) return { exists: false, size: null, mtime: null };
     return { exists: true, size: stat.size, mtime: stat.mtime.toISOString() };
@@ -101,30 +121,59 @@ async function getUntrackedBufferCacheStat(youtubeId) {
 
 /**
  * Deletes one untracked buffer cache file (whichever of .ts/.mp4 currently
- * represents it - see findWarmUntrackedBufferCache); returns whether one
+ * represents it - see findWarmUntrackedBufferCache) plus any hls-byterange
+ * stealth-cache entries for the same video; returns whether anything
  * existed to delete.
  */
 async function deleteUntrackedBufferCacheFile(youtubeId) {
+  const byteRangeResult = await deleteByteRangeCacheForVideo(youtubeId);
   const filePath = findWarmUntrackedBufferCache(youtubeId);
-  if (!filePath) return false;
+  if (!filePath) return byteRangeResult.deletedFiles > 0;
   try {
     await fs.promises.unlink(filePath);
     return true;
   } catch (err) {
-    if (err.code === 'ENOENT') return false;
+    if (err.code === 'ENOENT') return byteRangeResult.deletedFiles > 0;
     throw err;
   }
 }
 
 /**
- * Every untracked buffer cache entry, for the Library page's "Show
- * untracked" bucket (videosModule.js's _getUntrackedCandidates) to merge
+ * Every hidden-cache entry (hls-buffer's plus hls-byterange's stealth cache),
+ * for the Library page's "Show untracked" bucket (videosModule.js's _getUntrackedCandidates) to merge
  * against youtube_metadata_cache rows. Recognizes both the raw .ts a fresh
  * fetch always lands first, and the .mp4 swapHiddenCacheToMp4 leaves in its
  * place once finalizeToMp4 remuxes it (see findWarmUntrackedBufferCache).
  * @returns {Promise<Array<{youtubeId: string, size: number, mtime: string}>>}
  */
 async function listUntrackedBufferCacheEntries() {
+  const bufferEntries = await listHlsBufferCacheEntries();
+  // hls-byterange's stealth cache is reported the same way (partial
+  // entries flagged `partial`). One row per youtubeId: a complete entry
+  // beats a partial one, then the newest wins, when a video is cached by
+  // both modes or at several byte-range quality settings.
+  const newestById = new Map();
+  for (const entry of [...bufferEntries, ...(await listByteRangeCacheEntries())]) {
+    newestById.set(entry.youtubeId, newestEntry([newestById.get(entry.youtubeId), entry]));
+  }
+  return [...newestById.values()];
+}
+
+/**
+ * @returns {object|null} the best entry: a complete one beats a partial
+ *   one, then the latest mtime wins. Ignores null/undefined inputs.
+ */
+function newestEntry(entries) {
+  return entries
+    .filter(Boolean)
+    .reduce((best, entry) => {
+      if (!best) return entry;
+      if (Boolean(best.partial) !== Boolean(entry.partial)) return entry.partial ? best : entry;
+      return new Date(entry.mtime) > new Date(best.mtime) ? entry : best;
+    }, null);
+}
+
+async function listHlsBufferCacheEntries() {
   if (!fs.existsSync(HLS_UNTRACKED_BUFFER_CACHE_DIR)) return [];
   const entries = await fs.promises.readdir(HLS_UNTRACKED_BUFFER_CACHE_DIR);
   const results = [];

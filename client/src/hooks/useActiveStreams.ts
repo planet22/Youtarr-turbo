@@ -28,7 +28,7 @@ export interface StreamSegmentStatus {
 
 export interface StreamSnapshot {
   streamId: string;
-  mode: 'hls' | 'hls-buffer' | 'direct' | 'direct-redirect';
+  mode: 'hls' | 'hls-buffer' | 'hls-byterange' | 'download-cache' | 'youtube-hls' | 'byterange-cache-hit' | 'direct' | 'direct-redirect' | 'probe-shortcut';
   youtubeId: string;
   title: string | null;
   quality: string;
@@ -43,19 +43,44 @@ export interface StreamSnapshot {
   // trackPendingRequest doc comment. 'requested': the request has just
   // been received, mode/format not resolved yet. 'resolving': format/
   // quality probing (yt-dlp) is in flight - the slow step this exists to
-  // make visible.
-  state: 'requested' | 'resolving' | 'starting' | 'active' | 'cached' | 'failed';
+  // make visible. 'probe': a real hls/hls-buffer session was created to
+  // answer a detected metadata probe (ytstream.probeShortcut - see
+  // probeShortcut.js's tryServeInstantHlsPlaylist), distinguishing "Jellyfin
+  // just asked for this, no one may actually be watching" from genuine
+  // playback, since the underlying session is otherwise identical to a real
+  // one. Transitions to 'starting'/'active'/'cached' like any other session
+  // the moment real activity happens (a segment actually gets served,
+  // whether by the probe's own codec-detection fetch or real playback) -
+  // it is not a permanent label.
+  state: 'requested' | 'resolving' | 'starting' | 'active' | 'cached' | 'failed' | 'probe';
   /** Only meaningful when state === 'failed' - why this stream never started. */
   error: string | null;
   startedAt: number;
   bytesTransferred: number;
   bytesPerSecond: number;
+  /** youtube-hls with segments routed through Youtarr: total and rate are estimates. */
+  bytesEstimated?: boolean;
+  /** youtube-hls with segments routed through Youtarr: where in the video the player last asked for. */
+  playbackSeconds?: number | null;
   lastActivityAt: number;
   segments: StreamSegmentStatus | null;
 }
 
+/**
+ * mode=hls-byterange sessions the server is still holding: encoding, or
+ * finished and waiting for the idle reaper (each keeps a full-size file
+ * until released). Can exceed the row count if a row was removed without
+ * its session being torn down.
+ */
+export interface ByteRangeSessionCounts {
+  total: number;
+  encoding: number;
+  finished: number;
+}
+
 interface StreamsResponse {
   streams: StreamSnapshot[];
+  byteRangeSessions?: ByteRangeSessionCounts;
 }
 
 interface StreamStoppedPayload {
@@ -79,6 +104,7 @@ interface StreamStoppedPayload {
  */
 export function useActiveStreams(token: string | null) {
   const [streams, setStreams] = useState<StreamSnapshot[]>([]);
+  const [byteRangeSessions, setByteRangeSessions] = useState<ByteRangeSessionCounts | null>(null);
   const [loading, setLoading] = useState(true);
   const wsContext = useContext(WebSocketContext);
   const subscribe = wsContext?.subscribe;
@@ -95,6 +121,7 @@ export function useActiveStreams(token: string | null) {
         headers: { 'x-access-token': token },
       });
       setStreams(response.data?.streams || []);
+      setByteRangeSessions(response.data?.byteRangeSessions ?? null);
     } catch {
       // Leave the current value; the next broadcast or probe corrects it.
     } finally {
@@ -158,5 +185,5 @@ export function useActiveStreams(token: string | null) {
     };
   }, [subscribe, unsubscribe, fetchStreams]);
 
-  return { streams, loading, refetch: fetchStreams };
+  return { streams, byteRangeSessions, loading, refetch: fetchStreams };
 }

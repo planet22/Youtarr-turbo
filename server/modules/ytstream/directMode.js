@@ -21,6 +21,7 @@ const { UPSTREAM_USER_AGENT, buildBaseArgs } = require('./ytdlpArgs');
 const { getDirectFormatSelector } = require('./formatSelection');
 const { RETRY_PLAYER_CLIENT, isRetryableExtractionError } = require('./configResolution');
 const { persistStreamHistoryStart, persistStreamHistoryEnd } = require('./activeStreams');
+const { streamDebug } = require('./streamDebug');
 
 function isManifestUrl(url) {
   const u = String(url || '').toLowerCase();
@@ -47,6 +48,7 @@ async function resolveDirectUrl(youtubeId, config, quality, forcedPlayerClient, 
   };
 
   let stdout;
+  let usedRetryClient = false;
   try {
     stdout = await runOnce(forcedPlayerClient);
   } catch (err) {
@@ -55,6 +57,7 @@ async function resolveDirectUrl(youtubeId, config, quality, forcedPlayerClient, 
         { youtubeId, err: err.message },
         `ytstream: direct resolve hit a client/session error, retrying once with player_client=${RETRY_PLAYER_CLIENT}`
       );
+      usedRetryClient = true;
       stdout = await runOnce(RETRY_PLAYER_CLIENT);
     } else {
       throw err;
@@ -72,7 +75,10 @@ async function resolveDirectUrl(youtubeId, config, quality, forcedPlayerClient, 
   }
 
   const manifest = urls.find(isManifestUrl);
-  if (manifest) return manifest;
+  if (manifest) {
+    streamDebug({ youtubeId, usedRetryClient, urlCount: urls.length, urlType: 'manifest' }, 'ytstream: resolveDirectUrl resolved a manifest URL');
+    return manifest;
+  }
 
   if (urls.length > 1) {
     logger.warn(
@@ -81,6 +87,7 @@ async function resolveDirectUrl(youtubeId, config, quality, forcedPlayerClient, 
     );
   }
 
+  streamDebug({ youtubeId, usedRetryClient, urlCount: urls.length, urlType: 'plain' }, 'ytstream: resolveDirectUrl resolved a plain URL');
   return urls[0];
 }
 
@@ -136,8 +143,11 @@ function redactIncomingHeadersForLogging(headers) {
  * yt-dlp used to resolve the URL — age-restricted or members-only videos
  * get rejected. Proxying keeps this server in the loop, and forwards
  * Range so `mode=direct` stays seekable.
+ *
+ * @param {(bytes: number) => void} [onBytesSent] - called with each chunk of
+ *   the upstream body relayed to the client (for the stream history's byte total)
  */
-function proxyDirectStream(targetUrl, req, res, cookieHeader, redirectsLeft = 5) {
+function proxyDirectStream(targetUrl, req, res, cookieHeader, redirectsLeft = 5, onBytesSent = undefined) {
   return new Promise((resolve, reject) => {
     let parsed;
     try {
@@ -162,7 +172,8 @@ function proxyDirectStream(targetUrl, req, res, cookieHeader, redirectsLeft = 5)
 
       if ([301, 302, 303, 307, 308].includes(status) && upstreamRes.headers.location && redirectsLeft > 0) {
         upstreamRes.resume();
-        proxyDirectStream(new URL(upstreamRes.headers.location, parsed).href, req, res, cookieHeader, redirectsLeft - 1)
+        streamDebug({ status, location: upstreamRes.headers.location, redirectsLeft }, 'ytstream: proxyDirectStream following upstream redirect');
+        proxyDirectStream(new URL(upstreamRes.headers.location, parsed).href, req, res, cookieHeader, redirectsLeft - 1, onBytesSent)
           .then(resolve)
           .catch(reject);
         return;
@@ -176,12 +187,14 @@ function proxyDirectStream(targetUrl, req, res, cookieHeader, redirectsLeft = 5)
         return;
       }
 
+      streamDebug({ status, contentType: upstreamRes.headers['content-type'], contentLength: upstreamRes.headers['content-length'] }, 'ytstream: proxyDirectStream piping upstream response to client');
       res.status(status);
       ['content-type', 'content-length', 'content-range', 'accept-ranges', 'cache-control', 'etag', 'last-modified']
         .forEach((h) => {
           if (upstreamRes.headers[h]) res.set(h, upstreamRes.headers[h]);
         });
 
+      if (onBytesSent) upstreamRes.on('data', (chunk) => onBytesSent(chunk.length));
       upstreamRes.pipe(res);
       upstreamRes.on('error', (err) => {
         if (isAbortedByClient || err.code === 'ECONNRESET' || err.message === 'aborted') {

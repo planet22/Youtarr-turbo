@@ -158,6 +158,7 @@ interface UseNzbStatsResult {
   refetch: () => Promise<void>;
   deleteCacheEntries: (keys: string[]) => Promise<void>;
   cancelCurrentJob: () => Promise<void>;
+  clearFailedGrabs: () => Promise<void>;
 }
 
 const POLL_INTERVAL_MS = 5000;
@@ -218,5 +219,13 @@ export const useNzbStats = (token: string | null): UseNzbStatsResult => {
     await fetchStats();
   }, [token, fetchStats]);
 
-  return { stats, loading, error, refetch: fetchStats, deleteCacheEntries, cancelCurrentJob };
+  const clearFailedGrabs = useCallback(async () => {
+    if (!token) return;
+    await axios.delete('/api/nzb/failed-grabs', {
+      headers: { 'x-access-token': token },
+    });
+    await fetchStats();
+  }, [token, fetchStats]);
+
+  return { stats, loading, error, refetch: fetchStats, deleteCacheEntries, cancelCurrentJob, clearFailedGrabs };
 };

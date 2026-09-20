@@ -8,8 +8,8 @@
  *
  * When adding a new config field:
  * 1. Add it to CONFIG_FIELDS with its default value and trackChanges setting
- * 2. Add it to DEFAULT_CONFIG (TypeScript will enforce this)
- * 3. ConfigState type and TRACKABLE_CONFIG_KEYS are automatically derived
+ * 2. ConfigState, DEFAULT_CONFIG, and TRACKABLE_CONFIG_KEYS are all
+ *    automatically derived - nothing else to update
  */
 
 import { SponsorBlockCategories } from '../components/Configuration/types';
@@ -178,9 +178,19 @@ export const CONFIG_FIELDS = {
   // what a full download would use unless explicitly overridden here.
   ytstream: {
     default: {
-      defaultMode: 'direct' as 'direct' | 'direct-redirect' | 'hls' | 'hls-buffer',
+      defaultMode: 'direct' as 'direct' | 'direct-redirect' | 'hls' | 'hls-buffer' | 'hls-byterange' | 'download-cache' | 'youtube-hls',
       // mkv is ffmpeg-mode only (see YtstreamSettingsSection's Container select)
       container: 'mp4' as 'mp4' | 'ts' | 'mkv',
+      // Debug-only escape hatch, not exposed in Settings UI (same pattern as
+      // debugLogging below) - forces every probeShortcut synthetic clip
+      // (server/modules/ytstream/probeShortcut.js) to this container
+      // regardless of the real session's own `container` above, so a
+      // specific container's duration-patch path can be forced on/off for
+      // testing (e.g. the mp4 mvhd/tkhd/mdhd duration patch vs mkv's known-
+      // good Segment Info Duration patch) without editing code each time.
+      // null (default) uses the real session's `container` as before this
+      // existed.
+      probeShortcutContainerOverride: null as 'mp4' | 'ts' | 'mkv' | null,
       // Empty string = auto (derive from videoCodec); copy = remux; h264 = re-encode
       transcode: '' as '' | 'copy' | 'h264',
       // null = fall back to preferredResolution / 720
@@ -271,6 +281,25 @@ export const CONFIG_FIELDS = {
       // fakeLength; old configs are migrated automatically - see
       // configModule.js.)
       calculatedLength: false as boolean,
+      // mode=hls/hls-buffer only. Wraps the real media playlist in a thin
+      // HLS master playlist (#EXT-X-STREAM-INF with BANDWIDTH/RESOLUTION,
+      // pointing at the actual media playlist) instead of serving the media
+      // playlist directly at the top-level ytstream URL - the more
+      // broadly-compatible, spec-idiomatic HLS shape (Apple's own HLS
+      // Authoring Guidelines recommend a master playlist even for a single
+      // rendition), and it stops Jellyfin guessing a ~20 Mbps default
+      // bandwidth on a bare media playlist, which can force needless
+      // transcoding on bandwidth-limited clients. BANDWIDTH/RESOLUTION are
+      // estimates (server/modules/ytstream/hlsMasterPlaylist.js) - real
+      // values are known for RESOLUTION (same source-resolution lookup the
+      // encoder itself uses) but BANDWIDTH is a heuristic per resolution
+      // tier, since encodes are CRF/QP-quality-targeted, not fixed-bitrate.
+      // CODECS is deliberately never declared - the exact profile/level
+      // varies per hardware encoder and getting it wrong would misrepresent
+      // the stream the same way the old probe-shortcut synthetic clip did.
+      // On by default; existing STRM URLs work unchanged either way, since
+      // the media playlist itself is unaffected - only whether it's wrapped.
+      hlsMasterPlaylist: true as boolean,
       // mode=hls only, pairs with strm.cacheOnPlay. Once the background
       // cache-on-play download finishes, an active HLS session switches its
       // encode source from the live yt-dlp/ffmpeg network pull to the local
@@ -279,6 +308,8 @@ export const CONFIG_FIELDS = {
       // the video. No effect without cacheOnPlay (there's never a cached
       // file to switch to).
       hotSwapToCache: false as boolean,
+      // (No Settings UI: its only applicable mode, plain mode=hls, is hidden
+      // from the Playback mode picker. Still honored from config.json.)
       // Any mode, any request - not tied to an in-progress session the way
       // hotSwapToCache is. Checked first, before any mode/quality
       // resolution or yt-dlp/ffmpeg work: if this video is already fully
@@ -356,6 +387,17 @@ export const CONFIG_FIELDS = {
       // Jellyfin only ever sees the .strm replaced by the finished .mp4,
       // never the intermediate .ts.
       stealthCache: false as boolean,
+      // mode=hls-buffer only, config.json-only (no Settings UI, same
+      // pattern as probeShortcutContainerOverride above) - delays starting
+      // the network-bound hls-buffer fetch (server/modules/ytstream/
+      // hlsEngine.js's startHlsBufferFetch) until this many DISTINCT
+      // segments have actually been requested, instead of the instant the
+      // session is created. A metadata probe (Jellyfin/StrmTool) only ever
+      // requests segment 0 (occasionally 1), so this avoids spinning up a
+      // full background download for every probe that never becomes real
+      // playback. 0 keeps the original always-start-immediately behavior
+      // exactly as it was.
+      bufferStartAfterSegments: 3 as number,
       // This file's own per-request/per-segment diagnostic lines (segment
       // serves, playlist polls, buffer-fetch progress ticks, etc.) are too
       // high-volume for logger.info by default, but gating them behind the
@@ -366,6 +408,33 @@ export const CONFIG_FIELDS = {
       // Level, without touching any other module's verbosity; when off,
       // they behave exactly as before (visible only at Log Level=debug).
       debugLogging: false as boolean,
+      // mode=hls-byterange only (server/modules/ytstream/byteRangeHlsMode.js).
+      // false (default): the mode's own well-supported behavior - the
+      // top-level URL returns an HLS manifest (#EXT-X-MAP/#EXT-X-BYTERANGE
+      // into one growing fMP4 file). true (experimental, opt-in): skips the
+      // manifest entirely and serves that growing file directly via plain
+      // HTTP Range requests - real risk here (a native player like AVPlayer
+      // infers duration from Content-Length/probing when there's no
+      // manifest to read it from instead, and a still-growing file's
+      // changing declared size is a known source of playback failures) -
+      // off by default for exactly that reason.
+      byteRangeDeliverAsFile: false as boolean,
+      // mode=hls-byterange with byteRangeDeliverAsFile only. When a cached
+      // encode was cut off early (idle timeout, forced stop), resume from
+      // where it stopped and stitch the new tail onto it instead of
+      // re-encoding from byte 0. Off: a partial cache entry is ignored and
+      // a fresh from-zero encode runs (always safe).
+      byteRangeResumeCache: false as boolean,
+      // mode=youtube-hls only. Which audio track to serve when the video has
+      // dubbed languages ('en', 'de', 'pt-BR'...). Empty = the original
+      // language. A language the video doesn't offer falls back to that.
+      audioLanguage: '' as string,
+      // mode=youtube-hls only. Where the player gets its playlists/segments:
+      // 'off' - straight from YouTube (only the master comes from here);
+      // 'proxy' - Youtarr also serves the video/audio playlists (plays become
+      // visible); 'serve' - additionally every segment request goes through
+      // Youtarr, which redirects to YouTube (position + estimated data rate).
+      youtubeHlsProxy: 'off' as 'off' | 'proxy' | 'serve',
       // Per-hardware-mode result of the "Test HLS segment timing" check
       // (server/modules/streamTuningBenchmark.js's testSegmentTiming) -
       // only ever set by that test itself, never manually. true for a mode
@@ -435,11 +504,29 @@ export const CONFIG_FIELDS = {
       //            it's only ever used to confirm/correct thumb's uncertain
       //            or "hd" results. If fixed and thumb are both off, this
       //            becomes the only remaining check and runs directly.
+      //            Off by default (opt-in).
       resolutionDetection: {
         fixed: true,
         thumb: true,
-        extract: true,
+        extract: false,
       } as { fixed: boolean; thumb: boolean; extract: boolean },
+      // How many rows each of the three nzb_diagnostic_log-backed logs
+      // (see server/modules/nzbDiagnosticLog.js) keeps before pruning the
+      // oldest on every write - server/routes/nzb.js's recordSearchTrace/
+      // recordFailedGrab and server/modules/videoSearchModule.js's
+      // recordNzbQuery. 1-100 each; these back the NZB diagnostics page's
+      // Recent Queries, Search Detail/Debug, and Failed Grabs tables.
+      diagnosticLogLimits: {
+        recentQueries: 50,
+        searchTraces: 20,
+        failedGrabs: 20,
+      } as { recentQueries: number; searchTraces: number; failedGrabs: number },
+      // Row cap for the nzb_resolution_cache table (nzbThumbnailProbe.js's
+      // thumb/extract resolution findings, keyed by youtube_id) - replaces
+      // the old in-memory Map this table replaced, which was capped at 5000
+      // entries via manual LRU eviction. 100-10,000; oldest rows (by
+      // createdAt) are pruned once the cap is exceeded.
+      videoResolutionCacheLimit: 5000,
       categories: [] as Array<{
         name: string;
         subfolder: string | null;
@@ -572,104 +659,15 @@ export type ConfigState = {
 
 /**
  * Default configuration object
- * Automatically generated from CONFIG_FIELDS
+ * Genuinely derived from CONFIG_FIELDS (not hand-copied): every key in
+ * CONFIG_FIELDS is guaranteed to appear here with its `default`, so a new
+ * field can never drift out of sync with this object. The cast is required
+ * because Object.fromEntries loses the per-key literal types that
+ * ConfigState's mapped type expresses; the runtime shape is exact.
  */
-export const DEFAULT_CONFIG: ConfigState = {
-  channelAutoDownload: CONFIG_FIELDS.channelAutoDownload.default,
-  channelDownloadFrequency: CONFIG_FIELDS.channelDownloadFrequency.default,
-  channelFilesToDownload: CONFIG_FIELDS.channelFilesToDownload.default,
-  preferredResolution: CONFIG_FIELDS.preferredResolution.default,
-  videoCodec: CONFIG_FIELDS.videoCodec.default,
-  downloadTranscodeVideoCodec: CONFIG_FIELDS.downloadTranscodeVideoCodec.default,
-  downloadTranscodeHardwareMode: CONFIG_FIELDS.downloadTranscodeHardwareMode.default,
-  downloadTranscodeAudioCodec: CONFIG_FIELDS.downloadTranscodeAudioCodec.default,
-  defaultSubfolder: CONFIG_FIELDS.defaultSubfolder.default,
-  defaultSkipVideoFolder: CONFIG_FIELDS.defaultSkipVideoFolder.default,
-  videoFilenamePrefix: CONFIG_FIELDS.videoFilenamePrefix.default,
-  defaultLibraryMode: CONFIG_FIELDS.defaultLibraryMode.default,
-  episodeFilenamePrefix: CONFIG_FIELDS.episodeFilenamePrefix.default,
-  seriesOutputSubfolder: CONFIG_FIELDS.seriesOutputSubfolder.default,
-  plexApiKey: CONFIG_FIELDS.plexApiKey.default,
-  plexYoutubeLibraryId: CONFIG_FIELDS.plexYoutubeLibraryId.default,
-  plexSubfolderLibraryMappings: CONFIG_FIELDS.plexSubfolderLibraryMappings.default,
-  plexIP: CONFIG_FIELDS.plexIP.default,
-  plexPort: CONFIG_FIELDS.plexPort.default,
-  plexViaHttps: CONFIG_FIELDS.plexViaHttps.default,
-  plexPlaylistToken: CONFIG_FIELDS.plexPlaylistToken.default,
-  jellyfinEnabled: CONFIG_FIELDS.jellyfinEnabled.default,
-  jellyfinUrl: CONFIG_FIELDS.jellyfinUrl.default,
-  jellyfinApiKey: CONFIG_FIELDS.jellyfinApiKey.default,
-  jellyfinUserId: CONFIG_FIELDS.jellyfinUserId.default,
-  jellyfinVideoLibraryIds: CONFIG_FIELDS.jellyfinVideoLibraryIds.default,
-  jellyfinSubfolderLibraryMappings: CONFIG_FIELDS.jellyfinSubfolderLibraryMappings.default,
-  embyEnabled: CONFIG_FIELDS.embyEnabled.default,
-  embyUrl: CONFIG_FIELDS.embyUrl.default,
-  embyApiKey: CONFIG_FIELDS.embyApiKey.default,
-  embyUserId: CONFIG_FIELDS.embyUserId.default,
-  embyVideoLibraryIds: CONFIG_FIELDS.embyVideoLibraryIds.default,
-  watchStatusSyncEnabled: CONFIG_FIELDS.watchStatusSyncEnabled.default,
-  watchStatusSyncFrequency: CONFIG_FIELDS.watchStatusSyncFrequency.default,
-  plexWatchStatusAllUsers: CONFIG_FIELDS.plexWatchStatusAllUsers.default,
-  jellyfinWatchStatusAllUsers: CONFIG_FIELDS.jellyfinWatchStatusAllUsers.default,
-  embyWatchStatusAllUsers: CONFIG_FIELDS.embyWatchStatusAllUsers.default,
-  watchStatusWatchedRule: CONFIG_FIELDS.watchStatusWatchedRule.default,
-  youtubeApiKey: CONFIG_FIELDS.youtubeApiKey.default,
-  sponsorblockEnabled: CONFIG_FIELDS.sponsorblockEnabled.default,
-  sponsorblockAction: CONFIG_FIELDS.sponsorblockAction.default,
-  sponsorblockCategories: CONFIG_FIELDS.sponsorblockCategories.default,
-  sponsorblockApiUrl: CONFIG_FIELDS.sponsorblockApiUrl.default,
-  downloadSocketTimeoutSeconds: CONFIG_FIELDS.downloadSocketTimeoutSeconds.default,
-  downloadThrottledRate: CONFIG_FIELDS.downloadThrottledRate.default,
-  downloadRetryCount: CONFIG_FIELDS.downloadRetryCount.default,
-  downloadAutoRetryCount: CONFIG_FIELDS.downloadAutoRetryCount.default,
-  enableStallDetection: CONFIG_FIELDS.enableStallDetection.default,
-  stallDetectionWindowSeconds: CONFIG_FIELDS.stallDetectionWindowSeconds.default,
-  stallDetectionRateThreshold: CONFIG_FIELDS.stallDetectionRateThreshold.default,
-  downloadQueueManagerEnabled: CONFIG_FIELDS.downloadQueueManagerEnabled.default,
-  sleepRequests: CONFIG_FIELDS.sleepRequests.default,
-  proxy: CONFIG_FIELDS.proxy.default,
-  logLevel: CONFIG_FIELDS.logLevel.default,
-  cookiesEnabled: CONFIG_FIELDS.cookiesEnabled.default,
-  customCookiesUploaded: CONFIG_FIELDS.customCookiesUploaded.default,
-  writeChannelPosters: CONFIG_FIELDS.writeChannelPosters.default,
-  writeVideoNfoFiles: CONFIG_FIELDS.writeVideoNfoFiles.default,
-  writeVideoFanart: CONFIG_FIELDS.writeVideoFanart.default,
-  writeBackdropImages: CONFIG_FIELDS.writeBackdropImages.default,
-  notificationsEnabled: CONFIG_FIELDS.notificationsEnabled.default,
-  appriseUrls: CONFIG_FIELDS.appriseUrls.default,
-  autoRemovalEnabled: CONFIG_FIELDS.autoRemovalEnabled.default,
-  autoRemovalFreeSpaceThreshold: CONFIG_FIELDS.autoRemovalFreeSpaceThreshold.default,
-  autoRemovalVideoAgeThreshold: CONFIG_FIELDS.autoRemovalVideoAgeThreshold.default,
-  autoRemovalWatchedEnabled: CONFIG_FIELDS.autoRemovalWatchedEnabled.default,
-  autoRemovalWatchedMinDaysSinceWatched: CONFIG_FIELDS.autoRemovalWatchedMinDaysSinceWatched.default,
-  autoRemovalWatchedMinVideoAgeDays: CONFIG_FIELDS.autoRemovalWatchedMinVideoAgeDays.default,
-  autoRemovalKeepRecentCount: CONFIG_FIELDS.autoRemovalKeepRecentCount.default,
-  autoRemovalPreserveStrmFallback: CONFIG_FIELDS.autoRemovalPreserveStrmFallback.default,
-  autoRemovalMinFileSizeKB: CONFIG_FIELDS.autoRemovalMinFileSizeKB.default,
-  useTmpForDownloads: CONFIG_FIELDS.useTmpForDownloads.default,
-  tmpFilePath: CONFIG_FIELDS.tmpFilePath.default,
-  subtitlesEnabled: CONFIG_FIELDS.subtitlesEnabled.default,
-  subtitleLanguage: CONFIG_FIELDS.subtitleLanguage.default,
-  darkModeEnabled: CONFIG_FIELDS.darkModeEnabled.default,
-  channelVideosHotLoad: CONFIG_FIELDS.channelVideosHotLoad.default,
-  apiKeyRateLimit: CONFIG_FIELDS.apiKeyRateLimit.default,
-  autoUpdateYtdlp: CONFIG_FIELDS.autoUpdateYtdlp.default,
-  ytdlpUpdateChannel: CONFIG_FIELDS.ytdlpUpdateChannel.default,
-  ytdlpLastChecked: CONFIG_FIELDS.ytdlpLastChecked.default,
-  ytdlpLastUpdated: CONFIG_FIELDS.ytdlpLastUpdated.default,
-  ytdlpLastResult: CONFIG_FIELDS.ytdlpLastResult.default,
-  rescanLastRun: CONFIG_FIELDS.rescanLastRun.default,
-  ytdlpIpFamily: CONFIG_FIELDS.ytdlpIpFamily.default,
-  ytdlpDownloadRateLimit: CONFIG_FIELDS.ytdlpDownloadRateLimit.default,
-  ytdlpCustomArgs: CONFIG_FIELDS.ytdlpCustomArgs.default,
-  youtubeOutputDirectory: CONFIG_FIELDS.youtubeOutputDirectory.default,
-  uuid: CONFIG_FIELDS.uuid.default,
-  envAuthApplied: CONFIG_FIELDS.envAuthApplied.default,
-  mediaMode: CONFIG_FIELDS.mediaMode.default,
-  strm: CONFIG_FIELDS.strm.default,
-  ytstream: CONFIG_FIELDS.ytstream.default,
-  nzb: CONFIG_FIELDS.nzb.default,
-};
+export const DEFAULT_CONFIG: ConfigState = Object.fromEntries(
+  Object.entries(CONFIG_FIELDS).map(([key, field]) => [key, field.default])
+) as ConfigState;
 
 /**
  * Array of config keys that should be tracked for unsaved changes

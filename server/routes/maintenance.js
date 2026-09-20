@@ -10,7 +10,7 @@ const logger = require('../logger');
  *   name: Maintenance
  *   description: Filesystem reconciliation actions
  */
-function createMaintenanceRoutes({ verifyToken, videosModule, configModule, jobModule }) {
+function createMaintenanceRoutes({ verifyToken, videosModule, configModule, jobModule, cronJobs }) {
   const router = express.Router();
 
   /**
@@ -156,8 +156,8 @@ function createMaintenanceRoutes({ verifyToken, videosModule, configModule, jobM
    * @swagger
    * /api/maintenance/regenerate-metadata:
    *   post:
-   *     summary: Fully regenerate the .nfo file for every already-downloaded/STRM'd video from its cached .info.json
-   *     description: Unlike the resolution-tag backfill (which only patches one tag into the existing file), this rewrites the whole .nfo - useful after an NFO template/field change so existing files pick up the new format. DB-frozen fields (rating override, season/episode) are merged back in first so they're never dropped just because the cached .info.json predates them. Skips videos with no downloaded file or no cached metadata.
+   *     summary: Fully regenerate the .nfo file (and, for STRM videos, the .strmtool.json sidecar) for every already-downloaded/STRM'd video from its cached .info.json
+   *     description: Unlike the resolution-tag backfill (which only patches one tag into the existing file), this rewrites the whole .nfo - useful after an NFO template/field change so existing files pick up the new format. DB-frozen fields (rating override, season/episode) are merged back in first so they're never dropped just because the cached .info.json predates them. For STRM videos, also regenerates the .strmtool.json sidecar (server/modules/strmMediaInfoCache.js) from the same cached data, picking up the current ytstream/strm config rather than whatever was true when the .strm was materialized. Skips videos with no downloaded file or no cached metadata.
    *     tags: [Maintenance]
    *     responses:
    *       202:
@@ -270,6 +270,60 @@ function createMaintenanceRoutes({ verifyToken, videosModule, configModule, jobM
     } catch (err) {
       logger.error({ err }, 'Failed to compact job history');
       return res.status(500).json({ error: 'Failed to compact job history' });
+    }
+  });
+
+  /**
+   * @swagger
+   * /api/maintenance/tasks:
+   *   get:
+   *     summary: List scheduled tasks with next run and last run status
+   *     tags: [Maintenance]
+   *     responses:
+   *       200:
+   *         description: Array of scheduled tasks
+   */
+  router.get('/api/maintenance/tasks', verifyToken, (req, res) => {
+    try {
+      return res.json({ tasks: cronJobs.getTasks() });
+    } catch (err) {
+      logger.error({ err }, 'Failed to list scheduled tasks');
+      return res.status(500).json({ error: 'Failed to list scheduled tasks' });
+    }
+  });
+
+  /**
+   * @swagger
+   * /api/maintenance/tasks/{id}/run:
+   *   post:
+   *     summary: Run a scheduled task now (in the background)
+   *     tags: [Maintenance]
+   *     parameters:
+   *       - in: path
+   *         name: id
+   *         required: true
+   *         schema:
+   *           type: string
+   *     responses:
+   *       202:
+   *         description: Task started
+   *       404:
+   *         description: Unknown task
+   *       409:
+   *         description: Task is already running
+   */
+  router.post('/api/maintenance/tasks/:id/run', verifyToken, (req, res) => {
+    try {
+      const result = cronJobs.runTaskNow(req.params.id);
+      if (!result.started) {
+        return result.reason === 'running'
+          ? res.status(409).json({ error: 'Task is already running' })
+          : res.status(404).json({ error: 'Unknown task' });
+      }
+      return res.status(202).json({ status: 'started' });
+    } catch (err) {
+      logger.error({ err, taskId: req.params.id }, 'Failed to start scheduled task');
+      return res.status(500).json({ error: 'Failed to start task' });
     }
   });
 

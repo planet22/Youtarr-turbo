@@ -1,6 +1,6 @@
-# Youtarr on Synology NAS
+# Youtarr-Turbo on Synology NAS
 
-This guide provides Synology-specific installation instructions for Youtarr. Synology NAS devices running DSM 7+ can run Youtarr using Container Manager (Docker).
+This guide provides Synology-specific installation instructions for Youtarr-Turbo. Synology NAS devices running DSM 7+ can run Youtarr-Turbo using Container Manager (Docker).
 
 ## Why Synology Needs Special Instructions
 
@@ -24,7 +24,7 @@ This guide provides a manual configuration approach that works reliably on Synol
 
 ## Installation Steps
 
-> **Installation Overview**: This guide walks you through installing Youtarr on Synology. The most critical step for Synology users is **Step 4.5** where you must configure the database volume before first start. Unlike standard installations, Synology requires either named volumes or the LinuxServer MariaDB image to avoid permission issues.
+> **Installation Overview**: This guide walks you through installing Youtarr-Turbo on Synology. The most critical step for Synology users is **Step 4.5** where you must configure the database volume before first start. Unlike standard installations, Synology requires either named volumes or the LinuxServer MariaDB image to avoid permission issues.
 
 ### Step 1: Enable SSH and Configure Docker Access
 
@@ -72,7 +72,7 @@ cd /volume1/docker
 
 ---
 
-### Step 3: Clone Youtarr Repository
+### Step 3: Clone Youtarr-Turbo Repository
 
 **Option A: Using Git** (recommended):
 ```bash
@@ -93,7 +93,7 @@ cd Youtarr-turbo
 The docker-compose.yml file expects certain directories to exist. Create them now:
 
 ```bash
-cd /volume1/docker/Youtarr
+cd /volume1/docker/Youtarr-turbo
 
 # These directories are mounted by the containers
 # Note: database directory is NOT needed - see Step 4.5 for database configuration
@@ -114,7 +114,7 @@ mkdir -p /volume1/media/youtube
 mkdir -p /volume1/video/youtube
 
 # For standalone use:
-mkdir -p /volume1/docker/Youtarr/data/youtube
+mkdir -p /volume1/docker/Youtarr-turbo/data/youtube
 ```
 
 **Important**: Remember this path - you'll need it in the next step.
@@ -123,7 +123,7 @@ mkdir -p /volume1/docker/Youtarr/data/youtube
 
 ### Step 4.5: Configure Database Volume (IMPORTANT!)
 
-> **Critical for Synology**: The official MariaDB Docker image runs as UID 999, which does not exist on Synology systems. Using a bind mount (like `./database:/var/lib/mysql`) **will fail with permission errors** on Synology. You MUST configure the database volume before starting Youtarr for the first time.
+> **Critical for Synology**: The official MariaDB Docker image runs as UID 999, which does not exist on Synology systems. Using a bind mount (like `./database:/var/lib/mysql`) **will fail with permission errors** on Synology. You MUST configure the database volume before starting Youtarr-Turbo for the first time.
 
 Choose one of the following options:
 
@@ -134,7 +134,7 @@ Named volumes are managed by Docker internally and avoid all permission issues. 
 **Edit docker-compose.yml before first start:**
 
 ```bash
-cd /volume1/docker/Youtarr
+cd /volume1/docker/Youtarr-turbo
 vi docker-compose.yml
 ```
 
@@ -186,7 +186,7 @@ vi docker-compose.yml
 - Portable across all platforms (Synology, QNAP, macOS, Linux)
 - No UID/GID configuration needed
 
-**Note about data location:** The named volume data is stored by Docker in `/volume/@docker/volumes/` on Synology. You can back it up using `docker exec youtarr-db mysqldump` (see Backup section).
+**Note about data location:** The named volume data is stored by Docker in `/volume/@docker/volumes/` on Synology. You can back it up using `docker exec youtarr-turbo-db mysqldump` (see Backup section).
 
 ---
 
@@ -214,7 +214,7 @@ In this example:
 - The PGID would be 100
 
 ```bash
-cd /volume1/docker/Youtarr
+cd /volume1/docker/Youtarr-turbo
 vi docker-compose.yml
 ```
 
@@ -223,7 +223,7 @@ vi docker-compose.yml
 ```yaml
   youtarr-db:
     image: linuxserver/mariadb:latest
-    container_name: youtarr-db
+    container_name: youtarr-turbo-db
     restart: unless-stopped
     environment:
       MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-123qweasd}
@@ -247,7 +247,7 @@ vi docker-compose.yml
       retries: 5
       start_period: 30s
     networks:
-      - youtarr-network
+      - youtarr-turbo-network
 ```
 
 **3. Database directory:**
@@ -255,7 +255,7 @@ By default, Docker will automatically create the ./database directory (as root:r
 
 If you prefer to create it explicitly, or if you run into permission errors, you can do:
 ```bash
-cd /volume1/docker/Youtarr
+cd /volume1/docker/Youtarr-turbo
 mkdir -p database
 # Optional: If permissions are wrong, you can force ownership:
 # chown <your_uid>:<your_gid> database
@@ -290,10 +290,10 @@ After configuring the database, proceed to Step 5 to configure environment varia
 
 #### Create .env file
 
-Youtarr includes a `.env.example` template that you can use as a starting point:
+Youtarr-Turbo includes a `.env.example` template that you can use as a starting point:
 
 ```bash
-cd /volume1/docker/Youtarr
+cd /volume1/docker/Youtarr-turbo
 cp .env.example .env
 vi .env
 ```
@@ -337,7 +337,7 @@ Ensure `YOUTUBE_OUTPUT_DIR` matches the directory you created in Step 4.
 
 ---
 
-### Step 6: Start Youtarr
+### Step 6: Start Youtarr-Turbo
 
 > **⚠️ IMPORTANT**: Before starting, ensure you completed **Step 4.5** to configure the database volume! Skipping Step 4.5 will cause MariaDB to fail with permission errors on Synology.
 
@@ -346,7 +346,7 @@ Start the containers using docker compose:
 > **Compose command on Synology**: DSM 7 installs Docker Compose v2, which uses the space-separated syntax (`docker compose`). If your environment still uses the legacy v1 binary, substitute `docker-compose` in the examples below.
 
 ```bash
-cd /volume1/docker/Youtarr
+cd /volume1/docker/Youtarr-turbo
 docker compose up -d
 ```
 
@@ -363,8 +363,8 @@ docker compose logs -f
 ```
 
 **Expected output**:
-- `youtarr-db` container should show as "healthy"
-- `youtarr` container should show as "running"
+- `youtarr-turbo-db` container should show as "healthy"
+- `youtarr-turbo` container should show as "running"
 
 **Known harmless messages**:
 - IPv6 rate limiting warnings can be ignored
@@ -372,7 +372,7 @@ docker compose logs -f
 
 ---
 
-### Step 7: Access Youtarr
+### Step 7: Access Youtarr-Turbo
 
 Open your web browser and navigate to:
 
@@ -396,22 +396,22 @@ http://your-nas-ip:3087
 
 ### Container Manager GUI (Alternative to SSH)
 
-While SSH is recommended for initial setup, you can also manage Youtarr through Container Manager:
+While SSH is recommended for initial setup, you can also manage Youtarr-Turbo through Container Manager:
 
 1. Open **Container Manager** from DSM Package Center
 2. Go to **Project** tab
 3. Click **Create**
 4. Set project name: `youtarr`
-5. Set path: `/volume1/docker/Youtarr` (or your chosen location/volume)
+5. Set path: `/volume1/docker/Youtarr-turbo` (or your chosen location/volume)
 6. Upload or create `docker-compose.yml`
 
 **However**, manual configuration via SSH is more reliable for environment variables and initial setup.
 
 ### File Permissions
 
-Youtarr runs as root by default inside the container, which should work with Synology's default permissions. If you encounter permission issues with the **app container** (not database):
+Youtarr-Turbo runs as root by default inside the container, which should work with Synology's default permissions. If you encounter permission issues with the **app container** (not database):
 
-First stop Youtarr, then:
+First stop Youtarr-Turbo, then:
 
 **1. Find your Synology user UID/GID**
 
@@ -433,7 +433,7 @@ In this example:
 **2. Fix ownership for app directories**
 ```bash
 # Fix ownership for app directories only (from SSH)
-cd /volume1/docker/Youtarr
+cd /volume1/docker/Youtarr-turbo
 # sudo chown -R <your uid>:<your gid> config jobs server
 # Eg: sudo chown -R 1026:100 config jobs server
 ```
@@ -444,7 +444,7 @@ YOUTARR_UID=1026
 YOUTARR_GID=100
 ```
 
-Then restart Youtarr
+Then restart Youtarr-Turbo
 
 **Important**: The `YOUTARR_UID` and `YOUTARR_GID` environment variables only affect the **youtarr app container**, not the database container.
 
@@ -466,7 +466,7 @@ Then restart Youtarr
 
 **Recommended directory structure**:
 ```
-/volume1/docker/Youtarr/          # Application files
+/volume1/docker/Youtarr-turbo/          # Application files
 ├── config/                        # Youtarr configuration
 ├── database/                      # MariaDB data
 ├── jobs/                          # Job processing data
@@ -489,22 +489,22 @@ See [YOUTARR_DOWNLOADS_FOLDER_STRUCTURE.md](../YOUTARR_DOWNLOADS_FOLDER_STRUCTUR
 - Add library as "Movies" type
 - Enable NFO metadata reader
 - Point to your `YOUTUBE_OUTPUT_DIR`
-- For native playlist sync, also connect Jellyfin in Youtarr (Settings -> Jellyfin Integration: URL, API key, user). See [Media Server Playlists](../MEDIA_SERVER_PLAYLISTS.md).
+- For native playlist sync, also connect Jellyfin in Youtarr-Turbo (Settings -> Jellyfin Integration: URL, API key, user). See [Media Server Playlists](../MEDIA_SERVER_PLAYLISTS.md).
 
 #### Emby
 - Similar to Jellyfin setup
 - Use NFO metadata format
 - Configure as Movies library
-- For native playlist sync, also connect Emby in Youtarr (Settings -> Emby Integration). See [Media Server Playlists](../MEDIA_SERVER_PLAYLISTS.md).
+- For native playlist sync, also connect Emby in Youtarr-Turbo (Settings -> Emby Integration). See [Media Server Playlists](../MEDIA_SERVER_PLAYLISTS.md).
 
 ---
 
-## Updating Youtarr
+## Updating Youtarr-Turbo
 
-To update Youtarr to the latest version:
+To update Youtarr-Turbo to the latest version:
 
 ```bash
-cd /volume1/docker/Youtarr
+cd /volume1/docker/Youtarr-turbo
 
 # Pull latest code
 git pull
@@ -521,21 +521,21 @@ docker compose logs -f
 
 ## Stopping and Starting
 
-**Stop Youtarr**:
+**Stop Youtarr-Turbo**:
 ```bash
-cd /volume1/docker/Youtarr
+cd /volume1/docker/Youtarr-turbo
 docker compose down
 ```
 
-**Start Youtarr**:
+**Start Youtarr-Turbo**:
 ```bash
-cd /volume1/docker/Youtarr
+cd /volume1/docker/Youtarr-turbo
 docker compose up -d
 ```
 
-**Restart Youtarr**:
+**Restart Youtarr-Turbo**:
 ```bash
-cd /volume1/docker/Youtarr
+cd /volume1/docker/Youtarr-turbo
 docker compose restart
 ```
 
@@ -548,7 +548,7 @@ docker compose restart
 **Symptom**: Container fails to start with error about empty section between colons.
 
 **Solution**:
-1. Verify `.env` file exists: `cat /volume1/docker/Youtarr/.env`
+1. Verify `.env` file exists: `cat /volume1/docker/Youtarr-turbo/.env`
 2. Verify it contains: `YOUTUBE_OUTPUT_DIR="/your/path"`
 3. Restart containers: `docker compose down && docker compose up -d`
 
@@ -578,7 +578,7 @@ docker compose restart
 
 **Solution**:
 ```bash
-cd /volume1/docker/Youtarr
+cd /volume1/docker/Youtarr-turbo
 mkdir -p database config jobs server/images
 docker compose up -d
 ```
@@ -645,7 +645,7 @@ docker ps
 
 **Solution A: Use the setup token**:
 ```bash
-cd /volume1/docker/Youtarr
+cd /volume1/docker/Youtarr-turbo
 docker compose logs youtarr | grep -A5 "initial setup required"
 
 # Or read the token file directly:
@@ -657,7 +657,7 @@ Paste the token into the setup wizard and create your admin account.
 **Solution B: Set preset credentials**:
 ```bash
 # Edit .env file
-vi /volume1/docker/Youtarr/.env
+vi /volume1/docker/Youtarr-turbo/.env
 
 # Add these lines:
 AUTH_PRESET_USERNAME=admin
@@ -719,9 +719,9 @@ docker compose up -d
 
 **Root Cause**:
 - Most Synology failures are straight permission issues: the official MariaDB image runs as UID 999, which often lacks ownership rights on `/volume1/...` bind mounts. MariaDB can't even open the files and surfaces error 13. **This is why Step 4.5 instructs you to configure database volumes BEFORE first start**.
-- If you actually have a duplicate-column error (for example after restoring a database backup), all Youtarr migrations now check for existing schema and skip work they have already performed. A simple restart usually clears the error automatically; if not, drop the duplicate column manually (per the main Troubleshooting guide) and rerun.
+- If you actually have a duplicate-column error (for example after restoring a database backup), all Youtarr-Turbo migrations now check for existing schema and skip work they have already performed. A simple restart usually clears the error automatically; if not, drop the duplicate column manually (per the main Troubleshooting guide) and rerun.
 
-**If you already started Youtarr and are seeing permission errors:**
+**If you already started Youtarr-Turbo and are seeing permission errors:**
 
 **Option A: Switch to Named Volume (Recommended - Fresh Start)**
 
@@ -729,7 +729,7 @@ If you don't have important data yet or can re-add your channels:
 
 1. **Stop containers**:
    ```bash
-   cd /volume1/docker/Youtarr
+   cd /volume1/docker/Youtarr-turbo
    docker compose down
    ```
 
@@ -752,7 +752,7 @@ If you need bind mounts for some reason:
 
 1. **Stop containers**:
    ```bash
-   cd /volume1/docker/Youtarr
+   cd /volume1/docker/Youtarr-turbo
    docker compose down
    ```
 
@@ -778,7 +778,7 @@ If you have existing data in `./database/` that you want to preserve:
    # Try to start just the database temporarily to dump data
    docker compose up -d youtarr-db
    sleep 30
-   docker exec youtarr-db mysqldump -u <db_user> -p'<db_password>' <db_name> > /volume1/backups/youtarr-backup.sql
+   docker exec youtarr-turbo-db mysqldump -u <db_user> -p'<db_password>' <db_name> > /volume1/backups/youtarr-backup.sql
    # Replace <db_user>, <db_password>, and <db_name> with the values from your .env file (defaults: root / 123qweasd / youtarr).
    docker compose down
    ```
@@ -795,14 +795,14 @@ If you have existing data in `./database/` that you want to preserve:
    ```bash
    # Wait for database to be healthy
    sleep 30
-   docker exec -i youtarr-db mysql -u <db_user> -p'<db_password>' <db_name> < /volume1/backups/youtarr-backup.sql
+   docker exec -i youtarr-turbo-db mysql -u <db_user> -p'<db_password>' <db_name> < /volume1/backups/youtarr-backup.sql
    # Replace <db_user>, <db_password>, and <db_name> with the values from your .env file.
    docker compose restart youtarr
    ```
 
 **Prevention for new installations:**
 
-✅ **Always follow Step 4.5** before starting Youtarr for the first time to avoid these issues entirely!
+✅ **Always follow Step 4.5** before starting Youtarr-Turbo for the first time to avoid these issues entirely!
 
 ### High CPU Usage
 
@@ -811,7 +811,7 @@ If you have existing data in `./database/` that you want to preserve:
 **Cause**: yt-dlp and ffmpeg are CPU-intensive during video processing.
 
 **Solutions**:
-- Schedule downloads during off-peak hours (configure via Youtarr UI)
+- Schedule downloads during off-peak hours (configure via Youtarr-Turbo UI)
 - Lower **Files to Download per Channel/Playlist** in Settings -> Core, or set a **Download Rate Limit** in Settings -> YT-DLP
 - Lower video quality settings to reduce processing time
 - Disable SponsorBlock integration (if enabled)
@@ -826,7 +826,7 @@ If you have existing data in `./database/` that you want to preserve:
    df -h /volume1
    ```
 
-2. Enable automatic cleanup in Youtarr:
+2. Enable automatic cleanup in Youtarr-Turbo:
    - Settings -> Auto Removal
    - Set age threshold (e.g., remove videos older than 90 days)
    - Set free space threshold (e.g., maintain 100 GB free)
@@ -849,11 +849,11 @@ If you have existing data in `./database/` that you want to preserve:
 mkdir -p /volume1/backups/youtarr
 
 # Backup configuration
-cp -r /volume1/docker/Youtarr/config /volume1/backups/youtarr/config-$(date +%Y%m%d)
+cp -r /volume1/docker/Youtarr-turbo/config /volume1/backups/youtarr/config-$(date +%Y%m%d)
 
 # Backup database (with containers running).
 # Replace <db_user>, <db_password>, and <db_name> with the values from your .env file.
-docker exec youtarr-db mysqldump -u <db_user> -p'<db_password>' <db_name> > /volume1/backups/youtarr/database-$(date +%Y%m%d).sql
+docker exec youtarr-turbo-db mysqldump -u <db_user> -p'<db_password>' <db_name> > /volume1/backups/youtarr/database-$(date +%Y%m%d).sql
 ```
 
 **Optional file-level backups**
@@ -861,7 +861,7 @@ docker exec youtarr-db mysqldump -u <db_user> -p'<db_password>' <db_name> > /vol
 - **Bind mount / linuxserver installs**:
   ```bash
   docker compose down
-  cp -r /volume1/docker/Youtarr/database /volume1/backups/youtarr/database-$(date +%Y%m%d)
+  cp -r /volume1/docker/Youtarr-turbo/database /volume1/backups/youtarr/database-$(date +%Y%m%d)
   docker compose up -d
   ```
 
@@ -877,7 +877,7 @@ docker exec youtarr-db mysqldump -u <db_user> -p'<db_password>' <db_name> > /vol
 
 1. **Stop containers and restore configuration**
    ```bash
-   cd /volume1/docker/Youtarr
+   cd /volume1/docker/Youtarr-turbo
    docker compose down
    rm -rf config
    cp -r /volume1/backups/youtarr/config-YYYYMMDD config
@@ -889,7 +889,7 @@ docker exec youtarr-db mysqldump -u <db_user> -p'<db_password>' <db_name> > /vol
      ```bash
      docker compose up -d youtarr-db
      sleep 30
-     docker exec -i youtarr-db mysql -u <db_user> -p'<db_password>' <db_name> < /volume1/backups/youtarr/database-YYYYMMDD.sql
+     docker exec -i youtarr-turbo-db mysql -u <db_user> -p'<db_password>' <db_name> < /volume1/backups/youtarr/database-YYYYMMDD.sql
      docker compose restart youtarr
      ```
 
@@ -962,19 +962,19 @@ If your NAS has SSD cache:
 
 ### Schedule Downloads During Low-Activity Periods
 
-Configure Youtarr's cron schedule for late night:
+Configure Youtarr-Turbo's cron schedule for late night:
 - Settings -> Core, "Download Frequency" field
 - Example: `0 2 * * *` (runs at 2 AM daily)
 
 ---
 
-## Uninstalling Youtarr
+## Uninstalling Youtarr-Turbo
 
-To completely remove Youtarr:
+To completely remove Youtarr-Turbo:
 
 ```bash
 # Stop and remove containers
-cd /volume1/docker/Youtarr
+cd /volume1/docker/Youtarr-turbo
 docker compose down -v
 
 # Remove application files

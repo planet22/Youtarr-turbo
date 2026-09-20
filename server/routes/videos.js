@@ -1,6 +1,11 @@
 const express = require('express');
 const rateLimit = require('express-rate-limit');
 const { ROOT_SENTINEL, GLOBAL_DEFAULT_SENTINEL } = require('../modules/filesystem/constants');
+const youtubeUrlParser = require('../modules/youtubeUrlParser');
+
+// Upper bound on how many videoIds a single /api/videos/strm/download request
+// may process, to avoid an unbounded batch of sequential enqueue calls.
+const MAX_STRM_BULK_VIDEO_IDS = 500;
 
 // Video validation rate limiter
 const videoValidationLimiter = rateLimit({
@@ -532,15 +537,21 @@ module.exports = function createVideoRoutes({ verifyToken, videosModule, downloa
       if (!Array.isArray(videoIds) || videoIds.length === 0) {
         return res.status(400).json({ success: false, error: 'videoIds array is required' });
       }
+      if (videoIds.length > MAX_STRM_BULK_VIDEO_IDS) {
+        return res.status(400).json({ success: false, error: `videoIds array exceeds maximum of ${MAX_STRM_BULK_VIDEO_IDS}` });
+      }
 
       const Video = require('../models/video');
       const strmCacheOnPlay = require('../modules/strmCacheOnPlay');
       const processed = [];
       const failed = [];
 
+      const videos = await Video.findAll({ where: { id: videoIds } });
+      const videoById = new Map(videos.map((v) => [String(v.id), v]));
+
       for (const videoId of videoIds) {
         try {
-          const video = await Video.findByPk(videoId);
+          const video = videoById.get(String(videoId));
           if (!video) {
             failed.push({ videoId, error: 'Video not found in database' });
             continue;
@@ -1115,14 +1126,13 @@ module.exports = function createVideoRoutes({ verifyToken, videosModule, downloa
     // shape is still validated here at the boundary.
     const { videoChannelMap } = req.body;
     if (videoChannelMap !== undefined && videoChannelMap !== null) {
-      const YOUTUBE_ID_PATTERN = /^[a-zA-Z0-9_-]{11}$/;
       const YOUTUBE_CHANNEL_ID_PATTERN = /^UC[a-zA-Z0-9_-]{22}$/;
       const isValidMap =
         typeof videoChannelMap === 'object' &&
         !Array.isArray(videoChannelMap) &&
         Object.entries(videoChannelMap).every(
           ([videoId, channelId]) =>
-            YOUTUBE_ID_PATTERN.test(videoId) &&
+            youtubeUrlParser.isValidYoutubeId(videoId) &&
             typeof channelId === 'string' &&
             YOUTUBE_CHANNEL_ID_PATTERN.test(channelId)
         );

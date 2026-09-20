@@ -48,7 +48,7 @@ jest.mock('../../../shared/SubfolderAutocomplete', () => ({
     const React = require('react');
     return React.createElement('div', { 'data-testid': 'subfolder-autocomplete' },
       React.createElement('button', {
-        'data-testid': 'trigger-subfolder-change',
+        'data-testid': props.label === 'Default Subfolder' ? 'trigger-subfolder-change' : 'trigger-subfolder-change-other',
         onClick: () => props.onChange('NewFolder')
       }, 'Change Subfolder')
     );
@@ -112,7 +112,7 @@ describe('CoreSettingsSection Component', () => {
       expect(screen.getByText('Core Settings')).toBeInTheDocument();
       expect(screen.getByText('General Settings')).toBeInTheDocument();
       expect(screen.getByText('Download Settings')).toBeInTheDocument();
-      expect(screen.getByText('File Structure Settings')).toBeInTheDocument();
+      expect(screen.getByText('Default File Structure Settings')).toBeInTheDocument();
     });
 
     test('allows collapsing and expanding download settings accordion', async () => {

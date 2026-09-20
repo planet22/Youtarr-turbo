@@ -73,7 +73,7 @@ describe('CompactHistorySection', () => {
   test('shows a result message after compacting completes', async () => {
     setup({ preview: { totalJobs: 50, compactableCount: 42 } });
     await userEvent.click(screen.getByRole('button', { name: /compact 42 rows/i }));
-    await waitFor(() => expect(screen.getByText(/removed 42 history rows/i)).toBeInTheDocument());
+    expect(await screen.findByText(/removed 42 history rows/i)).toBeInTheDocument();
   });
 
   test('displays an error message from the hook', () => {

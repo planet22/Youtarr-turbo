@@ -43,10 +43,10 @@ jest.mock('../../modules/download/ytdlpCommandBuilder', () => ({
 }));
 
 jest.mock('../../modules/youtubeMetadataCache', () => ({
-  clearCachedEntry: jest.fn(),
+  deleteEntry: jest.fn(),
+  getCacheDetail: jest.fn(),
   countCached: jest.fn(),
   clearAll: jest.fn(),
-  YOUTUBE_METADATA_CACHE_RETENTION_DAYS: 365,
 }));
 const youtubeMetadataCache = require('../../modules/youtubeMetadataCache');
 
@@ -161,11 +161,80 @@ describe('GET /api/ytstream/mode-compatibility', () => {
     expect(body.backfillMissingSegments.status).toBe('optional');
   });
 
+  test('mode=youtube-hls: every encode-related field is ignored (nothing is encoded or wrapped locally)', () => {
+    const res = call({ mode: 'youtube-hls', transcode: 'h264' });
+    const body = res.json.mock.calls[0][0];
+    expect(body.container.status).toBe('ignored');
+    expect(body.transcode.status).toBe('ignored');
+    expect(body.hardwareMode.status).toBe('ignored');
+    expect(body.tuning.status).toBe('ignored');
+    expect(body.calculatedLength.status).toBe('ignored');
+    expect(body.hlsMasterPlaylist.status).toBe('ignored');
+  });
+
+  test.each(['hls-byterange', 'download-cache', 'youtube-hls'])('mode=%s: cacheOnPlay is ignored (experimental modes are intercepted before cache-on-play runs)', (mode) => {
+    const res = call({ mode, transcode: 'copy' });
+    const body = res.json.mock.calls[0][0];
+    expect(body.cacheOnPlay.status).toBe('ignored');
+  });
+
+  test.each(['hls-byterange', 'download-cache'])('mode=%s: calculatedLength is ignored (no estimated Content-Length to calculate)', (mode) => {
+    const res = call({ mode, transcode: 'copy' });
+    const body = res.json.mock.calls[0][0];
+    expect(body.calculatedLength.status).toBe('ignored');
+  });
+
+  test.each(['hls-byterange', 'download-cache', 'youtube-hls'])('mode=%s: serveCachedFile is ignored (experimental modes are intercepted before the cached-file check)', (mode) => {
+    const res = call({ mode, transcode: 'copy' });
+    const body = res.json.mock.calls[0][0];
+    expect(body.serveCachedFile.status).toBe('ignored');
+  });
+
+  test.each(['direct', 'direct-redirect', 'hls', 'hls-buffer'])('mode=%s: serveCachedFile is optional', (mode) => {
+    const res = call({ mode, transcode: 'copy' });
+    const body = res.json.mock.calls[0][0];
+    expect(body.serveCachedFile.status).toBe('optional');
+  });
+
   test('defaults to mode=direct when no query params are given', () => {
     const res = call({});
     const body = res.json.mock.calls[0][0];
     expect(body.calculatedLength.status).toBe('ignored');
     expect(body.container.status).toBe('ignored');
+  });
+});
+
+describe('youtube-hls proxy routes (playlists and segment redirects)', () => {
+  const runHandler = (routePath, params) => {
+    const handler = getHandler('get', routePath);
+    const res = mockRes();
+    res.redirect = jest.fn();
+    res.send = res.send || jest.fn();
+    handler({ params, headers: {} }, res);
+    return res;
+  };
+
+  test('registers a public playlist route', () => {
+    expect(() => getHandler('get', '/api/ytstream/:youtubeId/yth/:key/:file')).not.toThrow();
+  });
+
+  test('registers a public segment route', () => {
+    expect(() => getHandler('get', '/api/ytstream/:youtubeId/yth/:key/:kind/:file')).not.toThrow();
+  });
+
+  test('answers 404 for a playlist that was never registered', () => {
+    const res = runHandler('/api/ytstream/:youtubeId/yth/:key/:file', { youtubeId: 'abc123XYZ_', key: 'ythp-00000000000000000000', file: 'video.m3u8' });
+    expect(res.status).toHaveBeenCalledWith(404);
+  });
+
+  test('rejects a malformed key with 400', () => {
+    const res = runHandler('/api/ytstream/:youtubeId/yth/:key/:file', { youtubeId: 'abc123XYZ_', key: '../secret', file: 'video.m3u8' });
+    expect(res.status).toHaveBeenCalledWith(400);
+  });
+
+  test('never redirects a segment request for an unregistered playlist', () => {
+    const res = runHandler('/api/ytstream/:youtubeId/yth/:key/:kind/:file', { youtubeId: 'abc123XYZ_', key: 'ythp-00000000000000000000', kind: 'video', file: 's0.ts' });
+    expect(res.redirect).not.toHaveBeenCalled();
   });
 });
 
@@ -211,6 +280,71 @@ describe('GET /api/ytstream/:youtubeId/simulate', () => {
     expect(body.plan.transcode).toBe('copy');
     expect(body.plan.quality).toBe('720');
     expect(body.wouldCall).toMatch(/serveDirect/);
+  });
+
+  describe('experimental modes (their own dry run, never resolvePlaybackPlan)', () => {
+    const configFor = (ytstream) => configModule.getConfig.mockReturnValue({ ytstream, preferredResolution: '720' });
+
+    test('mode=youtube-hls reports itself as experimental with what it would call', async () => {
+      configFor({ defaultMode: 'youtube-hls', quality: '1080', audioLanguage: 'de' });
+      const res = await call({});
+      const body = res.json.mock.calls[0][0];
+      expect([body.experimental, body.mode]).toEqual([true, 'youtube-hls']);
+      expect(body.wouldCall).toMatch(/getPlaylist/);
+    });
+
+    test('mode=youtube-hls shows the configured routing mode', async () => {
+      configFor({ defaultMode: 'youtube-hls', quality: '1080', youtubeHlsProxy: 'serve' });
+      const body = (await call({})).json.mock.calls[0][0];
+      expect(body.settings.hlsProxy).toBe('serve');
+      expect(body.wouldCall).toMatch(/redirects \(302\)/);
+    });
+
+    test('mode=youtube-hls treats an unknown routing value as off', async () => {
+      configFor({ defaultMode: 'youtube-hls', quality: '1080', youtubeHlsProxy: 'bogus' });
+      expect((await call({})).json.mock.calls[0][0].settings.hlsProxy).toBe('off');
+    });
+
+    test('mode=youtube-hls shows the configured audio language and the settings it ignores', async () => {
+      configFor({ defaultMode: 'youtube-hls', quality: '1080', audioLanguage: 'de' });
+      const body = (await call({})).json.mock.calls[0][0];
+      expect(body.settings.audioLanguage).toBe('de');
+      expect(body.ignoredSettings).toEqual(expect.arrayContaining(['container', 'transcode']));
+    });
+
+    test('mode=youtube-hls without probe does no network work and says the playlist is not cached yet', async () => {
+      configFor({ defaultMode: 'youtube-hls', quality: '480' });
+      const body = (await call({ probe: undefined })).json.mock.calls[0][0];
+      expect([body.playlistCached, body.choice]).toEqual([false, undefined]);
+    });
+
+    test('mode=hls-byterange reports the session key and starting a fresh encode when nothing is cached', async () => {
+      configFor({ defaultMode: 'hls-byterange', quality: '1080', byteRangeDeliverAsFile: true });
+      const body = (await call({})).json.mock.calls[0][0];
+      expect(body.sessionKey).toMatch(/^[a-f0-9]{20}$/);
+      expect(body.wouldCall).toMatch(/fresh encode/);
+    });
+
+    test('mode=hls-byterange reflects Matroska when the container is mkv', async () => {
+      configFor({ defaultMode: 'hls-byterange', quality: '1080', byteRangeDeliverAsFile: true, container: 'mkv' });
+      const body = (await call({})).json.mock.calls[0][0];
+      expect(body.settings.container).toBe('mkv');
+    });
+
+    test('the response never includes the full config or the caller identity', async () => {
+      configFor({ defaultMode: 'hls-byterange', quality: '1080', byteRangeDeliverAsFile: true });
+      const body = (await call({})).json.mock.calls[0][0];
+      expect(Object.keys(body.requested)).not.toEqual(expect.arrayContaining(['config']));
+      expect(Object.keys(body.requested)).not.toEqual(expect.arrayContaining(['clientIp']));
+    });
+
+    test('a normal mode still gets the plan-based dry run', async () => {
+      configFor({ defaultMode: 'hls' });
+      spawnSync.mockReturnValue({ error: null, status: 0 });
+      const body = (await call({})).json.mock.calls[0][0];
+      expect(body.plan.mode).toBe('hls');
+      expect(body.experimental).toBeUndefined();
+    });
   });
 
   test('an invalid requested mode falls back to the currently configured default, not hardcoded direct', async () => {
@@ -317,7 +451,7 @@ describe('GET /api/ytstream/streams', () => {
     const req = {};
     const res = mockRes();
     await handler(req, res);
-    expect(res.json).toHaveBeenCalledWith({ streams: [] });
+    expect(res.json).toHaveBeenCalledWith({ streams: [], byteRangeSessions: { total: 0, encoding: 0, finished: 0 } });
     expect(models.Video.findAll).not.toHaveBeenCalled();
   });
 });
@@ -412,23 +546,20 @@ describe('DELETE /api/ytstream/history', () => {
 
 describe('metadata-cache routes', () => {
   test('DELETE /:youtubeId/metadata-cache clears the in-memory cache and the DB row', async () => {
-    const models = buildModels();
-    models.YoutubeMetadataCache.destroy.mockResolvedValue(1);
-    const handler = getHandler('delete', '/api/ytstream/:youtubeId/metadata-cache', models);
+    youtubeMetadataCache.deleteEntry.mockResolvedValue(1);
+    const handler = getHandler('delete', '/api/ytstream/:youtubeId/metadata-cache', buildModels());
     const req = { params: { youtubeId: 'vid1' } };
     const res = mockRes();
     await handler(req, res);
-    expect(youtubeMetadataCache.clearCachedEntry).toHaveBeenCalledWith('vid1');
-    expect(models.YoutubeMetadataCache.destroy).toHaveBeenCalledWith({ where: { youtube_id: 'vid1' } });
+    expect(youtubeMetadataCache.deleteEntry).toHaveBeenCalledWith('vid1');
     expect(res.json).toHaveBeenCalledWith({ success: true, deleted: 1 });
   });
 
   test('DELETE /metadata-cache/bulk clears every id and reports partial failures', async () => {
-    const models = buildModels();
-    models.YoutubeMetadataCache.destroy
+    youtubeMetadataCache.deleteEntry
       .mockResolvedValueOnce(1)
       .mockRejectedValueOnce(new Error('boom'));
-    const handler = getHandler('delete', '/api/ytstream/metadata-cache/bulk', models);
+    const handler = getHandler('delete', '/api/ytstream/metadata-cache/bulk', buildModels());
     const req = { body: { youtubeIds: ['ok-id', 'bad-id'] } };
     const res = mockRes();
     await handler(req, res);
@@ -436,8 +567,8 @@ describe('metadata-cache routes', () => {
   });
 
   test('GET /:youtubeId/metadata-cache/detail 404s when nothing is cached', async () => {
-    const models = buildModels();
-    const handler = getHandler('get', '/api/ytstream/:youtubeId/metadata-cache/detail', models);
+    youtubeMetadataCache.getCacheDetail.mockResolvedValue(null);
+    const handler = getHandler('get', '/api/ytstream/:youtubeId/metadata-cache/detail', buildModels());
     const req = { params: { youtubeId: 'vid1' }, query: {} };
     const res = mockRes();
     await handler(req, res);
@@ -445,14 +576,20 @@ describe('metadata-cache routes', () => {
   });
 
   test('GET /:youtubeId/metadata-cache/detail parses raw_info_json and omits it unless raw=true', async () => {
-    const models = buildModels();
-    models.YoutubeMetadataCache.findByPk.mockResolvedValue({
-      duration_seconds: 600,
-      fetched_at: new Date('2026-01-01'),
-      last_accessed_at: new Date('2026-01-02'),
-      raw_info_json: JSON.stringify({ title: 'Hello', uploader: 'Chan', width: 1920, height: 1080, fps: 30 }),
+    youtubeMetadataCache.getCacheDetail.mockResolvedValue({
+      durationSeconds: 600,
+      fetchedAt: new Date('2026-01-01'),
+      lastAccessedAt: new Date('2026-01-02'),
+      expiresAt: null,
+      title: 'Hello',
+      uploader: 'Chan',
+      resolution: '1920x1080',
+      fps: 30,
+      uploadDate: null,
+      hasRawInfoJson: true,
+      rawInfoJson: { title: 'Hello', uploader: 'Chan', width: 1920, height: 1080, fps: 30 },
     });
-    const handler = getHandler('get', '/api/ytstream/:youtubeId/metadata-cache/detail', models);
+    const handler = getHandler('get', '/api/ytstream/:youtubeId/metadata-cache/detail', buildModels());
     const req = { params: { youtubeId: 'vid1' }, query: {} };
     const res = mockRes();
     await handler(req, res);
@@ -464,12 +601,11 @@ describe('metadata-cache routes', () => {
   });
 
   test('GET /:youtubeId/metadata-cache/detail includes rawInfoJson when raw=true', async () => {
-    const models = buildModels();
-    models.YoutubeMetadataCache.findByPk.mockResolvedValue({
-      duration_seconds: 600,
-      raw_info_json: JSON.stringify({ title: 'Hello' }),
+    youtubeMetadataCache.getCacheDetail.mockResolvedValue({
+      durationSeconds: 600,
+      rawInfoJson: { title: 'Hello' },
     });
-    const handler = getHandler('get', '/api/ytstream/:youtubeId/metadata-cache/detail', models);
+    const handler = getHandler('get', '/api/ytstream/:youtubeId/metadata-cache/detail', buildModels());
     const req = { params: { youtubeId: 'vid1' }, query: { raw: 'true' } };
     const res = mockRes();
     await handler(req, res);
@@ -626,5 +762,38 @@ describe('GET /api/ytstream/:youtubeId/formats', () => {
     const res = mockRes();
     await handler(req, res);
     expect(res.status).toHaveBeenCalledWith(502);
+  });
+});
+
+describe('GET /api/ytstream/:youtubeId/byterange-hls/:sessionKey/progress', () => {
+  let server;
+  let baseUrl;
+
+  beforeAll(async () => {
+    const router = createYtStreamRoutes({
+      verifyToken: (req, res, next) => next(),
+      getClientAddress: (req) => req.socket?.remoteAddress || '127.0.0.1',
+      models: buildModels(),
+    });
+    const app = express();
+    app.use(router);
+    await new Promise((resolve) => { server = app.listen(0, '127.0.0.1', resolve); });
+    baseUrl = `http://127.0.0.1:${server.address().port}`;
+  });
+
+  afterAll(async () => {
+    await new Promise((resolve) => server.close(resolve));
+  });
+
+  test('is reached instead of being swallowed by the :filename asset route (unknown session is a 404 with a JSON error, not a 400)', async () => {
+    const response = await fetch(`${baseUrl}/api/ytstream/abc123XYZ_/byterange-hls/${'a'.repeat(20)}/progress`);
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({ error: 'Session not found or expired' });
+  });
+
+  test('rejects a malformed session key with a JSON 400', async () => {
+    const response = await fetch(`${baseUrl}/api/ytstream/abc123XYZ_/byterange-hls/not-a-key/progress`);
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: 'Invalid session key' });
   });
 });

@@ -3,6 +3,7 @@
 const https = require('https');
 const logger = require('../logger');
 const createConcurrencyLimiter = require('./subscriptionImport/concurrencyLimiter');
+const { isValidYoutubeId } = require('./youtubeUrlParser');
 
 // Rate limiting: at most OEMBED_RPS outbound oEmbed requests per second.
 // This protects the user's IP from YouTube throttling / temporary bans.
@@ -12,7 +13,6 @@ const OEMBED_TIMEOUT_MS = 5000;
 const OEMBED_HARD_DEADLINE_MS = OEMBED_TIMEOUT_MS + 2000;
 const OEMBED_MAX_IDS_PER_REQUEST = 100;
 const OEMBED_MAX_BYTES = 64 * 1024;
-const VIDEO_ID_PATTERN = /^[a-zA-Z0-9_-]{11}$/;
 
 /**
  * Creates a rate limiter that ensures at most `rps` fires per second.
@@ -155,7 +155,7 @@ async function enrichByIds(ids, { rateLimiter = defaultRateLimiter } = {}) {
   if (!Array.isArray(ids) || ids.length === 0) return {};
 
   const cleanIds = Array.from(
-    new Set(ids.filter((id) => typeof id === 'string' && VIDEO_ID_PATTERN.test(id)))
+    new Set(ids.filter((id) => isValidYoutubeId(id)))
   ).slice(0, OEMBED_MAX_IDS_PER_REQUEST);
 
   if (cleanIds.length === 0) return {};

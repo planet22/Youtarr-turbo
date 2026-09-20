@@ -1,6 +1,6 @@
 # Kodi Integration Guide
 
-Complete guide for integrating Youtarr with Kodi media center.
+Complete guide for integrating Youtarr-Turbo with Kodi media center.
 
 ## Table of Contents
 - [Overview](#overview)
@@ -13,7 +13,7 @@ Complete guide for integrating Youtarr with Kodi media center.
 
 ## Overview
 
-Youtarr provides comprehensive Kodi support through:
+Youtarr-Turbo provides comprehensive Kodi support through:
 - NFO metadata files for each video
 - Channel poster artwork (poster.jpg)
 - Proper folder organization
@@ -25,7 +25,7 @@ Youtarr provides comprehensive Kodi support through:
 ### Step 1: Add Video Source
 
 1. Navigate to Videos → Files → Add videos...
-2. Browse to your Youtarr download directory
+2. Browse to your Youtarr-Turbo download directory
 3. Enter a name for this media source (e.g., "YouTube")
 
 ### Step 2: Set Content Type
@@ -48,7 +48,7 @@ Configure the following settings:
 
 ### NFO Support
 
-Youtarr generates comprehensive NFO files containing:
+Youtarr-Turbo generates comprehensive NFO files containing:
 - **Title**: Video title with channel prefix
 - **Plot**: Full video description
 - **Premiered**: Original YouTube upload date
@@ -101,9 +101,9 @@ Organize content by type using subfolders:
 
 ## Playlist Files (.m3u)
 
-Youtarr doesn't push native playlists into Kodi the way it does for Plex, Jellyfin, and Emby. If you subscribe to YouTube playlists, Youtarr writes a standard `.m3u` file for each one into a `__playlists__` folder next to your videos. Import that file as a playlist source in Kodi to get the same list. See [Media Server Playlists](../MEDIA_SERVER_PLAYLISTS.md#m3u-fallback) for details.
+Youtarr-Turbo doesn't push native playlists into Kodi the way it does for Plex, Jellyfin, and Emby. If you subscribe to YouTube playlists, Youtarr-Turbo writes a standard `.m3u` file for each one into a `__playlists__` folder next to your videos. Import that file as a playlist source in Kodi to get the same list. See [Media Server Playlists](../MEDIA_SERVER_PLAYLISTS.md#m3u-fallback) for details.
 
-Channels can also write their own `.m3u`: enable "Generate channel playlist file (.m3u)" in a channel's settings and Youtarr writes a `<Channel Name>.m3u` at the top of that channel's folder, importable into Kodi the same way.
+Channels can also write their own `.m3u`: enable "Generate channel playlist file (.m3u)" in a channel's settings and Youtarr-Turbo writes a `<Channel Name>.m3u` at the top of that channel's folder, importable into Kodi the same way.
 
 ## File Structure
 

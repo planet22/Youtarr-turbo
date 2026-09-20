@@ -103,6 +103,8 @@ jest.mock('../chips', () => ({
       autoRemovalProtected ? 'Protected (All)' : `Protected (${keepRecentCount})`
     );
   },
+  MediaModeChip: () => null,
+  LibraryModeChip: () => null,
 }));
 
 describe('ChannelListRow', () => {

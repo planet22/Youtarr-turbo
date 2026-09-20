@@ -2,6 +2,33 @@ import React, { useState } from 'react';
 import { Dialog, DialogTitle, DialogContent, DialogActions, Button, Typography, Tooltip, Box, Switch, FormControlLabel } from '../../ui';
 import { StreamSegmentStatus } from '../../../hooks/useActiveStreams';
 
+/**
+ * What a filled cell means. 'encode': hls/hls-buffer, where a segment is a
+ * file Youtarr has encoded. 'requested': youtube-hls with segments routed
+ * through Youtarr, where nothing is encoded and a filled cell is a segment the
+ * player has asked for.
+ */
+export type SegmentVariant = 'encode' | 'requested';
+
+const VARIANT_TEXT: Record<SegmentVariant, {
+  done: string; current: string; allDone: string; doneCell: string; notYetCell: string; currentCell: string;
+  legendDone: string; legendCurrent: string; currentSuffix: string;
+}> = {
+  encode: {
+    done: 'encoded', current: 'Delivering segment', allDone: 'All ready', doneCell: 'encoded, ready instantly', notYetCell: 'not yet available',
+    currentCell: 'currently delivering', legendDone: 'Encoded', legendCurrent: 'Currently delivering', currentSuffix: 'delivering segment',
+  },
+  requested: {
+    done: 'requested by the player', current: 'Last requested segment', allDone: 'Whole video requested', doneCell: 'requested by the player', notYetCell: 'not requested yet',
+    currentCell: 'most recent request', legendDone: 'Requested', legendCurrent: 'Most recent request', currentSuffix: 'last requested segment',
+  },
+};
+
+/** The segment display variant for a stream's mode. */
+export function segmentVariantForMode(mode: string): SegmentVariant {
+  return mode === 'youtube-hls' ? 'requested' : 'encode';
+}
+
 // Solid fills for the two "something is actively happening to this segment
 // right now" states - deliberately not an outline (an outline over the
 // segment's own encoded/buffered/not-yet color was hard to spot at a glance;
@@ -103,6 +130,7 @@ function computeStripGrid(total: number): { cols: number; rows: number } {
 interface SegmentActivityStripProps {
   segments: StreamSegmentStatus;
   onClick?: () => void;
+  variant?: SegmentVariant;
 }
 
 /**
@@ -112,16 +140,17 @@ interface SegmentActivityStripProps {
  * single-row bar. The detailed, individually-labeled grid still lives in
  * SegmentActivityDialog, opened by clicking this strip.
  */
-export const SegmentActivityStrip: React.FC<SegmentActivityStripProps> = ({ segments, onClick }) => {
+export const SegmentActivityStrip: React.FC<SegmentActivityStripProps> = ({ segments, onClick, variant = 'encode' }) => {
+  const text = VARIANT_TEXT[variant];
   const encodedCount = countEncoded(segments);
   const pct = segments.totalSegments > 0 ? Math.round((encodedCount / segments.totalSegments) * 100) : 0;
   const allReady = encodedCount === segments.totalSegments;
   const { cols, rows } = computeStripGrid(segments.totalSegments);
-  const currentSuffix = segments.currentSegmentIndex !== null ? ` · delivering segment ${segments.currentSegmentIndex}` : '';
+  const currentSuffix = segments.currentSegmentIndex !== null ? ` · ${text.currentSuffix} ${segments.currentSegmentIndex}` : '';
   const backfillSuffix = segments.backfillSegmentIndex !== null ? ` · backfilling segment ${segments.backfillSegmentIndex}` : '';
 
   return (
-    <Tooltip title={`${encodedCount}/${segments.totalSegments} segments encoded (${pct}%)${currentSuffix}${backfillSuffix}${onClick ? ' · click for detail' : ''}`}>
+    <Tooltip title={`${encodedCount}/${segments.totalSegments} segments ${text.done} (${pct}%)${currentSuffix}${backfillSuffix}${onClick ? ' · click for detail' : ''}`}>
       <Box
         onClick={onClick}
         style={{
@@ -150,6 +179,7 @@ interface SegmentActivityDialogProps {
   onClose: () => void;
   title: string;
   segments: StreamSegmentStatus | null;
+  variant?: SegmentVariant;
 }
 
 /**
@@ -160,9 +190,10 @@ interface SegmentActivityDialogProps {
  * few hundred live Tooltip instances would be needless overhead for
  * something this simple.
  */
-export const SegmentActivityDialog: React.FC<SegmentActivityDialogProps> = ({ open, onClose, title, segments }) => {
+export const SegmentActivityDialog: React.FC<SegmentActivityDialogProps> = ({ open, onClose, title, segments, variant = 'encode' }) => {
   const [expandedView, setExpandedView] = useState(false);
   if (!segments) return null;
+  const text = VARIANT_TEXT[variant];
   const encodedCount = countEncoded(segments);
   const pct = segments.totalSegments > 0 ? Math.round((encodedCount / segments.totalSegments) * 100) : 0;
   const allReady = encodedCount === segments.totalSegments;
@@ -173,10 +204,10 @@ export const SegmentActivityDialog: React.FC<SegmentActivityDialogProps> = ({ op
       <DialogContent>
         <Box style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
           <Typography variant="body2" style={{ marginBottom: 12 }}>
-            {encodedCount}/{segments.totalSegments} segments encoded ({pct}%)
+            {encodedCount}/{segments.totalSegments} segments {text.done} ({pct}%)
             {segments.currentSegmentIndex !== null && (
               <span style={{ color: 'var(--primary)', marginLeft: 8, fontWeight: 600 }}>
-                Delivering segment {segments.currentSegmentIndex} ({formatSegmentTime(segments.currentSegmentIndex, segments)})
+                {text.current} {segments.currentSegmentIndex} ({formatSegmentTime(segments.currentSegmentIndex, segments)})
               </span>
             )}
             {segments.backfillSegmentIndex !== null && (
@@ -185,7 +216,7 @@ export const SegmentActivityDialog: React.FC<SegmentActivityDialogProps> = ({ op
               </span>
             )}
             {allReady && (
-              <span style={{ color: 'var(--success)', marginLeft: 8, fontWeight: 600 }}>All ready</span>
+              <span style={{ color: 'var(--success)', marginLeft: 8, fontWeight: 600 }}>{text.allDone}</span>
             )}
           </Typography>
           <FormControlLabel
@@ -210,8 +241,8 @@ export const SegmentActivityDialog: React.FC<SegmentActivityDialogProps> = ({ op
               <div
                 key={i}
                 title={`Segment ${i} · ${formatSegmentTime(i, segments)}${
-                  isEncoded ? ' · encoded, ready instantly' : i < segments.bufferedThroughIndex ? ' · buffered, fast seek' : ' · not yet available'
-                }${isCurrent ? ' · currently delivering' : ''}${isBackfilling ? ' · currently being backfilled' : ''}`}
+                  isEncoded ? ` · ${text.doneCell}` : i < segments.bufferedThroughIndex ? ' · buffered, fast seek' : ` · ${text.notYetCell}`
+                }${isCurrent ? ` · ${text.currentCell}` : ''}${isBackfilling ? ' · currently being backfilled' : ''}`}
                 style={{
                   width: '100%',
                   aspectRatio: '1 / 1',
@@ -235,24 +266,28 @@ export const SegmentActivityDialog: React.FC<SegmentActivityDialogProps> = ({ op
         <Box style={{ display: 'flex', gap: 16, marginTop: 12, flexWrap: 'wrap' }}>
           <Box style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
             <div style={{ width: 10, height: 10, borderRadius: 2, backgroundColor: 'var(--success)' }} />
-            <Typography variant="caption" style={{ color: 'var(--muted-foreground)' }}>Encoded</Typography>
+            <Typography variant="caption" style={{ color: 'var(--muted-foreground)' }}>{text.legendDone}</Typography>
           </Box>
-          <Box style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-            <div style={{ width: 10, height: 10, borderRadius: 2, backgroundColor: 'var(--warning)' }} />
-            <Typography variant="caption" style={{ color: 'var(--muted-foreground)' }}>Buffered (fast seek)</Typography>
-          </Box>
+          {variant === 'encode' && (
+            <Box style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <div style={{ width: 10, height: 10, borderRadius: 2, backgroundColor: 'var(--warning)' }} />
+              <Typography variant="caption" style={{ color: 'var(--muted-foreground)' }}>Buffered (fast seek)</Typography>
+            </Box>
+          )}
           <Box style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
             <div style={{ width: 10, height: 10, borderRadius: 2, backgroundColor: 'var(--border)' }} />
             <Typography variant="caption" style={{ color: 'var(--muted-foreground)' }}>Not yet</Typography>
           </Box>
           <Box style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
             <div style={{ width: 10, height: 10, borderRadius: 2, backgroundColor: DELIVERING_COLOR }} />
-            <Typography variant="caption" style={{ color: 'var(--muted-foreground)' }}>Currently delivering</Typography>
+            <Typography variant="caption" style={{ color: 'var(--muted-foreground)' }}>{text.legendCurrent}</Typography>
           </Box>
-          <Box style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-            <div style={{ width: 10, height: 10, borderRadius: 2, backgroundColor: BACKFILLING_COLOR }} />
-            <Typography variant="caption" style={{ color: 'var(--muted-foreground)' }}>Currently being backfilled</Typography>
-          </Box>
+          {variant === 'encode' && (
+            <Box style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <div style={{ width: 10, height: 10, borderRadius: 2, backgroundColor: BACKFILLING_COLOR }} />
+              <Typography variant="caption" style={{ color: 'var(--muted-foreground)' }}>Currently being backfilled</Typography>
+            </Box>
+          )}
         </Box>
       </DialogContent>
       <DialogActions>

@@ -27,6 +27,7 @@ const meta: Meta<typeof DownloadProgress> = {
         <WebSocketContext.Provider
           value={{
             socket: null,
+            isConnected: false,
             subscribe: () => {},
             unsubscribe: () => {},
           }}

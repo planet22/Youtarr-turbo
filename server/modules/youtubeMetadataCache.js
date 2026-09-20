@@ -34,6 +34,7 @@ const getModel = () => require('../models/youtubemetadatacache');
  */
 const fpsCache = new Map();
 const maxHeightCache = new Map();
+const durationCache = new Map();
 
 // Single source of truth for how long a row survives since it was last
 // accessed - cronJobs.js's nightly prune sweep and the Library page's
@@ -93,6 +94,38 @@ async function getCachedMaxHeight(youtubeId) {
 }
 
 /**
+ * Duration lookup - memory then the persistent DB row's duration_seconds
+ * column directly. Unlike fps/max-height, this is a plain NOT-NULL column
+ * rather than something computed from raw_info_json, so it's populated even
+ * for a row written by a duration-only producer that never had a full
+ * extraction to store. Replaces playbackPlan.js's own live `-j` yt-dlp call
+ * (getVideoDurationSeconds) whenever this video's duration is already known
+ * from any producer (streaming, download, or STRM generation).
+ * @param {string} youtubeId
+ * @returns {Promise<number|null>}
+ */
+async function getCachedDurationSeconds(youtubeId) {
+  if (durationCache.has(youtubeId)) return durationCache.get(youtubeId);
+  try {
+    const cached = await getModel().findByPk(youtubeId);
+    if (!cached) return null;
+    const seconds = Number(cached.duration_seconds);
+    if (Number.isFinite(seconds) && seconds > 0) {
+      durationCache.set(youtubeId, seconds);
+      // Fire-and-forget - a stale last_accessed_at just means this row
+      // might get swept a bit early, never a correctness issue.
+      cached.update({ last_accessed_at: new Date() }).catch((err) => {
+        logger.warn({ err, youtubeId }, 'youtubeMetadataCache: failed to bump last_accessed_at');
+      });
+      return seconds;
+    }
+  } catch (err) {
+    logger.warn({ err, youtubeId }, 'youtubeMetadataCache: duration lookup failed');
+  }
+  return null;
+}
+
+/**
  * Persists a full yt-dlp extraction (memory fps + the DB row's
  * raw_info_json) - call this from anywhere that already has one in hand,
  * so it's never independently re-fetched elsewhere. `info` is the PARSED
@@ -118,6 +151,7 @@ function cacheRawInfoJson(youtubeId, durationSeconds, info) {
   }
   const seconds = Number(durationSeconds);
   if (!Number.isFinite(seconds) || seconds <= 0) return;
+  durationCache.set(youtubeId, seconds);
   const now = new Date();
   getModel().upsert({
     youtube_id: youtubeId,
@@ -157,10 +191,52 @@ async function getCachedRawInfoJson(youtubeId) {
   }
 }
 
-/** Manual re-cache trigger's in-memory half - see ytstream.js's DELETE route for the DB-row half. */
-function clearCachedEntry(youtubeId) {
+// In-flight dedup for getOrFetchRawInfoJson - two concurrent callers for
+// the same uncached video (e.g. one needing duration, another needing
+// height) share one live fetch instead of each spawning their own.
+const infoLookupPromises = new Map();
+
+/**
+ * This video's full yt-dlp extraction - from the persistent cache if any
+ * producer already populated it, otherwise one live fetch via `fetchFn`
+ * (caller-supplied, since fetching is domain-specific - e.g. ytstream's
+ * player_client override - while caching is not), persisted for every
+ * future caller regardless of who asked.
+ * @param {string} youtubeId
+ * @param {() => Promise<object>} fetchFn - resolves to a parsed yt-dlp -j object
+ * @returns {Promise<object>}
+ */
+async function getOrFetchRawInfoJson(youtubeId, fetchFn) {
+  if (infoLookupPromises.has(youtubeId)) return infoLookupPromises.get(youtubeId);
+
+  const lookup = (async () => {
+    const cached = await getCachedRawInfoJson(youtubeId);
+    if (cached) return cached.data;
+    const info = await fetchFn();
+    cacheRawInfoJson(youtubeId, info.duration, info);
+    return info;
+  })();
+
+  infoLookupPromises.set(youtubeId, lookup);
+  try {
+    return await lookup;
+  } finally {
+    infoLookupPromises.delete(youtubeId);
+  }
+}
+
+/**
+ * Manual re-cache trigger (Library page's per-video/bulk "Clear Cached
+ * Metadata" action) - clears the in-memory caches and destroys the DB row,
+ * so the next stream/download/STRM pass relearns it from scratch.
+ * @param {string} youtubeId
+ * @returns {Promise<number>} rows destroyed (0 or 1)
+ */
+async function deleteEntry(youtubeId) {
   fpsCache.delete(youtubeId);
   maxHeightCache.delete(youtubeId);
+  durationCache.delete(youtubeId);
+  return getModel().destroy({ where: { youtube_id: youtubeId } });
 }
 
 /** Total cached rows - Settings UI's "Cached video metadata" count. */
@@ -172,15 +248,95 @@ async function countCached() {
 async function clearAll() {
   fpsCache.clear();
   maxHeightCache.clear();
+  durationCache.clear();
   return getModel().destroy({ truncate: true });
+}
+
+/**
+ * Batched title lookup for videos with a cached extraction but no other
+ * title source (e.g. an NZB-only grab, or a Video row since removed) - the
+ * Streaming page's Stream History title fallback.
+ * @param {string[]} youtubeIds
+ * @returns {Promise<Record<string,string>>} youtubeId -> title, only for ids that had one cached
+ */
+async function getCachedTitles(youtubeIds) {
+  const titles = {};
+  if (!youtubeIds || !youtubeIds.length) return titles;
+  try {
+    const rows = await getModel().findAll({
+      where: { youtube_id: youtubeIds },
+      attributes: ['youtube_id', 'raw_info_json'],
+    });
+    for (const row of rows) {
+      if (!row.raw_info_json) continue;
+      try {
+        const info = JSON.parse(row.raw_info_json);
+        if (info && info.title) titles[row.youtube_id] = info.title;
+      } catch (err) {
+        logger.warn({ err, youtubeId: row.youtube_id }, 'youtubeMetadataCache: failed to parse cached raw_info_json for title fallback');
+      }
+    }
+  } catch (err) {
+    logger.warn({ err }, 'youtubeMetadataCache: batched title lookup failed');
+  }
+  return titles;
+}
+
+/**
+ * Full detail for the Library page's "Cached Metadata" dialog - everything
+ * about one video's cache row, with raw_info_json already parsed into its
+ * commonly-shown fields. `rawInfoJson` is always included here (the caller
+ * decides whether to actually forward the (potentially large) blob in an
+ * HTTP response - see server/routes/ytstream.js's `?raw=true` opt-in).
+ * @param {string} youtubeId
+ * @returns {Promise<object|null>} null if nothing is cached for this video
+ */
+async function getCacheDetail(youtubeId) {
+  const row = await getModel().findByPk(youtubeId);
+  if (!row) return null;
+
+  let info = null;
+  if (row.raw_info_json) {
+    try {
+      info = JSON.parse(row.raw_info_json);
+    } catch (err) {
+      logger.warn({ err, youtubeId }, 'youtubeMetadataCache: failed to parse cached raw_info_json');
+    }
+  }
+
+  const expiresAt = row.last_accessed_at
+    ? new Date(new Date(row.last_accessed_at).getTime() + YOUTUBE_METADATA_CACHE_RETENTION_DAYS * 24 * 60 * 60 * 1000).toISOString()
+    : null;
+
+  return {
+    durationSeconds: row.duration_seconds,
+    fetchedAt: row.fetched_at,
+    lastAccessedAt: row.last_accessed_at,
+    expiresAt,
+    title: info?.title ?? null,
+    uploader: info?.uploader ?? info?.channel ?? null,
+    resolution: info && info.width && info.height ? `${info.width}x${info.height}` : null,
+    fps: info?.fps ?? null,
+    uploadDate: info?.upload_date ?? null,
+    // False for a row written by the cheap calculatedLength duration-only
+    // probe (getVideoDurationSeconds) for a video that's never actually
+    // streamed/downloaded/materialized past that - lets the client tell
+    // "nothing here yet" apart from "something broke" for free.
+    hasRawInfoJson: Boolean(row.raw_info_json),
+    rawInfoJson: info,
+  };
 }
 
 module.exports = {
   getCachedFps,
+  getCachedDurationSeconds,
   getCachedMaxHeight,
   getCachedRawInfoJson,
+  getOrFetchRawInfoJson,
+  getCachedTitles,
+  getCacheDetail,
   cacheRawInfoJson,
-  clearCachedEntry,
+  deleteEntry,
   countCached,
   clearAll,
   YOUTUBE_METADATA_CACHE_RETENTION_DAYS,

@@ -17,6 +17,7 @@ import { ConfigurationCard } from '../common/ConfigurationCard';
 import { InfoTooltip } from '../common/InfoTooltip';
 import { ConfigState } from '../types';
 import { YtstreamSettingsSection, DEFAULT_YTSTREAM } from './YtstreamSettingsSection';
+import { useYtstreamModeCompatibility } from '../hooks/useYtstreamModeCompatibility';
 
 interface Props {
   config: ConfigState;
@@ -49,6 +50,7 @@ export const StrmSettingsSection: React.FC<Props> = ({
   const setYtstream = (patch: Partial<ConfigState['ytstream']>) => {
     onConfigChange({ ytstream: { ...ytstream, ...patch } });
   };
+  const modeCompat = useYtstreamModeCompatibility(ytstream.defaultMode || 'direct', ytstream.transcode || '', token, ytstream.container || '');
   const mediaIsDownload = (config.mediaMode || 'download') === 'download';
   const ytstreamSelected = strm.target === 'ytstream';
 
@@ -139,13 +141,16 @@ export const StrmSettingsSection: React.FC<Props> = ({
                   <Switch
                     checked={ytstream.serveCachedFile ?? false}
                     onChange={(e) => setYtstream({ serveCachedFile: e.target.checked })}
-                    disabled={mediaIsDownload}
+                    disabled={mediaIsDownload || modeCompat.serveCachedFile?.status === 'ignored'}
                   />
                 }
                 label="Serve already-downloaded files directly"
               />
               <InfoTooltip
-                text="Checked on every /api/ytstream request before anything else: if the video is already fully downloaded (via STRM cache-on-play or a genuine download), the local file is served directly with Range/seek support instead of live-proxying or re-transcoding via yt-dlp/ffmpeg. Off by default. Has no effect on STRM-only videos; no Jellyfin rescan needed since the URL is unchanged."
+                text={
+                  'Checked on every /api/ytstream request before anything else: if the video is already fully downloaded (via STRM cache-on-play or a genuine download), the local file is served directly with Range/seek support instead of live-proxying or re-transcoding via yt-dlp/ffmpeg. Off by default. Has no effect on STRM-only videos; no Jellyfin rescan needed since the URL is unchanged.'
+                  + (modeCompat.serveCachedFile?.status === 'ignored' && modeCompat.serveCachedFile.reason ? ` For the current Playback mode (${ytstream.defaultMode}): ${modeCompat.serveCachedFile.reason}` : '')
+                }
                 onMobileClick={onMobileTooltipClick}
               />
             </Box>

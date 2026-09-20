@@ -1,7 +1,8 @@
 const fs = require('fs-extra');
 const path = require('path');
-const { execSync, spawnSync, spawn } = require('child_process');
+const { spawnSync, spawn } = require('child_process');
 const configModule = require('./configModule');
+const { resizeImageWithFfmpeg } = require('./imageResizer');
 const nfoGenerator = require('./nfoGenerator');
 const ratingMapper = require('./ratingMapper');
 const tempPathManager = require('./download/tempPathManager');
@@ -416,10 +417,7 @@ async function downloadChannelThumbnailIfMissing(channelId) {
         // it nothing to go on ("Unable to find a suitable output format"),
         // so keep ".jpg" as the actual extension and put "temp" before it.
         const tempPath = channelThumbPath.replace(/\.jpg$/i, '.temp.jpg');
-        execSync(
-          `${configModule.ffmpegPath} -loglevel error -y -i "${channelThumbPath}" -vf "scale=iw*0.4:ih*0.4" -q:v 2 "${tempPath}"`,
-          { stdio: 'pipe' }
-        );
+        resizeImageWithFfmpeg(channelThumbPath, tempPath, 0.4, { stdio: 'pipe' });
         fs.renameSync(tempPath, channelThumbPath);
       }
     } catch (err) {
@@ -1161,11 +1159,8 @@ async function resolveTrackedOwnerChannelId(youtubeId, metadataChannelId) {
       // Resize the image using ffmpeg with proper settings to avoid deprecated format warnings
       // Using -loglevel error to suppress the deprecated pixel format warnings but still show actual errors
       try {
-        execSync(
-          `${configModule.ffmpegPath} -loglevel error -y -i "${newImageFullPath}" -vf "scale=iw*0.5:ih*0.5" -q:v 2 "${newImageFullPathSmall}"`,
-          { stdio: 'inherit' }
-        );
-        fs.rename(newImageFullPathSmall, newImageFullPath);
+        resizeImageWithFfmpeg(newImageFullPath, newImageFullPathSmall, 0.5);
+        await fs.rename(newImageFullPathSmall, newImageFullPath);
         logger.info('Image resized successfully');
       } catch (err) {
         logger.error({ err }, 'Error resizing image');

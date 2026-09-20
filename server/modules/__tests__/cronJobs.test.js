@@ -85,6 +85,13 @@ describe('CronJobs', () => {
     cronJobs = require('../cronJobs');
   });
 
+  // Jobs are looked up by cron expression so adding a new job never shifts the
+  // callbacks other tests rely on.
+  const getScheduledCallback = (expression) => {
+    const call = mockSchedule.schedule.mock.calls.find(([expr]) => expr === expression);
+    return call[1];
+  };
+
   describe('module export', () => {
     test('should export initialize function', () => {
       expect(cronJobs).toBeDefined();
@@ -94,14 +101,13 @@ describe('CronJobs', () => {
   });
 
   describe('initialize', () => {
-    test('should register all four cron jobs', () => {
+    test('should register all seven cron jobs', () => {
       cronJobs.initialize();
 
-      expect(mockSchedule.schedule).toHaveBeenCalledTimes(4);
-      expect(mockSchedule.schedule).toHaveBeenCalledWith('0 2 * * *', expect.any(Function));
-      expect(mockSchedule.schedule).toHaveBeenCalledWith('0 3 * * *', expect.any(Function));
-      expect(mockSchedule.schedule).toHaveBeenCalledWith('30 3 * * *', expect.any(Function));
-      expect(mockSchedule.schedule).toHaveBeenCalledWith('0 4 * * *', expect.any(Function));
+      expect(mockSchedule.schedule).toHaveBeenCalledTimes(7);
+      ['0 2 * * *', '10 2 * * *', '0 3 * * *', '15 3 * * *', '20 3 * * *', '30 3 * * *', '0 4 * * *'].forEach((expression) => {
+        expect(mockSchedule.schedule).toHaveBeenCalledWith(expression, expect.any(Function));
+      });
     });
 
     test('should log initialization messages', () => {
@@ -121,7 +127,7 @@ describe('CronJobs', () => {
 
     beforeEach(() => {
       cronJobs.initialize();
-      cleanupCallback = mockSchedule.schedule.mock.calls[0][1];
+      cleanupCallback = getScheduledCallback('0 2 * * *');
     });
 
     test('should call performAutomaticCleanup when triggered', async () => {
@@ -215,7 +221,7 @@ describe('CronJobs', () => {
 
     beforeEach(() => {
       cronJobs.initialize();
-      sessionCleanupCallback = mockSchedule.schedule.mock.calls[1][1];
+      sessionCleanupCallback = getScheduledCallback('0 3 * * *');
     });
 
     test('should destroy expired and inactive sessions', async () => {
@@ -283,7 +289,7 @@ describe('CronJobs', () => {
 
     beforeEach(() => {
       cronJobs.initialize();
-      backfillCallback = mockSchedule.schedule.mock.calls[2][1];
+      backfillCallback = getScheduledCallback('30 3 * * *');
     });
 
     test('should call backfillVideoMetadata when triggered', async () => {
@@ -373,7 +379,7 @@ describe('CronJobs', () => {
     beforeEach(() => {
       mockRefreshCache = jest.fn();
       cronJobs.initialize({ refreshYtDlpVersionCache: mockRefreshCache });
-      autoUpdateCallback = mockSchedule.schedule.mock.calls[3][1];
+      autoUpdateCallback = getScheduledCallback('0 4 * * *');
     });
 
     test('does nothing when autoUpdateYtdlp is false', async () => {
@@ -551,9 +557,9 @@ describe('CronJobs', () => {
     test('should handle all cron jobs executing successfully', async () => {
       cronJobs.initialize();
 
-      const videoCleanupCallback = mockSchedule.schedule.mock.calls[0][1];
-      const sessionCleanupCallback = mockSchedule.schedule.mock.calls[1][1];
-      const backfillCallback = mockSchedule.schedule.mock.calls[2][1];
+      const videoCleanupCallback = getScheduledCallback('0 2 * * *');
+      const sessionCleanupCallback = getScheduledCallback('0 3 * * *');
+      const backfillCallback = getScheduledCallback('30 3 * * *');
 
       mockVideoDeletionModule.performAutomaticCleanup.mockResolvedValue({
         totalDeleted: 2,
@@ -579,9 +585,9 @@ describe('CronJobs', () => {
     test('should handle partial failures across cron jobs', async () => {
       cronJobs.initialize();
 
-      const videoCleanupCallback = mockSchedule.schedule.mock.calls[0][1];
-      const sessionCleanupCallback = mockSchedule.schedule.mock.calls[1][1];
-      const backfillCallback = mockSchedule.schedule.mock.calls[2][1];
+      const videoCleanupCallback = getScheduledCallback('0 2 * * *');
+      const sessionCleanupCallback = getScheduledCallback('0 3 * * *');
+      const backfillCallback = getScheduledCallback('30 3 * * *');
 
       mockVideoDeletionModule.performAutomaticCleanup.mockRejectedValue(new Error('Cleanup failed'));
       mockDb.Session.destroy.mockResolvedValue(5);
@@ -601,9 +607,9 @@ describe('CronJobs', () => {
     test('should handle all cron jobs failing', async () => {
       cronJobs.initialize();
 
-      const videoCleanupCallback = mockSchedule.schedule.mock.calls[0][1];
-      const sessionCleanupCallback = mockSchedule.schedule.mock.calls[1][1];
-      const backfillCallback = mockSchedule.schedule.mock.calls[2][1];
+      const videoCleanupCallback = getScheduledCallback('0 2 * * *');
+      const sessionCleanupCallback = getScheduledCallback('0 3 * * *');
+      const backfillCallback = getScheduledCallback('30 3 * * *');
 
       mockVideoDeletionModule.performAutomaticCleanup.mockRejectedValue(new Error('Cleanup failed'));
       mockDb.Session.destroy.mockRejectedValue(new Error('Session cleanup failed'));
@@ -622,7 +628,7 @@ describe('CronJobs', () => {
   describe('error handling edge cases', () => {
     test('should handle undefined result from performAutomaticCleanup gracefully', async () => {
       cronJobs.initialize();
-      const cleanupCallback = mockSchedule.schedule.mock.calls[0][1];
+      const cleanupCallback = getScheduledCallback('0 2 * * *');
 
       mockVideoDeletionModule.performAutomaticCleanup.mockResolvedValue(undefined);
 
@@ -636,7 +642,7 @@ describe('CronJobs', () => {
 
     test('should handle result with missing properties from performAutomaticCleanup gracefully', async () => {
       cronJobs.initialize();
-      const cleanupCallback = mockSchedule.schedule.mock.calls[0][1];
+      const cleanupCallback = getScheduledCallback('0 2 * * *');
 
       mockVideoDeletionModule.performAutomaticCleanup.mockResolvedValue({
         totalDeleted: 5
@@ -652,7 +658,7 @@ describe('CronJobs', () => {
 
     test('should handle non-numeric result from Session.destroy', async () => {
       cronJobs.initialize();
-      const sessionCleanupCallback = mockSchedule.schedule.mock.calls[1][1];
+      const sessionCleanupCallback = getScheduledCallback('0 3 * * *');
 
       mockDb.Session.destroy.mockResolvedValue('invalid');
 

@@ -84,16 +84,20 @@ jobs:
           }
 
           # Extract backend coverage
-          backend_coverage=0
-          if [ -f "coverage/coverage-summary.json" ]; then
-            backend_coverage=$(node -p "require('./coverage/coverage-summary.json').total.lines.pct")
+          # A missing report means the test run crashed; fail rather than
+          # publishing a misleading 0% badge.
+          if [ ! -f "coverage/coverage-summary.json" ]; then
+            echo "::error::Backend coverage report not found (test run likely crashed)"
+            exit 1
           fi
+          backend_coverage=$(node -p "require('./coverage/coverage-summary.json').total.lines.pct")
 
           # Extract frontend coverage
-          frontend_coverage=0
-          if [ -f "client/coverage/coverage-summary.json" ]; then
-            frontend_coverage=$(node -p "require('./client/coverage/coverage-summary.json').total.lines.pct")
+          if [ ! -f "client/coverage/coverage-summary.json" ]; then
+            echo "::error::Frontend coverage report not found (test run likely crashed)"
+            exit 1
           fi
+          frontend_coverage=$(node -p "require('./client/coverage/coverage-summary.json').total.lines.pct")
 
           # Round to integers for cleaner badges
           backend_int=$(printf "%.0f" "$backend_coverage")

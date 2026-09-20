@@ -11,6 +11,11 @@ on:
         required: false
         default: false
         type: boolean
+      version:
+        description: 'Force this exact version (e.g. 0.1.0) instead of auto-calculating from commit history. Leave blank for normal auto-versioning.'
+        required: false
+        default: ''
+        type: string
 
 concurrency:
   group: release-${{ github.ref }}
@@ -49,8 +54,29 @@ jobs:
           release_branches: main
           dry_run: true  # Always dry run first to get the version
 
+      - name: Determine final version
+        id: final_version
+        env:
+          FORCED_VERSION: ${{ inputs.version }}
+          CALCULATED_TAG: ${{ steps.calculate_version.outputs.new_tag }}
+          RELEASE_TYPE: ${{ steps.calculate_version.outputs.release_type }}
+        run: |
+          if [ -n "$FORCED_VERSION" ]; then
+            TAG="v${FORCED_VERSION#v}"
+            echo "tag=${TAG}" >> $GITHUB_OUTPUT
+            echo "should_release=true" >> $GITHUB_OUTPUT
+            echo "🔧 Forcing version: ${TAG}"
+          else
+            echo "tag=${CALCULATED_TAG}" >> $GITHUB_OUTPUT
+            if [ "$RELEASE_TYPE" = "none" ]; then
+              echo "should_release=false" >> $GITHUB_OUTPUT
+            else
+              echo "should_release=true" >> $GITHUB_OUTPUT
+            fi
+          fi
+
       - name: No changes since last release
-        if: ${{ steps.calculate_version.outputs.release_type == 'none' && !inputs.dry_run }}
+        if: ${{ steps.final_version.outputs.should_release != 'true' && !inputs.dry_run }}
         run: |
           echo "No conventional commit changes since last tag (${{ steps.calculate_version.outputs.previous_tag }}). Skipping release."
 
@@ -97,14 +123,14 @@ jobs:
           fi
 
       - name: Login to Docker Hub
-        if: ${{ !inputs.dry_run && steps.calculate_version.outputs.release_type != 'none' && steps.image_meta.outputs.dockerhub_enabled == 'true' }}
+        if: ${{ !inputs.dry_run && steps.final_version.outputs.should_release == 'true' && steps.image_meta.outputs.dockerhub_enabled == 'true' }}
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           username: ${{ vars.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Login to GHCR
-        if: ${{ !inputs.dry_run && steps.calculate_version.outputs.release_type != 'none' }}
+        if: ${{ !inputs.dry_run && steps.final_version.outputs.should_release == 'true' }}
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ghcr.io
@@ -112,18 +138,18 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Update version in package.json files
-        if: ${{ !inputs.dry_run && steps.calculate_version.outputs.release_type != 'none' }}
+        if: ${{ !inputs.dry_run && steps.final_version.outputs.should_release == 'true' }}
         run: |
-          npm version ${{ steps.calculate_version.outputs.new_tag }} --no-git-tag-version
+          npm version ${{ steps.final_version.outputs.tag }} --no-git-tag-version
           cd client
-          npm version ${{ steps.calculate_version.outputs.new_tag }} --no-git-tag-version
+          npm version ${{ steps.final_version.outputs.tag }} --no-git-tag-version
           cd ..
           git add package.json package-lock.json client/package.json client/package-lock.json
-          git commit -m "Bump version to ${{ steps.calculate_version.outputs.new_tag }} [skip ci]"
+          git commit -m "Bump version to ${{ steps.final_version.outputs.tag }} [skip ci]"
           git push
 
       - name: Build client (verification)
-        if: ${{ steps.calculate_version.outputs.release_type != 'none' }}
+        if: ${{ steps.final_version.outputs.should_release == 'true' }}
         run: |
           cd client
           npm run build
@@ -131,7 +157,7 @@ jobs:
           echo "✅ Client build successful"
 
       - name: Verify MSW worker excluded from production bundle
-        if: ${{ steps.calculate_version.outputs.release_type != 'none' }}
+        if: ${{ steps.final_version.outputs.should_release == 'true' }}
         run: |
           if [ -e client/build/mockServiceWorker.js ]; then
             echo "❌ client/build/mockServiceWorker.js should not exist in production output"
@@ -140,7 +166,7 @@ jobs:
           echo "✅ MSW worker correctly excluded from production bundle"
 
       - name: Build Docker image (verification)
-        if: ${{ steps.calculate_version.outputs.release_type != 'none' }}
+        if: ${{ steps.final_version.outputs.should_release == 'true' }}
         uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # v5
         with:
           context: .
@@ -150,12 +176,12 @@ jobs:
           no-cache: true
 
       - name: Record bump commit SHA
-        if: ${{ !inputs.dry_run && steps.calculate_version.outputs.release_type != 'none' }}
+        if: ${{ !inputs.dry_run && steps.final_version.outputs.should_release == 'true' }}
         run: |
           echo "BUMP_COMMIT=$(git rev-parse HEAD)" >> $GITHUB_ENV
 
       - name: Create and push tag
-        if: ${{ !inputs.dry_run && steps.calculate_version.outputs.release_type != 'none' }}
+        if: ${{ !inputs.dry_run && steps.final_version.outputs.should_release == 'true' }}
         id: tag_version
         uses: mathieudutour/github-tag-action@a22cf08638b34d5badda920f9daf6e72c477b07b # v6.2
         with:
@@ -163,16 +189,16 @@ jobs:
           tag_prefix: v
           default_bump: patch
           release_branches: main
-          custom_tag: ${{ steps.calculate_version.outputs.new_tag }}
+          custom_tag: ${{ steps.final_version.outputs.tag }}
           create_release: false
 
 
       - name: Compute release notes
         id: release_notes
-        if: ${{ !inputs.dry_run && steps.calculate_version.outputs.release_type != 'none' }}
+        if: ${{ !inputs.dry_run && steps.final_version.outputs.should_release == 'true' }}
         env:
           CHANGELOG_BODY: ${{ steps.calculate_version.outputs.changelog }}
-          NEW_TAG: ${{ steps.calculate_version.outputs.new_tag }}
+          NEW_TAG: ${{ steps.final_version.outputs.tag }}
           PREVIOUS_TAG: ${{ steps.calculate_version.outputs.previous_tag }}
           OWNER_LC: ${{ steps.image_meta.outputs.owner_lc }}
           DOCKERHUB_ENABLED: ${{ steps.image_meta.outputs.dockerhub_enabled }}
@@ -205,11 +231,11 @@ jobs:
           } >> $GITHUB_OUTPUT
 
       - name: Create GitHub Release
-        if: ${{ !inputs.dry_run && steps.calculate_version.outputs.release_type != 'none' }}
+        if: ${{ !inputs.dry_run && steps.final_version.outputs.should_release == 'true' }}
         uses: ncipollo/release-action@339a81892b84b4eeb0f6e744e4574d79d0d9b8dd # v1
         with:
-          tag: ${{ steps.calculate_version.outputs.new_tag }}
-          name: Release ${{ steps.calculate_version.outputs.new_tag }}
+          tag: ${{ steps.final_version.outputs.tag }}
+          name: Release ${{ steps.final_version.outputs.tag }}
           body: ${{ steps.release_notes.outputs.body }}
           draft: false
           prerelease: false
@@ -217,9 +243,9 @@ jobs:
           allowUpdates: true
 
       - name: Update CHANGELOG.md
-        if: ${{ !inputs.dry_run && steps.calculate_version.outputs.release_type != 'none' }}
+        if: ${{ !inputs.dry_run && steps.final_version.outputs.should_release == 'true' }}
         env:
-          NEW_TAG: ${{ steps.calculate_version.outputs.new_tag }}
+          NEW_TAG: ${{ steps.final_version.outputs.tag }}
           CHANGELOG_BODY: ${{ steps.calculate_version.outputs.changelog }}
           REPO: ${{ github.repository }}
         run: |
@@ -252,15 +278,15 @@ jobs:
           git push
 
       - name: Record CHANGELOG commit SHA
-        if: ${{ !inputs.dry_run && steps.calculate_version.outputs.release_type != 'none' }}
+        if: ${{ !inputs.dry_run && steps.final_version.outputs.should_release == 'true' }}
         run: |
           echo "CHANGELOG_COMMIT=$(git rev-parse HEAD)" >> $GITHUB_ENV
 
       - name: Compute release tags
         id: release_tags
-        if: ${{ !inputs.dry_run && steps.calculate_version.outputs.release_type != 'none' }}
+        if: ${{ !inputs.dry_run && steps.final_version.outputs.should_release == 'true' }}
         env:
-          NEW_TAG: ${{ steps.calculate_version.outputs.new_tag }}
+          NEW_TAG: ${{ steps.final_version.outputs.tag }}
           OWNER_LC: ${{ steps.image_meta.outputs.owner_lc }}
           DOCKERHUB_ENABLED: ${{ steps.image_meta.outputs.dockerhub_enabled }}
           DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
@@ -277,7 +303,7 @@ jobs:
           } >> $GITHUB_OUTPUT
 
       - name: Build and push Docker images
-        if: ${{ !inputs.dry_run && steps.calculate_version.outputs.release_type != 'none' }}
+        if: ${{ !inputs.dry_run && steps.final_version.outputs.should_release == 'true' }}
         uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # v5
         with:
           context: .
@@ -287,13 +313,13 @@ jobs:
           no-cache: true
 
       - name: Announce release on Discord
-        if: ${{ !inputs.dry_run && steps.calculate_version.outputs.release_type != 'none' }}
+        if: ${{ !inputs.dry_run && steps.final_version.outputs.should_release == 'true' }}
         continue-on-error: true
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_ANNOUNCEMENT_WEBHOOK_URL }}
-          NEW_TAG: ${{ steps.calculate_version.outputs.new_tag }}
+          NEW_TAG: ${{ steps.final_version.outputs.tag }}
           CHANGELOG: ${{ steps.calculate_version.outputs.changelog }}
-          RELEASE_URL: https://github.com/${{ github.repository }}/releases/tag/${{ steps.calculate_version.outputs.new_tag }}
+          RELEASE_URL: https://github.com/${{ github.repository }}/releases/tag/${{ steps.final_version.outputs.tag }}
         run: |
           if [ -z "$DISCORD_WEBHOOK" ]; then
             echo "⚠️ DISCORD_ANNOUNCEMENT_WEBHOOK_URL secret not set, skipping Discord notification"
@@ -331,7 +357,7 @@ jobs:
           echo "✅ Discord announcement sent"
 
       - name: Revert release commits on failure
-        if: ${{ failure() && !inputs.dry_run && steps.calculate_version.outputs.release_type != 'none' }}
+        if: ${{ failure() && !inputs.dry_run && steps.final_version.outputs.should_release == 'true' }}
         run: |
           set -e
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
@@ -359,12 +385,12 @@ jobs:
           fi
 
       - name: Cleanup tag and release on failure
-        if: ${{ failure() && !inputs.dry_run && steps.calculate_version.outputs.release_type != 'none' }}
+        if: ${{ failure() && !inputs.dry_run && steps.final_version.outputs.should_release == 'true' }}
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         with:
           github-token: ${{ secrets.ACTION_RUNNER_TOKEN }}
           script: |
-            const tag = `${{ toJSON(steps.calculate_version.outputs.new_tag) }}`.replace(/^"|"$/g, '');
+            const tag = `${{ toJSON(steps.final_version.outputs.tag) }}`.replace(/^"|"$/g, '');
             const owner = context.repo.owner;
             const repo = context.repo.repo;
             if (!tag) {
@@ -391,7 +417,7 @@ jobs:
       - name: Display dry run results
         if: ${{ inputs.dry_run }}
         env:
-          NEW_TAG: ${{ steps.calculate_version.outputs.new_tag }}
+          NEW_TAG: ${{ steps.final_version.outputs.tag }}
           PREVIOUS_TAG: ${{ steps.calculate_version.outputs.previous_tag }}
           RELEASE_TYPE: ${{ steps.calculate_version.outputs.release_type }}
           CHANGELOG_BODY: ${{ steps.calculate_version.outputs.changelog }}

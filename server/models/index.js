@@ -28,6 +28,9 @@ JobVideoDownload.belongsTo(Job, { foreignKey: 'job_id', as: 'job' });
 
 Video.hasMany(JobVideo, { foreignKey: 'video_id', as: 'jobVideos' });
 
+Channel.hasMany(Video, { foreignKey: 'channel_id', sourceKey: 'channel_id', as: 'videos' });
+Video.belongsTo(Channel, { foreignKey: 'channel_id', targetKey: 'channel_id', as: 'channel' });
+
 Playlist.hasMany(PlaylistVideo, { foreignKey: 'playlist_id', sourceKey: 'playlist_id' });
 PlaylistVideo.belongsTo(Playlist, { foreignKey: 'playlist_id', targetKey: 'playlist_id' });
 

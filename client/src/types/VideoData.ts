@@ -61,6 +61,9 @@ export interface VideoData {
   cachedVideoAt?: string | null;
   cachedVideoAgo?: string | null;
   cachedVideoExpiresAt?: string | null;
+  // True when the untracked cache entry is a partial hls-byterange encode
+  // (cut off before the end of the video) rather than a full copy.
+  cachedVideoPartial?: boolean;
   // ytstream.stealthCache (or finalizeToMp4 alone, hybrid mode) hls-buffer
   // cache: true only for a still-STRM tracked row (is_strm true) with a warm
   // copy sitting in the same hidden dir the untracked cache uses - distinct
@@ -73,6 +76,9 @@ export interface VideoData {
   stealthCacheFileSize?: number | null;
   stealthCacheAt?: string | null;
   stealthCacheExpiresAt?: string | null;
+  // True when the hidden cache copy is only part of the video (an
+  // hls-byterange encode cut off early) - shown with a "Partial" chip.
+  stealthCachePartial?: boolean;
 }
 
 export interface EnabledChannel {

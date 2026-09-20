@@ -22,7 +22,7 @@ describe('deriveScopeMode', () => {
 describe('PlexPlaylistScopeControl', () => {
   test('renders the admin-visibility/sharing info note', () => {
     render(<PlexPlaylistScopeControl value="" onChange={jest.fn()} />);
-    expect(screen.getByText(/share it from Plex Web/i)).toBeInTheDocument();
+    expect(screen.getByText(/To share a playlist with other Plex users, use Plex Web/i)).toBeInTheDocument();
   });
 
   test('does not show the token field in admin mode', () => {

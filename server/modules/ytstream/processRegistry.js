@@ -10,6 +10,7 @@
  */
 const logger = require('../../logger');
 const { spawnSync } = require('child_process');
+const { streamDebug } = require('./streamDebug');
 
 // Active child processes for Enhanced mode (the video/audio yt-dlp feeders
 // and the ffmpeg muxer on pipe:3/pipe:4), tracked so they're killed
@@ -78,6 +79,7 @@ function isFfmpegAvailable() {
   }
   if (available) {
     ffmpegAvailableCache = true;
+    streamDebug({}, 'ytstream: isFfmpegAvailable confirmed ffmpeg on PATH; caching true for the rest of this process');
   } else {
     logger.warn(
       'ffmpeg was not found on PATH. mode=hls/hls-buffer require it and will ' +
@@ -87,10 +89,29 @@ function isFfmpegAvailable() {
   return available;
 }
 
+// Same only-cache-true reasoning as ffmpegAvailableCache above. ffprobe
+// ships alongside ffmpeg in every normal install, but is a separate binary;
+// byteRangeHlsMode's resume feature needs it to measure cached durations.
+let ffprobeAvailableCache = null;
+
+function isFfprobeAvailable() {
+  if (ffprobeAvailableCache === true) return true;
+  let available;
+  try {
+    const result = spawnSync('ffprobe', ['-version'], { timeout: 5000 });
+    available = !result.error && result.status === 0;
+  } catch {
+    available = false;
+  }
+  if (available) ffprobeAvailableCache = true;
+  return available;
+}
+
 module.exports = {
   activeChildProcesses,
   registerChildProcess,
   killChildProcess,
   killAllChildProcesses,
   isFfmpegAvailable,
+  isFfprobeAvailable,
 };

@@ -14,11 +14,11 @@ import {
   Box,
 } from '../../ui';
 import { Stop as StopIcon, Search as ProbeIcon, Storage as CachedVideoIcon } from '../../../lib/icons';
-import { formatFileSize } from '../../../utils/formatters';
 import { StreamSnapshot } from '../../../hooks/useActiveStreams';
 import { YOUTUBE_URL_BASE } from '../../shared/VideoModal/constants';
 import {
-  formatBytesPerSecond,
+  formatStreamRate,
+  formatStreamTotal,
   parseClientLabel,
   isLikelyProbeRequest,
   formatModeLabel,
@@ -26,7 +26,8 @@ import {
   modeChipColor,
 } from '../utils';
 import { useStreamRowActions } from '../hooks/useStreamRowActions';
-import { SegmentActivityStrip } from './SegmentActivityGrid';
+import { SegmentActivityStrip, segmentVariantForMode } from './SegmentActivityGrid';
+import { ByteRangeProgressStrip } from './ByteRangeProgressGrid';
 import {
   FormatResolutionCell,
   FormatContainerCell,
@@ -42,6 +43,8 @@ export interface StreamsTableProps {
   token: string | null;
   onStopped: (streamId: string) => void;
   onOpenSegments: (streamId: string) => void;
+  // mode=hls-byterange rows only - see ByteRangeProgressGrid.tsx.
+  onOpenByteRange?: (streamId: string) => void;
 }
 
 // An IPv4 address never needs more than "255.255.255.255" (15 chars) worth
@@ -65,6 +68,7 @@ export const STATE_CHIP_COLOR: Record<StreamSnapshot['state'], 'default' | 'succ
   active: 'success',
   cached: 'default',
   failed: 'error',
+  probe: 'default',
 };
 
 // Friendlier than the raw state string ("resolving" reads fine, but
@@ -77,6 +81,7 @@ export const STATE_CHIP_LABEL: Record<StreamSnapshot['state'], string> = {
   active: 'Active',
   cached: 'Cached',
   failed: 'Failed',
+  probe: 'Probe',
 };
 
 function StreamRow({
@@ -84,11 +89,13 @@ function StreamRow({
   token,
   onStopped,
   onOpenSegments,
+  onOpenByteRange,
 }: {
   stream: StreamSnapshot;
   token: string | null;
   onStopped: (id: string) => void;
   onOpenSegments: (streamId: string) => void;
+  onOpenByteRange?: (streamId: string) => void;
 }) {
   const { elapsed, stopping, handleStop } = useStreamRowActions(stream, token, onStopped);
 
@@ -177,11 +184,18 @@ function StreamRow({
         </Tooltip>
       </TableCell>
       <TableCell style={{ whiteSpace: 'nowrap' }}>{elapsed}</TableCell>
-      <TableCell style={{ whiteSpace: 'nowrap' }}>{formatBytesPerSecond(stream.bytesPerSecond)}</TableCell>
-      <TableCell style={{ whiteSpace: 'nowrap' }}>{formatFileSize(stream.bytesTransferred) || '0MB'}</TableCell>
+      <TableCell style={{ whiteSpace: 'nowrap' }}>{formatStreamRate(stream)}</TableCell>
+      <TableCell style={{ whiteSpace: 'nowrap' }}>{formatStreamTotal(stream)}</TableCell>
       <TableCell>
         {stream.segments ? (
-          <SegmentActivityStrip segments={stream.segments} onClick={() => onOpenSegments(stream.streamId)} />
+          <SegmentActivityStrip segments={stream.segments} variant={segmentVariantForMode(stream.mode)} onClick={() => onOpenSegments(stream.streamId)} />
+        ) : stream.mode === 'hls-byterange' && onOpenByteRange ? (
+          <ByteRangeProgressStrip
+            youtubeId={stream.youtubeId}
+            sessionKey={stream.streamId}
+            token={token}
+            onClick={() => onOpenByteRange(stream.streamId)}
+          />
         ) : (
           <Typography variant="caption" style={{ color: 'var(--muted-foreground)' }}>—</Typography>
         )}
@@ -208,7 +222,7 @@ function StreamRow({
   );
 }
 
-function StreamsTable({ streams, token, onStopped, onOpenSegments }: StreamsTableProps) {
+function StreamsTable({ streams, token, onStopped, onOpenSegments, onOpenByteRange }: StreamsTableProps) {
   return (
     <Paper style={{ overflow: 'hidden' }}>
       <TableContainer>
@@ -234,15 +248,26 @@ function StreamsTable({ streams, token, onStopped, onOpenSegments }: StreamsTabl
             </TableRow>
           </TableHead>
           <TableBody>
-            {streams.map((stream) => (
-              <StreamRow
-                key={stream.streamId}
-                stream={stream}
-                token={token}
-                onStopped={onStopped}
-                onOpenSegments={onOpenSegments}
-              />
-            ))}
+            {streams.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={14} style={{ textAlign: 'center', padding: 24 }}>
+                  <Typography variant="body2" style={{ color: 'var(--muted-foreground)' }}>
+                    No active streams
+                  </Typography>
+                </TableCell>
+              </TableRow>
+            ) : (
+              streams.map((stream) => (
+                <StreamRow
+                  key={stream.streamId}
+                  stream={stream}
+                  token={token}
+                  onStopped={onStopped}
+                  onOpenSegments={onOpenSegments}
+                  onOpenByteRange={onOpenByteRange}
+                />
+              ))
+            )}
           </TableBody>
         </Table>
       </TableContainer>

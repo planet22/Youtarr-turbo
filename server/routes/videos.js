@@ -918,6 +918,13 @@ module.exports = function createVideoRoutes({ verifyToken, videosModule, downloa
       });
     }
 
+    if (typeof url !== 'string') {
+      return res.status(400).json({
+        success: false,
+        error: 'URL must be a string'
+      });
+    }
+
     // Validate URL length (prevent excessively long URLs)
     const MAX_URL_LENGTH = 2048;
     if (url.length > MAX_URL_LENGTH) {
@@ -965,13 +972,6 @@ module.exports = function createVideoRoutes({ verifyToken, videosModule, downloa
       }
     }
 
-    // Persist a real subfolder override so it is reusable in future downloads.
-    if (subfolder && subfolder !== ROOT_SENTINEL && subfolder !== GLOBAL_DEFAULT_SENTINEL) {
-      require('../modules/subfolderModule')
-        .register(subfolder)
-        .catch((err) => req.log.warn({ err }, 'Failed to register download subfolder'));
-    }
-
     try {
       // Optionally fetch video metadata for response
       const videoValidationModule = require('../modules/videoValidationModule');
@@ -982,6 +982,15 @@ module.exports = function createVideoRoutes({ verifyToken, videosModule, downloa
           success: false,
           error: metadata.error || 'Could not validate video URL'
         });
+      }
+
+      // Persist a real subfolder override so it is reusable in future downloads.
+      // Only once the request is known to be valid, so a rejected request does
+      // not leave a subfolder behind.
+      if (subfolder && subfolder !== ROOT_SENTINEL && subfolder !== GLOBAL_DEFAULT_SENTINEL) {
+        require('../modules/subfolderModule')
+          .register(subfolder)
+          .catch((err) => req.log.warn({ err }, 'Failed to register download subfolder'));
       }
 
       // Queue the download

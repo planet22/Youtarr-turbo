@@ -778,6 +778,20 @@ describe('videos routes: remaining endpoints', () => {
       expect(res.body).toEqual({ success: false, error: 'URL is required' });
     });
 
+    it.each([
+      ['an array', [VIDEO_URL]],
+      ['a number', 12345],
+      ['an object', { href: VIDEO_URL }],
+    ])('rejects a url that is %s', async (_label, url) => {
+      const { app, downloadModule } = makeApp();
+
+      const res = await post(app, { url });
+
+      expect(res.status).toBe(400);
+      expect(res.body).toEqual({ success: false, error: 'URL must be a string' });
+      expect(downloadModule.doGroupedManualDownloads).not.toHaveBeenCalled();
+    });
+
     it('rejects a url over 2048 characters', async () => {
       const { app } = makeApp();
 
@@ -879,6 +893,24 @@ describe('videos routes: remaining endpoints', () => {
       expect(res.status).toBe(200);
       await new Promise((resolve) => setImmediate(resolve));
       expect(log.warn).toHaveBeenCalledWith({ err: expect.any(Error) }, 'Failed to register download subfolder');
+    });
+
+    it('does not register the subfolder when the url fails metadata validation', async () => {
+      videoValidationModule.validateVideo.mockResolvedValue({ isValidUrl: false, error: 'Video unavailable' });
+      const { app } = makeApp();
+
+      const res = await post(app, { url: VIDEO_URL, subfolder: 'Music' });
+
+      expect(res.status).toBe(400);
+      expect(subfolderModule.register).not.toHaveBeenCalled();
+    });
+
+    it('does not register the subfolder when the url format is invalid', async () => {
+      const { app } = makeApp();
+
+      await post(app, { url: 'https://example.com/x', subfolder: 'Music' });
+
+      expect(subfolderModule.register).not.toHaveBeenCalled();
     });
 
     it('rejects a url that fails metadata validation with its reason', async () => {

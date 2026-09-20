@@ -130,7 +130,7 @@ describe('JobModule.updateJob', () => {
     it('writes the video count as the output of a successful job', async () => {
       const job = await finish('Complete');
 
-      expect(job.output).toBe('0 videos.');
+      expect(job.output).toBe('2 videos.');
       expect(job.status).toBe('Complete');
     });
 
@@ -159,6 +159,34 @@ describe('JobModule.updateJob', () => {
       expect(job.data.videos).toEqual([{ id: 1 }, { id: 3 }]);
       expect(job.output).toBe('2 videos.');
       expect(JobVideo.findAll).toHaveBeenCalledWith({ where: { job_id: 'j1' } });
+    });
+
+    it('keeps the videos it was given when the database has none for the job', async () => {
+      JobVideo.findAll.mockResolvedValue([]);
+
+      const job = await finish('Complete', { data: { videos: [{ id: 7 }, { id: 8 }] } });
+
+      expect(job.data.videos).toEqual([{ id: 7 }, { id: 8 }]);
+      expect(job.output).toBe('2 videos.');
+    });
+
+    it('keeps the videos it was given when the rows exist but their videos are gone', async () => {
+      JobVideo.findAll.mockResolvedValue([{ video_id: 1 }]);
+      Video.findOne.mockResolvedValue(null);
+
+      const job = await finish('Complete', { data: { videos: [{ id: 7 }] } });
+
+      expect(job.data.videos).toEqual([{ id: 7 }]);
+    });
+
+    it('prefers the database list when it found videos', async () => {
+      JobVideo.findAll.mockResolvedValue([{ video_id: 1 }]);
+      Video.findOne.mockResolvedValue({ dataValues: { id: 1 } });
+
+      const job = await finish('Complete', { data: { videos: [{ id: 7 }, { id: 8 }] } });
+
+      expect(job.data.videos).toEqual([{ id: 1 }]);
+      expect(job.output).toBe('1 videos.');
     });
 
     it('does not overwrite the output of an Error job with the recount', async () => {

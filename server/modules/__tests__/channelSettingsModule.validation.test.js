@@ -20,7 +20,7 @@ describe('ChannelSettingsModule validators and previews', () => {
 
     execFileSync = jest.fn();
     Channel = { findOne: jest.fn(), findAll: jest.fn().mockResolvedValue([]) };
-    ChannelVideo = { findAll: jest.fn().mockResolvedValue([]) };
+    ChannelVideo = { findAll: jest.fn().mockResolvedValue([]), findOne: jest.fn().mockResolvedValue(null) };
     Video = { findOne: jest.fn() };
     JobVideoDownload = { count: jest.fn().mockResolvedValue(0), findAll: jest.fn().mockResolvedValue([]) };
     jobModule = { getAllJobs: jest.fn().mockReturnValue({}) };
@@ -409,13 +409,36 @@ describe('ChannelSettingsModule validators and previews', () => {
       await expect(mod.hasActiveDownloads('UC1')).resolves.toBe(false);
     });
 
-    it('cannot attribute a download whose video row does not exist yet', async () => {
+    it('attributes a first-time download to the channel that lists the video', async () => {
       jobModule.getAllJobs.mockReturnValue(activeJob('j1'));
       JobVideoDownload.count.mockResolvedValue(1);
       JobVideoDownload.findAll.mockResolvedValue([{ youtube_id: 'brand-new' }]);
       Video.findOne.mockResolvedValue(null);
+      ChannelVideo.findOne.mockResolvedValue({ id: 5 });
+
+      await expect(mod.hasActiveDownloads('UC1')).resolves.toBe(true);
+      expect(ChannelVideo.findOne).toHaveBeenCalledWith({ where: { youtube_id: 'brand-new', channel_id: 'UC1' }, attributes: ['id'] });
+    });
+
+    it('is false for a first-time download that no listing of the channel contains', async () => {
+      jobModule.getAllJobs.mockReturnValue(activeJob('j1'));
+      JobVideoDownload.count.mockResolvedValue(1);
+      JobVideoDownload.findAll.mockResolvedValue([{ youtube_id: 'brand-new' }]);
+      Video.findOne.mockResolvedValue(null);
+      ChannelVideo.findOne.mockResolvedValue(null);
 
       await expect(mod.hasActiveDownloads('UC1')).resolves.toBe(false);
+    });
+
+    it('does not consult the listing when the video row already names another channel', async () => {
+      jobModule.getAllJobs.mockReturnValue(activeJob('j1'));
+      JobVideoDownload.count.mockResolvedValue(1);
+      JobVideoDownload.findAll.mockResolvedValue([{ youtube_id: 'a' }]);
+      Video.findOne.mockResolvedValue({ channel_id: 'other' });
+
+      await mod.hasActiveDownloads('UC1');
+
+      expect(ChannelVideo.findOne).not.toHaveBeenCalled();
     });
 
     it('looks the video up by YouTube id', async () => {

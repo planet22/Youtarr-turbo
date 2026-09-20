@@ -585,7 +585,21 @@ class ChannelSettingsModule {
               attributes: ['channel_id']
             });
 
-            if (video && video.channel_id === channelId) {
+            if (video) {
+              if (video.channel_id === channelId) {
+                return true;
+              }
+              continue;
+            }
+
+            // A first-time download has no Videos row until post-processing,
+            // so fall back to the channel's own video listing.
+            const ChannelVideo = require('../models/channelvideo');
+            const listed = await ChannelVideo.findOne({
+              where: { youtube_id: videoDownload.youtube_id, channel_id: channelId },
+              attributes: ['id']
+            });
+            if (listed) {
               return true;
             }
           }

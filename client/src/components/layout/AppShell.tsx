@@ -12,7 +12,7 @@ import { useMediaQuery } from '../../hooks/useMediaQuery';
 import { HEADER_HEIGHT_DESKTOP, HEADER_HEIGHT_MOBILE, NAV_SIDEBAR_COLLAPSED_WIDTH, NAV_SIDEBAR_EXPANDED_WIDTH } from './navLayoutConstants';
 import './layoutFallback.css';
 
-import { Tv as SubscriptionsIcon, Library as VideoLibraryIcon, Radio as StreamingIcon, Rss as NzbIcon } from 'lucide-react';
+import { Tv as SubscriptionsIcon, Library as VideoLibraryIcon, Radio as StreamingIcon, Rss as NzbIcon, ScrollText as EventLogIcon } from 'lucide-react';
 import {
   Download as DownloadIcon,
   Settings as SettingsIcon,
@@ -106,6 +106,7 @@ export function AppShell({
       { key: 'download-manual', label: 'Manual Download', to: '/downloads/manual', icon: <ManualDownloadIcon size={14} /> },
       { key: 'download-activity', label: 'Activity', to: '/downloads/activity', icon: <ActivityIcon size={14} /> },
       { key: 'download-history', label: 'History', to: '/downloads/history', icon: <HistoryIcon size={14} /> },
+      { key: 'download-log', label: 'Event Log', to: '/downloads/log', icon: <EventLogIcon size={14} /> },
     ],
     []
   );

@@ -12,6 +12,7 @@ import { Navigate, Route, Routes, useSearchParams } from 'react-router-dom';
 import DownloadNew from './DownloadManager/DownloadNew';
 import DownloadProgress from './DownloadManager/DownloadProgress';
 import DownloadHistory from './DownloadManager/DownloadHistory';
+import EventLog from './DownloadManager/EventLog';
 import WebSocketContext from '../contexts/WebSocketContext';
 import { useDownloadListingsRefresh } from '../hooks/useDownloadListingsRefresh';
 import { useConfig } from '../hooks/useConfig';
@@ -123,6 +124,14 @@ function DownloadManager({ token }: DownloadManagerProps) {
               jobIdFilter={jobIdFilter}
               onClearJobIdFilter={() => setSearchParams({}, { replace: true })}
             />
+          </Grid>
+        }
+      />
+      <Route
+        path="log"
+        element={
+          <Grid container spacing={2}>
+            <EventLog token={token} />
           </Grid>
         }
       />

@@ -43,6 +43,7 @@ describe('cronJobs task registry', () => {
       'session-cleanup',
       'stream-history-prune',
       'metadata-cache-prune',
+      'job-event-prune',
       'metadata-backfill',
       'ytdlp-update'
     ]);

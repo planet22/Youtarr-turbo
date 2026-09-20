@@ -1,0 +1,146 @@
+// Registry of every event type the video/events log knows about. To add a new
+// step to the log: add one entry here, then call
+//   jobEventLog.record(EVENT_TYPES.YOUR_TYPE, { jobId, youtubeId, detail })
+// at the place it happens. `message` is rendered ONCE at write time and stored
+// frozen - the log never recomputes text from live state, which is the whole
+// point of it. Types missing from this catalog still record (generic message),
+// so a call site can never break by being ahead of its catalog entry.
+
+const LEVELS = Object.freeze({ INFO: 'info', WARN: 'warn', ERROR: 'error' });
+
+const EVENT_TYPES = Object.freeze({
+  // Job lifecycle (no youtubeId)
+  JOB_CREATED: 'job.created',
+  JOB_STARTED: 'job.started',
+  JOB_FINISHED: 'job.finished',
+  JOB_REMOVED: 'job.removed',
+  // Per-video download pipeline
+  VIDEO_DOWNLOAD_STARTED: 'video.download_started',
+  VIDEO_FILE_FINALIZED: 'video.file_finalized',
+  VIDEO_FAILED: 'video.failed',
+  VIDEO_AUTO_RETRY_QUEUED: 'video.auto_retry_queued',
+  VIDEO_DELETED: 'video.deleted',
+  // STRM
+  STRM_CREATED: 'strm.created',
+  STRM_CACHE_ON_PLAY_QUEUED: 'strm.cache_on_play_queued',
+  // Sonarr/Radarr (NZB) grabs
+  NZB_GRAB_REQUESTED: 'nzb.grab_requested',
+  NZB_STAGED_FOR_IMPORT: 'nzb.staged_for_import',
+  NZB_IMPORT_DETECTED: 'nzb.import_detected',
+  NZB_HISTORY_REMOVED: 'nzb.history_removed',
+  NZB_UNTRACKED: 'nzb.untracked',
+  NZB_UNTRACK_FAILED: 'nzb.untrack_failed',
+  // ytstream buffer cache
+  CACHE_HLS_BUFFER_FINALIZED: 'cache.hls_buffer_finalized',
+  CACHE_TS_TO_MP4: 'cache.ts_to_mp4',
+  CACHE_PROMOTED_TO_LIBRARY: 'cache.promoted_to_library',
+});
+
+const has = (value) => value !== undefined && value !== null && value !== '';
+const suffix = (value, text) => (has(value) ? ` ${text.replace('%s', value)}` : '');
+
+const EVENT_CATALOG = {
+  [EVENT_TYPES.JOB_CREATED]: {
+    actor: 'job',
+    message: ({ detail = {} }) =>
+      detail.status === 'Pending' ? 'Job queued' : `Job created (${detail.status || 'unknown status'})`,
+  },
+  [EVENT_TYPES.JOB_STARTED]: { actor: 'job', message: () => 'Job started' },
+  [EVENT_TYPES.JOB_FINISHED]: {
+    actor: 'job',
+    level: ({ detail = {} }) => {
+      if (detail.status === 'Error') return LEVELS.ERROR;
+      if (['Terminated', 'Killed', 'Complete with Warnings', 'Failed'].includes(detail.status)) return LEVELS.WARN;
+      return LEVELS.INFO;
+    },
+    message: ({ detail = {} }) => {
+      const parts = [];
+      if (has(detail.videoCount)) parts.push(`${detail.videoCount} video${detail.videoCount === 1 ? '' : 's'}`);
+      if (detail.failedCount) parts.push(`${detail.failedCount} failed`);
+      if (detail.skippedCount) parts.push(`${detail.skippedCount} skipped`);
+      return `Job finished: ${detail.status || 'unknown'}${parts.length ? ` (${parts.join(', ')})` : ''}${suffix(detail.reason, '- %s')}`;
+    },
+  },
+  [EVENT_TYPES.JOB_REMOVED]: { actor: 'job', message: () => 'Job removed from the queue before it started' },
+
+  [EVENT_TYPES.VIDEO_DOWNLOAD_STARTED]: { actor: 'downloader', message: () => 'Download started' },
+  [EVENT_TYPES.VIDEO_FILE_FINALIZED]: {
+    actor: 'downloader',
+    message: ({ detail = {} }) => `File finalized${suffix(detail.filePath, 'at %s')}${suffix(detail.fileSize, '(%s bytes)')}`,
+  },
+  [EVENT_TYPES.VIDEO_FAILED]: {
+    actor: 'downloader',
+    level: () => LEVELS.ERROR,
+    message: ({ detail = {} }) => `Download failed${suffix(detail.error, '- %s')}`,
+  },
+  [EVENT_TYPES.VIDEO_AUTO_RETRY_QUEUED]: {
+    actor: 'downloader',
+    level: () => LEVELS.WARN,
+    message: ({ detail = {} }) => `Auto-retry queued${suffix(detail.attempt, '(attempt %s)')}`,
+  },
+  [EVENT_TYPES.VIDEO_DELETED]: {
+    actor: 'library',
+    message: ({ detail = {} }) => `Video deleted${suffix(detail.reason, '- %s')}`,
+  },
+
+  [EVENT_TYPES.STRM_CREATED]: { actor: 'strm', message: () => 'STRM file created' },
+  [EVENT_TYPES.STRM_CACHE_ON_PLAY_QUEUED]: {
+    actor: 'strm',
+    message: () => 'Background download queued because the STRM item was played',
+  },
+
+  [EVENT_TYPES.NZB_GRAB_REQUESTED]: {
+    actor: 'nzb',
+    message: ({ detail = {} }) =>
+      `Grab requested by Sonarr/Radarr${suffix(detail.categoryName, 'for category %s')}${suffix(detail.importStrategy, '(import strategy: %s)')}`,
+  },
+  [EVENT_TYPES.NZB_STAGED_FOR_IMPORT]: {
+    actor: 'nzb',
+    message: ({ detail = {} }) => `Staged for Sonarr/Radarr import${suffix(detail.stagedPath, 'at %s')}`,
+  },
+  [EVENT_TYPES.NZB_IMPORT_DETECTED]: { actor: 'nzb', message: () => 'Import by Sonarr/Radarr detected' },
+  [EVENT_TYPES.NZB_HISTORY_REMOVED]: {
+    actor: 'nzb',
+    message: () => 'Sonarr/Radarr removed this item from its download history',
+  },
+  [EVENT_TYPES.NZB_UNTRACKED]: {
+    actor: 'nzb',
+    message: ({ detail = {} }) =>
+      `Removed from the Youtarr library after Sonarr/Radarr import${suffix(detail.trigger, '(via %s)')}`,
+  },
+  [EVENT_TYPES.NZB_UNTRACK_FAILED]: {
+    actor: 'nzb',
+    level: () => LEVELS.WARN,
+    message: ({ detail = {} }) => `Could not remove from the Youtarr library${suffix(detail.error, '- %s')}`,
+  },
+
+  [EVENT_TYPES.CACHE_HLS_BUFFER_FINALIZED]: {
+    actor: 'ytstream',
+    message: ({ detail = {} }) => `HLS buffer saved${suffix(detail.filePath, 'to %s')}`,
+  },
+  [EVENT_TYPES.CACHE_TS_TO_MP4]: {
+    actor: 'ytstream',
+    message: () => 'Hidden .ts cache remuxed to .mp4',
+  },
+  [EVENT_TYPES.CACHE_PROMOTED_TO_LIBRARY]: {
+    actor: 'ytstream',
+    message: ({ detail = {} }) => `Buffered cache promoted to a library file${suffix(detail.filePath, 'at %s')}`,
+  },
+};
+
+/**
+ * Resolves the stored actor/level/message for an event, letting an explicit
+ * value on the call always win over the catalog default.
+ * @param {string} eventType
+ * @param {object} fields - the record() call's fields (jobId, youtubeId, detail, message?, level?, actor?)
+ * @returns {{actor: string|null, level: string, message: string}}
+ */
+function describeEvent(eventType, fields = {}) {
+  const entry = EVENT_CATALOG[eventType] || {};
+  const level = fields.level || (typeof entry.level === 'function' ? entry.level(fields) : entry.level) || LEVELS.INFO;
+  const actor = fields.actor || entry.actor || null;
+  const message = fields.message || (entry.message ? entry.message(fields) : eventType);
+  return { actor, level, message };
+}
+
+module.exports = { EVENT_TYPES, EVENT_CATALOG, LEVELS, describeEvent };

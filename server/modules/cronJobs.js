@@ -94,6 +94,7 @@ function initialize(deps = {}) {
   const notificationModule = require('./notificationModule');
   const ytdlpModule = require('./ytdlpModule');
   const configModule = require('./configModule');
+  const jobEventLog = require('./jobEventLog');
   const { refreshYtDlpVersionCache } = deps;
 
   logger.info('Initializing scheduled cron jobs');
@@ -282,6 +283,26 @@ function initialize(deps = {}) {
       if (result > 0) logger.info({ removed: result, retentionDays }, 'Pruned stale entries from the untracked-video YouTube metadata cache');
     } catch (error) {
       logger.error({ err: error }, 'Error pruning youtube_metadata_cache');
+    }
+  });
+
+  // ============================================================================
+  // VIDEO/EVENTS LOG PRUNE - 3:25 AM Daily
+  // ============================================================================
+  // job_events (server/modules/jobEventLog) is append-only, so this is the only
+  // thing that ever removes rows. Retention is jobEventLogRetentionDays
+  // (default 180, 0 keeps everything).
+  defineTask({
+    id: 'job-event-prune',
+    label: 'Video/events log prune',
+    description: 'Removes video/events log rows older than the configured retention.',
+    cron: '25 3 * * *',
+    confirm: false,
+  }, async () => {
+    try {
+      await jobEventLog.prune();
+    } catch (error) {
+      logger.error({ err: error }, 'Error pruning the video/events log');
     }
   });
 

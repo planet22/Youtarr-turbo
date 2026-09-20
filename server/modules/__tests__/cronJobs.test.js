@@ -101,11 +101,11 @@ describe('CronJobs', () => {
   });
 
   describe('initialize', () => {
-    test('should register all seven cron jobs', () => {
+    test('should register all eight cron jobs', () => {
       cronJobs.initialize();
 
-      expect(mockSchedule.schedule).toHaveBeenCalledTimes(7);
-      ['0 2 * * *', '10 2 * * *', '0 3 * * *', '15 3 * * *', '20 3 * * *', '30 3 * * *', '0 4 * * *'].forEach((expression) => {
+      expect(mockSchedule.schedule).toHaveBeenCalledTimes(8);
+      ['0 2 * * *', '10 2 * * *', '0 3 * * *', '15 3 * * *', '20 3 * * *', '25 3 * * *', '30 3 * * *', '0 4 * * *'].forEach((expression) => {
         expect(mockSchedule.schedule).toHaveBeenCalledWith(expression, expect.any(Function));
       });
     });

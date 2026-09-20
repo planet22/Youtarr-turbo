@@ -17,6 +17,7 @@ const StreamHistory = require('./streamhistory');
 const YoutubeMetadataCache = require('./youtubemetadatacache');
 const NzbDiagnosticLog = require('./nzbdiagnosticlog');
 const NzbResolutionCache = require('./nzbresolutioncache');
+const JobEvent = require('./jobevent');
 
 Job.hasMany(JobVideo, { foreignKey: 'job_id', as: 'jobVideos' });
 Job.hasMany(JobVideoDownload, { foreignKey: 'job_id', as: 'jobVideoDownloads' });
@@ -59,4 +60,5 @@ module.exports = {
   YoutubeMetadataCache,
   NzbDiagnosticLog,
   NzbResolutionCache,
+  JobEvent,
 };

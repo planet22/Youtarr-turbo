@@ -55,6 +55,28 @@ describe('cronJobs nightly maintenance tasks', () => {
   };
   const task = (id) => cronJobs.getTasks().find((t) => t.id === id);
 
+  describe('video/events log prune (3:25 AM)', () => {
+    it('is registered as its own task', () => {
+      expect(task('job-event-prune')).toMatchObject({ cron: '25 3 * * *', confirm: false });
+    });
+
+    it('prunes the log through jobEventLog', async () => {
+      const jobEventLog = require('../jobEventLog');
+
+      await run('25 3 * * *');
+
+      expect(jobEventLog.prune).toHaveBeenCalled();
+    });
+
+    it('logs instead of throwing when the prune fails', async () => {
+      require('../jobEventLog').prune.mockRejectedValueOnce(new Error('db down'));
+
+      await run('25 3 * * *');
+
+      expect(logger.error).toHaveBeenCalledWith({ err: expect.any(Error) }, 'Error pruning the video/events log');
+    });
+  });
+
   describe('STRM cache-on-play expiry (2:10 AM)', () => {
     it('is registered as its own task', () => {
       expect(task('strm-cache-expiry')).toMatchObject({ cron: '10 2 * * *', confirm: false });

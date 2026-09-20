@@ -3,6 +3,9 @@ jest.mock('uuid');
 jest.mock('../../logger');
 jest.mock('child_process');
 
+// The module builds paths with the platform separator, so expectations must too.
+const platformPath = (p) => p.split('/').join(require('path').sep);
+
 describe('ConfigModule', () => {
   let ConfigModule;
   let fs;
@@ -474,7 +477,7 @@ describe('ConfigModule', () => {
 
       // Assert
       expect(fs.mkdirSync).toHaveBeenCalledWith(
-        expect.stringContaining('config/images'),
+        expect.stringContaining(platformPath('config/images')),
         { recursive: true }
       );
     });
@@ -636,7 +639,7 @@ describe('ConfigModule', () => {
       // Arrange
       fs.existsSync.mockImplementation((path) => {
         if (path.includes('config.json') && !path.includes('example')) return false;
-        if (path.includes('config/config.example.json')) return true;
+        if (path.split('\\').join('/').includes('config/config.example.json')) return true;
         return false;
       });
       fs.readFileSync.mockReturnValue(JSON.stringify(defaultTemplate));
@@ -646,7 +649,7 @@ describe('ConfigModule', () => {
 
       // Assert
       expect(logger.info).toHaveBeenCalledWith(
-        expect.objectContaining({ path: expect.stringContaining('config/config.example.json') }),
+        expect.objectContaining({ path: expect.stringContaining(platformPath('config/config.example.json')) }),
         'Using config.example.json from mounted volume'
       );
     });
@@ -656,7 +659,7 @@ describe('ConfigModule', () => {
       fs.existsSync.mockImplementation((path) => {
         if (path.includes('config.json') && !path.includes('example')) return false;
         // The template path is relative to __dirname (server/modules)
-        if (path.includes('server/config.example.json')) return true;
+        if (path.split('\\').join('/').includes('server/config.example.json')) return true;
         return false;
       });
       fs.readFileSync.mockReturnValue(JSON.stringify(defaultTemplate));
@@ -666,7 +669,7 @@ describe('ConfigModule', () => {
 
       // Assert
       expect(logger.info).toHaveBeenCalledWith(
-        expect.objectContaining({ path: expect.stringContaining('server/config.example.json') }),
+        expect.objectContaining({ path: expect.stringContaining(platformPath('server/config.example.json')) }),
         'Using config.example.json from image template'
       );
     });
@@ -1231,7 +1234,7 @@ describe('ConfigModule', () => {
       const imagePath = ConfigModule.getImagePath();
 
       // Assert
-      expect(imagePath).toContain('config/images');
+      expect(imagePath).toContain(platformPath('config/images'));
     });
 
     test('should return standard image path when DATA_PATH is not set', () => {
@@ -1246,8 +1249,8 @@ describe('ConfigModule', () => {
       const imagePath = ConfigModule.getImagePath();
 
       // Assert
-      expect(imagePath).toContain('server/images');
-      expect(imagePath).not.toContain('config/images');
+      expect(imagePath).toContain(platformPath('server/images'));
+      expect(imagePath).not.toContain(platformPath('config/images'));
     });
 
     test('should return platform jobs path when DATA_PATH is set', () => {
@@ -1262,7 +1265,7 @@ describe('ConfigModule', () => {
       const jobsPath = ConfigModule.getJobsPath();
 
       // Assert
-      expect(jobsPath).toContain('config/jobs');
+      expect(jobsPath).toContain(platformPath('config/jobs'));
     });
 
     test('should return standard jobs path when DATA_PATH is not set', () => {
@@ -1278,7 +1281,7 @@ describe('ConfigModule', () => {
 
       // Assert
       expect(jobsPath).toContain('jobs');
-      expect(jobsPath).not.toContain('config/jobs');
+      expect(jobsPath).not.toContain(platformPath('config/jobs'));
     });
   });
 

@@ -302,6 +302,14 @@ describe('ytstream playbackPlan', () => {
         expect((await plan({ t: '90' })).seekSeconds).toBe(90);
       });
 
+      it.each(['abc', '-5', 'Infinity', '12s'])('treats t=%s as no seek position', async (t) => {
+        expect((await plan({ t })).seekSeconds).toBeNull();
+      });
+
+      it('keeps a fractional seek position', async () => {
+        expect((await plan({ t: '12.5' })).seekSeconds).toBe(12.5);
+      });
+
       it('starts with the probe shortcut step', async () => {
         const result = await plan();
 

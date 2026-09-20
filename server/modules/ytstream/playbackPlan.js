@@ -374,7 +374,9 @@ async function resolvePlaybackPlan(youtubeId, req, config, { probe }) {
     });
   }
 
-  const seekSeconds = req.query.t ? Number(req.query.t) : null;
+  // A t that is not a non-negative number (e.g. t=abc) means "no seek", not NaN.
+  const requestedSeek = req.query.t ? Number(req.query.t) : null;
+  const seekSeconds = Number.isFinite(requestedSeek) && requestedSeek >= 0 ? requestedSeek : null;
 
   // getModeFieldCompatibility is the single canonical source for all of
   // this - both the forced-value ENFORCEMENT below and the dry-run TEXT

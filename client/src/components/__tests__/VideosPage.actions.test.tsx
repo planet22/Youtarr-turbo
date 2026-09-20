@@ -223,8 +223,8 @@ describe('VideosPage bulk and single-row actions', () => {
     mockPurgeVideos.mockResolvedValue({ success: true, purged: [2], failed: [] });
     mockForceDownload.mockResolvedValue({ success: true, processed: [3], failed: [] });
     mockRevertToStrm.mockResolvedValue({ success: true, processed: [1], failed: [] });
-    mockCache.clearMetadataCache.mockResolvedValue(undefined);
-    mockCache.clearVideoCache.mockResolvedValue(undefined);
+    mockCache.clearMetadataCache.mockResolvedValue(true);
+    mockCache.clearVideoCache.mockResolvedValue(true);
     mockCache.bulkClearMetadataCache.mockResolvedValue({ success: true, failed: [] });
     mockCache.bulkClearVideoCache.mockResolvedValue({ success: true, failed: [] });
     axios.post.mockResolvedValue({ data: {} });
@@ -433,6 +433,30 @@ describe('VideosPage bulk and single-row actions', () => {
       mockDeleteVideos.mockResolvedValue({ success: false, deleted: [], failed: [{ videoId: 1, error: 'x' }] });
       renderPage();
       await select('v1');
+      await user.click(menuItem('Obliterate'));
+
+      await user.click(screen.getByRole('button', { name: 'confirm obliterate' }));
+
+      expect(await screen.findByText('Obliterated 1 video, but 1 step failed')).toBeInTheDocument();
+    });
+
+    it('counts a failed cache clear as a failed step', async () => {
+      mockCache.bulkClearMetadataCache.mockResolvedValue({ success: false, failed: ['u1'] });
+      renderPage();
+      await select('u1');
+      await user.click(menuItem('Obliterate'));
+
+      await user.click(screen.getByRole('button', { name: 'confirm obliterate' }));
+
+      expect(await screen.findByText('Obliterated 1 video, but 1 step failed')).toBeInTheDocument();
+    });
+
+    it('counts a failed revert to STRM as a failed step', async () => {
+      mockVideos = [video({ id: 7, youtubeId: 'v7', hasCachedVideo: true })];
+      mockRevertToStrm.mockResolvedValue({ success: false, processed: [], failed: [{ videoId: 7, error: 'x' }] });
+      mockDeleteVideos.mockResolvedValue({ success: true, deleted: [7], failed: [] });
+      renderPage();
+      await select('v7');
       await user.click(menuItem('Obliterate'));
 
       await user.click(screen.getByRole('button', { name: 'confirm obliterate' }));
@@ -686,6 +710,21 @@ describe('VideosPage bulk and single-row actions', () => {
       expect(await status()).toHaveTextContent('Failed to clear cached metadata');
     });
 
+    it('counts only the videos it cleared when some of the selection failed', async () => {
+      mockVideos = [
+        video({ id: null as unknown as number, youtubeId: 'u1', isTracked: false, hasCachedMetadata: true }),
+        video({ id: null as unknown as number, youtubeId: 'u2', isTracked: false, hasCachedMetadata: true }),
+      ];
+      mockCache.bulkClearMetadataCache.mockResolvedValue({ success: true, failed: ['u2'] });
+      renderPage();
+      await select('u1', 'u2');
+      await user.click(menuItem('Clear Cached Metadata'));
+
+      await user.click(screen.getByRole('button', { name: 'confirm clear metadata' }));
+
+      expect(await screen.findByText('Cleared cached metadata for 1 video')).toBeInTheDocument();
+    });
+
     it('clears the cached video of an untracked row through the buffer cache', async () => {
       renderPage();
       await select('u1');
@@ -753,6 +792,40 @@ describe('VideosPage bulk and single-row actions', () => {
 
       await waitFor(() => expect(mockRevertToStrm).toHaveBeenCalledWith([7], 'tok'));
       expect(mockCache.clearVideoCache).not.toHaveBeenCalled();
+    });
+
+    it('reports a failed metadata clear and keeps the detail dialog open', async () => {
+      mockCache.clearMetadataCache.mockResolvedValue(false);
+      renderPage();
+      await user.click(screen.getByRole('button', { name: 'metadata detail u1' }));
+
+      await user.click(screen.getByRole('button', { name: 'clear cache detail' }));
+
+      expect(await status()).toHaveTextContent('Failed to clear cached metadata');
+      expect(screen.getByText(/cache detail metadata/)).toBeInTheDocument();
+    });
+
+    it('reports a failed cached video clear and keeps the detail dialog open', async () => {
+      mockCache.clearVideoCache.mockResolvedValue(false);
+      renderPage();
+      await user.click(screen.getByRole('button', { name: 'video detail u1' }));
+
+      await user.click(screen.getByRole('button', { name: 'clear cache detail' }));
+
+      expect(await status()).toHaveTextContent('Failed to clear cached video');
+      expect(screen.getByText(/cache detail video/)).toBeInTheDocument();
+    });
+
+    it('reports a failed revert to STRM and keeps the detail dialog open', async () => {
+      mockVideos = [video({ id: 7, youtubeId: 'v7', hasCachedVideo: true })];
+      mockRevertToStrm.mockResolvedValue({ success: false, processed: [], failed: [{ videoId: 7, error: 'x' }] });
+      renderPage();
+      await user.click(screen.getByRole('button', { name: 'video detail v7' }));
+
+      await user.click(screen.getByRole('button', { name: 'clear cache detail' }));
+
+      expect(await status()).toHaveTextContent('Failed to clear cached video');
+      expect(screen.getByText(/cache detail video/)).toBeInTheDocument();
     });
 
     it('closes the detail dialog', async () => {

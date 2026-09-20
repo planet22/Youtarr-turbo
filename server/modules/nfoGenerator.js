@@ -197,6 +197,15 @@ class NfoGenerator {
     const tagLine = `  <tag>${this.escapeXml(tag)}</tag>`;
     if (xml.includes(tagLine)) return false;
 
+    // A different, earlier "Available: ..." tag (the video's tiers changed)
+    // is replaced in place rather than left next to the new one.
+    const staleTag = xml.match(/^ {2}<tag>Available: [^<]*<\/tag>$/m);
+    if (staleTag) {
+      const replaced = xml.slice(0, staleTag.index) + tagLine + xml.slice(staleTag.index + staleTag[0].length);
+      await fs.promises.writeFile(nfoPath, replaced, 'utf8');
+      return true;
+    }
+
     // Keep the new tag grouped with any existing <tag>/<genre> lines by
     // inserting right after the last one; otherwise fall back to just
     // before the closing root element. Neither <movie> nor <episodedetails>

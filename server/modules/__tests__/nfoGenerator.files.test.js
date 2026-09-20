@@ -92,6 +92,24 @@ describe('nfoGenerator file output', () => {
       expect(read('video.nfo')).toBe(original);
     });
 
+    it('replaces an earlier resolution tag when the available tiers have changed', async () => {
+      fs.writeFileSync(nfoPath(), '<movie>\n  <tag>a</tag>\n  <tag>Available: 480p</tag>\n  <tag>b</tag>\n</movie>\n');
+
+      const changed = await nfoGenerator.patchExistingNfoWithResolutionTag(nfoPath(), info);
+
+      expect(changed).toBe(true);
+      expect(read('video.nfo')).toBe('<movie>\n  <tag>a</tag>\n  <tag>Available: 720p/1080p</tag>\n  <tag>b</tag>\n</movie>\n');
+    });
+
+    it('does not accumulate resolution tags over repeated changes', async () => {
+      fs.writeFileSync(nfoPath(), '<movie>\n  <tag>a</tag>\n</movie>\n');
+
+      await nfoGenerator.patchExistingNfoWithResolutionTag(nfoPath(), { formats: formats(480) });
+      await nfoGenerator.patchExistingNfoWithResolutionTag(nfoPath(), info);
+
+      expect(read('video.nfo').match(/Available:/g)).toHaveLength(1);
+    });
+
     it('leaves a file with an unrecognized root untouched', async () => {
       const original = '<tvshow>\n  <title>T</title>\n</tvshow>\n';
       fs.writeFileSync(nfoPath(), original);

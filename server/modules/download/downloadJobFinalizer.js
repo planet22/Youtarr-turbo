@@ -16,6 +16,8 @@ const downloadCleanup = require('./downloadCleanup');
 const transient403RetryPlanner = require('./transient403RetryPlanner');
 const failureAdvisor = require('./failureAdvisor');
 const failedVideoEnricher = require('./failedVideoEnricher');
+const jobEventLog = require('../jobEventLog');
+const { EVENT_TYPES } = require('../jobEventLog/eventCatalog');
 const { runCompletionSideEffects } = require('./downloadCompletionEffects');
 const {
   computeOutcomeFlags,
@@ -54,6 +56,32 @@ function stderrHasOnlyBenignWarnings(stderrBuffer = '') {
   return lines.every((line) =>
     BENIGN_STDERR_WARNING_PATTERNS.some((pattern) => pattern.test(line))
   );
+}
+
+// One log entry per failed video (and one more for those handed to an
+// auto-retry job), written once the failure is final and diagnosed.
+function recordFailedVideoEvents(jobId, failedVideosList) {
+  for (const failed of failedVideosList || []) {
+    jobEventLog.record(EVENT_TYPES.VIDEO_FAILED, {
+      jobId,
+      youtubeId: failed.youtubeId,
+      videoTitle: failed.title,
+      channelName: failed.channel,
+      detail: {
+        error: failed.error,
+        diagnosisKey: failed.diagnosisKey,
+        autoRetryQueued: Boolean(failed.autoRetryQueued),
+      },
+    });
+    if (failed.autoRetryQueued) {
+      jobEventLog.record(EVENT_TYPES.VIDEO_AUTO_RETRY_QUEUED, {
+        jobId,
+        youtubeId: failed.youtubeId,
+        videoTitle: failed.title,
+        channelName: failed.channel,
+      });
+    }
+  }
 }
 
 async function persistCompletedVideosBeforeTerminalUpdate(jobId, videoData, failedVideosList) {
@@ -253,6 +281,7 @@ async function finalizeDownloadJob({
     }
 
     logger.info({ jobType, jobId }, 'Job complete (with or without errors)');
+    recordFailedVideoEvents(jobId, failedVideosList);
 
     const flags = computeOutcomeFlags({
       code,

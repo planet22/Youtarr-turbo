@@ -15,6 +15,8 @@ const configModule = require('./configModule');
 const { isDownloadJob } = require('./download/jobTypes');
 const downloadCleanup = require('./download/downloadCleanup');
 const { serializeAuxData, parseAuxData } = require('./jobAuxData');
+const jobEventLog = require('./jobEventLog');
+const { EVENT_TYPES } = require('./jobEventLog/eventCatalog');
 const logger = require('../logger');
 
 // Scratch flag for ad-hoc verbose tracing (queue reorder/order investigation
@@ -301,6 +303,11 @@ class JobModule {
         // Step 6: Update job status and output
         this.jobs[jobId].status = 'Terminated';
         this.jobs[jobId].output = outputMessage;
+        jobEventLog.record(EVENT_TYPES.JOB_FINISHED, {
+          jobId,
+          jobType: this.jobs[jobId].jobType,
+          detail: { status: 'Terminated', previousStatus: 'In Progress', videoCount: recoveredCount, reason: outputMessage },
+        });
 
         try {
           await Job.update(
@@ -325,6 +332,11 @@ class JobModule {
 
         this.jobs[jobId].status = 'Terminated';
         this.jobs[jobId].output = 'Job terminated during server restart';
+        jobEventLog.record(EVENT_TYPES.JOB_FINISHED, {
+          jobId,
+          jobType: this.jobs[jobId].jobType,
+          detail: { status: 'Terminated', previousStatus: 'Pending', reason: 'Job terminated during server restart' },
+        });
 
         try {
           await Job.update(
@@ -611,6 +623,7 @@ class JobModule {
       return { success: false, error: error.message };
     }
 
+    jobEventLog.record(EVENT_TYPES.JOB_REMOVED, { jobId, jobType: job.jobType });
     delete this.jobs[jobId];
     this.emitJobsUpdated(jobId, 'Removed');
     return { success: true };
@@ -1381,11 +1394,41 @@ class JobModule {
         timeCreated: job.timeCreated,
       });
       this.emitJobsUpdated(jobId, job.status);
+      jobEventLog.record(EVENT_TYPES.JOB_CREATED, { jobId, jobType: job.jobType, detail: { status: job.status } });
+      if (job.status === 'In Progress') {
+        jobEventLog.record(EVENT_TYPES.JOB_STARTED, { jobId, jobType: job.jobType });
+      }
       return jobId;
     } catch (error) {
       logger.error({ err: error }, 'Error saving job');
       throw error;
     }
+  }
+
+  // Records a status transition in the video/events log. Only a real change of
+  // status is logged (updateJob is also called for pure data updates), and
+  // 'Pending' is not an event of its own - job.created already covers it.
+  recordStatusChange(jobId, job, previousStatus, changedAt) {
+    if (job.status === previousStatus || job.status === 'Pending') return;
+    if (job.status === 'In Progress') {
+      jobEventLog.record(EVENT_TYPES.JOB_STARTED, { jobId, jobType: job.jobType, occurredAt: changedAt });
+      return;
+    }
+    const failedStatuses = ['Error', 'Terminated', 'Killed', 'Failed'];
+    jobEventLog.record(EVENT_TYPES.JOB_FINISHED, {
+      jobId,
+      jobType: job.jobType,
+      occurredAt: changedAt,
+      detail: {
+        status: job.status,
+        previousStatus,
+        videoCount: job.data?.videos?.length,
+        failedCount: job.data?.failedVideos?.length,
+        skippedCount: job.data?.cumulativeSkipped,
+        errorCode: job.data?.errorCode,
+        reason: job.data?.notes || (failedStatuses.includes(job.status) ? job.output : undefined),
+      },
+    });
   }
 
   async updateJob(jobId, updatedFields) {
@@ -1444,6 +1487,7 @@ class JobModule {
     // NZB queue/history endpoints rely on to recognize the job at all. A
     // job whose data.nzb got dropped here simply vanishes from Sonarr/
     // Radarr's SABnzbd queue AND history once it completes.
+    const previousStatus = job.status;
     for (let field in updatedFields) {
       if (field === 'data') {
         job.data = { ...(job.data || {}), ...updatedFields.data };
@@ -1451,6 +1495,9 @@ class JobModule {
         job[field] = updatedFields[field];
       }
     }
+    // Stamped here, before the completed-job video reload below, so the event
+    // carries the moment the status actually changed rather than after those DB reads.
+    const statusChangedAt = new Date();
 
     // Save only THIS job to DB, don't iterate through all jobs
     const isCompletedJob = updatedFields.status === 'Complete' ||
@@ -1495,6 +1542,8 @@ class JobModule {
         // Continue with save anyway - don't fail the job completion
       }
     }
+
+    this.recordStatusChange(jobId, job, previousStatus, statusChangedAt);
 
     if (isCompletedJob) {
       // Save ALL completed jobs to DB (download and non-download alike) with retry on failure

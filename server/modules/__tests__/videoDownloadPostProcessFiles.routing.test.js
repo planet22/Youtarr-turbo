@@ -10,6 +10,7 @@ const mockFsState = { existing: new Set() };
 jest.mock('fs-extra', () => ({
   existsSync: jest.fn((p) => mockFsState.existing.has(p)),
   readFileSync: jest.fn(),
+  statSync: jest.fn(() => ({ size: 4321 })),
   writeFileSync: jest.fn(),
   ensureDirSync: jest.fn(),
   moveSync: jest.fn(),
@@ -72,11 +73,13 @@ const mockChannel = { findOne: jest.fn(), findAll: jest.fn(), update: jest.fn() 
 const mockChannelVideo = { findAll: jest.fn() };
 const mockChannelSettings = { decodeSeasonEpisode: jest.fn() };
 const mockJobVideoDownload = { update: jest.fn() };
+const mockRecordEvent = jest.fn();
 
 jest.mock('../../models/channel', () => mockChannel);
 jest.mock('../../models/channelvideo', () => mockChannelVideo);
 jest.mock('../channelSettingsModule', () => mockChannelSettings);
 jest.mock('../../models', () => ({ JobVideoDownload: mockJobVideoDownload, Channel: mockChannel }));
+jest.mock('../jobEventLog', () => ({ record: (...args) => mockRecordEvent(...args) }));
 jest.mock('../videoPersistence', () => ({ persistDownloadedVideoForJob: jest.fn(() => Promise.resolve(null)) }));
 jest.mock('../../logger');
 jest.mock('../filesystem', () => ({
@@ -612,6 +615,40 @@ describe('videoDownloadPostProcessFiles routing and finalize', () => {
       await run();
 
       expect(fs.removeSync).not.toHaveBeenCalledWith(completedPath().replace(/\.mp4$/, '.jpg'));
+    });
+  });
+
+  describe('video/events log', () => {
+    it('records video.file_finalized with the final path and file size', async () => {
+      await run();
+
+      expect(mockRecordEvent).toHaveBeenCalledWith('video.file_finalized', {
+        jobId: 'job-1',
+        youtubeId: 'abc123',
+        detail: { filePath: completedPath(), fileSize: 4321 },
+      });
+    });
+
+    it('records the event after the tracking row is marked completed', async () => {
+      await run();
+
+      expect(mockJobVideoDownload.update.mock.invocationCallOrder[0]).toBeLessThan(mockRecordEvent.mock.invocationCallOrder[0]);
+    });
+
+    it('still records the event when the file size cannot be read', async () => {
+      fs.statSync.mockImplementationOnce(() => { throw new Error('gone'); });
+
+      await run();
+
+      expect(mockRecordEvent).toHaveBeenCalledWith('video.file_finalized', expect.objectContaining({ detail: { filePath: completedPath(), fileSize: undefined } }));
+    });
+
+    it('records nothing when the tracking update fails', async () => {
+      mockJobVideoDownload.update.mockRejectedValue(new Error('db down'));
+
+      await run();
+
+      expect(mockRecordEvent).not.toHaveBeenCalled();
     });
   });
 });

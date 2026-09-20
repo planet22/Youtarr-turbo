@@ -13,6 +13,8 @@ const { probeVideoDimensions, probeVideoDuration, selectionTierForHeight } = req
 const hardwareEncoderModule = require('./hardwareEncoderModule');
 const { TRANSCODE_PROGRESS_MARKER } = require('./constants/outputMarkers');
 const { JobVideoDownload } = require('../models');
+const jobEventLog = require('./jobEventLog');
+const { EVENT_TYPES } = require('./jobEventLog/eventCatalog');
 const videoPersistence = require('./videoPersistence');
 const { VIDEO_PERSISTED_MARKER } = require('./constants/outputMarkers');
 const logger = require('../logger');
@@ -1600,6 +1602,18 @@ async function resolveTrackedOwnerChannelId(youtubeId, metadataChannelId) {
         if (updatedCount > 0) {
           logger.info({ id, activeJobId, finalVideoPath }, 'Marked video as completed in tracking');
         }
+        // Size is best-effort context for the log only; a stat failure must not matter here.
+        let finalFileSize;
+        try {
+          finalFileSize = fs.statSync(finalVideoPath).size;
+        } catch (statErr) {
+          finalFileSize = undefined;
+        }
+        jobEventLog.record(EVENT_TYPES.VIDEO_FILE_FINALIZED, {
+          jobId: activeJobId,
+          youtubeId: id,
+          detail: { filePath: finalVideoPath, fileSize: finalFileSize },
+        });
       } catch (err) {
         logger.error({ err, id }, 'Error updating JobVideoDownload status');
         // Don't fail the entire post-processing if this fails

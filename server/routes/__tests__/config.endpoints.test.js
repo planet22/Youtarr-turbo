@@ -418,8 +418,8 @@ describe('config routes: remaining endpoints', () => {
 
         const res = await supertest(app).post('/api/cookies/upload').attach('cookieFile', Buffer.from(COOKIE_HEADER), { filename: 'cookies.bin', contentType: 'application/octet-stream' });
 
-        expect(res.status).toBe(500);
-        expect(res.body.error).toBe('Only text files are allowed');
+        expect(res.status).toBe(400);
+        expect(res.body).toEqual({ error: 'Only text files are allowed' });
         expect(configModule.writeCustomCookiesFile).not.toHaveBeenCalled();
       });
 
@@ -437,7 +437,17 @@ describe('config routes: remaining endpoints', () => {
 
         const res = await supertest(app).post('/api/cookies/upload').attach('cookieFile', big, 'cookies.txt');
 
-        expect(res.status).toBe(500);
+        expect(res.status).toBe(413);
+        expect(res.body).toEqual({ error: 'File exceeds maximum allowed size.' });
+      });
+
+      it('answers 400 when the file is sent under the wrong field name', async () => {
+        const { app, configModule } = makeApp();
+
+        const res = await supertest(app).post('/api/cookies/upload').attach('wrongField', Buffer.from(COOKIE_HEADER), 'cookies.txt');
+
+        expect(res.status).toBe(400);
+        expect(configModule.writeCustomCookiesFile).not.toHaveBeenCalled();
       });
 
       it('answers 500 when saving the file fails', async () => {

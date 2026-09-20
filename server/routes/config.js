@@ -63,10 +63,28 @@ const cookieUpload = multer({
     if (file.mimetype.startsWith('text/') || file.originalname.endsWith('.txt')) {
       cb(null, true);
     } else {
-      cb(new Error('Only text files are allowed'), false);
+      const err = new Error('Only text files are allowed');
+      err.statusCode = 400;
+      cb(err, false);
     }
   }
 });
+
+// Turns upload rejections (file too large, wrong file type) into JSON 4xx
+// responses instead of letting them reach the generic 500 error handler.
+function handleCookieUpload(req, res, next) {
+  cookieUpload.single('cookieFile')(req, res, (err) => {
+    if (!err) return next();
+    if (err instanceof multer.MulterError) {
+      const status = err.code === 'LIMIT_FILE_SIZE' ? 413 : 400;
+      return res.status(status).json({ error: err.code === 'LIMIT_FILE_SIZE' ? 'File exceeds maximum allowed size.' : err.message });
+    }
+    if (err.statusCode) {
+      return res.status(err.statusCode).json({ error: err.message });
+    }
+    return next(err);
+  });
+}
 
 /**
  * Creates configuration routes
@@ -515,10 +533,12 @@ module.exports = function createConfigRoutes({ verifyToken, configModule, valida
    *         description: Cookie file uploaded successfully
    *       400:
    *         description: Invalid file or format
+   *       413:
+   *         description: File exceeds the 1MB limit
    *       500:
    *         description: Failed to upload cookie file
    */
-  router.post('/api/cookies/upload', verifyToken, cookieUpload.single('cookieFile'), async (req, res) => {
+  router.post('/api/cookies/upload', verifyToken, handleCookieUpload, async (req, res) => {
     try {
       if (!req.file) {
         return res.status(400).json({ error: 'No file uploaded' });

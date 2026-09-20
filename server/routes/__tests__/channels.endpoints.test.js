@@ -220,12 +220,17 @@ describe('channel routes: remaining endpoints', () => {
       expect(channelSettingsModule.updateChannelSettings).toHaveBeenCalledWith('UC1', { video_quality: '720' });
     });
 
-    it('answers 409 while downloads for the channel are in progress', async () => {
-      channelSettingsModule.updateChannelSettings.mockRejectedValue(new Error('Cannot change subfolder while downloads are in progress for this channel'));
+    it.each([
+      [400, 'Invalid video quality'],
+      [404, 'Channel not found'],
+      [409, 'Cannot change subfolder while downloads are in progress for this channel'],
+    ])('answers %i with the reason when the module reports that status', async (statusCode, message) => {
+      channelSettingsModule.updateChannelSettings.mockRejectedValue(Object.assign(new Error(message), { statusCode }));
 
       const res = await makeApp().put('/api/channels/UC1/settings').send({ sub_folder: 'x' });
 
-      expect(res.status).toBe(409);
+      expect(res.status).toBe(statusCode);
+      expect(res.body).toEqual({ error: message });
     });
 
     it('answers 500 with the reason for other failures', async () => {

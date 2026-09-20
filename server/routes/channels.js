@@ -566,6 +566,10 @@ module.exports = function createChannelRoutes({ verifyToken, channelModule, arch
    *     responses:
    *       200:
    *         description: Settings updated successfully
+   *       400:
+   *         description: Invalid settings
+   *       404:
+   *         description: Channel not found
    *       409:
    *         description: Cannot change subfolder while downloads are in progress
    *       500:
@@ -579,8 +583,10 @@ module.exports = function createChannelRoutes({ verifyToken, channelModule, arch
       );
       res.json(result);
     } catch (error) {
-      console.error('Error updating channel settings:', error);
-      const statusCode = error.message.includes('Cannot change subfolder while downloads are in progress') ? 409 : 500;
+      const statusCode = error.statusCode || 500;
+      if (statusCode >= 500) {
+        logger.error({ err: error, channelId: req.params.channelId }, 'Error updating channel settings');
+      }
       res.status(statusCode).json({ error: error.message });
     }
   });

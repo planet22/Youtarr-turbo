@@ -624,6 +624,29 @@ describe('ChannelSettingsModule', () => {
       ).rejects.toThrow('Channel not found');
     });
 
+    test('reports an unknown channel with status 404', async () => {
+      Channel.findOne.mockResolvedValue(null);
+
+      await expect(
+        channelSettingsModule.updateChannelSettings('UC999999', {})
+      ).rejects.toMatchObject({ statusCode: 404 });
+    });
+
+    test('reports invalid input with status 400', async () => {
+      await expect(
+        channelSettingsModule.updateChannelSettings('UC123456', { video_quality: '999' })
+      ).rejects.toMatchObject({ statusCode: 400 });
+    });
+
+    test('reports a subfolder change during downloads with status 409', async () => {
+      const hasActive = jest.spyOn(channelSettingsModule, 'hasActiveDownloads').mockResolvedValue(true);
+
+      await expect(
+        channelSettingsModule.updateChannelSettings('UC123456', { sub_folder: 'NewFolder' })
+      ).rejects.toMatchObject({ statusCode: 409 });
+      hasActive.mockRestore();
+    });
+
     test('should allow subfolder change when no downloads are active', async () => {
       jobModule.getAllJobs.mockReturnValue({});
 

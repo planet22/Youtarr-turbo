@@ -21,6 +21,16 @@ const {
   moveWithRetries
 } = require('./filesystem');
 
+// Error carrying the HTTP status a caller-side problem (bad input, unknown
+// channel, conflicting state) should be reported with.
+class ChannelSettingsError extends Error {
+  constructor(message, statusCode) {
+    super(message);
+    this.name = 'ChannelSettingsError';
+    this.statusCode = statusCode;
+  }
+}
+
 /**
  * Module for managing channel-level configuration settings
  * Handles subfolder organization and per-channel video quality overrides
@@ -847,14 +857,14 @@ class ChannelSettingsModule {
     });
 
     if (!channel) {
-      throw new Error('Channel not found');
+      throw new ChannelSettingsError('Channel not found', 404);
     }
 
     // Check for active downloads
     if (settings.sub_folder !== undefined) {
       const hasActive = await this.hasActiveDownloads(channelId);
       if (hasActive) {
-        throw new Error('Cannot change subfolder while downloads are in progress for this channel');
+        throw new ChannelSettingsError('Cannot change subfolder while downloads are in progress for this channel', 409);
       }
     }
 
@@ -862,7 +872,7 @@ class ChannelSettingsModule {
     if (settings.sub_folder !== undefined) {
       const validation = this.validateSubFolder(settings.sub_folder);
       if (!validation.valid) {
-        throw new Error(validation.error);
+        throw new ChannelSettingsError(validation.error, 400);
       }
     }
 
@@ -870,7 +880,7 @@ class ChannelSettingsModule {
     if (settings.video_quality !== undefined) {
       const validation = this.validateVideoQuality(settings.video_quality);
       if (!validation.valid) {
-        throw new Error(validation.error);
+        throw new ChannelSettingsError(validation.error, 400);
       }
     }
 
@@ -892,7 +902,7 @@ class ChannelSettingsModule {
         maxDuration
       );
       if (!validation.valid) {
-        throw new Error(validation.error);
+        throw new ChannelSettingsError(validation.error, 400);
       }
     }
 
@@ -900,7 +910,7 @@ class ChannelSettingsModule {
     if (settings.title_filter_regex !== undefined) {
       const validation = this.validateTitleRegex(settings.title_filter_regex);
       if (!validation.valid) {
-        throw new Error(validation.error);
+        throw new ChannelSettingsError(validation.error, 400);
       }
     }
 
@@ -908,7 +918,7 @@ class ChannelSettingsModule {
     if (settings.season_episode_regex !== undefined) {
       const validation = this.validateSeasonEpisodeRegex(settings.season_episode_regex);
       if (!validation.valid) {
-        throw new Error(validation.error);
+        throw new ChannelSettingsError(validation.error, 400);
       }
     }
 
@@ -916,7 +926,7 @@ class ChannelSettingsModule {
     if (settings.audio_format !== undefined) {
       const validation = this.validateAudioFormat(settings.audio_format);
       if (!validation.valid) {
-        throw new Error(validation.error);
+        throw new ChannelSettingsError(validation.error, 400);
       }
     }
 
@@ -926,7 +936,7 @@ class ChannelSettingsModule {
     if (settings.default_rating !== undefined) {
       const validation = this.validateDefaultRating(settings.default_rating);
       if (!validation.valid) {
-        throw new Error(validation.error);
+        throw new ChannelSettingsError(validation.error, 400);
       }
       normalizedDefaultRating = validation.value;
     }
@@ -935,7 +945,7 @@ class ChannelSettingsModule {
     if (settings.skip_video_folder !== undefined) {
       const validation = this.validateSkipVideoFolder(settings.skip_video_folder);
       if (!validation.valid) {
-        throw new Error(validation.error);
+        throw new ChannelSettingsError(validation.error, 400);
       }
     }
 
@@ -943,7 +953,7 @@ class ChannelSettingsModule {
     if (settings.media_mode !== undefined) {
       const validation = this.validateMediaMode(settings.media_mode);
       if (!validation.valid) {
-        throw new Error(validation.error);
+        throw new ChannelSettingsError(validation.error, 400);
       }
     }
 
@@ -951,33 +961,33 @@ class ChannelSettingsModule {
     if (settings.library_mode !== undefined) {
       const validation = this.validateLibraryMode(settings.library_mode);
       if (!validation.valid) {
-        throw new Error(validation.error);
+        throw new ChannelSettingsError(validation.error, 400);
       }
     }
 
     if (settings.m3u_enabled !== undefined) {
       const validation = this.validateM3uEnabled(settings.m3u_enabled);
       if (!validation.valid) {
-        throw new Error(validation.error);
+        throw new ChannelSettingsError(validation.error, 400);
       }
     }
     if (settings.m3u_sort_order !== undefined) {
       const validation = this.validateM3uSortOrder(settings.m3u_sort_order);
       if (!validation.valid) {
-        throw new Error(validation.error);
+        throw new ChannelSettingsError(validation.error, 400);
       }
     }
 
     if (settings.auto_removal_protected !== undefined) {
       const validation = this.validateAutoRemovalProtected(settings.auto_removal_protected);
       if (!validation.valid) {
-        throw new Error(validation.error);
+        throw new ChannelSettingsError(validation.error, 400);
       }
     }
     if (settings.auto_removal_keep_recent_count !== undefined) {
       const validation = this.validateAutoRemovalKeepRecentCount(settings.auto_removal_keep_recent_count);
       if (!validation.valid) {
-        throw new Error(validation.error);
+        throw new ChannelSettingsError(validation.error, 400);
       }
     }
 
@@ -991,7 +1001,7 @@ class ChannelSettingsModule {
       settings.auto_removal_keep_recent_count !== undefined &&
       settings.auto_removal_keep_recent_count !== null
     ) {
-      throw new Error('auto_removal_keep_recent_count cannot be set while the channel is protected from auto-removal');
+      throw new ChannelSettingsError('auto_removal_keep_recent_count cannot be set while the channel is protected from auto-removal', 400);
     }
 
     // Validate hidden_tabs if provided
@@ -999,7 +1009,7 @@ class ChannelSettingsModule {
     if (settings.hidden_tabs !== undefined) {
       const validation = this.validateHiddenTabs(settings.hidden_tabs, channel.available_tabs);
       if (!validation.valid) {
-        throw new Error(validation.error);
+        throw new ChannelSettingsError(validation.error, 400);
       }
       normalizedHiddenTabs = validation.normalized;
     }
@@ -1017,7 +1027,7 @@ class ChannelSettingsModule {
         effectiveHiddenTabs
       );
       if (!validation.valid) {
-        throw new Error(validation.error);
+        throw new ChannelSettingsError(validation.error, 400);
       }
       normalizedAutoDownloadTabs = validation.normalized;
     }

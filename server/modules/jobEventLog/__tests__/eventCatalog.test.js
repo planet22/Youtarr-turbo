@@ -247,4 +247,40 @@ describe('rating, move and playlist steps', () => {
   test('playlist.item_removed names the playlist and server', () => {
     expect(msg(EVENT_TYPES.PLAYLIST_ITEM_REMOVED, { playlistTitle: 'My PL', server: 'Plex' })).toBe('Removed from playlist "My PL" on Plex');
   });
+
+  describe('recreated, interrupted and playback-cache events', () => {
+    const say = (type, detail) => describeEvent(type, { detail }).message;
+
+    test('says a recreated video came back from the archive', () => {
+      expect(say(EVENT_TYPES.VIDEO_RECREATED, { hasFile: true })).toBe('Video re-added to the library from the download archive');
+    });
+
+    test('says when the recreated video has no file on disk', () => {
+      expect(say(EVENT_TYPES.VIDEO_RECREATED, { hasFile: false })).toBe('Video re-added to the library from the download archive (no file found on disk)');
+    });
+
+    test('warns when a download was interrupted', () => {
+      expect(describeEvent(EVENT_TYPES.VIDEO_DOWNLOAD_INTERRUPTED, {}).level).toBe('warn');
+    });
+
+    test('says partial files were removed', () => {
+      expect(say(EVENT_TYPES.VIDEO_DOWNLOAD_INTERRUPTED, {})).toBe('Download interrupted - partial files removed');
+    });
+
+    test('says when nothing was left to remove', () => {
+      expect(say(EVENT_TYPES.VIDEO_DOWNLOAD_INTERRUPTED, { alreadyRemoved: true })).toBe('Download interrupted - no partial files were left');
+    });
+
+    test('says a complete playback cache was saved, with its size', () => {
+      expect(say(EVENT_TYPES.CACHE_BYTE_RANGE_SAVED, { complete: true, sizeBytes: 2048 })).toBe('Playback cache saved (complete) - 2.0 KB');
+    });
+
+    test('says a resumed partial playback cache was saved', () => {
+      expect(say(EVENT_TYPES.CACHE_BYTE_RANGE_SAVED, { complete: false, resumed: true })).toBe('Playback cache saved (partial, after resume)');
+    });
+
+    test('says a seekable mp4 was made for playback', () => {
+      expect(say(EVENT_TYPES.CACHE_REMUXED, { size: 1024 })).toBe('Seekable .mp4 made for in-app playback of a .ts file (1.0 KB)');
+    });
+  });
 });

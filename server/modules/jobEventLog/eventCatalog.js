@@ -32,6 +32,8 @@ const EVENT_TYPES = Object.freeze({
   VIDEO_UNAVAILABLE_ON_YOUTUBE: 'video.unavailable_on_youtube',
   VIDEO_RATING_CHANGED: 'video.rating_changed',
   VIDEO_MOVED: 'video.moved',
+  VIDEO_RECREATED: 'video.recreated',
+  VIDEO_DOWNLOAD_INTERRUPTED: 'video.download_interrupted',
   // Media-server (Plex/Jellyfin/Emby) playlists
   PLAYLIST_SYNCED: 'playlist.synced',
   PLAYLIST_ITEM_ADDED: 'playlist.item_added',
@@ -55,6 +57,8 @@ const EVENT_TYPES = Object.freeze({
   CACHE_TS_TO_MP4: 'cache.ts_to_mp4',
   CACHE_PROMOTED_TO_LIBRARY: 'cache.promoted_to_library',
   CACHE_DELETED: 'cache.deleted',
+  CACHE_BYTE_RANGE_SAVED: 'cache.byte_range_saved',
+  CACHE_REMUXED: 'cache.remuxed_for_playback',
 });
 
 const has = (value) => value !== undefined && value !== null && value !== '';
@@ -251,6 +255,18 @@ const EVENT_CATALOG = {
     message: ({ detail = {} }) => `Could not remove from the Youtarr library${suffix(brief(detail.error), '- %s')}`,
   },
 
+  [EVENT_TYPES.VIDEO_RECREATED]: {
+    actor: 'library',
+    message: ({ detail = {} }) =>
+      `Video re-added to the library from the download archive${detail.hasFile ? '' : ' (no file found on disk)'}`,
+  },
+  [EVENT_TYPES.VIDEO_DOWNLOAD_INTERRUPTED]: {
+    actor: 'downloader',
+    level: () => LEVELS.WARN,
+    message: ({ detail = {} }) =>
+      detail.alreadyRemoved ? 'Download interrupted - no partial files were left' : 'Download interrupted - partial files removed',
+  },
+
   [EVENT_TYPES.LOG_CLEARED]: {
     actor: 'maintenance',
     level: () => LEVELS.WARN,
@@ -268,6 +284,15 @@ const EVENT_CATALOG = {
     actor: 'ytstream',
     message: ({ detail = {} }) =>
       `Hidden cache file deleted${suffix(formatBytes(detail.freedBytes), '(freed %s)')}${suffix(detail.reason, '- %s')}`,
+  },
+  [EVENT_TYPES.CACHE_BYTE_RANGE_SAVED]: {
+    actor: 'ytstream',
+    message: ({ detail = {} }) =>
+      `Playback cache saved (${detail.complete ? 'complete' : 'partial'}${detail.resumed ? ', after resume' : ''})${suffix(formatBytes(detail.sizeBytes), '- %s')}`,
+  },
+  [EVENT_TYPES.CACHE_REMUXED]: {
+    actor: 'ytstream',
+    message: ({ detail = {} }) => `Seekable .mp4 made for in-app playback of a .ts file${suffix(formatBytes(detail.size), '(%s)')}`,
   },
   [EVENT_TYPES.CACHE_TS_TO_MP4]: {
     actor: 'ytstream',

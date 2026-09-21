@@ -24,6 +24,8 @@ const crypto = require('crypto');
 const { spawn } = require('child_process');
 const logger = require('../logger');
 const configModule = require('./configModule');
+const jobEventLog = require('./jobEventLog');
+const { EVENT_TYPES } = require('./jobEventLog/eventCatalog');
 
 const REMUX_CACHE_DIR = path.join(configModule.directoryPath, '.youtarr_ytstream_cache', 'ts-remux');
 const REMUX_TIMEOUT_MS = 5 * 60 * 1000;
@@ -31,6 +33,9 @@ const REMUX_TIMEOUT_MS = 5 * 60 * 1000;
 // Dedupes concurrent requests for the same file (e.g. a player's initial
 // GET and its immediate Range-based follow-up) onto a single ffmpeg run.
 const inFlight = new Map();
+
+// Library files are named "... [<11-character video id>].<ext>".
+const VIDEO_ID_IN_FILENAME = /\[([A-Za-z0-9_-]{11})\]\.[^.]+$/;
 
 function cacheKeyFor(filePath, stat) {
   const hash = crypto.createHash('sha1').update(filePath).digest('hex').slice(0, 16);
@@ -84,6 +89,11 @@ async function ensureSeekableMp4(filePath) {
         });
       });
       await fs.promises.rename(tempPath, cachePath);
+      const size = await fs.promises.stat(cachePath).then((s) => s.size, () => undefined);
+      jobEventLog.record(EVENT_TYPES.CACHE_REMUXED, {
+        youtubeId: (path.basename(filePath).match(VIDEO_ID_IN_FILENAME) || [])[1],
+        detail: { filePath, cachePath, size },
+      });
       logger.info({ filePath, cachePath }, 'ytstream: remuxed a .ts library file to a seekable .mp4 for in-app playback');
       return cachePath;
     } catch (err) {

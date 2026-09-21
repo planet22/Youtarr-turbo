@@ -981,6 +981,13 @@ class JobModule {
           if (!videoInstance && needsVideo) {
             const created = await Video.create(payload);
             videosUpserts += 1;
+            jobEventLog.record(EVENT_TYPES.VIDEO_RECREATED, {
+              youtubeId: info.id,
+              videoTitle: payload.youTubeVideoName,
+              channelName: payload.youTubeChannelName,
+              isTracked: true,
+              detail: { videoId: created.id, hasFile: Boolean(payload.fileSize), filePath: payload.filePath },
+            });
             // Diagnostic for the nzb 'untracked' resurrection bug: this is
             // the exact point where a video whose DB row was removed (by
             // Sonarr/Radarr-triggered untrack) comes back to life, as long

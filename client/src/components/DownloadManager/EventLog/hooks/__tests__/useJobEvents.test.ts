@@ -22,6 +22,7 @@ const event = (id: number): JobEvent => ({
   videoTitle: null,
   channelName: null,
   jobType: null,
+  source: null,
   isTracked: null,
 });
 

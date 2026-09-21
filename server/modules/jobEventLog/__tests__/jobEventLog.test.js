@@ -152,6 +152,19 @@ describe('jobEventLog', () => {
       expect(lastRow().job_type).toBe('Channel Downloads');
     });
 
+    test('stores the source label of the job at the moment of the event', async () => {
+      jobEventLog.rememberJob('j1', 'Sonarr/Radarr: TV [abc123]');
+      jobEventLog.record('job.started', { jobId: 'j1' });
+      await jobEventLog.flush();
+      expect(lastRow().source).toBe('NZB (TV)');
+    });
+
+    test('stores no source for an event with no job', async () => {
+      jobEventLog.record('log.cleared', {});
+      await jobEventLog.flush();
+      expect(lastRow().source).toBeNull();
+    });
+
     test('forgets the oldest entries beyond the cap', async () => {
       for (let i = 0; i < 2001; i += 1) jobEventLog.rememberJob('job-' + i, 'T' + i);
       jobEventLog.record('job.started', { jobId: 'job-0' });
@@ -164,7 +177,7 @@ describe('jobEventLog', () => {
     const row = (over = {}) => ({
       id: 5, occurred_at: new Date('2026-09-19T17:12:59.566Z'), job_id: 'j1', youtube_id: 'abc',
       event_type: 'nzb.untracked', level: 'info', actor: 'nzb', message: 'm', detail: '{"a":1}',
-      video_title: 'T', channel_name: 'C', job_type: 'X', ...over,
+      video_title: 'T', channel_name: 'C', job_type: 'X', source: 'Channels', ...over,
     });
     const query = () => JobEvent.findAll.mock.calls[0][0];
 
@@ -178,7 +191,7 @@ describe('jobEventLog', () => {
       expect(events[0]).toEqual({
         id: 5, occurredAt: '2026-09-19T17:12:59.566Z', jobId: 'j1', youtubeId: 'abc',
         eventType: 'nzb.untracked', level: 'info', actor: 'nzb', message: 'm', detail: { a: 1 },
-        videoTitle: 'T', channelName: 'C', jobType: 'X', isTracked: null,
+        videoTitle: 'T', channelName: 'C', jobType: 'X', source: 'Channels', isTracked: null,
       });
     });
 
@@ -274,22 +287,14 @@ describe('jobEventLog', () => {
       expect(query().where.event_type).toBe('video.failed');
     });
 
-    test('filters by a source label, matching the job types in that group', async () => {
-      await jobEventLog.list({ source: 'NZB' });
-      const { Op } = require('sequelize');
-      expect(query().where[Op.and][0][Op.or]).toEqual([{ job_type: { [Op.like]: 'Sonarr/Radarr: %' } }]);
+    test('filters by the stored source label', async () => {
+      await jobEventLog.list({ source: 'NZB (TV)' });
+      expect(query().where.source).toBe('NZB (TV)');
     });
 
-    test('a source with several job types matches any of them', async () => {
-      await jobEventLog.list({ source: 'Playlists' });
-      const { Op } = require('sequelize');
-      expect(query().where[Op.and][0][Op.or]).toHaveLength(2);
-    });
-
-    test('ignores an unknown source label', async () => {
-      await jobEventLog.list({ source: 'Nonsense' });
-      const { Op } = require('sequelize');
-      expect(query().where[Op.and]).toBeUndefined();
+    test('does not filter by source when none is given', async () => {
+      await jobEventLog.list({});
+      expect(query().where.source).toBeUndefined();
     });
 
     test('escapes LIKE wildcards in the search text', async () => {
@@ -305,14 +310,12 @@ describe('jobEventLog', () => {
       JobEvent.findAll
         .mockResolvedValueOnce([{ value: 'job.created' }, { value: 'video.failed' }])
         .mockResolvedValueOnce([{ value: 'nzb' }])
-        .mockResolvedValueOnce([{ value: 'pcrobec' }]);
+        .mockResolvedValueOnce([{ value: 'pcrobec' }])
+        .mockResolvedValueOnce([{ value: 'NZB (TV)' }, { value: 'Channels' }]);
       const facets = await jobEventLog.facets();
-      expect(facets).toMatchObject({ eventTypes: ['job.created', 'video.failed'], actors: ['nzb'], channels: ['pcrobec'] });
-    });
-
-    test('always offers every source label', async () => {
-      const facets = await jobEventLog.facets();
-      expect(facets.sources).toEqual(expect.arrayContaining(['Channels', 'NZB', 'Playlists']));
+      expect(facets).toMatchObject({
+        eventTypes: ['job.created', 'video.failed'], actors: ['nzb'], channels: ['pcrobec'], sources: ['NZB (TV)', 'Channels'],
+      });
     });
 
     test('leaves out empty values', async () => {

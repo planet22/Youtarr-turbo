@@ -14,6 +14,7 @@ const event = (over: Partial<JobEvent> = {}): JobEvent => ({
   videoTitle: 'Celebrity Juice S26E09',
   channelName: 'pcrobec',
   jobType: 'X',
+  source: 'Other',
   isTracked: true,
   ...over,
 });

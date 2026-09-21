@@ -1,7 +1,7 @@
 const { AsyncLocalStorage } = require('async_hooks');
 const logger = require('../../logger');
 const { EVENT_TYPES, LEVELS, describeEvent } = require('./eventCatalog');
-const { SOURCES, SOURCE_LABELS } = require('./sourceLabels');
+const { sourceLabelForJobType } = require('./sourceLabels');
 
 // Append-only video/events log. Every call site is a single fire-and-forget
 // `jobEventLog.record(...)`: it returns immediately, never throws, and never
@@ -13,6 +13,7 @@ const MAX_MESSAGE_LENGTH = 512;
 const MAX_TITLE_LENGTH = 512;
 const MAX_CHANNEL_LENGTH = 255;
 const MAX_JOB_TYPE_LENGTH = 255;
+const MAX_SOURCE_LENGTH = 96;
 const MAX_DETAIL_BYTES = 16 * 1024;
 const DEFAULT_RETENTION_DAYS = 180;
 const MAX_RETENTION_DAYS = 3650;
@@ -205,6 +206,7 @@ class JobEventLog {
         video_title: truncate(videoTitle, MAX_TITLE_LENGTH),
         channel_name: truncate(channelName, MAX_CHANNEL_LENGTH),
         job_type: truncate(jobType, MAX_JOB_TYPE_LENGTH),
+        source: truncate(fields.source || sourceLabelForJobType(jobType), MAX_SOURCE_LENGTH),
         is_tracked: isTracked === null || isTracked === undefined ? null : Boolean(isTracked),
       };
       this.tail = this.tail.then(() => this.write(entry));
@@ -259,7 +261,7 @@ class JobEventLog {
    * @param {string} [filters.actor]
    * @param {'tracked'|'untracked'} [filters.tracked] - whether the video was in the library when it happened
    * @param {string} [filters.channel]
-   * @param {string} [filters.source] - a job source label (Channels, NZB, ...)
+   * @param {string} [filters.source] - a job source label as stored (Channels, NZB (TV), ...)
    * @param {string} [filters.q] - substring match on message, video title, channel name
    * @param {string} [filters.from] - only events at or after this ISO time
    * @param {string} [filters.to] - only events at or before this ISO time
@@ -285,9 +287,7 @@ class JobEventLog {
     if (filters.tracked === 'tracked') where.is_tracked = true;
     if (filters.tracked === 'untracked') where.is_tracked = false;
     if (filters.channel) where.channel_name = filters.channel;
-    // A source label selects jobs by their type; an unknown label is ignored.
-    const sourcePatterns = filters.source && SOURCES[filters.source];
-    if (sourcePatterns) where[Op.and] = [{ [Op.or]: sourcePatterns.map((pattern) => ({ job_type: { [Op.like]: pattern } })) }];
+    if (filters.source) where.source = filters.source;
 
     const timeBounds = {};
     if (filters.from) timeBounds[Op.gte] = new Date(filters.from);
@@ -328,12 +328,13 @@ class JobEventLog {
       });
       return rows.map((row) => row.value).filter(Boolean);
     };
-    const [eventTypes, actors, channels] = await Promise.all([
+    const [eventTypes, actors, channels, sources] = await Promise.all([
       distinct('event_type'),
       distinct('actor'),
       distinct('channel_name'),
+      distinct('source'),
     ]);
-    return { eventTypes, actors, channels, sources: SOURCE_LABELS };
+    return { eventTypes, actors, channels, sources };
   }
 
   toApiShape(row) {
@@ -351,6 +352,7 @@ class JobEventLog {
       videoTitle: data.video_title,
       channelName: data.channel_name,
       jobType: data.job_type,
+      source: data.source || null,
       isTracked: data.is_tracked === null || data.is_tracked === undefined ? null : Boolean(data.is_tracked),
     };
   }

@@ -123,7 +123,7 @@ describe('Job event routes', () => {
       ['an over-long timestamp', { to: '2026-09-19T00:00:00.000Z'.padEnd(41, '0') }],
       ['an over-long actor', { actor: 'x'.repeat(49) }],
       ['an over-long channel', { channel: 'x'.repeat(256) }],
-      ['an over-long source', { source: 'x'.repeat(41) }],
+      ['an over-long source', { source: 'x'.repeat(97) }],
       ['an over-long job id', { jobId: 'x'.repeat(37) }],
       ['an over-long youtube id', { youtubeId: 'x'.repeat(21) }],
       ['an over-long search', { q: 'x'.repeat(201) }],

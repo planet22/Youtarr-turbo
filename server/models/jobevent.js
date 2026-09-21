@@ -21,6 +21,8 @@ JobEvent.init(
     job_type: { type: DataTypes.STRING(255), allowNull: true },
     // Whether the video had a library row when the event happened; null = not known then.
     is_tracked: { type: DataTypes.BOOLEAN, allowNull: true },
+    // The job's source label (Channels, NZB (TV), ...), stored when the event was recorded; null = no job.
+    source: { type: DataTypes.STRING(96), allowNull: true },
   },
   { sequelize, modelName: 'JobEvent', tableName: 'job_events', timestamps: false }
 );

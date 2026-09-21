@@ -17,6 +17,8 @@ export interface JobEvent {
   videoTitle: string | null;
   channelName: string | null;
   jobType: string | null;
+  // The job's source label, stored with the event (e.g. NZB (TV), Channels); null = no job
+  source: string | null;
   // Whether the video had a library row when the event happened (recorded at
   // that moment); null when it was not known then, or there is no video.
   isTracked: boolean | null;
@@ -38,7 +40,7 @@ export interface JobEventFilters {
   eventType?: string;
   actor?: string;
   channel?: string;
-  // Job source label, e.g. NZB or Channels
+  // Job source label as stored, e.g. NZB (TV) or Channels
   source?: string;
   // 'tracked' or 'untracked': whether the video was in the library at that moment
   tracked?: string;

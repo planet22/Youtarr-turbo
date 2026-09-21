@@ -17,6 +17,7 @@ const event = (id: number, over: Partial<JobEvent> = {}): JobEvent => ({
   videoTitle: 'Celebrity Juice S26E09',
   channelName: 'pcrobec',
   jobType: 'Sonarr/Radarr: TV [abc123]',
+  source: 'NZB (TV)',
   isTracked: true,
   ...over,
 });
@@ -74,7 +75,7 @@ describe('EventLogTable', () => {
       expect(screen.getByRole('columnheader', { name: 'Channel' })).toBeInTheDocument();
     });
 
-    test('labels the source the way Download History does, NZB category included', () => {
+    test('shows the source label stored with the event', () => {
       setup([event(1)]);
 
       expect(screen.getByRole('columnheader', { name: 'Source' })).toBeInTheDocument();

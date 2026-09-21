@@ -16,7 +16,6 @@ import { ChevronDown } from 'lucide-react';
 import type { JobEvent } from '../../../../types/JobEvent';
 import type { VideoData } from '../../../../types/VideoData';
 import VideoThumbnail from '../../VideoThumbnail';
-import { getJobSourceLabel } from '../../DownloadHistory';
 import { eventLevelColor, formatEventDelta, formatEventTime, trackedLabel } from '../eventLogFormat';
 import EventDetail from './EventDetail';
 
@@ -108,16 +107,16 @@ const VideoCell: React.FC<CellProps> = ({ event, onSelectVideo, onOpenVideo }) =
 
 const ChannelCell: React.FC<CellProps> = ({ event }) => <span>{event.channelName || ''}</span>;
 
-// Where the event came from, labelled exactly as Download History labels a
-// job's source (Channels, Playlists, NZB (TV), Manual Videos, ...).
+// Where the event came from - the label stored with the event (Channels,
+// Playlists, NZB (TV), Manual Videos, ...), the same ones Download History uses.
 const SourceCell: React.FC<CellProps> = ({ event, onSelectJob }) => {
-  if (!event.jobId || !event.jobType) {
+  if (!event.jobId || !event.source) {
     return <Typography variant="caption" color="secondary">-</Typography>;
   }
   const jobId = event.jobId;
   return (
     <Link component="button" type="button" style={linkStyle} onClick={() => onSelectJob(jobId)}>
-      {getJobSourceLabel(event.jobType)}
+      {event.source}
     </Link>
   );
 };

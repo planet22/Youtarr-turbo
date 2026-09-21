@@ -256,11 +256,20 @@ describe('notifications module routing', () => {
       await expect(notifications.sendTestNotification()).rejects.toThrow('n-discord://a: bad webhook; n-pover://b: apprise missing');
     });
 
-    it('resolves when only some of the sends fail', async () => {
+    it('reports the failing service when only some of the sends fail', async () => {
       setUrls(url('discord://a'), url('pover://b'));
       senders.discordSender.send.mockRejectedValue(new Error('bad webhook'));
 
-      await expect(notifications.sendTestNotification()).resolves.toBeUndefined();
+      await expect(notifications.sendTestNotification()).rejects.toMatchObject({ message: 'n-discord://a: bad webhook' });
+    });
+
+    it('still sends to the working services when one fails', async () => {
+      setUrls(url('discord://a'), url('pover://b'));
+      senders.discordSender.send.mockRejectedValue(new Error('bad webhook'));
+
+      await notifications.sendTestNotification().catch(() => {});
+
+      expect(senders.appriseSender.send).toHaveBeenCalledTimes(1);
     });
   });
 

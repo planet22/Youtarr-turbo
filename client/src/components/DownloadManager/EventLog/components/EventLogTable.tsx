@@ -85,15 +85,28 @@ const VideoCell: React.FC<CellProps> = ({ event, onSelectVideo, onOpenVideo }) =
           onError={noop}
           iconSize={20}
         />
-        {/* Recorded when the event happened, so it stays true after the row is gone. */}
+        {/* Recorded when the event happened, so it stays true after the row is gone.
+            Same banner the Videos library puts across an untracked row's thumbnail. */}
         {event.isTracked === false && (
-          <span
+          <Box
             data-testid="untracked-badge"
-            className="absolute bottom-0 left-0 right-0 text-center text-[10px] leading-tight py-0.5 pointer-events-none"
-            style={{ background: 'rgba(0,0,0,0.7)', color: '#fff', borderBottomLeftRadius: 'var(--radius-thumb)', borderBottomRightRadius: 'var(--radius-thumb)' }}
+            className="pointer-events-none"
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              backgroundColor: 'var(--media-overlay-background, rgba(0,0,0,0.6))',
+              color: 'var(--media-overlay-foreground)',
+              padding: '2px 4px',
+              fontSize: '0.6rem',
+              fontWeight: 'bold',
+              textAlign: 'center',
+              zIndex: 2,
+            }}
           >
             Untracked
-          </span>
+          </Box>
         )}
       </Box>
       <Box className="min-w-0">

@@ -1534,17 +1534,22 @@ class JobModule {
           }
         }
 
-        // Update in-memory structure with complete video list from DB
+        // Update in-memory structure with complete video list from DB. An
+        // empty recount (e.g. the JobVideo rows were never saved) must not
+        // wipe the videos the caller just handed in, so it only replaces them
+        // when it found something.
         if (!job.data) {
           job.data = {};
         }
-        job.data.videos = videos;
+        if (videos.length > 0 || !Array.isArray(job.data.videos)) {
+          job.data.videos = videos;
+        }
 
         // Update output message to reflect correct video count - only for
         // genuine successes; Error/Killed jobs keep the descriptive output
         // text their finalizer already set instead of a bare video count.
         if (updatedFields.status === 'Complete' || updatedFields.status === 'Complete with Warnings') {
-          job.output = `${videos.length} videos.`;
+          job.output = `${job.data.videos.length} videos.`;
         }
 
         logger.info({ jobId, videoCount: videos.length }, 'Reloaded videos from database for completed job');

@@ -4,8 +4,8 @@ jest.mock('../../logger');
 
 const { EventEmitter } = require('events');
 
-// health.js creates its express Router at module scope, so every test loads a
-// fresh copy of the module (otherwise routes from earlier tests pile up on it).
+// Every test loads a fresh copy of the module and builds its own routes, so the
+// release-version cache never carries over from one test to the next.
 describe('health routes', () => {
   let supertest;
   let express;
@@ -216,6 +216,112 @@ describe('health routes', () => {
       await makeApp().get('/getCurrentReleaseVersion');
 
       expect(verifyToken).not.toHaveBeenCalled();
+    });
+
+    describe('caching the latest release', () => {
+      const NOW = 1_800_000_000_000;
+
+      beforeEach(() => {
+        jest.spyOn(Date, 'now').mockReturnValue(NOW);
+      });
+
+      afterEach(() => {
+        jest.restoreAllMocks();
+      });
+
+      it('asks GitHub only once for repeated requests', async () => {
+        githubReplies({ body: JSON.stringify({ tag_name: 'v1.2.3' }) });
+        const app = makeApp();
+
+        const first = await app.get('/getCurrentReleaseVersion');
+        const second = await app.get('/getCurrentReleaseVersion');
+
+        expect(https.get).toHaveBeenCalledTimes(1);
+        expect(second.body).toEqual(first.body);
+      });
+
+      it('remembers that no release has been published yet', async () => {
+        githubReplies({ statusCode: 404, body: '{"message":"Not Found"}' });
+        const app = makeApp();
+
+        await app.get('/getCurrentReleaseVersion');
+        const second = await app.get('/getCurrentReleaseVersion');
+
+        expect(https.get).toHaveBeenCalledTimes(1);
+        expect(second.body).toEqual({ version: null, ytDlpVersion: '2026.01.01' });
+      });
+
+      it('still reports the current yt-dlp version on a cached answer', async () => {
+        githubReplies({ body: JSON.stringify({ tag_name: 'v1' }) });
+        const app = makeApp();
+        await app.get('/getCurrentReleaseVersion');
+        deps.getCachedYtDlpVersion.mockReturnValue('2026.02.02');
+
+        const second = await app.get('/getCurrentReleaseVersion');
+
+        expect(second.body).toEqual({ version: 'v1', ytDlpVersion: '2026.02.02' });
+      });
+
+      it('asks GitHub again once the cached answer is ten minutes old', async () => {
+        githubReplies({ body: JSON.stringify({ tag_name: 'v1' }) });
+        const app = makeApp();
+        await app.get('/getCurrentReleaseVersion');
+
+        Date.now.mockReturnValue(NOW + 10 * 60 * 1000 + 1);
+        githubReplies({ body: JSON.stringify({ tag_name: 'v2' }) });
+        const second = await app.get('/getCurrentReleaseVersion');
+
+        expect(https.get).toHaveBeenCalledTimes(2);
+        expect(second.body.version).toBe('v2');
+      });
+
+      it('keeps using the cached answer just before it expires', async () => {
+        githubReplies({ body: JSON.stringify({ tag_name: 'v1' }) });
+        const app = makeApp();
+        await app.get('/getCurrentReleaseVersion');
+
+        Date.now.mockReturnValue(NOW + 10 * 60 * 1000 - 1);
+        await app.get('/getCurrentReleaseVersion');
+
+        expect(https.get).toHaveBeenCalledTimes(1);
+      });
+
+      it.each([
+        ['a non-200 status', { statusCode: 403, body: 'rate limited' }],
+        ['an unreadable body', { body: 'not json' }],
+        ['a network error', { error: new Error('ENOTFOUND') }],
+      ])('does not cache a failure (%s), so the next request retries', async (_label, failure) => {
+        githubReplies(failure);
+        const app = makeApp();
+        await app.get('/getCurrentReleaseVersion');
+
+        githubReplies({ body: JSON.stringify({ tag_name: 'v3' }) });
+        const second = await app.get('/getCurrentReleaseVersion');
+
+        expect(https.get).toHaveBeenCalledTimes(2);
+        expect(second.body.version).toBe('v3');
+      });
+
+      it('keeps a separate cache for each set of routes', async () => {
+        githubReplies({ body: JSON.stringify({ tag_name: 'v1' }) });
+        await makeApp().get('/getCurrentReleaseVersion');
+
+        await makeApp().get('/getCurrentReleaseVersion');
+
+        expect(https.get).toHaveBeenCalledTimes(2);
+      });
+    });
+  });
+
+  describe('creating the routes', () => {
+    it('gives every call its own router, so routes are not registered twice', () => {
+      const createHealthRoutes = require('../health');
+
+      const first = createHealthRoutes(deps);
+      const second = createHealthRoutes(deps);
+
+      expect(second).not.toBe(first);
+      expect(second.stack).toHaveLength(first.stack.length);
     });
   });
 

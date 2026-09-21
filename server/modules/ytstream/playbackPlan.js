@@ -154,7 +154,10 @@ async function resolveVideoCodec(youtubeId, quality, config, playerClient, quali
   const stdout = await ytDlpRunner.run(args, { timeoutMs: 30000 });
   const codec = String(stdout).trim().split(/\r?\n/)[0] || '';
   streamDebug({ youtubeId, quality, playerClient, qualityStrictness, videoFormat, codec }, 'ytstream: resolveVideoCodec resolved via live yt-dlp probe');
-  codecCache.set(cacheKey, codec);
+  // An empty result means the probe found nothing usable this time; don't
+  // remember it, so the next request retries instead of skipping the
+  // copy->h264 compatibility check for the life of the process.
+  if (codec) codecCache.set(cacheKey, codec);
   return codec;
 }
 

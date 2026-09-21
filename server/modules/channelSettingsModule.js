@@ -23,6 +23,11 @@ const {
   moveWithRetries
 } = require('./filesystem');
 
+// How long a python3 regex check may run, including interpreter start-up.
+// A busy or slow host (e.g. a NAS) can take well over a second to start it.
+const PYTHON_REGEX_TIMEOUT_MS = 5000;
+const REGEX_CHECK_TIMEOUT_MESSAGE = 'Timed out while checking the regex. The server may be busy - please try again.';
+
 // Error carrying the HTTP status a caller-side problem (bad input, unknown
 // channel, conflicting state) should be reported with.
 class ChannelSettingsError extends Error {
@@ -176,7 +181,7 @@ class ChannelSettingsModule {
       // Use execFileSync with argument array to prevent shell injection
       const result = execFileSync('python3', [scriptPath, trimmed, 'test'], {
         encoding: 'utf8',
-        timeout: 1000,
+        timeout: PYTHON_REGEX_TIMEOUT_MS,
       });
 
       const parsed = JSON.parse(result);
@@ -184,6 +189,9 @@ class ChannelSettingsModule {
         return { valid: false, error: parsed.error };
       }
     } catch (err) {
+      if (err.code === 'ETIMEDOUT') {
+        return { valid: false, error: REGEX_CHECK_TIMEOUT_MESSAGE };
+      }
       return {
         valid: false,
         error: `Invalid Python regex pattern: ${err.message}`,
@@ -243,7 +251,7 @@ class ChannelSettingsModule {
     try {
       const result = execFileSync('python3', [scriptPath, pattern, title || ''], {
         encoding: 'utf8',
-        timeout: 1000,
+        timeout: PYTHON_REGEX_TIMEOUT_MS,
       });
       return JSON.parse(result);
     } catch (err) {
@@ -258,7 +266,8 @@ class ChannelSettingsModule {
           // fall through to the generic error below
         }
       }
-      return { matches: false, season: null, episode: null, error: err.message };
+      const error = err.code === 'ETIMEDOUT' ? REGEX_CHECK_TIMEOUT_MESSAGE : err.message;
+      return { matches: false, season: null, episode: null, error };
     }
   }
 
@@ -761,7 +770,7 @@ class ChannelSettingsModule {
       const result = execFileSync('python3', [scriptPath], {
         input: payload,
         encoding: 'utf8',
-        timeout: 5000,
+        timeout: PYTHON_REGEX_TIMEOUT_MS,
         maxBuffer: 10 * 1024 * 1024,
       });
       const parsed = JSON.parse(result);

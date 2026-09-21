@@ -244,17 +244,25 @@ function createVideoDetailRoutes({ verifyToken, videoMetadataModule, mediaServer
       };
 
       if (range) {
-        // Parse Range header
-        const parts = range.replace(/bytes=/, '').split('-');
-        const start = parseInt(parts[0], 10);
-        const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
-
-        if (isNaN(start) || isNaN(end) || start < 0) {
-          res.status(416).set('Content-Range', `bytes */${fileSize}`);
-          return res.end();
+        // Parse Range header: "N-M", "N-" (to the end) or "-N" (the last N
+        // bytes). Only the first range of a multi-range request is served, and
+        // an end past the end of the file is clamped to it (RFC 7233).
+        const spec = /^(\d*)-(\d*)$/.exec(range.replace(/^bytes=/, '').split(',')[0].trim());
+        let start = NaN;
+        let end = NaN;
+        if (spec && (spec[1] || spec[2])) {
+          if (spec[1]) {
+            start = parseInt(spec[1], 10);
+            end = spec[2] ? Math.min(parseInt(spec[2], 10), fileSize - 1) : fileSize - 1;
+          } else {
+            const suffixLength = parseInt(spec[2], 10);
+            start = Math.max(0, fileSize - suffixLength);
+            end = fileSize - 1;
+            if (suffixLength === 0) start = NaN;
+          }
         }
 
-        if (start >= fileSize || end >= fileSize || start > end) {
+        if (isNaN(start) || isNaN(end) || start >= fileSize || start > end) {
           res.status(416).set('Content-Range', `bytes */${fileSize}`);
           return res.end();
         }

@@ -86,6 +86,13 @@ describe('VideosModule untracked bucket', () => {
         expect(options.replacements.search).toBe('%cats%');
       });
 
+      it('matches search text literally by escaping LIKE wildcards', async () => {
+        await videosModule._getUntrackedCandidates({ search: '100%_sure\\' });
+
+        const [, options] = metadataQuery();
+        expect(options.replacements.search).toBe('%100\\%\\_sure\\\\%');
+      });
+
       it('filters the upload date range as YYYYMMDD', async () => {
         await videosModule._getUntrackedCandidates({ dateFrom: '2024-01-05', dateTo: '2024-02-10' });
 

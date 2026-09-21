@@ -290,12 +290,47 @@ describe('videoDetail routes: remaining endpoints', () => {
         expect(res.headers['cache-control']).toBe('no-store');
       });
 
+      it('serves the last N bytes for a suffix range', async () => {
+        const res = await ranged('bytes=-5');
+
+        expect(res.status).toBe(206);
+        expect(res.headers['content-range']).toBe('bytes 15-19/20');
+        expect(res.body.toString()).toBe('fghij');
+      });
+
+      it('serves the whole file for a suffix range longer than the file', async () => {
+        const res = await ranged('bytes=-500');
+
+        expect(res.status).toBe(206);
+        expect(res.headers['content-range']).toBe('bytes 0-19/20');
+      });
+
+      it.each([
+        ['bytes=5-20', 'bytes 5-19/20', 15],
+        ['bytes=5-999', 'bytes 5-19/20', 15],
+        ['bytes=0-19', 'bytes 0-19/20', 20],
+      ])('clamps %s to the end of the file', async (range, contentRange, length) => {
+        const res = await ranged(range);
+
+        expect(res.status).toBe(206);
+        expect(res.headers['content-range']).toBe(contentRange);
+        expect(res.headers['content-length']).toBe(String(length));
+      });
+
+      it('serves only the first range of a multi-range request', async () => {
+        const res = await ranged('bytes=0-3,10-12');
+
+        expect(res.status).toBe(206);
+        expect(res.headers['content-range']).toBe('bytes 0-3/20');
+      });
+
       it.each([
         ['starts past the end of the file', 'bytes=20-25'],
-        ['ends past the end of the file', 'bytes=5-20'],
         ['ends before it starts', 'bytes=10-5'],
         ['is not numeric', 'bytes=abc-def'],
-        ['is a negative start', 'bytes=-5-10'],
+        ['has two dashes', 'bytes=-5-10'],
+        ['has no numbers', 'bytes=-'],
+        ['asks for the last zero bytes', 'bytes=-0'],
       ])('answers 416 with the file size for a range that %s', async (_label, range) => {
         const res = await ranged(range);
 

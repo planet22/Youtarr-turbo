@@ -50,7 +50,16 @@ describe('ChannelSettingsModule validators and previews', () => {
       const [cmd, args, options] = execFileSync.mock.calls[0];
       expect(cmd).toBe('python3');
       expect(args.slice(1)).toEqual(['(?P<season>\\d)', 'S2E5']);
-      expect(options).toMatchObject({ encoding: 'utf8', timeout: 1000 });
+      expect(options).toMatchObject({ encoding: 'utf8', timeout: 5000 });
+    });
+
+    it('reports a timeout as a timeout rather than as the raw spawn error', () => {
+      execFileSync.mockImplementation(() => { throw Object.assign(new Error('spawnSync python3 ETIMEDOUT'), { code: 'ETIMEDOUT' }); });
+
+      const result = mod.decodeSeasonEpisode('p', 't');
+
+      expect(result.matches).toBe(false);
+      expect(result.error).toBe('Timed out while checking the regex. The server may be busy - please try again.');
     });
 
     it('passes an empty title when none is given', () => {
@@ -116,6 +125,40 @@ describe('ChannelSettingsModule validators and previews', () => {
       execFileSync.mockReturnValue(JSON.stringify({ error: 'missing named groups' }));
 
       expect(mod.validateSeasonEpisodeRegex('bad')).toEqual({ valid: false, error: 'missing named groups' });
+    });
+
+    it('says the check timed out instead of blaming the pattern when python is too slow', () => {
+      execFileSync.mockImplementation(() => { throw Object.assign(new Error('spawnSync python3 ETIMEDOUT'), { code: 'ETIMEDOUT' }); });
+
+      expect(mod.validateSeasonEpisodeRegex('(?P<season>\\d)(?P<episode>\\d)')).toEqual({
+        valid: false,
+        error: 'Timed out while checking the regex. The server may be busy - please try again.',
+      });
+    });
+  });
+
+  describe('validateTitleRegex timeouts', () => {
+    it('gives the python check five seconds', () => {
+      execFileSync.mockReturnValue(JSON.stringify({ matches: false }));
+
+      mod.validateTitleRegex('a.*');
+
+      expect(execFileSync.mock.calls[0][2]).toMatchObject({ timeout: 5000 });
+    });
+
+    it('says the check timed out instead of calling the regex invalid', () => {
+      execFileSync.mockImplementation(() => { throw Object.assign(new Error('spawnSync python3 ETIMEDOUT'), { code: 'ETIMEDOUT' }); });
+
+      expect(mod.validateTitleRegex('a.*')).toEqual({
+        valid: false,
+        error: 'Timed out while checking the regex. The server may be busy - please try again.',
+      });
+    });
+
+    it('still reports other failures as an invalid pattern', () => {
+      execFileSync.mockImplementation(() => { throw new Error('spawn python3 ENOENT'); });
+
+      expect(mod.validateTitleRegex('a.*').error).toBe('Invalid Python regex pattern: spawn python3 ENOENT');
     });
   });
 

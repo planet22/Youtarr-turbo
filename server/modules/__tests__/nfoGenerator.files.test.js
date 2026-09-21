@@ -92,6 +92,24 @@ describe('nfoGenerator file output', () => {
       expect(read('video.nfo')).toBe(original);
     });
 
+    it('replaces an earlier resolution tag when the available tiers have changed', async () => {
+      fs.writeFileSync(nfoPath(), '<movie>\n  <tag>a</tag>\n  <tag>Available: 480p</tag>\n  <tag>b</tag>\n</movie>\n');
+
+      const changed = await nfoGenerator.patchExistingNfoWithResolutionTag(nfoPath(), info);
+
+      expect(changed).toBe(true);
+      expect(read('video.nfo')).toBe('<movie>\n  <tag>a</tag>\n  <tag>Available: 720p/1080p</tag>\n  <tag>b</tag>\n</movie>\n');
+    });
+
+    it('does not accumulate resolution tags over repeated changes', async () => {
+      fs.writeFileSync(nfoPath(), '<movie>\n  <tag>a</tag>\n</movie>\n');
+
+      await nfoGenerator.patchExistingNfoWithResolutionTag(nfoPath(), { formats: formats(480) });
+      await nfoGenerator.patchExistingNfoWithResolutionTag(nfoPath(), info);
+
+      expect(read('video.nfo').match(/Available:/g)).toHaveLength(1);
+    });
+
     it('leaves a file with an unrecognized root untouched', async () => {
       const original = '<tvshow>\n  <title>T</title>\n</tvshow>\n';
       fs.writeFileSync(nfoPath(), original);
@@ -231,6 +249,15 @@ describe('nfoGenerator file output', () => {
       expect(xml).toContain(`<trailer>${nfoGenerator.buildYouTubeTrailerUrl('abc')}</trailer>`);
     });
 
+    it('escapes XML special characters in the video id', () => {
+      write({ id: 'a&b<c' });
+
+      const xml = read('ep.nfo');
+      expect(xml).toContain('<uniqueid type="youtube" default="true">a&amp;b&lt;c</uniqueid>');
+      expect(xml).toContain('<youtubeid>a&amp;b&lt;c</youtubeid>');
+      expect(xml).toContain('videoid=a&amp;b&lt;c</trailer>');
+    });
+
     it('omits ids, dates and trailer when the video has none', () => {
       write({ title: 'No ids' });
 
@@ -305,6 +332,14 @@ describe('nfoGenerator file output', () => {
       nfoGenerator.writeEpisodeNfoFile(path.join(dir, 'Tom & Jerry.mp4'), { id: 'abc' }, { season: 2024, episode: 7, showTitle: 'My Show' });
 
       expect(read('Tom & Jerry.nfo')).toContain('<thumb>Tom &amp; Jerry.jpg</thumb>');
+    });
+
+    it('escapes XML special characters in the video id of a movie NFO', () => {
+      nfoGenerator.writeVideoNfoFile(path.join(dir, 'm.mp4'), { id: 'a&b' });
+
+      const xml = read('m.nfo');
+      expect(xml).toContain('<uniqueid type="youtube" default="true">a&amp;b</uniqueid>');
+      expect(xml).toContain('<youtubeid>a&amp;b</youtubeid>');
     });
 
     it('includes the resolution tag', () => {

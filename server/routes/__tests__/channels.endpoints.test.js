@@ -20,11 +20,11 @@ const supertest = require('supertest');
 
 const createChannelRoutes = require('../channels');
 const channelSettingsModule = require('../../modules/channelSettingsModule');
+const logger = require('../../logger');
 
 describe('channel routes: remaining endpoints', () => {
   let log;
   let channelModule;
-  let consoleError;
 
   const makeApp = () => {
     const app = express();
@@ -54,11 +54,6 @@ describe('channel routes: remaining endpoints', () => {
       getChannelVideos: jest.fn(),
       isFetchInProgress: jest.fn(),
     };
-    consoleError = jest.spyOn(console, 'error').mockImplementation(() => {});
-  });
-
-  afterEach(() => {
-    consoleError.mockRestore();
   });
 
   describe('GET /getchannels', () => {
@@ -218,6 +213,7 @@ describe('channel routes: remaining endpoints', () => {
 
       expect(res.status).toBe(500);
       expect(res.body).toEqual({ error: 'db down' });
+      expect(logger.error).toHaveBeenCalledWith({ err: expect.any(Error), channelId: 'UC1' }, 'Error getting channel settings');
     });
 
     it('updates the settings with the request body', async () => {
@@ -272,6 +268,7 @@ describe('channel routes: remaining endpoints', () => {
 
       expect(res.status).toBe(500);
       expect(res.body).toEqual({ error: 'db down' });
+      expect(logger.error).toHaveBeenCalledWith({ err: expect.any(Error) }, expect.stringMatching(/^Error getting /));
     });
   });
 
@@ -300,6 +297,7 @@ describe('channel routes: remaining endpoints', () => {
 
       expect(res.status).toBe(500);
       expect(res.body).toEqual({ error: 'bad regex' });
+      expect(logger.error).toHaveBeenCalledWith({ err: expect.any(Error), channelId: 'UC1' }, 'Error previewing title filter');
     });
 
     it('previews the combined filters', async () => {
@@ -326,6 +324,7 @@ describe('channel routes: remaining endpoints', () => {
 
       expect(res.status).toBe(500);
       expect(res.body).toEqual({ error: 'bad regex' });
+      expect(logger.error).toHaveBeenCalledWith({ err: expect.any(Error), channelId: 'UC1' }, 'Error previewing combined filters');
     });
   });
 

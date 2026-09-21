@@ -24,6 +24,8 @@ describe('VideoDeletionModule STRM revert, cache expiry and purge', () => {
   let archiveModule;
   let m3uGenerator;
   let configValues;
+  let sequelize;
+  const TRANSACTION = { id: 'tx' };
 
   const write = (p, content = 'x') => fs.writeFileSync(p, content);
   const exists = (p) => fs.existsSync(p);
@@ -61,6 +63,8 @@ describe('VideoDeletionModule STRM revert, cache expiry and purge', () => {
     archiveModule = { removeVideoFromArchive: jest.fn().mockResolvedValue(undefined) };
     m3uGenerator = { generateChannelM3UInBackground: jest.fn() };
 
+    sequelize = { transaction: jest.fn(async (work) => work(TRANSACTION)) };
+    jest.doMock('../../db', () => ({ sequelize }));
     jest.doMock('../../models', () => ({ Video, JobVideo, VideoWatchStatus }));
     jest.doMock('../configModule', () => ({ directoryPath: dir, getConfig: jest.fn(() => configValues) }));
     jest.doMock('../archiveModule', () => archiveModule);
@@ -231,6 +235,38 @@ describe('VideoDeletionModule STRM revert, cache expiry and purge', () => {
       expect(result).toEqual({ success: false, videoId: 1, error });
     });
 
+    it('keeps the media file and the STRM backup when restoring the media-info cache fails', async () => {
+      write(path.join(videoDir, `Title [${YT_ID}].strmtool.json.cached`), '{"a":1}');
+      // A directory where the restored media-info cache belongs makes that rename fail.
+      const cachePath = path.join(videoDir, `Title [${YT_ID}].strmtool.json`);
+      fs.mkdirSync(cachePath);
+      write(path.join(cachePath, 'blocker'));
+      Video.findByPk.mockResolvedValue(makeVideo());
+
+      const result = await videoDeletionModule.revertToStrm(1);
+
+      expect(result.success).toBe(false);
+      expect(exists(mediaPath)).toBe(true);
+      expect(exists(`${strmPath}.cached`)).toBe(true);
+      expect(exists(strmPath)).toBe(false);
+    });
+
+    it('puts the STRM backup back when the media file cannot be deleted', async () => {
+      // A directory in place of the media file makes the unlink fail.
+      fs.unlinkSync(mediaPath);
+      fs.mkdirSync(mediaPath);
+      write(path.join(mediaPath, 'blocker'));
+      const video = makeVideo();
+      Video.findByPk.mockResolvedValue(video);
+
+      const result = await videoDeletionModule.revertToStrm(1);
+
+      expect(result.success).toBe(false);
+      expect(exists(`${strmPath}.cached`)).toBe(true);
+      expect(exists(strmPath)).toBe(false);
+      expect(video.update).not.toHaveBeenCalled();
+    });
+
     it('explains when the video was never STRM', async () => {
       fs.unlinkSync(`${strmPath}.cached`);
       Video.findByPk.mockResolvedValue(makeVideo());
@@ -301,17 +337,31 @@ describe('VideoDeletionModule STRM revert, cache expiry and purge', () => {
 
       const result = await videoDeletionModule.sweepExpiredCachedVideos();
 
-      expect(result).toEqual({ success: true, reverted: 1, failed: 0, thresholdHours: 24 });
+      expect(result).toEqual({ success: true, reverted: 1, failed: 0, skipped: 0, thresholdHours: 24 });
     });
 
-    it('counts and logs a video with no backup as failed', async () => {
+    it('skips a video with no STRM backup quietly instead of failing it every night', async () => {
       configValues.strm = { cacheOnPlayExpiryHours: 24 };
       fs.unlinkSync(`${strmPath}.cached`);
       Video.findAll.mockResolvedValue([makeVideo()]);
 
       const result = await videoDeletionModule.sweepExpiredCachedVideos();
 
-      expect(result).toMatchObject({ reverted: 0, failed: 1 });
+      expect(result).toMatchObject({ reverted: 0, failed: 0, skipped: 1 });
+      expect(logger.warn).not.toHaveBeenCalled();
+      expect(exists(mediaPath)).toBe(true);
+    });
+
+    it('still counts and logs a revert that fails although a backup exists', async () => {
+      configValues.strm = { cacheOnPlayExpiryHours: 24 };
+      // A directory in the way of the restored .strm makes the rename fail.
+      fs.mkdirSync(strmPath);
+      write(path.join(strmPath, 'blocker'));
+      Video.findAll.mockResolvedValue([makeVideo()]);
+
+      const result = await videoDeletionModule.sweepExpiredCachedVideos();
+
+      expect(result).toMatchObject({ reverted: 0, failed: 1, skipped: 0 });
       expect(logger.warn).toHaveBeenCalledWith(expect.objectContaining({ youtubeId: YT_ID }), expect.stringContaining('[Cache Expiry] Failed to revert'));
     });
 
@@ -344,9 +394,32 @@ describe('VideoDeletionModule STRM revert, cache expiry and purge', () => {
       const result = await videoDeletionModule.purgeVideoById(1);
 
       expect(result).toEqual({ success: true, videoId: 1, channelId: 'UC1' });
-      expect(JobVideo.destroy).toHaveBeenCalledWith({ where: { video_id: 1 } });
-      expect(VideoWatchStatus.destroy).toHaveBeenCalledWith({ where: { video_id: 1 } });
+      expect(JobVideo.destroy).toHaveBeenCalledWith(expect.objectContaining({ where: { video_id: 1 } }));
+      expect(VideoWatchStatus.destroy).toHaveBeenCalledWith(expect.objectContaining({ where: { video_id: 1 } }));
       expect(video.destroy).toHaveBeenCalled();
+    });
+
+    it('deletes all three rows inside one transaction', async () => {
+      const video = makeVideo({ removed: true });
+      Video.findByPk.mockResolvedValue(video);
+
+      await videoDeletionModule.purgeVideoById(1);
+
+      expect(sequelize.transaction).toHaveBeenCalledTimes(1);
+      expect(JobVideo.destroy).toHaveBeenCalledWith({ where: { video_id: 1 }, transaction: TRANSACTION });
+      expect(VideoWatchStatus.destroy).toHaveBeenCalledWith({ where: { video_id: 1 }, transaction: TRANSACTION });
+      expect(video.destroy).toHaveBeenCalledWith({ transaction: TRANSACTION });
+    });
+
+    it('fails without touching the archive when the video row cannot be deleted', async () => {
+      const video = makeVideo({ removed: true });
+      video.destroy.mockRejectedValue(new Error('locked'));
+      Video.findByPk.mockResolvedValue(video);
+
+      const result = await videoDeletionModule.purgeVideoById(1);
+
+      expect(result).toEqual({ success: false, videoId: 1, error: 'locked' });
+      expect(archiveModule.removeVideoFromArchive).not.toHaveBeenCalled();
     });
 
     it('removes dependent rows before the video row', async () => {

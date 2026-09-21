@@ -366,6 +366,17 @@ describe('VideosModule', () => {
       expect(replacements.search).toBe('%test video%');
     });
 
+    test('matches search text literally by escaping LIKE wildcards', async () => {
+      mockSequelize.query.mockResolvedValueOnce([{ total: 0 }]);
+      mockSequelize.query.mockResolvedValueOnce([]);
+      mockSequelize.query.mockResolvedValueOnce([]); // getAllUniqueChannels
+
+      await VideosModule.getVideosPaginated({ search: '100%_sure\\' });
+
+      const replacements = mockSequelize.query.mock.calls[1][1].replacements;
+      expect(replacements.search).toBe('%100\\%\\_sure\\\\%');
+    });
+
     test('should handle pagination parameters correctly', async () => {
       mockSequelize.query.mockResolvedValueOnce([{ total: 100 }]);
       mockSequelize.query.mockResolvedValueOnce([]);
@@ -971,6 +982,16 @@ describe('VideosModule', () => {
       expect(result.updated).toBe(1);
       expect(result.removed).toBe(0);
       expect(result.timeElapsed).toBeDefined();
+    });
+
+    test('reads videos in id order so consecutive chunks cannot overlap or skip rows', async () => {
+      mockFs.readdir.mockResolvedValueOnce([]);
+      mockVideo.count.mockResolvedValueOnce(1);
+      mockVideo.findAll.mockResolvedValueOnce([]);
+
+      await VideosModule.backfillVideoMetadata();
+
+      expect(mockVideo.findAll.mock.calls[0][0]).toMatchObject({ order: [['id', 'ASC']] });
     });
 
     test('probes the file with ffprobe when video_resolution is NULL', async () => {

@@ -1,5 +1,5 @@
 # ---- Base Node ----
-FROM node:20-slim AS base
+FROM node:24-slim AS base
 WORKDIR /app
 RUN npm install -g npm@11.15.0 --ignore-scripts
 
@@ -49,7 +49,7 @@ FROM python:3.11-slim AS apprise
 RUN pip install --no-cache-dir --target=/opt/apprise apprise
 
 # ---- Release ----
-FROM node:20-slim AS release
+FROM node:24-slim AS release
 WORKDIR /app
 
 # Install runtime dependencies
@@ -68,7 +68,7 @@ WORKDIR /app
 # default, and the base image may list its repos either in the newer
 # DEB822 format (/etc/apt/sources.list.d/debian.sources) or the legacy
 # single-file /etc/apt/sources.list depending on which Debian release
-# the node:20-slim tag currently tracks, so both are handled here.
+# the node:24-slim tag currently tracks, so both are handled here.
 #
 # fonts-dejavu-core: provides /usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf,
 # used by ensurePlaceholderSegment's drawtext filter (the "Loading..." text
@@ -79,7 +79,6 @@ WORKDIR /app
 # intel-media-va-driver-non-free / libmfx-gen1.2 are Intel-only (no arm64
 # build in Debian), so they're installed only when building for amd64 —
 # QSV hardware transcode is unavailable on arm64 regardless.
-ARG TARGETARCH
 RUN if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
         sed -i '/^Components:/ s/$/ contrib non-free non-free-firmware/' /etc/apt/sources.list.d/debian.sources; \
     elif [ -f /etc/apt/sources.list ]; then \
@@ -96,7 +95,7 @@ RUN if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
     libva-drm2 \
     vainfo \
     fonts-dejavu-core \
-    $( [ "$TARGETARCH" = "amd64" ] && echo intel-media-va-driver-non-free libmfx-gen1.2 ) \
+    $( [ "$(dpkg --print-architecture)" = "amd64" ] && echo intel-media-va-driver-non-free libmfx-gen1.2 ) \
     && rm -rf /var/lib/apt/lists/*
 
 # Download the latest yt-dlp release

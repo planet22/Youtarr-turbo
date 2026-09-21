@@ -12,9 +12,7 @@ const { AUDIO_EXTENSIONS, MEDIA_EXTENSIONS } = require('./filesystem/constants')
 const { probeVideoDimensions } = require('./resolutionTier');
 const createLimiter = require('./subscriptionImport/concurrencyLimiter');
 const { formatRelativeTimeAgo } = require('./relativeTimeFormatter');
-
-// Search text is matched literally: %, _ and \ would otherwise act as LIKE wildcards.
-const escapeLikeWildcards = (text) => String(text).replace(/[\\%_]/g, '\\$&');
+const { escapeLikeWildcards } = require('../utils/escapeLike');
 
 // Backfill row updates are applied in parameterized batches of this size,
 // and flushed mid-chunk at the same cadence so completed work survives a

@@ -55,6 +55,35 @@ describe('EventLogTable', () => {
       expect(screen.getByText(/\.500/)).toBeInTheDocument();
     });
 
+    test('stacks the date over the time so the column can be narrow', () => {
+      setup([event(5)]);
+
+      expect(screen.getByText(/^[A-Z][a-z]{2} \d{1,2}$/)).toBeInTheDocument();
+      expect(screen.getByText(/:\d{2}\.500/)).toBeInTheDocument();
+    });
+
+    test('cuts a long event message and offers more', () => {
+      setup([event(1, { message: 'File finalized at ' + '/very/long/path/segment'.repeat(10) })]);
+
+      expect(screen.getByRole('button', { name: 'more…' })).toBeInTheDocument();
+    });
+
+    test('opens the row, showing the whole message, when more is clicked', async () => {
+      const message = 'File finalized at ' + '/very/long/path/segment'.repeat(10);
+      setup([event(1, { message })]);
+
+      await userEvent.click(screen.getByRole('button', { name: 'more…' }));
+
+      expect(screen.getByRole('button', { name: 'Hide details' })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'more…' })).not.toBeInTheDocument();
+    });
+
+    test('does not offer more on a short message', () => {
+      setup([event(1)]);
+
+      expect(screen.queryByRole('button', { name: 'more…' })).not.toBeInTheDocument();
+    });
+
     test('shows the event type in its own column', () => {
       setup([event(1)]);
 
@@ -352,6 +381,12 @@ describe('EventLogTable', () => {
       await userEvent.click(screen.getByRole('button', { name: 'Celebrity Juice S26E09' }));
 
       expect(onSelectVideo).toHaveBeenCalledWith('abc123');
+    });
+
+    test('cuts a long message and offers more, like the table', () => {
+      setup([event(1, { message: 'File finalized at ' + '/very/long/path/segment'.repeat(10) })], { isMobile: true });
+
+      expect(screen.getByRole('button', { name: 'more…' })).toBeInTheDocument();
     });
   });
 });

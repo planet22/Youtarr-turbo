@@ -16,8 +16,16 @@ import { ChevronDown } from 'lucide-react';
 import type { JobEvent } from '../../../../types/JobEvent';
 import type { VideoData } from '../../../../types/VideoData';
 import VideoThumbnail from '../../VideoThumbnail';
-import { componentLabel, eventLevelColor, formatEventDelta, formatEventTime, trackedLabel } from '../eventLogFormat';
+import {
+  componentLabel,
+  eventLevelColor,
+  formatEventDelta,
+  formatEventTime,
+  formatEventTimeParts,
+  trackedLabel,
+} from '../eventLogFormat';
 import EventDetail from './EventDetail';
+import EventMessage from './EventMessage';
 
 interface EventLogTableProps {
   events: JobEvent[];
@@ -142,8 +150,44 @@ const ExpandChevron: React.FC<{ expanded: boolean }> = ({ expanded }) => (
   <ChevronDown style={{ transform: expanded ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 200ms' }} />
 );
 
+// The date over the time, so the column stays narrow.
+const TimeStack: React.FC<{ iso: string }> = ({ iso }) => {
+  const { date, time } = formatEventTimeParts(iso);
+  return (
+    <span className="block leading-tight whitespace-nowrap">
+      <span className="block">{date}</span>
+      <span className="block text-muted-foreground">{time}</span>
+    </span>
+  );
+};
+
 // Columns in the desktop table before the optional "since previous" column.
 const BASE_COLUMN_COUNT = 10;
+
+// Every column but Event has a set width; Event takes whatever is left, which
+// makes it the widest. minWidth keeps Event from being squeezed on a narrow
+// screen - the table scrolls sideways instead.
+const COLUMN_WIDTHS = {
+  expander: 40,
+  time: 118,
+  sincePrevious: 80,
+  video: 240,
+  channel: 120,
+  library: 64,
+  source: 104,
+  type: 128,
+  component: 100,
+  level: 68,
+};
+const FIXED_WIDTH_TOTAL = Object.values(COLUMN_WIDTHS).reduce((sum, width) => sum + width, 0) - COLUMN_WIDTHS.sincePrevious;
+const MIN_EVENT_COLUMN_WIDTH = 340;
+
+const cellStyle = (width?: number, nowrap = false): React.CSSProperties => ({
+  padding: '6px 8px',
+  overflowWrap: 'anywhere',
+  ...(width ? { width } : {}),
+  ...(nowrap ? { whiteSpace: 'nowrap' } : {}),
+});
 
 const EventLogTable: React.FC<EventLogTableProps> = ({ events, timeline, isMobile, onSelectVideo, onSelectJob, onOpenVideo }) => {
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
@@ -186,7 +230,7 @@ const EventLogTable: React.FC<EventLogTableProps> = ({ events, timeline, isMobil
               </Box>
               <VideoCell {...cell} />
               <Box className="flex items-center gap-2 flex-wrap">
-                <span>{event.message}</span>
+                <EventMessage message={event.message} expanded={expanded.has(event.id)} onMore={() => toggle(event.id)} />
                 <LevelCell {...cell} />
               </Box>
               <Box className="flex items-center gap-3 flex-wrap mt-1">
@@ -205,20 +249,25 @@ const EventLogTable: React.FC<EventLogTableProps> = ({ events, timeline, isMobil
 
   return (
     <TableContainer>
-      <Table>
+      <Table
+        style={{
+          tableLayout: 'fixed',
+          minWidth: FIXED_WIDTH_TOTAL + MIN_EVENT_COLUMN_WIDTH + (timeline ? COLUMN_WIDTHS.sincePrevious : 0),
+        }}
+      >
         <TableHead>
           <TableRow>
-            <TableCell component="th" />
-            <TableCell component="th">Time</TableCell>
-            {timeline && <TableCell component="th">Since previous</TableCell>}
-            <TableCell component="th">Video</TableCell>
-            <TableCell component="th">Channel</TableCell>
-            <TableCell component="th">Library</TableCell>
-            <TableCell component="th">Source</TableCell>
-            <TableCell component="th">Type</TableCell>
-            <TableCell component="th">Component</TableCell>
-            <TableCell component="th">Level</TableCell>
-            <TableCell component="th">Event</TableCell>
+            <TableCell component="th" style={cellStyle(COLUMN_WIDTHS.expander)} />
+            <TableCell component="th" style={cellStyle(COLUMN_WIDTHS.time)}>Time</TableCell>
+            {timeline && <TableCell component="th" style={cellStyle(COLUMN_WIDTHS.sincePrevious)}>Since previous</TableCell>}
+            <TableCell component="th" style={cellStyle(COLUMN_WIDTHS.video)}>Video</TableCell>
+            <TableCell component="th" style={cellStyle(COLUMN_WIDTHS.channel)}>Channel</TableCell>
+            <TableCell component="th" style={cellStyle(COLUMN_WIDTHS.library)}>Library</TableCell>
+            <TableCell component="th" style={cellStyle(COLUMN_WIDTHS.source)}>Source</TableCell>
+            <TableCell component="th" style={cellStyle(COLUMN_WIDTHS.type)}>Type</TableCell>
+            <TableCell component="th" style={cellStyle(COLUMN_WIDTHS.component)}>Component</TableCell>
+            <TableCell component="th" style={cellStyle(COLUMN_WIDTHS.level)}>Level</TableCell>
+            <TableCell component="th" style={cellStyle()}>Event</TableCell>
           </TableRow>
         </TableHead>
         <TableBody>
@@ -227,17 +276,19 @@ const EventLogTable: React.FC<EventLogTableProps> = ({ events, timeline, isMobil
             return (
               <React.Fragment key={event.id}>
                 <TableRow hover>
-                  <TableCell>{expander(event)}</TableCell>
-                  <TableCell style={{ whiteSpace: 'nowrap' }}>{formatEventTime(event.occurredAt)}</TableCell>
-                  {timeline && <TableCell style={{ whiteSpace: 'nowrap' }}>{deltaFor(events, index, timeline) ?? ''}</TableCell>}
-                  <TableCell><VideoCell {...cell} /></TableCell>
-                  <TableCell><ChannelCell {...cell} /></TableCell>
-                  <TableCell>{trackedLabel(event.isTracked)}</TableCell>
-                  <TableCell><SourceCell {...cell} /></TableCell>
-                  <TableCell>{event.eventType}</TableCell>
-                  <TableCell>{componentLabel(event.actor)}</TableCell>
-                  <TableCell><LevelCell {...cell} /></TableCell>
-                  <TableCell>{event.message}</TableCell>
+                  <TableCell style={cellStyle()}>{expander(event)}</TableCell>
+                  <TableCell style={cellStyle(undefined, true)}><TimeStack iso={event.occurredAt} /></TableCell>
+                  {timeline && <TableCell style={cellStyle(undefined, true)}>{deltaFor(events, index, timeline) ?? ''}</TableCell>}
+                  <TableCell style={cellStyle()}><VideoCell {...cell} /></TableCell>
+                  <TableCell style={cellStyle()}><ChannelCell {...cell} /></TableCell>
+                  <TableCell style={cellStyle()}>{trackedLabel(event.isTracked)}</TableCell>
+                  <TableCell style={cellStyle()}><SourceCell {...cell} /></TableCell>
+                  <TableCell style={cellStyle()}>{event.eventType}</TableCell>
+                  <TableCell style={cellStyle()}>{componentLabel(event.actor)}</TableCell>
+                  <TableCell style={cellStyle()}><LevelCell {...cell} /></TableCell>
+                  <TableCell style={cellStyle()}>
+                    <EventMessage message={event.message} expanded={expanded.has(event.id)} onMore={() => toggle(event.id)} />
+                  </TableCell>
                 </TableRow>
                 {expanded.has(event.id) && (
                   <TableRow>

@@ -21,6 +21,36 @@ export function formatEventTime(iso: string): string {
   });
 }
 
+// The same instant as formatEventTime, split so a narrow column can stack it:
+// the date on one line, the time (with milliseconds) on the next.
+export function formatEventTimeParts(iso: string): { date: string; time: string } {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return { date: iso, time: '' };
+  return {
+    date: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+    time: date.toLocaleTimeString('en-US', {
+      hour: 'numeric',
+      minute: '2-digit',
+      second: '2-digit',
+      fractionalSecondDigits: 3,
+      hour12: true,
+    }),
+  };
+}
+
+export const MESSAGE_PREVIEW_LENGTH = 100;
+
+// The start of a long event message for the main line, cut at a word where it can
+// be; the full text stays in the row's expansion. Display only - the stored
+// message is untouched.
+export function previewMessage(message: string, max = MESSAGE_PREVIEW_LENGTH): { text: string; truncated: boolean } {
+  if (message.length <= max) return { text: message, truncated: false };
+  const cut = message.slice(0, max);
+  const lastSpace = cut.lastIndexOf(' ');
+  const text = (lastSpace > max / 2 ? cut.slice(0, lastSpace) : cut).replace(/[\s,;:(-]+$/, '');
+  return { text, truncated: true };
+}
+
 // Elapsed time from one entry to the next, e.g. "+45 ms", "+1.234 s", "+2m 03s".
 // Null when either timestamp is unusable or the order is reversed.
 export function formatEventDelta(previousIso: string, currentIso: string): string | null {

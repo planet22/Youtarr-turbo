@@ -1,4 +1,13 @@
-import { componentLabel, EVENT_LEVEL_OPTIONS, eventLevelColor, formatEventDelta, formatEventTime } from '../eventLogFormat';
+import {
+  componentLabel,
+  EVENT_LEVEL_OPTIONS,
+  eventLevelColor,
+  formatEventDelta,
+  formatEventTime,
+  formatEventTimeParts,
+  MESSAGE_PREVIEW_LENGTH,
+  previewMessage,
+} from '../eventLogFormat';
 
 describe('eventLogFormat', () => {
   describe('formatEventTime', () => {
@@ -136,5 +145,53 @@ describe('componentLabel', () => {
 
   test('is empty when there is no component', () => {
     expect(componentLabel(null)).toBe('');
+  });
+});
+
+describe('formatEventTimeParts', () => {
+  test('puts the date on its own, without a time', () => {
+    expect(formatEventTimeParts('2026-09-19T17:12:59.566Z').date).toMatch(/^[A-Z][a-z]{2} \d{1,2}$/);
+  });
+
+  test('puts the time, with milliseconds, on its own', () => {
+    expect(formatEventTimeParts('2026-09-19T17:12:59.566Z').time).toMatch(/:\d{2}\.566/);
+  });
+
+  test('keeps entries a few milliseconds apart distinguishable', () => {
+    expect(formatEventTimeParts('2026-09-19T17:12:59.394Z').time).not.toBe(formatEventTimeParts('2026-09-19T17:12:59.566Z').time);
+  });
+
+  test('gives the input back as the date, with no time, when it is not a date', () => {
+    expect(formatEventTimeParts('not a date')).toEqual({ date: 'not a date', time: '' });
+  });
+});
+
+describe('previewMessage', () => {
+  test('leaves a short message alone', () => {
+    expect(previewMessage('Download started')).toEqual({ text: 'Download started', truncated: false });
+  });
+
+  test('leaves a message of exactly the preview length alone', () => {
+    expect(previewMessage('x'.repeat(MESSAGE_PREVIEW_LENGTH)).truncated).toBe(false);
+  });
+
+  test('cuts a long message at a word', () => {
+    const message = 'File finalized at ' + 'word '.repeat(30);
+    const { text, truncated } = previewMessage(message);
+    expect(truncated).toBe(true);
+    expect(text.endsWith('word')).toBe(true);
+  });
+
+  test('keeps the preview within the limit', () => {
+    expect(previewMessage('word '.repeat(60)).text.length).toBeLessThanOrEqual(MESSAGE_PREVIEW_LENGTH);
+  });
+
+  test('cuts a long unbroken string at the limit', () => {
+    expect(previewMessage('x'.repeat(300)).text).toBe('x'.repeat(MESSAGE_PREVIEW_LENGTH));
+  });
+
+  test('does not leave dangling punctuation on the cut', () => {
+    const message = 'a'.repeat(90) + ', ' + 'b'.repeat(50);
+    expect(previewMessage(message).text.endsWith(',')).toBe(false);
   });
 });

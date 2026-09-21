@@ -34,6 +34,7 @@ This guide provides step-by-step instructions for common tasks in Youtarr-Turbo.
     - [Ignore Videos from Auto-Downloads](#ignore-videos-from-auto-downloads)
   - [Find Videos on YouTube](#find-videos-on-youtube)
   - [Preview and Play Videos](#preview-and-play-videos)
+  - [Follow a Video or Job in the Event Log](#follow-a-video-or-job-in-the-event-log)
   - [Track Watch Status from Media Servers](#track-watch-status-from-media-servers)
     - [How it works](#how-it-works)
     - [Settings](#settings)
@@ -525,6 +526,28 @@ Click any thumbnail on the Videos page or a channel page to open a video detail 
 4. **Actions from the modal**
    - Download, protect, delete, ignore, and rate actions are all available inside the modal
    - Changes sync back to the source page when the modal closes
+
+## Follow a Video or Job in the Event Log
+
+The **Event Log** page (Downloads > Event Log, at `/downloads/log`) is a permanent, step-by-step record of what happened to your videos. Each step is written down once, at the moment it happens, with a time to the millisecond: a job queued and started, a download started, a file finalized, a download failed (and why), an NZB grab staged, imported or untracked, a video deleted, restored, protected or moved, STRM and cache files created or removed, playlist changes, and so on. Nothing on the page is worked out later from current state, so an entry never changes after it is written. Download History is unchanged and keeps working as before.
+
+**What each row shows**
+
+- **Time**: date over time, to the millisecond. Events in the same millisecond stay in the order they happened.
+- **Video**: the thumbnail (click it to open the same video popup Download History uses) and title. An **Untracked** banner on the thumbnail means the video was not in your library at that moment.
+- **Channel**, **Library** (whether the video was in the library when the event happened), **Source** (Channels, Playlists, Manual Videos, NZB, Auto-retry, STRM Cache-on-play, HLS Buffer Cache, Download All, ...), **Type** (e.g. `video.failed`), **Component** (which part of Youtarr-Turbo recorded it), **Level** and the **Event** text.
+- Click the arrow, or a "more…" link on a long message, to expand the row for the full text and every recorded detail (file paths, sizes, download speed, the complete error, and the likely cause when Youtarr-Turbo recognizes one).
+
+**Filtering and order**
+
+- Filter by level, event type, source, component, channel, library (tracked or untracked), date range, or search text. Filters are remembered.
+- With no filter the newest events are first. With any filter active the order flips to oldest first, so a filtered view reads as a story.
+- Click a video title or a source to see only that video's or that job's events, with the time since the previous step shown. On Download History, a row's **Timeline** link opens the same view for that job.
+
+**Keeping and clearing the log**
+
+- Entries older than `jobEventLogRetentionDays` (default 180, `0` keeps everything) are removed nightly. See [CONFIG.md](CONFIG.md).
+- **Settings > Maintenance & Rescan > Clear Event Log** deletes every entry after a confirmation. One entry noting that the log was cleared is left behind.
 
 ## Track Watch Status from Media Servers
 

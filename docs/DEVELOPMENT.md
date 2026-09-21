@@ -764,6 +764,16 @@ If a backend change is not being picked up, verify the container is actually run
 - Use prepared statements for SQL (Sequelize handles this)
 - Keep dependencies updated
 
+### Video/events log (`jobEventLog`)
+
+The Event Log page reads an append-only `job_events` table. Every step is recorded by the code that does the thing, with a single fire-and-forget call, the same way you would add a `logger.info`:
+
+1. Add an entry to `server/modules/jobEventLog/eventCatalog.js`: the `EVENT_TYPES` key, then an `EVENT_CATALOG` entry with the component (`actor`), an optional `level`, and a `message` function. The message is rendered once when the event is recorded and stored frozen. Keep long text (a yt-dlp error, a file path) in `detail` rather than the message.
+2. Call `jobEventLog.record(EVENT_TYPES.YOUR_TYPE, { jobId, youtubeId, videoTitle, channelName, detail })` where it happens. `record()` never throws, never awaits, and returns immediately. Pass `isTracked` when the code knows whether the video has a library row; otherwise it is taken from in-memory state loaded at startup.
+3. Never derive an event from Download History or job state, and never look anything up when reading the log; the row is a snapshot taken at write time.
+
+`jest.setup.js` mocks `server/modules/jobEventLog` globally, so tests never write to the database. Assert on the call instead: `expect(jobEventLog.record).toHaveBeenCalledWith('video.deleted', expect.objectContaining({ youtubeId }))`. In a suite that calls `jest.resetModules()`, require `jobEventLog` after requiring the module under test so both share one mock.
+
 ### Security Testing
 
 ```bash

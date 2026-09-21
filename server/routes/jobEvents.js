@@ -118,9 +118,9 @@ function createJobEventRoutes({ verifyToken, jobEventLog }) {
    *       - { in: query, name: category, schema: { type: string, enum: [job, video, nzb, strm, cache, playlist, log] }, description: Event type family }
    *       - { in: query, name: from, schema: { type: string, format: date-time }, description: Only events at or after this time }
    *       - { in: query, name: to, schema: { type: string, format: date-time }, description: Only events at or before this time }
-   *       - { in: query, name: actor, schema: { type: string }, description: Who recorded the event (downloader, nzb, ...) }
+   *       - { in: query, name: actor, schema: { type: string }, description: Component that recorded the event, as stored (downloader, library, nzb, media-server, ...) }
    *       - { in: query, name: channel, schema: { type: string }, description: Exact channel name }
-   *       - { in: query, name: source, schema: { type: string }, description: Job source label from /api/job-events/facets }
+   *       - { in: query, name: source, schema: { type: string }, description: Job source label as stored on the event, e.g. Channels or NZB (TV); the values are listed by /api/job-events/facets }
    *       - { in: query, name: tracked, schema: { type: string, enum: [tracked, untracked] }, description: Whether the video was in the library when the event happened }
    *       - { in: query, name: offset, schema: { type: integer, minimum: 0 } }
    *       - { in: query, name: order, schema: { type: string, enum: [asc, desc], default: desc } }
@@ -150,6 +150,7 @@ function createJobEventRoutes({ verifyToken, jobEventLog }) {
    *                       videoTitle: { type: string, nullable: true }
    *                       channelName: { type: string, nullable: true }
    *                       jobType: { type: string, nullable: true }
+   *                       source: { type: string, nullable: true, description: The job's source label (Channels, Playlists, NZB (TV), Manual Videos, ...) stored when the event was recorded; null when the event has no job }
    *                       isTracked: { type: boolean, nullable: true, description: Whether the video was in the library at that moment; null if not known }
    *                 total: { type: integer }
    *       400:
@@ -177,11 +178,20 @@ function createJobEventRoutes({ verifyToken, jobEventLog }) {
    * /api/job-events/facets:
    *   get:
    *     summary: Values available to the log's filter dropdowns
-   *     description: Distinct event types, actors and channel names present in the log, plus the job source labels.
+   *     description: Distinct event types, components (actors), channel names and job source labels actually present in the log.
    *     tags: [Jobs]
    *     responses:
    *       200:
    *         description: Filter option lists
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 eventTypes: { type: array, items: { type: string } }
+   *                 actors: { type: array, items: { type: string } }
+   *                 channels: { type: array, items: { type: string } }
+   *                 sources: { type: array, items: { type: string } }
    *       500:
    *         description: Failed to read the log
    */

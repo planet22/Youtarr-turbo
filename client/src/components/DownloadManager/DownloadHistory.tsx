@@ -86,6 +86,8 @@ export function getJobSourceLabel(jobType: string): string {
     return categoryMatch ? `NZB (${categoryMatch[1]})` : 'NZB';
   }
   if (jobType.startsWith('STRM Cache: ')) return 'STRM Cache-on-play';
+  // "Download all videos" for a channel tab (Channel Download All: <title>)
+  if (jobType.startsWith('Channel Download All: ')) return 'Download All';
   // Grouped under the same "HLS Buffer Cache" filter option as the fetch
   // it finalizes, rather than fragmenting the Source dropdown - the two are
   // the same feature, just two separate history lines now (see

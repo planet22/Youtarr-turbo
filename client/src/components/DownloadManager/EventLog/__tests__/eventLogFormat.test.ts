@@ -66,6 +66,19 @@ describe('eventLogFormat', () => {
   });
 });
 
+describe('tracked labels', () => {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { trackedLabel, TRACKED_OPTIONS } = require('../eventLogFormat');
+
+  test.each([[true, 'Yes'], [false, 'No'], [null, '']])('labels %p as %p', (value, label) => {
+    expect(trackedLabel(value)).toBe(label);
+  });
+
+  test('offers tracked and untracked as filter options', () => {
+    expect(TRACKED_OPTIONS).toEqual(['tracked', 'untracked']);
+  });
+});
+
 describe('detail formatting', () => {
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   const { detailLabel, describeDetailEntries } = require('../eventLogFormat');

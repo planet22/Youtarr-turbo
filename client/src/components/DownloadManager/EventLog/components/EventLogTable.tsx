@@ -17,7 +17,7 @@ import type { JobEvent } from '../../../../types/JobEvent';
 import type { VideoData } from '../../../../types/VideoData';
 import VideoThumbnail from '../../VideoThumbnail';
 import { getJobSourceLabel } from '../../DownloadHistory';
-import { eventLevelColor, formatEventDelta, formatEventTime } from '../eventLogFormat';
+import { eventLevelColor, formatEventDelta, formatEventTime, trackedLabel } from '../eventLogFormat';
 import EventDetail from './EventDetail';
 
 interface EventLogTableProps {
@@ -76,15 +76,27 @@ const VideoCell: React.FC<CellProps> = ({ event, onSelectVideo, onOpenVideo }) =
   const youtubeId = event.youtubeId;
   return (
     <Box className="flex items-start gap-2">
-      <VideoThumbnail
-        video={thumbnailVideo(event)}
-        width={THUMBNAIL_WIDTH}
-        height={THUMBNAIL_HEIGHT}
-        onClick={() => onOpenVideo(event)}
-        hasError={false}
-        onError={noop}
-        iconSize={20}
-      />
+      <Box className="relative shrink-0" style={{ width: THUMBNAIL_WIDTH, height: THUMBNAIL_HEIGHT }}>
+        <VideoThumbnail
+          video={thumbnailVideo(event)}
+          width={THUMBNAIL_WIDTH}
+          height={THUMBNAIL_HEIGHT}
+          onClick={() => onOpenVideo(event)}
+          hasError={false}
+          onError={noop}
+          iconSize={20}
+        />
+        {/* Recorded when the event happened, so it stays true after the row is gone. */}
+        {event.isTracked === false && (
+          <span
+            data-testid="untracked-badge"
+            className="absolute bottom-0 left-0 right-0 text-center text-[10px] leading-tight py-0.5 pointer-events-none"
+            style={{ background: 'rgba(0,0,0,0.7)', color: '#fff', borderBottomLeftRadius: 'var(--radius-thumb)', borderBottomRightRadius: 'var(--radius-thumb)' }}
+          >
+            Untracked
+          </span>
+        )}
+      </Box>
       <Box className="min-w-0">
         <Link component="button" type="button" style={linkStyle} onClick={() => onSelectVideo(youtubeId)}>
           {event.videoTitle || youtubeId}
@@ -119,7 +131,7 @@ const ExpandChevron: React.FC<{ expanded: boolean }> = ({ expanded }) => (
 );
 
 // Columns in the desktop table before the optional "since previous" column.
-const BASE_COLUMN_COUNT = 9;
+const BASE_COLUMN_COUNT = 10;
 
 const EventLogTable: React.FC<EventLogTableProps> = ({ events, timeline, isMobile, onSelectVideo, onSelectJob, onOpenVideo }) => {
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
@@ -189,6 +201,7 @@ const EventLogTable: React.FC<EventLogTableProps> = ({ events, timeline, isMobil
             {timeline && <TableCell component="th">Since previous</TableCell>}
             <TableCell component="th">Video</TableCell>
             <TableCell component="th">Channel</TableCell>
+            <TableCell component="th">Library</TableCell>
             <TableCell component="th">Source</TableCell>
             <TableCell component="th">Type</TableCell>
             <TableCell component="th">Actor</TableCell>
@@ -207,6 +220,7 @@ const EventLogTable: React.FC<EventLogTableProps> = ({ events, timeline, isMobil
                   {timeline && <TableCell style={{ whiteSpace: 'nowrap' }}>{deltaFor(events, index, timeline) ?? ''}</TableCell>}
                   <TableCell><VideoCell {...cell} /></TableCell>
                   <TableCell><ChannelCell {...cell} /></TableCell>
+                  <TableCell>{trackedLabel(event.isTracked)}</TableCell>
                   <TableCell><SourceCell {...cell} /></TableCell>
                   <TableCell>{event.eventType}</TableCell>
                   <TableCell>{event.actor || ''}</TableCell>

@@ -87,6 +87,18 @@ describe('Job event routes', () => {
       expect(jobEventLog.list).toHaveBeenCalledWith({ category });
     });
 
+    test.each(['tracked', 'untracked'])('passes the %s filter through', async (tracked) => {
+      await request(app).get('/api/job-events').query({ tracked });
+
+      expect(jobEventLog.list).toHaveBeenCalledWith({ tracked });
+    });
+
+    test('answers 400 for a tracked filter outside the allowed set', async () => {
+      const res = await request(app).get('/api/job-events').query({ tracked: 'maybe' });
+
+      expect(res.status).toBe(400);
+    });
+
     test('passes level and order through', async () => {
       await request(app).get('/api/job-events').query({ level: 'error', order: 'asc' });
 

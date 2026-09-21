@@ -60,6 +60,16 @@ const EVENT_TYPES = Object.freeze({
 const has = (value) => value !== undefined && value !== null && value !== '';
 const suffix = (value, text) => (has(value) ? ` ${text.replace('%s', value)}` : '');
 
+// A short, single-line reason can ride in the event's main line; anything longer
+// (a yt-dlp error is often a paragraph) stays in the event's detail, which the
+// expansion row shows in full. Returns null when the text is too long to inline.
+const MAX_INLINE_TEXT = 100;
+function brief(text) {
+  if (!has(text)) return null;
+  const trimmed = String(text).trim();
+  return trimmed.length > 0 && trimmed.length <= MAX_INLINE_TEXT && !/[\r\n]/.test(trimmed) ? trimmed : null;
+}
+
 // "12s", "2m 03s", "1h 05m" - how long a transfer took.
 function formatSeconds(seconds) {
   const total = Math.round(Number(seconds));
@@ -108,7 +118,7 @@ const EVENT_CATALOG = {
       if (has(detail.videoCount)) parts.push(`${detail.videoCount} video${detail.videoCount === 1 ? '' : 's'}`);
       if (detail.failedCount) parts.push(`${detail.failedCount} failed`);
       if (detail.skippedCount) parts.push(`${detail.skippedCount} skipped`);
-      return `Job finished: ${detail.status || 'unknown'}${parts.length ? ` (${parts.join(', ')})` : ''}${suffix(detail.reason, '- %s')}`;
+      return `Job finished: ${detail.status || 'unknown'}${parts.length ? ` (${parts.join(', ')})` : ''}${suffix(brief(detail.reason), '- %s')}`;
     },
   },
   [EVENT_TYPES.JOB_REMOVED]: { actor: 'job', message: () => 'Job removed from the queue before it started' },
@@ -127,7 +137,7 @@ const EVENT_CATALOG = {
     level: () => LEVELS.ERROR,
     // The error yt-dlp reported, plus the same "likely cause" advice Download History shows.
     message: ({ detail = {} }) =>
-      `Download failed${suffix(detail.error, '- %s')}${suffix(detail.diagnosisTitle, '(Likely cause: %s)')}`,
+      `Download failed${suffix(brief(detail.error), '- %s')}${suffix(detail.diagnosisTitle, '(Likely cause: %s)')}`,
   },
   [EVENT_TYPES.VIDEO_AUTO_RETRY_QUEUED]: {
     actor: 'downloader',
@@ -238,7 +248,7 @@ const EVENT_CATALOG = {
   [EVENT_TYPES.NZB_UNTRACK_FAILED]: {
     actor: 'nzb',
     level: () => LEVELS.WARN,
-    message: ({ detail = {} }) => `Could not remove from the Youtarr library${suffix(detail.error, '- %s')}`,
+    message: ({ detail = {} }) => `Could not remove from the Youtarr library${suffix(brief(detail.error), '- %s')}`,
   },
 
   [EVENT_TYPES.LOG_CLEARED]: {

@@ -17,6 +17,7 @@ const event = (id: number, over: Partial<JobEvent> = {}): JobEvent => ({
   videoTitle: 'Celebrity Juice S26E09',
   channelName: 'pcrobec',
   jobType: 'Sonarr/Radarr: TV [abc123]',
+  isTracked: true,
   ...over,
 });
 
@@ -179,6 +180,86 @@ describe('EventLogTable', () => {
       setup([event(1, { jobId: null })]);
 
       expect(screen.queryByRole('button', { name: 'NZB (TV)' })).not.toBeInTheDocument();
+    });
+  });
+
+  describe('tracked state', () => {
+    test('marks an untracked video on its thumbnail', () => {
+      setup([event(1, { isTracked: false })]);
+
+      expect(screen.getByTestId('untracked-badge')).toHaveTextContent('Untracked');
+    });
+
+    test('shows no badge for a tracked video', () => {
+      setup([event(1, { isTracked: true })]);
+
+      expect(screen.queryByTestId('untracked-badge')).not.toBeInTheDocument();
+    });
+
+    test('shows no badge when tracked state was not known', () => {
+      setup([event(1, { isTracked: null })]);
+
+      expect(screen.queryByTestId('untracked-badge')).not.toBeInTheDocument();
+    });
+
+    test('has a Library column', () => {
+      setup([event(1)]);
+
+      expect(screen.getByRole('columnheader', { name: 'Library' })).toBeInTheDocument();
+    });
+
+    test.each([[true, 'Yes'], [false, 'No']])('shows %p as %s in the Library column', (isTracked, label) => {
+      setup([event(1, { isTracked })]);
+
+      expect(screen.getByRole('cell', { name: label })).toBeInTheDocument();
+    });
+
+    test('leaves the Library cell empty when it was not known', () => {
+      setup([event(1, { isTracked: null })]);
+
+      expect(screen.queryByRole('cell', { name: 'Yes' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('cell', { name: 'No' })).not.toBeInTheDocument();
+    });
+
+    test('shows the badge on the mobile cards too', () => {
+      setup([event(1, { isTracked: false })], { isMobile: true });
+
+      expect(screen.getByTestId('untracked-badge')).toBeInTheDocument();
+    });
+  });
+
+  describe('long text in the expansion row', () => {
+    const LONG = 'Failed to fetch video metadata: ERROR: [youtube] VyJRZmWDIps: Sign in to confirm your age. ' + 'Use --cookies-from-browser or --cookies for the authentication. '.repeat(3);
+
+    test('shows the full error in the expansion row', async () => {
+      setup([event(1, { detail: { error: LONG } })]);
+
+      await userEvent.click(screen.getByRole('button', { name: 'Show details' }));
+
+      expect(screen.getByTestId('event-detail')).toHaveTextContent(LONG.trim());
+    });
+
+    test('lets a long value wrap instead of running off the table', async () => {
+      setup([event(1, { detail: { error: LONG } })]);
+      await userEvent.click(screen.getByRole('button', { name: 'Show details' }));
+
+      expect(screen.getByText(LONG.trim(), { selector: 'span' })).toHaveStyle({ overflowWrap: 'anywhere' });
+    });
+
+    test('caps the width of the expansion row', async () => {
+      setup([event(1, { detail: { error: LONG } })]);
+
+      await userEvent.click(screen.getByRole('button', { name: 'Show details' }));
+
+      expect(screen.getByTestId('event-detail')).toHaveStyle({ maxWidth: '60rem' });
+    });
+
+    test('shows whether the video was in the library in the expansion row', async () => {
+      setup([event(1, { isTracked: false })]);
+
+      await userEvent.click(screen.getByRole('button', { name: 'Show details' }));
+
+      expect(screen.getByTestId('event-detail')).toHaveTextContent('In library');
     });
   });
 

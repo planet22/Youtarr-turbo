@@ -87,6 +87,23 @@ describe('nzb.js video/events log', () => {
       });
     });
 
+    it('says the video is no longer tracked, since its library row was just deleted', async () => {
+      jobModule.getJob.mockReturnValue(buildJob('TV'));
+
+      await nzb.handleHistoryDeleteRequest(['job-1']);
+
+      expect(callFor('nzb.untracked')[1].isTracked).toBe(false);
+    });
+
+    it('offers the NZB name only as a provisional title on the history-removed entry', async () => {
+      jobModule.getJob.mockReturnValue(buildJob('TV'));
+
+      await nzb.handleHistoryDeleteRequest(['job-1']);
+
+      expect(callFor('nzb.history_removed')[1]).toMatchObject({ provisionalTitle: 'Celebrity Juice S26E09' });
+      expect(callFor('nzb.history_removed')[1].videoTitle).toBeUndefined();
+    });
+
     it('names the trigger and the destroyed row counts in the untrack detail', async () => {
       jobModule.getJob.mockReturnValue(buildJob('TV'));
 

@@ -155,6 +155,7 @@ class VideoPersistence {
       }
     }
 
+    jobEventLog.markTracked(videoInstance.youtubeId, true);
     jobEventLog.rememberVideo(videoInstance.youtubeId, { title: videoInstance.youTubeVideoName, channelName: videoInstance.youTubeChannelName });
 
     // Create JobVideo relationship if needed

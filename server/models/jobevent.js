@@ -19,6 +19,8 @@ JobEvent.init(
     video_title: { type: DataTypes.STRING(512), allowNull: true },
     channel_name: { type: DataTypes.STRING(255), allowNull: true },
     job_type: { type: DataTypes.STRING(255), allowNull: true },
+    // Whether the video had a library row when the event happened; null = not known then.
+    is_tracked: { type: DataTypes.BOOLEAN, allowNull: true },
   },
   { sequelize, modelName: 'JobEvent', tableName: 'job_events', timestamps: false }
 );

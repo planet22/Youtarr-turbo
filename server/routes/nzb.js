@@ -374,6 +374,7 @@ async function untrackFromYoutarrLibrary(job, videoRow) {
       youtubeId: videoRow.youtubeId,
       videoTitle: videoRow.youTubeVideoName,
       channelName: videoRow.youTubeChannelName,
+      isTracked: false,
       detail: { trigger: 'Sonarr/Radarr history delete', counts },
     });
   } catch (err) {
@@ -549,6 +550,7 @@ async function reconcileMovedUntrackedVideo(videoRow) {
     youtubeId: videoRow.youtubeId,
     videoTitle: videoRow.youTubeVideoName,
     channelName: videoRow.youTubeChannelName,
+    isTracked: false,
     detail: { trigger: 'file moved away by Sonarr/Radarr (no history-delete call received)', counts },
   });
 
@@ -670,7 +672,7 @@ async function handleHistoryDeleteRequest(jobIds) {
       jobEventLog.record(EVENT_TYPES.NZB_HISTORY_REMOVED, {
         jobId,
         youtubeId: job.data.nzb.youtubeId,
-        videoTitle: job.data.nzb.nzbName,
+        provisionalTitle: job.data.nzb.nzbName,
         occurredAt: job.data.nzb.historyRemovedAt,
       });
       const category = findCategory(categories, { name: job.data.nzb.categoryName });
@@ -921,6 +923,17 @@ async function recordFailedGrab(job, message) {
   }, max);
 }
 
+// The real title and channel of every video offered to Sonarr/Radarr, remembered
+// now so a grab's very first log entries already read the same as its later ones
+// (the NZB itself only carries a stand-in name and no channel).
+function rememberSearchResults(results) {
+  for (const result of results || []) {
+    if (result && result.youtubeId) {
+      jobEventLog.rememberVideo(result.youtubeId, { title: result.title, channelName: result.channelName });
+    }
+  }
+}
+
 async function getRecentFailedGrabs() {
   const max = nzbDiagnosticLog.resolveLogLimit(configModule.getConfig(), 'failedGrabs');
   return nzbDiagnosticLog.getDiagnosticEvents('failedGrab', max);
@@ -1154,6 +1167,7 @@ module.exports = function createNzbRoutes() {
           // always unset here - same resolution detection as the real search
           // branch above.
           await applyResolutionDetection(results, getResolutionDetectionConfig(cfg));
+          rememberSearchResults(results);
           res.type('application/xml').send(nzbFeedModule.buildSearchXml(results, responseOpts));
         } catch (err) {
           logger.error({ err }, 'nzb: RSS-mode (blank query) lookup failed');
@@ -1300,6 +1314,7 @@ module.exports = function createNzbRoutes() {
 
         nzbDebug({ results }, 'nzb: search complete');
 
+        rememberSearchResults(results);
         res.type('application/xml').send(nzbFeedModule.buildSearchXml(results, responseOpts));
       } catch (err) {
         logger.error({ err, query }, 'nzb: search failed');
@@ -1439,7 +1454,7 @@ module.exports = function createNzbRoutes() {
         jobEventLog.record(EVENT_TYPES.NZB_GRAB_REQUESTED, {
           jobId,
           youtubeId,
-          videoTitle: nzbName || youtubeId,
+          provisionalTitle: nzbName || youtubeId,
           detail: { categoryName: category.name, importStrategy: category.importStrategy || 'hardlink', nzbName, season, ep },
         });
         res.json({ status: true, nzo_ids: [String(jobId)] });

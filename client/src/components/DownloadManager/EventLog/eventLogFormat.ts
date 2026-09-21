@@ -104,3 +104,12 @@ export function describeDetailEntries(detail: Record<string, unknown> | null): D
     .map(([key, value]) => ({ label: detailLabel(key), value: detailValue(key, value) }))
     .filter((entry) => entry.value !== '');
 }
+
+// Whether the video was in the library when the event happened.
+export const TRACKED_OPTIONS: readonly string[] = ['tracked', 'untracked'];
+
+export function trackedLabel(isTracked: boolean | null): string {
+  if (isTracked === true) return 'Yes';
+  if (isTracked === false) return 'No';
+  return '';
+}

@@ -91,6 +91,9 @@ class VideoDeletionModule {
       youtubeId: video.youtubeId,
       videoTitle: video.youTubeVideoName,
       channelName: video.youTubeChannelName,
+      // A purge deletes the row itself, so the video is no longer in the library;
+      // an ordinary delete keeps the row (marked removed), so nothing is claimed.
+      isTracked: detail.purged ? false : undefined,
       detail,
     });
   }

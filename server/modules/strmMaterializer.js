@@ -757,7 +757,9 @@ class StrmMaterializer {
       await existing.update(videoRow);
       return existing;
     }
-    return Video.create(videoRow);
+    const created = await Video.create(videoRow);
+    jobEventLog.markTracked(videoRow.youtubeId, true);
+    return created;
   }
 
   async _writeThumbnail(meta, paths, { skipMediaSidecarFiles = false } = {}) {

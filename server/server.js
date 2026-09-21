@@ -225,6 +225,8 @@ const initialize = async () => {
   try {
     // Wait for the database to initialize
     await db.initializeDatabase();
+    // Lets the video/events log answer "was this video in the library?" instantly.
+    require('./modules/jobEventLog').warm();
 
     // Start background health monitor to handle database reconnection (skip in tests)
     if (process.env.NODE_ENV !== 'test') {

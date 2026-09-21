@@ -16,9 +16,9 @@ describe('jobVideoRef', () => {
   });
 
   describe('singleVideoRefForJob', () => {
-    test('uses the NZB grab video and its NZB name', () => {
+    test('uses the NZB grab video, offering its NZB name only as a provisional title', () => {
       const job = { data: { nzb: { youtubeId: 'abc', nzbName: 'Celebrity Juice S26E09' } } };
-      expect(singleVideoRefForJob(job)).toEqual({ youtubeId: 'abc', videoTitle: 'Celebrity Juice S26E09' });
+      expect(singleVideoRefForJob(job)).toEqual({ youtubeId: 'abc', provisionalTitle: 'Celebrity Juice S26E09' });
     });
 
     test('uses the only URL of a one-URL job', () => {

@@ -22,7 +22,8 @@ function videoIdFromUrl(url) {
 function singleVideoRefForJob(job) {
   const nzb = job && job.data && job.data.nzb;
   if (nzb && nzb.youtubeId) {
-    return { youtubeId: nzb.youtubeId, videoTitle: nzb.nzbName || undefined };
+    // The NZB's own name is only a stand-in for the real title.
+    return { youtubeId: nzb.youtubeId, provisionalTitle: nzb.nzbName || undefined };
   }
 
   const urls = job && job.data && job.data.urls;

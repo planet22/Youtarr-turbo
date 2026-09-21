@@ -38,7 +38,7 @@ export function useJobEvents(
   const [error, setError] = useState<string | null>(null);
   const generationRef = useRef(0);
 
-  const { jobId, youtubeId, level, category, eventType, actor, channel, source, q, from, to } = filters;
+  const { jobId, youtubeId, level, category, eventType, actor, channel, source, tracked, q, from, to } = filters;
 
   const fetchPage = useCallback(async (): Promise<JobEventPage> => {
     const params: Record<string, string | number> = {
@@ -47,7 +47,7 @@ export function useJobEvents(
       order: ascending ? 'asc' : 'desc',
     };
     const optional: Record<string, string | undefined> = {
-      jobId, youtubeId, level, category, eventType, actor, channel, source, q, from, to,
+      jobId, youtubeId, level, category, eventType, actor, channel, source, tracked, q, from, to,
     };
     Object.entries(optional).forEach(([name, value]) => {
       if (value) params[name] = value;
@@ -57,7 +57,7 @@ export function useJobEvents(
       params,
     });
     return response.data;
-  }, [token, page, pageSize, ascending, jobId, youtubeId, level, category, eventType, actor, channel, source, q, from, to]);
+  }, [token, page, pageSize, ascending, jobId, youtubeId, level, category, eventType, actor, channel, source, tracked, q, from, to]);
 
   const fetchFacets = useCallback(async () => {
     const response = await axios.get<JobEventFacets>('/api/job-events/facets', {

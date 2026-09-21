@@ -121,8 +121,17 @@ describe('VideoDeletionModule video/events log', () => {
         youtubeId: 'abc123',
         videoTitle: 'A Title',
         channelName: 'A Channel',
+        isTracked: false,
         detail: { purged: true },
       });
+    });
+
+    it('says the video is no longer tracked, because a purge deletes its row', async () => {
+      mockVideo.findByPk.mockResolvedValue(videoRow({ removed: true }));
+
+      await videoDeletionModule.purgeVideoById(7);
+
+      expect(jobEventLog.record.mock.calls[0][1].isTracked).toBe(false);
     });
 
     it('records nothing when the video is not marked missing', async () => {

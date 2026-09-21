@@ -1,7 +1,7 @@
 import React from 'react';
 import { Box, Typography } from '../../../ui';
 import type { JobEvent } from '../../../../types/JobEvent';
-import { describeDetailEntries } from '../eventLogFormat';
+import { describeDetailEntries, trackedLabel } from '../eventLogFormat';
 
 interface EventDetailProps {
   event: JobEvent;
@@ -20,6 +20,7 @@ const EventDetail: React.FC<EventDetailProps> = ({ event }) => {
     { label: 'Event type', value: event.eventType },
     { label: 'Level', value: event.level },
     { label: 'Actor', value: event.actor || '' },
+    { label: 'In library', value: trackedLabel(event.isTracked) },
     { label: 'Video id', value: event.youtubeId || '' },
     { label: 'Video title', value: event.videoTitle || '' },
     { label: 'Channel', value: event.channelName || '' },
@@ -29,13 +30,14 @@ const EventDetail: React.FC<EventDetailProps> = ({ event }) => {
   const recorded = describeDetailEntries(event.detail);
 
   return (
-    <Box className="p-3 flex flex-col gap-2" data-testid="event-detail">
-      <Typography variant="body2">{event.message}</Typography>
-      <Box className="grid gap-x-6 gap-y-1" style={{ gridTemplateColumns: 'max-content 1fr' }}>
+    // Capped so a long error wraps here instead of running off the edge of a wide table.
+    <Box className="p-3 flex flex-col gap-2" data-testid="event-detail" style={{ maxWidth: '60rem' }}>
+      <Typography variant="body2" style={{ overflowWrap: 'anywhere' }}>{event.message}</Typography>
+      <Box className="grid gap-x-6 gap-y-1" style={{ gridTemplateColumns: 'max-content minmax(0, 1fr)' }}>
         {[...identity, ...recorded].map((row) => (
           <React.Fragment key={row.label}>
             <Typography variant="caption" color="secondary">{row.label}</Typography>
-            <Typography variant="caption" style={{ wordBreak: 'break-all' }}>{row.value}</Typography>
+            <Typography variant="caption" style={{ overflowWrap: 'anywhere', whiteSpace: 'pre-wrap' }}>{row.value}</Typography>
           </React.Fragment>
         ))}
       </Box>

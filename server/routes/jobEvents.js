@@ -10,6 +10,7 @@ const MAX_TIMESTAMP_LENGTH = 40;
 const MAX_ACTOR_LENGTH = 48;
 const MAX_CHANNEL_LENGTH = 255;
 const MAX_SOURCE_LENGTH = 40;
+const TRACKED_VALUES = ['tracked', 'untracked'];
 const CATEGORIES = ['job', 'video', 'nzb', 'strm', 'cache', 'playlist', 'log'];
 const LEVELS = ['info', 'warn', 'error'];
 const ORDERS = ['asc', 'desc'];
@@ -57,6 +58,7 @@ function parseListQuery(query) {
     actor: optionalString(query, 'actor', MAX_ACTOR_LENGTH),
     channel: optionalString(query, 'channel', MAX_CHANNEL_LENGTH),
     source: optionalString(query, 'source', MAX_SOURCE_LENGTH),
+    tracked: optionalString(query, 'tracked', 10),
     order: optionalString(query, 'order', 4),
     from: optionalTimestamp(query, 'from'),
     to: optionalTimestamp(query, 'to'),
@@ -68,6 +70,9 @@ function parseListQuery(query) {
   if (failed) return { error: failed.error };
   if (fields.level.value !== undefined && !LEVELS.includes(fields.level.value)) {
     return { error: `level must be one of: ${LEVELS.join(', ')}` };
+  }
+  if (fields.tracked.value !== undefined && !TRACKED_VALUES.includes(fields.tracked.value)) {
+    return { error: `tracked must be one of: ${TRACKED_VALUES.join(', ')}` };
   }
   if (fields.category.value !== undefined && !CATEGORIES.includes(fields.category.value)) {
     return { error: `category must be one of: ${CATEGORIES.join(', ')}` };
@@ -116,6 +121,7 @@ function createJobEventRoutes({ verifyToken, jobEventLog }) {
    *       - { in: query, name: actor, schema: { type: string }, description: Who recorded the event (downloader, nzb, ...) }
    *       - { in: query, name: channel, schema: { type: string }, description: Exact channel name }
    *       - { in: query, name: source, schema: { type: string }, description: Job source label from /api/job-events/facets }
+   *       - { in: query, name: tracked, schema: { type: string, enum: [tracked, untracked] }, description: Whether the video was in the library when the event happened }
    *       - { in: query, name: offset, schema: { type: integer, minimum: 0 } }
    *       - { in: query, name: order, schema: { type: string, enum: [asc, desc], default: desc } }
    *       - { in: query, name: limit, schema: { type: integer, minimum: 1, maximum: 500, default: 100 } }
@@ -144,6 +150,7 @@ function createJobEventRoutes({ verifyToken, jobEventLog }) {
    *                       videoTitle: { type: string, nullable: true }
    *                       channelName: { type: string, nullable: true }
    *                       jobType: { type: string, nullable: true }
+   *                       isTracked: { type: boolean, nullable: true, description: Whether the video was in the library at that moment; null if not known }
    *                 total: { type: integer }
    *       400:
    *         description: Invalid query parameter

@@ -26,6 +26,7 @@ const event = (id: number, over: Partial<JobEvent> = {}): JobEvent => ({
   videoTitle: 'Celebrity Juice S26E09',
   channelName: 'pcrobec',
   jobType: 'Channel Downloads',
+  isTracked: true,
   ...over,
 });
 
@@ -157,6 +158,7 @@ describe('EventLog page', () => {
       ['source', 'NZB'],
       ['actor', 'downloader'],
       ['channel', 'pcrobec'],
+      ['tracked', 'untracked'],
     ])('a saved %s filter applies', async (name, value) => {
       window.localStorage.setItem('youtarr:eventLog:filter:' + name, JSON.stringify(value));
       renderPage();

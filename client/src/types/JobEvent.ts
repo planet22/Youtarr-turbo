@@ -17,6 +17,9 @@ export interface JobEvent {
   videoTitle: string | null;
   channelName: string | null;
   jobType: string | null;
+  // Whether the video had a library row when the event happened (recorded at
+  // that moment); null when it was not known then, or there is no video.
+  isTracked: boolean | null;
 }
 
 export interface JobEventPage {
@@ -37,6 +40,8 @@ export interface JobEventFilters {
   channel?: string;
   // Job source label, e.g. NZB or Channels
   source?: string;
+  // 'tracked' or 'untracked': whether the video was in the library at that moment
+  tracked?: string;
   q?: string;
   // ISO instants bounding when the event happened
   from?: string;

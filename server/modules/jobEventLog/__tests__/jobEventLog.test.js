@@ -18,7 +18,7 @@ describe('jobEventLog', () => {
         findAll: jest.fn().mockResolvedValue([]),
         destroy: jest.fn().mockResolvedValue(0),
       },
-      Video: { findOne: jest.fn().mockResolvedValue(null) },
+      Video: { findOne: jest.fn().mockResolvedValue(null), findAll: jest.fn().mockResolvedValue([]) },
       Job: { findOne: jest.fn().mockResolvedValue(null) },
     }));
     jest.doMock('../../configModule', () => ({ getConfig: jest.fn(() => ({})) }));
@@ -178,8 +178,24 @@ describe('jobEventLog', () => {
       expect(events[0]).toEqual({
         id: 5, occurredAt: '2026-09-19T17:12:59.566Z', jobId: 'j1', youtubeId: 'abc',
         eventType: 'nzb.untracked', level: 'info', actor: 'nzb', message: 'm', detail: { a: 1 },
-        videoTitle: 'T', channelName: 'C', jobType: 'X',
+        videoTitle: 'T', channelName: 'C', jobType: 'X', isTracked: null,
       });
+    });
+
+    test.each([[true, true], [false, false], [null, null]])('maps a stored is_tracked of %p', async (stored, expected) => {
+      JobEvent.findAll.mockResolvedValueOnce([row({ is_tracked: stored })]);
+      const { events } = await jobEventLog.list({});
+      expect(events[0].isTracked).toBe(expected);
+    });
+
+    test('filters to videos that were in the library', async () => {
+      await jobEventLog.list({ tracked: 'tracked' });
+      expect(query().where.is_tracked).toBe(true);
+    });
+
+    test('filters to videos that were not in the library', async () => {
+      await jobEventLog.list({ tracked: 'untracked' });
+      expect(query().where.is_tracked).toBe(false);
     });
 
     test('returns a null detail when the stored JSON is corrupt', async () => {
@@ -303,6 +319,154 @@ describe('jobEventLog', () => {
       JobEvent.findAll.mockResolvedValueOnce([{ value: 'a' }, { value: '' }, { value: null }]).mockResolvedValue([]);
       const facets = await jobEventLog.facets();
       expect(facets.eventTypes).toEqual(['a']);
+    });
+  });
+
+  describe('tracked state captured at the moment of the event', () => {
+    const lastRow = () => JobEvent.create.mock.calls[JobEvent.create.mock.calls.length - 1][0];
+
+    test('is unknown until the library state has been loaded', async () => {
+      jobEventLog.record('video.download_started', { youtubeId: 'abc' });
+      await jobEventLog.flush();
+      expect(lastRow().is_tracked).toBeNull();
+    });
+
+    test('is true for a video in the library once loaded', async () => {
+      Video.findAll.mockResolvedValueOnce([{ youtubeId: 'abc', youTubeVideoName: 'T', youTubeChannelName: 'C' }]);
+      await jobEventLog.warm();
+      jobEventLog.record('video.download_started', { youtubeId: 'abc' });
+      await jobEventLog.flush();
+      expect(lastRow().is_tracked).toBe(true);
+    });
+
+    test('is false for a video not in the library once loaded', async () => {
+      await jobEventLog.warm();
+      jobEventLog.record('video.download_started', { youtubeId: 'abc' });
+      await jobEventLog.flush();
+      expect(lastRow().is_tracked).toBe(false);
+    });
+
+    test('is unknown for an event with no video', async () => {
+      await jobEventLog.warm();
+      jobEventLog.record('job.started', { jobId: 'j1' });
+      await jobEventLog.flush();
+      expect(lastRow().is_tracked).toBeNull();
+    });
+
+    test('an explicit value on the event wins', async () => {
+      jobEventLog.record('nzb.untracked', { youtubeId: 'abc', isTracked: false });
+      await jobEventLog.flush();
+      expect(lastRow().is_tracked).toBe(false);
+    });
+
+    test('an explicit value updates what later events see', async () => {
+      Video.findAll.mockResolvedValueOnce([{ youtubeId: 'abc' }]);
+      await jobEventLog.warm();
+      jobEventLog.record('nzb.untracked', { youtubeId: 'abc', isTracked: false });
+      jobEventLog.record('video.failed', { youtubeId: 'abc' });
+      await jobEventLog.flush();
+      expect(lastRow().is_tracked).toBe(false);
+    });
+
+    test('markTracked(true) makes a later event read as tracked', async () => {
+      await jobEventLog.warm();
+      jobEventLog.markTracked('abc', true);
+      jobEventLog.record('video.downloaded', { youtubeId: 'abc' });
+      await jobEventLog.flush();
+      expect(lastRow().is_tracked).toBe(true);
+    });
+
+    test('a change made before the library state loads is not lost when it lands', async () => {
+      jobEventLog.markTracked('abc', true);
+      Video.findAll.mockResolvedValueOnce([]);
+      await jobEventLog.warm();
+      jobEventLog.record('video.downloaded', { youtubeId: 'abc' });
+      await jobEventLog.flush();
+      expect(lastRow().is_tracked).toBe(true);
+    });
+
+    test('a removal made before the library state loads wins over the loaded row', async () => {
+      jobEventLog.markTracked('abc', false);
+      Video.findAll.mockResolvedValueOnce([{ youtubeId: 'abc' }]);
+      await jobEventLog.warm();
+      jobEventLog.record('video.failed', { youtubeId: 'abc' });
+      await jobEventLog.flush();
+      expect(lastRow().is_tracked).toBe(false);
+    });
+
+    test('stays unknown, without throwing, when the library state cannot be loaded', async () => {
+      Video.findAll.mockRejectedValueOnce(new Error('db down'));
+      await expect(jobEventLog.warm()).resolves.toBeUndefined();
+      jobEventLog.record('video.failed', { youtubeId: 'abc' });
+      await jobEventLog.flush();
+      expect(lastRow().is_tracked).toBeNull();
+    });
+
+    test('loading the library state also fills in titles for videos nothing has named yet', async () => {
+      Video.findAll.mockResolvedValueOnce([{ youtubeId: 'abc', youTubeVideoName: 'From library', youTubeChannelName: 'Chan' }]);
+      await jobEventLog.warm();
+      jobEventLog.record('video.download_started', { youtubeId: 'abc' });
+      await jobEventLog.flush();
+      expect(lastRow()).toMatchObject({ video_title: 'From library', channel_name: 'Chan' });
+    });
+
+    test('loading the library state never overwrites a name already supplied', async () => {
+      jobEventLog.rememberVideo('abc', { title: 'Supplied' });
+      Video.findAll.mockResolvedValueOnce([{ youtubeId: 'abc', youTubeVideoName: 'From library' }]);
+      await jobEventLog.warm();
+      jobEventLog.record('video.download_started', { youtubeId: 'abc' });
+      await jobEventLog.flush();
+      expect(lastRow().video_title).toBe('Supplied');
+    });
+  });
+
+  describe('one video reads the same across its events', () => {
+    const lastRow = () => JobEvent.create.mock.calls[JobEvent.create.mock.calls.length - 1][0];
+
+    test('a provisional title is used when nothing better is known', async () => {
+      jobEventLog.record('job.created', { youtubeId: 'abc', provisionalTitle: 'Celebrity Juice S17E10' });
+      await jobEventLog.flush();
+      expect(lastRow().video_title).toBe('Celebrity Juice S17E10');
+    });
+
+    test('the id an NZB name carries is stripped from a provisional title', async () => {
+      jobEventLog.record('job.created', { youtubeId: 'GSdt_08xE8k', provisionalTitle: 'Celebrity Juice S17E10 [GSdt_08xE8k]' });
+      await jobEventLog.flush();
+      expect(lastRow().video_title).toBe('Celebrity Juice S17E10');
+    });
+
+    test('a remembered real title wins over a provisional one', async () => {
+      jobEventLog.rememberVideo('abc', { title: 'Real title', channelName: 'Real channel' });
+      jobEventLog.record('job.created', { youtubeId: 'abc', provisionalTitle: 'nzb name [abcdefghijk]' });
+      await jobEventLog.flush();
+      expect(lastRow()).toMatchObject({ video_title: 'Real title', channel_name: 'Real channel' });
+    });
+
+    test('a supplied real title wins over a provisional one', async () => {
+      jobEventLog.record('strm.created', { youtubeId: 'abc', videoTitle: 'Real title', provisionalTitle: 'stand-in' });
+      await jobEventLog.flush();
+      expect(lastRow().video_title).toBe('Real title');
+    });
+
+    test('a provisional title is never remembered for later events', async () => {
+      jobEventLog.record('job.created', { youtubeId: 'abc', provisionalTitle: 'stand-in' });
+      jobEventLog.record('video.failed', { youtubeId: 'abc' });
+      await jobEventLog.flush();
+      expect(lastRow().video_title).toBeNull();
+    });
+
+    test('later events use the real title and channel once one event has supplied them', async () => {
+      jobEventLog.record('job.created', { youtubeId: 'abc', provisionalTitle: 'stand-in' });
+      jobEventLog.record('strm.created', { youtubeId: 'abc', videoTitle: 'Real title', channelName: 'Real channel' });
+      jobEventLog.record('job.finished', { youtubeId: 'abc' });
+      await jobEventLog.flush();
+      expect(lastRow()).toMatchObject({ video_title: 'Real title', channel_name: 'Real channel' });
+    });
+
+    test('a provisional title that is only an id-tag leaves the title empty', async () => {
+      jobEventLog.record('job.created', { youtubeId: 'GSdt_08xE8k', provisionalTitle: '[GSdt_08xE8k]' });
+      await jobEventLog.flush();
+      expect(lastRow().video_title).toBeNull();
     });
   });
 

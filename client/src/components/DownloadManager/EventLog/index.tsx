@@ -21,6 +21,7 @@ import {
   dayEndIso,
   dayStartIso,
   EVENT_LEVEL_FILTER_OPTIONS,
+  TRACKED_OPTIONS,
 } from './eventLogFormat';
 
 // Deep-link parameters (e.g. from a link to one job's or video's timeline).
@@ -48,6 +49,7 @@ const EventLog: React.FC<EventLogProps> = ({ token }) => {
   const [source, setSource] = usePersistedFilterState('youtarr:eventLog:filter:source', '');
   const [actor, setActor] = usePersistedFilterState('youtarr:eventLog:filter:actor', '');
   const [channel, setChannel] = usePersistedFilterState('youtarr:eventLog:filter:channel', '');
+  const [tracked, setTracked] = usePersistedFilterState('youtarr:eventLog:filter:tracked', '');
   const [dateFrom, setDateFrom] = usePersistedFilterState('youtarr:eventLog:filter:dateFrom', '');
   const [dateTo, setDateTo] = usePersistedFilterState('youtarr:eventLog:filter:dateTo', '');
   const listState = useVideoListState({ initialViewMode: 'table', searchStorageKey: 'youtarr:eventLogSearch' });
@@ -66,11 +68,12 @@ const EventLog: React.FC<EventLogProps> = ({ token }) => {
       source: source || undefined,
       actor: actor || undefined,
       channel: channel || undefined,
+      tracked: tracked || undefined,
       q: search || undefined,
       from: dateFrom ? dayStartIso(dateFrom) : undefined,
       to: dateTo ? dayEndIso(dateTo) : undefined,
     }),
-    [jobId, youtubeId, level, eventType, source, actor, channel, search, dateFrom, dateTo]
+    [jobId, youtubeId, level, eventType, source, actor, channel, tracked, search, dateFrom, dateTo]
   );
 
   // Latest first normally; as soon as anything narrows the list it reads as a
@@ -126,10 +129,11 @@ const EventLog: React.FC<EventLogProps> = ({ token }) => {
       { id: 'select', label: 'Source', value: source, options: facets.sources, onChange: setSource },
       { id: 'select', label: 'Actor', value: actor, options: facets.actors, onChange: setActor },
       { id: 'select', label: 'Channel', value: channel, options: facets.channels, onChange: setChannel },
+      { id: 'select', label: 'Library', value: tracked, options: [...TRACKED_OPTIONS], onChange: setTracked },
       { id: 'dateRangeString', label: 'Occurred', dateFrom, dateTo, onFromChange: setDateFrom, onToChange: setDateTo },
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [jobId, youtubeId, level, eventType, source, actor, channel, facets, dateFrom, dateTo, clearParam]
+    [jobId, youtubeId, level, eventType, source, actor, channel, tracked, facets, dateFrom, dateTo, clearParam]
   );
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));

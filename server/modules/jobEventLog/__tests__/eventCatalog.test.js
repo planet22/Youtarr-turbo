@@ -162,6 +162,55 @@ describe('protection, ignore and YouTube availability', () => {
   });
 });
 
+describe('long errors stay out of the main line', () => {
+  const failed = (error, extra = {}) => describeEvent(EVENT_TYPES.VIDEO_FAILED, { detail: { error, ...extra } }).message;
+  const LONG = 'Failed to fetch video metadata: ERROR: [youtube] VyJRZmWDIps: Sign in to confirm your age. Use --cookies-from-browser or --cookies for the authentication.';
+
+  test('a short error is shown in the message', () => {
+    expect(failed('Video unavailable')).toBe('Download failed - Video unavailable');
+  });
+
+  test('an error of exactly 100 characters is still shown', () => {
+    const hundred = 'x'.repeat(100);
+    expect(failed(hundred)).toBe('Download failed - ' + hundred);
+  });
+
+  test('an error over 100 characters is left out of the message', () => {
+    expect(failed('x'.repeat(101))).toBe('Download failed');
+  });
+
+  test('a yt-dlp style paragraph is left out of the message', () => {
+    expect(failed(LONG)).toBe('Download failed');
+  });
+
+  test('a multi-line error is left out even when short', () => {
+    expect(failed('first line\nsecond line')).toBe('Download failed');
+  });
+
+  test('the likely cause still shows when the error is left out', () => {
+    expect(failed(LONG, { diagnosisTitle: 'Age-restricted video' })).toBe('Download failed (Likely cause: Age-restricted video)');
+  });
+
+  test('a short error and a likely cause show together', () => {
+    expect(failed('HTTP 403', { diagnosisTitle: 'Blocked' })).toBe('Download failed - HTTP 403 (Likely cause: Blocked)');
+  });
+
+  test('a long job reason is left out of the job.finished message', () => {
+    const message = describeEvent(EVENT_TYPES.JOB_FINISHED, { detail: { status: 'Error', reason: 'y'.repeat(300) } }).message;
+    expect(message).toBe('Job finished: Error');
+  });
+
+  test('a short job reason is shown in the job.finished message', () => {
+    const message = describeEvent(EVENT_TYPES.JOB_FINISHED, { detail: { status: 'Terminated', reason: 'Stopped by user' } }).message;
+    expect(message).toBe('Job finished: Terminated - Stopped by user');
+  });
+
+  test('a long untrack failure is left out of its message', () => {
+    expect(describeEvent(EVENT_TYPES.NZB_UNTRACK_FAILED, { detail: { error: 'z'.repeat(200) } }).message)
+      .toBe('Could not remove from the Youtarr library');
+  });
+});
+
 describe('rating, move and playlist steps', () => {
   const msg = (type, detail) => describeEvent(type, { detail }).message;
 

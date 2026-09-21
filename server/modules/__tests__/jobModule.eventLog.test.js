@@ -98,10 +98,11 @@ describe('JobModule video/events log', () => {
   describe('single-video jobs', () => {
     const NZB_JOB = { jobType: 'Sonarr/Radarr: TV [abc]', status: 'Pending', data: { nzb: { youtubeId: 'abc', nzbName: 'Celebrity Juice S26E09' } } };
 
-    test('ties job.created to the video an NZB grab is for', async () => {
+    test('ties job.created to the video an NZB grab is for, offering the NZB name only as a provisional title', async () => {
       await jobModule.addJob({ ...NZB_JOB });
 
-      expect(callsOf('job.created')[0][1]).toMatchObject({ youtubeId: 'abc', videoTitle: 'Celebrity Juice S26E09' });
+      expect(callsOf('job.created')[0][1]).toMatchObject({ youtubeId: 'abc', provisionalTitle: 'Celebrity Juice S26E09' });
+      expect(callsOf('job.created')[0][1].videoTitle).toBeUndefined();
     });
 
     test('ties job.created to the only URL of a one-video job', async () => {

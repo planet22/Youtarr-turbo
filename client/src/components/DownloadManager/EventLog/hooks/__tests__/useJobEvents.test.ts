@@ -22,6 +22,7 @@ const event = (id: number): JobEvent => ({
   videoTitle: null,
   channelName: null,
   jobType: null,
+  isTracked: null,
 });
 
 const page = (ids: number[], total = ids.length): { data: JobEventPage } => ({
@@ -220,6 +221,12 @@ describe('useJobEvents filters and facets', () => {
     renderHook(() => useJobEvents('tok', { eventType: 'video.failed', actor: 'nzb', channel: 'pcrobec', source: 'NZB' }, 1, 25, true));
 
     await waitFor(() => expect(listParams()).toMatchObject({ eventType: 'video.failed', actor: 'nzb', channel: 'pcrobec', source: 'NZB' }));
+  });
+
+  test('sends the tracked filter', async () => {
+    renderHook(() => useJobEvents('tok', { tracked: 'untracked' }, 1, 25, true));
+
+    await waitFor(() => expect(listParams()).toMatchObject({ tracked: 'untracked' }));
   });
 
   test('exposes the dropdown options from the facets endpoint', async () => {

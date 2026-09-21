@@ -52,6 +52,10 @@ function parseDetail(raw) {
   }
 }
 
+// "Title [GSdt_08xE8k]" -> "Title": NZB names carry the video id; the real title does not.
+const cleanProvisionalTitle = (title) =>
+  typeof title === 'string' ? title.replace(/\s*\[[A-Za-z0-9_-]{11}\]\s*$/, '').trim() || undefined : undefined;
+
 const escapeLike = (text) => text.replace(/[\\%_]/g, (ch) => `\\${ch}`);
 
 // Insertion-ordered map capped at MAX_REMEMBERED entries, oldest evicted first.
@@ -73,6 +77,63 @@ class JobEventLog {
     this.contextStorage = new AsyncLocalStorage();
     this.videoInfo = new Map();
     this.jobTypes = new Map();
+    // Which videos currently have a library row. Null until warm() has read the
+    // Videos table; changes made before then are kept in trackedOverrides so
+    // none is lost when the read lands.
+    this.trackedIds = null;
+    this.trackedOverrides = new Map();
+  }
+
+  /**
+   * Loads which videos are in the library (and the names of the most recent
+   * ones) once, at startup, so record() can answer synchronously afterwards.
+   * Events recorded before this finishes carry "unknown" for is_tracked.
+   */
+  async warm() {
+    try {
+      const { Video } = require('../../models');
+      const rows = await Video.findAll({
+        attributes: ['youtubeId', 'youTubeVideoName', 'youTubeChannelName'],
+        raw: true,
+      });
+      const ids = new Set(rows.map((row) => row.youtubeId));
+      for (const [id, tracked] of this.trackedOverrides) {
+        if (tracked) ids.add(id);
+        else ids.delete(id);
+      }
+      this.trackedOverrides.clear();
+      this.trackedIds = ids;
+      // Newest rows last; never overwrite a name something already supplied.
+      for (const row of rows.slice(-MAX_REMEMBERED)) {
+        if (this.videoInfo.has(row.youtubeId)) continue;
+        this.rememberVideo(row.youtubeId, { title: row.youTubeVideoName, channelName: row.youTubeChannelName });
+      }
+      logger.info({ videos: ids.size }, 'jobEventLog: loaded library state');
+    } catch (err) {
+      logger.warn({ err }, 'jobEventLog: could not load library state; is_tracked stays unknown until restart');
+    }
+  }
+
+  /**
+   * Called where a Video row is created (true) or removed (false).
+   * @param {string} youtubeId
+   * @param {boolean} tracked
+   */
+  markTracked(youtubeId, tracked) {
+    if (!youtubeId) return;
+    if (this.trackedIds) {
+      if (tracked) this.trackedIds.add(youtubeId);
+      else this.trackedIds.delete(youtubeId);
+    } else {
+      remember(this.trackedOverrides, youtubeId, Boolean(tracked));
+    }
+  }
+
+  // true / false once library state is loaded, null while it is not known.
+  isTracked(youtubeId) {
+    if (!youtubeId) return null;
+    if (this.trackedOverrides.has(youtubeId)) return this.trackedOverrides.get(youtubeId);
+    return this.trackedIds ? this.trackedIds.has(youtubeId) : null;
   }
 
   /**
@@ -96,6 +157,8 @@ class JobEventLog {
    * @param {string} [fields.youtubeId]
    * @param {string} [fields.videoTitle] - snapshot; looked up from Videos at write time when omitted
    * @param {string} [fields.channelName] - snapshot; same
+   * @param {string} [fields.provisionalTitle] - a stand-in title (e.g. an NZB name), used only when no real title is known
+   * @param {boolean} [fields.isTracked] - whether the video has a library row; when omitted it is read from the in-memory library state
    * @param {string} [fields.jobType] - snapshot; looked up from Jobs at write time when omitted
    * @param {object} [fields.detail] - structured context stored as JSON
    * @param {string} [fields.message] - overrides the catalog's message
@@ -120,11 +183,16 @@ class JobEventLog {
       const { actor, level, message } = describeEvent(eventType, fields);
       // Everything is fixed here, at the moment of the event: what the caller
       // knows first, then what was remembered a moment ago. Never looked up later.
+      // A provisional title (e.g. an NZB's own name) is used only when nothing
+      // authoritative is known, so one video reads the same across its events.
       const known = (fields.youtubeId && this.videoInfo.get(fields.youtubeId)) || {};
-      const videoTitle = fields.videoTitle || known.title;
+      const videoTitle = fields.videoTitle || known.title || cleanProvisionalTitle(fields.provisionalTitle);
       const channelName = fields.channelName || known.channelName;
+      if (fields.isTracked !== undefined) this.markTracked(fields.youtubeId, fields.isTracked);
+      const isTracked = fields.isTracked !== undefined ? fields.isTracked : this.isTracked(fields.youtubeId);
       const jobType = fields.jobType || (fields.jobId && this.jobTypes.get(fields.jobId)) || undefined;
-      if (fields.youtubeId) this.rememberVideo(fields.youtubeId, { title: videoTitle, channelName });
+      // Only authoritative names are remembered, never a provisional one.
+      if (fields.youtubeId) this.rememberVideo(fields.youtubeId, { title: fields.videoTitle, channelName: fields.channelName });
       const entry = {
         occurred_at: occurredAt,
         job_id: truncate(fields.jobId, 36),
@@ -137,6 +205,7 @@ class JobEventLog {
         video_title: truncate(videoTitle, MAX_TITLE_LENGTH),
         channel_name: truncate(channelName, MAX_CHANNEL_LENGTH),
         job_type: truncate(jobType, MAX_JOB_TYPE_LENGTH),
+        is_tracked: isTracked === null || isTracked === undefined ? null : Boolean(isTracked),
       };
       this.tail = this.tail.then(() => this.write(entry));
     } catch (err) {
@@ -188,6 +257,7 @@ class JobEventLog {
    * @param {string} [filters.category] - event type family: job, video, nzb, strm or cache
    * @param {string} [filters.level]
    * @param {string} [filters.actor]
+   * @param {'tracked'|'untracked'} [filters.tracked] - whether the video was in the library when it happened
    * @param {string} [filters.channel]
    * @param {string} [filters.source] - a job source label (Channels, NZB, ...)
    * @param {string} [filters.q] - substring match on message, video title, channel name
@@ -212,6 +282,8 @@ class JobEventLog {
     if (filters.level) where.level = filters.level;
     if (filters.category) where.event_type = { [Op.like]: `${escapeLike(filters.category)}.%` };
     if (filters.actor) where.actor = filters.actor;
+    if (filters.tracked === 'tracked') where.is_tracked = true;
+    if (filters.tracked === 'untracked') where.is_tracked = false;
     if (filters.channel) where.channel_name = filters.channel;
     // A source label selects jobs by their type; an unknown label is ignored.
     const sourcePatterns = filters.source && SOURCES[filters.source];
@@ -279,6 +351,7 @@ class JobEventLog {
       videoTitle: data.video_title,
       channelName: data.channel_name,
       jobType: data.job_type,
+      isTracked: data.is_tracked === null || data.is_tracked === undefined ? null : Boolean(data.is_tracked),
     };
   }
 

@@ -1200,6 +1200,7 @@ class VideosModule {
         // Fetch a chunk of videos
         const videos = await Video.findAll({
           attributes: ['id', 'youtubeId', 'filePath', 'fileSize', 'audioFilePath', 'audioFileSize', 'removed', 'video_resolution'],
+          order: [['id', 'ASC']],
           limit: VIDEO_CHUNK_SIZE,
           offset: offset,
           raw: true
@@ -1594,6 +1595,7 @@ class VideosModule {
         checkTimeLimit();
         const videos = await Video.findAll({
           attributes: ['id', 'youtubeId', 'filePath'],
+          order: [['id', 'ASC']],
           limit: CHUNK_SIZE,
           offset,
           raw: true,
@@ -1930,6 +1932,7 @@ class VideosModule {
             'id', 'youtubeId', 'filePath', 'youTubeChannelName',
             'season', 'episode', 'normalized_rating', 'rating_source', 'is_strm', 'removed',
           ],
+          order: [['id', 'ASC']],
           limit: CHUNK_SIZE,
           offset,
           raw: true,

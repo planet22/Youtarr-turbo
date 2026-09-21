@@ -968,6 +968,16 @@ describe('VideosModule', () => {
       expect(result.timeElapsed).toBeDefined();
     });
 
+    test('reads videos in id order so consecutive chunks cannot overlap or skip rows', async () => {
+      mockFs.readdir.mockResolvedValueOnce([]);
+      mockVideo.count.mockResolvedValueOnce(1);
+      mockVideo.findAll.mockResolvedValueOnce([]);
+
+      await VideosModule.backfillVideoMetadata();
+
+      expect(mockVideo.findAll.mock.calls[0][0]).toMatchObject({ order: [['id', 'ASC']] });
+    });
+
     test('probes the file with ffprobe when video_resolution is NULL', async () => {
       mockFs.readdir.mockResolvedValueOnce([
         { name: 'Video [abc12345678].mp4', isDirectory: () => false, isFile: () => true }

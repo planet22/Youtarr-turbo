@@ -337,17 +337,31 @@ describe('VideoDeletionModule STRM revert, cache expiry and purge', () => {
 
       const result = await videoDeletionModule.sweepExpiredCachedVideos();
 
-      expect(result).toEqual({ success: true, reverted: 1, failed: 0, thresholdHours: 24 });
+      expect(result).toEqual({ success: true, reverted: 1, failed: 0, skipped: 0, thresholdHours: 24 });
     });
 
-    it('counts and logs a video with no backup as failed', async () => {
+    it('skips a video with no STRM backup quietly instead of failing it every night', async () => {
       configValues.strm = { cacheOnPlayExpiryHours: 24 };
       fs.unlinkSync(`${strmPath}.cached`);
       Video.findAll.mockResolvedValue([makeVideo()]);
 
       const result = await videoDeletionModule.sweepExpiredCachedVideos();
 
-      expect(result).toMatchObject({ reverted: 0, failed: 1 });
+      expect(result).toMatchObject({ reverted: 0, failed: 0, skipped: 1 });
+      expect(logger.warn).not.toHaveBeenCalled();
+      expect(exists(mediaPath)).toBe(true);
+    });
+
+    it('still counts and logs a revert that fails although a backup exists', async () => {
+      configValues.strm = { cacheOnPlayExpiryHours: 24 };
+      // A directory in the way of the restored .strm makes the rename fail.
+      fs.mkdirSync(strmPath);
+      write(path.join(strmPath, 'blocker'));
+      Video.findAll.mockResolvedValue([makeVideo()]);
+
+      const result = await videoDeletionModule.sweepExpiredCachedVideos();
+
+      expect(result).toMatchObject({ reverted: 0, failed: 1, skipped: 0 });
       expect(logger.warn).toHaveBeenCalledWith(expect.objectContaining({ youtubeId: YT_ID }), expect.stringContaining('[Cache Expiry] Failed to revert'));
     });
 

@@ -233,6 +233,12 @@ class VideoDeletionModule {
    *   through to normal deletion.
    * @private
    */
+  _getStrmBackupPath(video) {
+    const dir = path.dirname(video.filePath);
+    const stem = path.basename(video.filePath, path.extname(video.filePath));
+    return path.join(dir, `${stem}.strm.cached`);
+  }
+
   async _tryRevertToStrm(video) {
     // Module-scope `fs` (top of file) is already fs.promises; only the sync
     // existsSync check below needs the callback-style module directly.
@@ -241,7 +247,7 @@ class VideoDeletionModule {
 
     const dir = path.dirname(video.filePath);
     const stem = path.basename(video.filePath, path.extname(video.filePath));
-    const strmBackupPath = path.join(dir, `${stem}.strm.cached`);
+    const strmBackupPath = this._getStrmBackupPath(video);
 
     if (!fsSync.existsSync(strmBackupPath)) {
       return null;
@@ -397,6 +403,7 @@ class VideoDeletionModule {
    * @returns {Promise<{success:boolean, reverted:number, failed:number, thresholdHours:number}>}
    */
   async sweepExpiredCachedVideos() {
+    const fsSync = require('fs');
     const configModule = require('./configModule');
     const { Op } = require('sequelize');
     const config = configModule.getConfig();
@@ -417,7 +424,20 @@ class VideoDeletionModule {
 
     let reverted = 0;
     let failed = 0;
+    let skipped = 0;
     for (const video of candidates) {
+      // No archived STRM backup means this file was never cached from a STRM,
+      // so it can never be reverted: skip it quietly instead of failing and
+      // warning about it on every nightly sweep.
+      if (!fsSync.existsSync(this._getStrmBackupPath(video))) {
+        skipped += 1;
+        logger.debug(
+          { videoId: video.id, youtubeId: video.youtubeId },
+          '[Cache Expiry] Skipping expired cached video with no STRM backup'
+        );
+        continue;
+      }
+
       const result = await this._tryRevertToStrm(video);
       if (result && result.success) {
         reverted += 1;
@@ -434,7 +454,7 @@ class VideoDeletionModule {
       logger.info({ reverted, failed, thresholdHours }, '[Cache Expiry] Swept expired cache-on-play videos back to STRM');
     }
 
-    return { success: true, reverted, failed, thresholdHours };
+    return { success: true, reverted, failed, skipped, thresholdHours };
   }
 
   /**

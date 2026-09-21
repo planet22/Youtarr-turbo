@@ -249,6 +249,15 @@ describe('nfoGenerator file output', () => {
       expect(xml).toContain(`<trailer>${nfoGenerator.buildYouTubeTrailerUrl('abc')}</trailer>`);
     });
 
+    it('escapes XML special characters in the video id', () => {
+      write({ id: 'a&b<c' });
+
+      const xml = read('ep.nfo');
+      expect(xml).toContain('<uniqueid type="youtube" default="true">a&amp;b&lt;c</uniqueid>');
+      expect(xml).toContain('<youtubeid>a&amp;b&lt;c</youtubeid>');
+      expect(xml).toContain('videoid=a&amp;b&lt;c</trailer>');
+    });
+
     it('omits ids, dates and trailer when the video has none', () => {
       write({ title: 'No ids' });
 
@@ -323,6 +332,14 @@ describe('nfoGenerator file output', () => {
       nfoGenerator.writeEpisodeNfoFile(path.join(dir, 'Tom & Jerry.mp4'), { id: 'abc' }, { season: 2024, episode: 7, showTitle: 'My Show' });
 
       expect(read('Tom & Jerry.nfo')).toContain('<thumb>Tom &amp; Jerry.jpg</thumb>');
+    });
+
+    it('escapes XML special characters in the video id of a movie NFO', () => {
+      nfoGenerator.writeVideoNfoFile(path.join(dir, 'm.mp4'), { id: 'a&b' });
+
+      const xml = read('m.nfo');
+      expect(xml).toContain('<uniqueid type="youtube" default="true">a&amp;b</uniqueid>');
+      expect(xml).toContain('<youtubeid>a&amp;b</youtubeid>');
     });
 
     it('includes the resolution tag', () => {

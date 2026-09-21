@@ -92,7 +92,7 @@ class NfoGenerator {
   _extractCommonFields(jsonData) {
     const title = this.escapeXml(jsonData.fulltitle || jsonData.title || 'Unknown Title');
     const plot = this.escapeXml(jsonData.description || '');
-    const youtubeId = jsonData.id || '';
+    const youtubeId = this.escapeXml(jsonData.id || '');
     const premiered = this.formatDate(jsonData.upload_date);
     const year = premiered ? premiered.substring(0, 4) : null;
 

@@ -30,6 +30,12 @@ const EVENT_TYPES = Object.freeze({
   VIDEO_IGNORED: 'video.ignored',
   VIDEO_UNIGNORED: 'video.unignored',
   VIDEO_UNAVAILABLE_ON_YOUTUBE: 'video.unavailable_on_youtube',
+  VIDEO_RATING_CHANGED: 'video.rating_changed',
+  VIDEO_MOVED: 'video.moved',
+  // Media-server (Plex/Jellyfin/Emby) playlists
+  PLAYLIST_SYNCED: 'playlist.synced',
+  PLAYLIST_ITEM_ADDED: 'playlist.item_added',
+  PLAYLIST_ITEM_REMOVED: 'playlist.item_removed',
   // STRM
   STRM_CREATED: 'strm.created',
   STRM_CACHE_ON_PLAY_QUEUED: 'strm.cache_on_play_queued',
@@ -174,6 +180,30 @@ const EVENT_CATALOG = {
     actor: 'youtube',
     level: () => LEVELS.WARN,
     message: () => 'Video is no longer available on YouTube',
+  },
+
+  [EVENT_TYPES.VIDEO_RATING_CHANGED]: {
+    actor: 'library',
+    message: ({ detail = {} }) =>
+      `Rating changed${suffix(detail.previousRating || 'none', 'from %s')} to ${detail.rating || 'none'}`,
+  },
+  [EVENT_TYPES.VIDEO_MOVED]: {
+    actor: 'library',
+    message: ({ detail = {} }) => `Video file moved${suffix(detail.to, 'to %s')}${suffix(detail.from, '(from %s)')}`,
+  },
+
+  [EVENT_TYPES.PLAYLIST_SYNCED]: {
+    actor: 'media-server',
+    message: ({ detail = {} }) =>
+      `Playlist "${detail.playlistTitle || 'unknown'}" ${detail.created ? 'created on' : 'updated on'} ${detail.server || 'the media server'}${suffix(detail.itemCount, '(%s items)')}`,
+  },
+  [EVENT_TYPES.PLAYLIST_ITEM_ADDED]: {
+    actor: 'media-server',
+    message: ({ detail = {} }) => `Added to playlist "${detail.playlistTitle || 'unknown'}"${suffix(detail.server, 'on %s')}`,
+  },
+  [EVENT_TYPES.PLAYLIST_ITEM_REMOVED]: {
+    actor: 'media-server',
+    message: ({ detail = {} }) => `Removed from playlist "${detail.playlistTitle || 'unknown'}"${suffix(detail.server, 'on %s')}`,
   },
 
   [EVENT_TYPES.STRM_CREATED]: { actor: 'strm', message: () => 'STRM file created' },

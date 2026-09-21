@@ -10,7 +10,7 @@ const MAX_TIMESTAMP_LENGTH = 40;
 const MAX_ACTOR_LENGTH = 48;
 const MAX_CHANNEL_LENGTH = 255;
 const MAX_SOURCE_LENGTH = 40;
-const CATEGORIES = ['job', 'video', 'nzb', 'strm', 'cache'];
+const CATEGORIES = ['job', 'video', 'nzb', 'strm', 'cache', 'playlist', 'log'];
 const LEVELS = ['info', 'warn', 'error'];
 const ORDERS = ['asc', 'desc'];
 
@@ -110,7 +110,7 @@ function createJobEventRoutes({ verifyToken, jobEventLog }) {
    *       - { in: query, name: eventType, schema: { type: string }, description: "e.g. video.failed" }
    *       - { in: query, name: level, schema: { type: string, enum: [info, warn, error] } }
    *       - { in: query, name: q, schema: { type: string }, description: Substring match on message, video title and channel }
-   *       - { in: query, name: category, schema: { type: string, enum: [job, video, nzb, strm, cache] }, description: Event type family }
+   *       - { in: query, name: category, schema: { type: string, enum: [job, video, nzb, strm, cache, playlist, log] }, description: Event type family }
    *       - { in: query, name: from, schema: { type: string, format: date-time }, description: Only events at or after this time }
    *       - { in: query, name: to, schema: { type: string, format: date-time }, description: Only events at or before this time }
    *       - { in: query, name: actor, schema: { type: string }, description: Who recorded the event (downloader, nzb, ...) }

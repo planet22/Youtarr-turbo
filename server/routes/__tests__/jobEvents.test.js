@@ -81,6 +81,12 @@ describe('Job event routes', () => {
       expect(jobEventLog.list).toHaveBeenCalledWith({ actor: 'nzb', channel: 'pcrobec', source: 'NZB' });
     });
 
+    test.each(['playlist', 'log'])('accepts the %s event family as a category', async (category) => {
+      await request(app).get('/api/job-events').query({ category });
+
+      expect(jobEventLog.list).toHaveBeenCalledWith({ category });
+    });
+
     test('passes level and order through', async () => {
       await request(app).get('/api/job-events').query({ level: 'error', order: 'asc' });
 

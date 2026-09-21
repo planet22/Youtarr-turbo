@@ -161,3 +161,41 @@ describe('protection, ignore and YouTube availability', () => {
     });
   });
 });
+
+describe('rating, move and playlist steps', () => {
+  const msg = (type, detail) => describeEvent(type, { detail }).message;
+
+  test('video.rating_changed shows the previous and new rating', () => {
+    expect(msg(EVENT_TYPES.VIDEO_RATING_CHANGED, { previousRating: 'PG', rating: 'R' })).toBe('Rating changed from PG to R');
+  });
+
+  test('video.rating_changed says "none" when there was no previous rating', () => {
+    expect(msg(EVENT_TYPES.VIDEO_RATING_CHANGED, { rating: 'R' })).toBe('Rating changed from none to R');
+  });
+
+  test('video.rating_changed says "none" when the rating was cleared', () => {
+    expect(msg(EVENT_TYPES.VIDEO_RATING_CHANGED, { previousRating: 'PG' })).toBe('Rating changed from PG to none');
+  });
+
+  test('video.moved shows where the file went and where it was', () => {
+    expect(msg(EVENT_TYPES.VIDEO_MOVED, { from: '/a/x.mp4', to: '/b/x.mp4' })).toBe('Video file moved to /b/x.mp4 (from /a/x.mp4)');
+  });
+
+  test('playlist.synced says created on the first sync', () => {
+    expect(msg(EVENT_TYPES.PLAYLIST_SYNCED, { playlistTitle: 'My PL', server: 'Plex', created: true, itemCount: 3 }))
+      .toBe('Playlist "My PL" created on Plex (3 items)');
+  });
+
+  test('playlist.synced says updated on a later sync', () => {
+    expect(msg(EVENT_TYPES.PLAYLIST_SYNCED, { playlistTitle: 'My PL', server: 'Plex', created: false, itemCount: 3 }))
+      .toBe('Playlist "My PL" updated on Plex (3 items)');
+  });
+
+  test('playlist.item_added names the playlist and server', () => {
+    expect(msg(EVENT_TYPES.PLAYLIST_ITEM_ADDED, { playlistTitle: 'My PL', server: 'Plex' })).toBe('Added to playlist "My PL" on Plex');
+  });
+
+  test('playlist.item_removed names the playlist and server', () => {
+    expect(msg(EVENT_TYPES.PLAYLIST_ITEM_REMOVED, { playlistTitle: 'My PL', server: 'Plex' })).toBe('Removed from playlist "My PL" on Plex');
+  });
+});

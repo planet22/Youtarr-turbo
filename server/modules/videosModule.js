@@ -900,9 +900,16 @@ class VideosModule {
           continue;
         }
 
+        const previousRating = video.normalized_rating;
         await video.update({
           normalized_rating: rating,
           rating_source: 'Manual Override'
+        });
+        jobEventLog.record(EVENT_TYPES.VIDEO_RATING_CHANGED, {
+          youtubeId: video.youtubeId,
+          videoTitle: video.youTubeVideoName,
+          channelName: video.youTubeChannelName,
+          detail: { rating, previousRating },
         });
 
         if (video.filePath) {

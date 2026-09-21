@@ -366,6 +366,17 @@ describe('VideosModule', () => {
       expect(replacements.search).toBe('%test video%');
     });
 
+    test('matches search text literally by escaping LIKE wildcards', async () => {
+      mockSequelize.query.mockResolvedValueOnce([{ total: 0 }]);
+      mockSequelize.query.mockResolvedValueOnce([]);
+      mockSequelize.query.mockResolvedValueOnce([]); // getAllUniqueChannels
+
+      await VideosModule.getVideosPaginated({ search: '100%_sure\\' });
+
+      const replacements = mockSequelize.query.mock.calls[1][1].replacements;
+      expect(replacements.search).toBe('%100\\%\\_sure\\\\%');
+    });
+
     test('should handle pagination parameters correctly', async () => {
       mockSequelize.query.mockResolvedValueOnce([{ total: 100 }]);
       mockSequelize.query.mockResolvedValueOnce([]);

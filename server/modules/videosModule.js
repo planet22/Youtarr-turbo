@@ -13,6 +13,9 @@ const { probeVideoDimensions } = require('./resolutionTier');
 const createLimiter = require('./subscriptionImport/concurrencyLimiter');
 const { formatRelativeTimeAgo } = require('./relativeTimeFormatter');
 
+// Search text is matched literally: %, _ and \ would otherwise act as LIKE wildcards.
+const escapeLikeWildcards = (text) => String(text).replace(/[\\%_]/g, '\\$&');
+
 // Backfill row updates are applied in parameterized batches of this size,
 // and flushed mid-chunk at the same cadence so completed work survives a
 // time-limit abort.
@@ -118,7 +121,7 @@ class VideosModule {
 
       if (search) {
         whereConditions.push('(Videos.youTubeVideoName LIKE :search OR Videos.youTubeChannelName LIKE :search)');
-        replacements.search = `%${search}%`;
+        replacements.search = `%${escapeLikeWildcards(search)}%`;
       }
 
       if (channelFilter) {
@@ -677,7 +680,7 @@ class VideosModule {
         OR JSON_UNQUOTE(JSON_EXTRACT(raw_info_json, '$.uploader')) LIKE :search
         OR JSON_UNQUOTE(JSON_EXTRACT(raw_info_json, '$.channel')) LIKE :search
       )`);
-      metadataReplacements.search = `%${search}%`;
+      metadataReplacements.search = `%${escapeLikeWildcards(search)}%`;
     }
     if (dateFrom) {
       // upload_date is yt-dlp's YYYYMMDD text, same format/comparison as

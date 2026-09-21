@@ -2,6 +2,7 @@ const { AsyncLocalStorage } = require('async_hooks');
 const logger = require('../../logger');
 const { EVENT_TYPES, LEVELS, describeEvent } = require('./eventCatalog');
 const { sourceLabelForJobType } = require('./sourceLabels');
+const { escapeLikeWildcards: escapeLike } = require('../../utils/escapeLike');
 
 // Append-only video/events log. Every call site is a single fire-and-forget
 // `jobEventLog.record(...)`: it returns immediately, never throws, and never
@@ -56,8 +57,6 @@ function parseDetail(raw) {
 // "Title [GSdt_08xE8k]" -> "Title": NZB names carry the video id; the real title does not.
 const cleanProvisionalTitle = (title) =>
   typeof title === 'string' ? title.replace(/\s*\[[A-Za-z0-9_-]{11}\]\s*$/, '').trim() || undefined : undefined;
-
-const escapeLike = (text) => text.replace(/[\\%_]/g, (ch) => `\\${ch}`);
 
 // Insertion-ordered map capped at MAX_REMEMBERED entries, oldest evicted first.
 function remember(map, key, value) {

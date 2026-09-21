@@ -9,6 +9,7 @@ describe('VideoDeletionModule video/events log', () => {
   let videoDeletionModule;
   let mockVideo;
   let mockFs;
+  let mockTransaction;
   let jobEventLog;
 
   const videoRow = (overrides = {}) => ({
@@ -30,12 +31,15 @@ describe('VideoDeletionModule video/events log', () => {
 
     mockVideo = { findByPk: jest.fn(), findOne: jest.fn() };
     mockFs = { readdir: jest.fn().mockResolvedValue([]), unlink: jest.fn() };
+    // The purge runs in one transaction; this one just runs the work.
+    mockTransaction = jest.fn(async (work) => work({ id: 'tx' }));
 
     jest.doMock('../../models', () => ({
       Video: mockVideo,
       JobVideo: { destroy: jest.fn().mockResolvedValue(1) },
       VideoWatchStatus: { destroy: jest.fn().mockResolvedValue(0) },
     }));
+    jest.doMock('../../db', () => ({ sequelize: { transaction: mockTransaction } }));
     jest.doMock('fs', () => ({ promises: mockFs }));
     jest.doMock('../filesystem', () => ({
       isVideoDirectory: jest.fn(() => true),
@@ -132,6 +136,28 @@ describe('VideoDeletionModule video/events log', () => {
       await videoDeletionModule.purgeVideoById(7);
 
       expect(jobEventLog.record.mock.calls[0][1].isTracked).toBe(false);
+    });
+
+    it('records the purge only after the transaction has committed', async () => {
+      mockVideo.findByPk.mockResolvedValue(videoRow({ removed: true }));
+      let recordedInsideTransaction = false;
+      mockTransaction.mockImplementation(async (work) => {
+        await work({ id: 'tx' });
+        recordedInsideTransaction = jobEventLog.record.mock.calls.length > 0;
+      });
+
+      await videoDeletionModule.purgeVideoById(7);
+
+      expect(recordedInsideTransaction).toBe(false);
+    });
+
+    it('records nothing when the purge transaction fails', async () => {
+      mockVideo.findByPk.mockResolvedValue(videoRow({ removed: true }));
+      mockTransaction.mockRejectedValue(new Error('deadlock'));
+
+      await videoDeletionModule.purgeVideoById(7);
+
+      expect(jobEventLog.record).not.toHaveBeenCalled();
     });
 
     it('records nothing when the video is not marked missing', async () => {

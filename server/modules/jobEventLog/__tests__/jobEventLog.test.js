@@ -577,11 +577,16 @@ describe('jobEventLog', () => {
 
     test('prune deletes only rows older than the cutoff', async () => {
       JobEvent.destroy.mockResolvedValueOnce(4);
-      const before = Date.now();
-      await expect(jobEventLog.prune(10)).resolves.toBe(4);
+      const now = Date.parse('2026-09-20T12:00:00.000Z');
+      const clock = jest.spyOn(Date, 'now').mockReturnValue(now);
+      try {
+        await expect(jobEventLog.prune(10)).resolves.toBe(4);
+      } finally {
+        clock.mockRestore();
+      }
       const { Op } = require('sequelize');
       const cutoff = JobEvent.destroy.mock.calls[0][0].where.occurred_at[Op.lt].getTime();
-      expect(cutoff).toBeLessThanOrEqual(before - 10 * 24 * 60 * 60 * 1000 + 1000);
+      expect(cutoff).toBe(now - 10 * 24 * 60 * 60 * 1000);
     });
 
     test('prune with 0 days deletes nothing', async () => {

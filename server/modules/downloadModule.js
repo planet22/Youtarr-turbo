@@ -259,7 +259,7 @@ class DownloadModule {
 
       return await this.doSingleChannelDownloadJob(jobDataWithQuality, isNextJob);
     } catch (err) {
-      console.error('Error generating channel download groups, falling back to single job:', err);
+      logger.error({ err }, 'Error generating channel download groups, falling back to single job');
       return await this.doSingleChannelDownloadJob(jobData, isNextJob);
     }
   }
@@ -718,7 +718,7 @@ class DownloadModule {
             effectiveQuality = channelRecord.video_quality;
           }
         } catch (channelErr) {
-          console.error('[DownloadModule] Error determining channel quality override:', channelErr.message);
+          logger.error({ err: channelErr }, '[DownloadModule] Error determining channel quality override');
         }
       }
 

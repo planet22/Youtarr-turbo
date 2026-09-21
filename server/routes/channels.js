@@ -527,7 +527,7 @@ module.exports = function createChannelRoutes({ verifyToken, channelModule, arch
       }
       res.json(settings);
     } catch (error) {
-      console.error('Error getting channel settings:', error);
+      logger.error({ err: error, channelId: req.params.channelId }, 'Error getting channel settings');
       res.status(500).json({ error: error.message });
     }
   });
@@ -622,7 +622,7 @@ module.exports = function createChannelRoutes({ verifyToken, channelModule, arch
       const subfolders = await channelSettingsModule.getAllSubFolders();
       res.json(subfolders);
     } catch (error) {
-      console.error('Error getting subfolders:', error);
+      logger.error({ err: error }, 'Error getting subfolders');
       res.status(500).json({ error: error.message });
     }
   });
@@ -652,7 +652,7 @@ module.exports = function createChannelRoutes({ verifyToken, channelModule, arch
       const result = await channelSettingsModule.getChannelsUsingDefaultSubfolder();
       res.json(result);
     } catch (error) {
-      console.error('Error getting channels using default subfolder:', error);
+      logger.error({ err: error }, 'Error getting channels using default subfolder');
       res.status(500).json({ error: error.message });
     }
   });
@@ -727,7 +727,7 @@ module.exports = function createChannelRoutes({ verifyToken, channelModule, arch
       );
       res.json(result);
     } catch (error) {
-      console.error('Error previewing title filter:', error);
+      logger.error({ err: error, channelId: req.params.channelId }, 'Error previewing title filter');
       res.status(500).json({ error: error.message });
     }
   });
@@ -770,7 +770,7 @@ module.exports = function createChannelRoutes({ verifyToken, channelModule, arch
       );
       res.json(result);
     } catch (error) {
-      console.error('Error previewing combined filters:', error);
+      logger.error({ err: error, channelId: req.params.channelId }, 'Error previewing combined filters');
       res.status(500).json({ error: error.message });
     }
   });

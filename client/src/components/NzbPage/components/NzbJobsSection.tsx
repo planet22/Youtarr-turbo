@@ -13,6 +13,7 @@ import {
   Button,
   Box,
   Grid,
+  Alert,
 } from '../../ui';
 import { useMediaQuery } from '../../../hooks/useMediaQuery';
 import { NzbActiveJob, NzbHistoryJob, NzbJobsSnapshot } from '../../../hooks/useNzbStats';
@@ -136,13 +137,17 @@ function NzbHistoryMobileList({ history }: { history: NzbHistoryJob[] }) {
 function NzbJobsSection({ jobs, onCancelCurrentJob }: NzbJobsSectionProps) {
   const isMobile = useMediaQuery('(max-width: 767px)');
   const [canceling, setCanceling] = useState(false);
+  const [cancelError, setCancelError] = useState<string | null>(null);
   const active = jobs?.active ?? [];
   const history = jobs?.history ?? [];
 
   const handleCancel = async () => {
     setCanceling(true);
+    setCancelError(null);
     try {
       await onCancelCurrentJob();
+    } catch {
+      setCancelError("Couldn't cancel the job. Please try again.");
     } finally {
       setCanceling(false);
     }
@@ -158,6 +163,11 @@ function NzbJobsSection({ jobs, onCancelCurrentJob }: NzbJobsSectionProps) {
               Jobs Sonarr/Radarr have grabbed that are queued or actively downloading right now.
             </Typography>
           </Box>
+          {cancelError && (
+            <Alert severity="error" onClose={() => setCancelError(null)} style={{ margin: '0 16px 12px' }}>
+              {cancelError}
+            </Alert>
+          )}
           {isMobile ? (
             <NzbQueueMobileList active={active} canceling={canceling} onCancel={handleCancel} />
           ) : (

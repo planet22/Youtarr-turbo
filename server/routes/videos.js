@@ -3,9 +3,24 @@ const rateLimit = require('express-rate-limit');
 const { ROOT_SENTINEL, GLOBAL_DEFAULT_SENTINEL } = require('../modules/filesystem/constants');
 const youtubeUrlParser = require('../modules/youtubeUrlParser');
 
-// Upper bound on how many videoIds a single /api/videos/strm/download request
-// may process, to avoid an unbounded batch of sequential enqueue calls.
+// Upper bound on how many videoIds a single /api/videos/strm/download or
+// /api/videos/strm/revert request may process, to avoid an unbounded batch of
+// sequential calls.
 const MAX_STRM_BULK_VIDEO_IDS = 500;
+
+// Same bound for the bulk delete and purge routes.
+const MAX_BULK_VIDEO_IDS = 500;
+
+// A non-negative whole number given as a number or a string of digits
+// ('25' yes; '25abc', '1.9', 1.9, -1 no). Returns null when it is not one.
+function parseWholeNumber(value) {
+  if (typeof value === 'number') return Number.isInteger(value) && value >= 0 ? value : null;
+  if (typeof value === 'string' && /^\d+$/.test(value.trim())) return Number(value.trim());
+  return null;
+}
+
+// Storage thresholds are written as a whole number plus unit, e.g. '500MB' or '10GB'.
+const STORAGE_THRESHOLD_PATTERN = /^\d+(MB|GB)$/;
 
 // Video validation rate limiter
 const videoValidationLimiter = rateLimit({
@@ -396,6 +411,13 @@ module.exports = function createVideoRoutes({ verifyToken, videosModule, downloa
         });
       }
 
+      if ((videoIds && videoIds.length > MAX_BULK_VIDEO_IDS) || (youtubeIds && youtubeIds.length > MAX_BULK_VIDEO_IDS)) {
+        return res.status(400).json({
+          success: false,
+          error: `ids array exceeds maximum of ${MAX_BULK_VIDEO_IDS}`
+        });
+      }
+
       const videoDeletionModule = require('../modules/videoDeletionModule');
       let result;
 
@@ -452,6 +474,12 @@ module.exports = function createVideoRoutes({ verifyToken, videosModule, downloa
           error: 'videoIds array is required'
         });
       }
+      if (videoIds.length > MAX_BULK_VIDEO_IDS) {
+        return res.status(400).json({
+          success: false,
+          error: `videoIds array exceeds maximum of ${MAX_BULK_VIDEO_IDS}`
+        });
+      }
 
       const videoDeletionModule = require('../modules/videoDeletionModule');
       const result = await videoDeletionModule.purgeVideos(videoIds);
@@ -485,8 +513,8 @@ module.exports = function createVideoRoutes({ verifyToken, videosModule, downloa
    *                 type: integer
    *                 description: Age threshold in days
    *               autoRemovalFreeSpaceThreshold:
-   *                 type: integer
-   *                 description: Free space threshold in GB
+   *                 type: string
+   *                 description: Free space threshold as a whole number plus unit, e.g. 500MB or 10GB. Empty or null for none.
    *               autoRemovalWatchedEnabled:
    *                 type: boolean
    *                 description: Enable watched-based removal
@@ -608,16 +636,25 @@ module.exports = function createVideoRoutes({ verifyToken, videosModule, downloa
         return res.status(400).json({ success: false, error: 'videoIds array is required' });
       }
 
+      if (videoIds.length > MAX_STRM_BULK_VIDEO_IDS) {
+        return res.status(400).json({ success: false, error: `videoIds array exceeds maximum of ${MAX_STRM_BULK_VIDEO_IDS}` });
+      }
+
       const videoDeletionModule = require('../modules/videoDeletionModule');
       const processed = [];
       const failed = [];
 
       for (const videoId of videoIds) {
-        const result = await videoDeletionModule.revertToStrm(videoId);
-        if (result.success) {
-          processed.push(videoId);
-        } else {
-          failed.push({ videoId, error: result.error || 'Could not revert to STRM' });
+        try {
+          const result = await videoDeletionModule.revertToStrm(videoId);
+          if (result.success) {
+            processed.push(videoId);
+          } else {
+            failed.push({ videoId, error: result.error || 'Could not revert to STRM' });
+          }
+        } catch (err) {
+          req.log.error({ err, videoId }, 'Failed to revert video to STRM');
+          failed.push({ videoId, error: err.message || 'Unknown error' });
         }
       }
 
@@ -639,6 +676,18 @@ module.exports = function createVideoRoutes({ verifyToken, videosModule, downloa
         autoRemovalWatchedMinVideoAgeDays,
         autoRemovalKeepRecentCount
       } = req.body || {};
+
+      // null or '' mean "not set" (the settings page sends '' for a blank field).
+      const invalidOverride = [
+        ['autoRemovalVideoAgeThreshold', autoRemovalVideoAgeThreshold, (v) => parseWholeNumber(v) !== null],
+        ['autoRemovalFreeSpaceThreshold', autoRemovalFreeSpaceThreshold, (v) => typeof v === 'string' && STORAGE_THRESHOLD_PATTERN.test(v)],
+        ['autoRemovalWatchedMinDaysSinceWatched', autoRemovalWatchedMinDaysSinceWatched, (v) => parseWholeNumber(v) !== null],
+        ['autoRemovalWatchedMinVideoAgeDays', autoRemovalWatchedMinVideoAgeDays, (v) => parseWholeNumber(v) !== null],
+        ['autoRemovalKeepRecentCount', autoRemovalKeepRecentCount, (v) => parseWholeNumber(v) !== null],
+      ].find(([, value, isValid]) => value !== undefined && value !== null && value !== '' && !isValid(value));
+      if (invalidOverride) {
+        return res.status(400).json({ success: false, error: `Invalid ${invalidOverride[0]}` });
+      }
 
       const coerceBoolean = (value) => {
         if (typeof value === 'boolean') return value;
@@ -892,6 +941,13 @@ module.exports = function createVideoRoutes({ verifyToken, videosModule, downloa
       });
     }
 
+    if (typeof url !== 'string') {
+      return res.status(400).json({
+        success: false,
+        error: 'URL must be a string'
+      });
+    }
+
     // Validate URL length (prevent excessively long URLs)
     const MAX_URL_LENGTH = 2048;
     if (url.length > MAX_URL_LENGTH) {
@@ -939,13 +995,6 @@ module.exports = function createVideoRoutes({ verifyToken, videosModule, downloa
       }
     }
 
-    // Persist a real subfolder override so it is reusable in future downloads.
-    if (subfolder && subfolder !== ROOT_SENTINEL && subfolder !== GLOBAL_DEFAULT_SENTINEL) {
-      require('../modules/subfolderModule')
-        .register(subfolder)
-        .catch((err) => req.log.warn({ err }, 'Failed to register download subfolder'));
-    }
-
     try {
       // Optionally fetch video metadata for response
       const videoValidationModule = require('../modules/videoValidationModule');
@@ -956,6 +1005,15 @@ module.exports = function createVideoRoutes({ verifyToken, videosModule, downloa
           success: false,
           error: metadata.error || 'Could not validate video URL'
         });
+      }
+
+      // Persist a real subfolder override so it is reusable in future downloads.
+      // Only once the request is known to be valid, so a rejected request does
+      // not leave a subfolder behind.
+      if (subfolder && subfolder !== ROOT_SENTINEL && subfolder !== GLOBAL_DEFAULT_SENTINEL) {
+        require('../modules/subfolderModule')
+          .register(subfolder)
+          .catch((err) => req.log.warn({ err }, 'Failed to register download subfolder'));
       }
 
       // Queue the download
@@ -1203,12 +1261,14 @@ module.exports = function createVideoRoutes({ verifyToken, videosModule, downloa
         }
       }
       if (overrideSettings.videoCount !== undefined) {
-        const count = parseInt(overrideSettings.videoCount);
-        if (isNaN(count) || count < 1 || count > 50) {
+        const count = parseWholeNumber(overrideSettings.videoCount);
+        if (count === null || count < 1 || count > 50) {
           return res.status(400).json({
             error: 'Invalid video count. Must be between 1 and 50'
           });
         }
+        // Pass the validated number on, not whatever string/number was sent.
+        overrideSettings.videoCount = count;
       }
     }
 

@@ -513,6 +513,31 @@ describe('GET /api/ytstream/history', () => {
     );
   });
 
+  test('matches the search text literally by escaping LIKE wildcards', async () => {
+    const { Op } = require('sequelize');
+    const models = buildModels();
+    const handler = getHandler('get', '/api/ytstream/history', models);
+    const req = { query: { search: '50%_off\\' } };
+    const res = mockRes();
+    await handler(req, res);
+
+    const expected = { [Op.like]: '%50\\%\\_off\\\\%' };
+    expect(models.Video.findAll).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { youTubeVideoName: expected } })
+    );
+    expect(models.StreamHistory.findAndCountAll).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          [Op.or]: expect.arrayContaining([
+            { youtube_id: expected },
+            { client_ip: expected },
+            { user_agent: expected },
+          ]),
+        }),
+      })
+    );
+  });
+
   test('responds 500 when the query fails', async () => {
     const models = buildModels();
     models.StreamHistory.findAndCountAll.mockRejectedValue(new Error('db down'));

@@ -148,6 +148,15 @@ describe('VideosModule maintenance jobs', () => {
       expect(Video.findAll.mock.calls[0][0]).toMatchObject({ limit: 500, offset: 0, raw: true });
     });
 
+    it('reads videos in id order so consecutive chunks cannot overlap or skip rows', async () => {
+      Video.count.mockResolvedValue(1200);
+      Video.findAll.mockResolvedValue([]);
+
+      await videosModule.backfillResolutionTags();
+
+      expect(Video.findAll.mock.calls[0][0]).toMatchObject({ order: [['id', 'ASC']] });
+    });
+
     it('accepts a bare number as the time limit', async () => {
       serveVideos([video(1)]);
 
@@ -347,6 +356,15 @@ describe('VideosModule maintenance jobs', () => {
 
       expect(nfoGenerator.writeVideoNfoFile).toHaveBeenCalledWith('/lib/v1.mp4', { title: 'T', normalized_rating: 'PG', rating_source: 'Channel Default' });
       expect(result).toMatchObject({ scanned: 1, regenerated: 1, errors: 0, status: 'completed' });
+    });
+
+    it('reads videos in id order so consecutive chunks cannot overlap or skip rows', async () => {
+      Video.count.mockResolvedValue(1200);
+      Video.findAll.mockResolvedValue([]);
+
+      await videosModule.regenerateVideoMetadataFiles();
+
+      expect(Video.findAll.mock.calls[0][0]).toMatchObject({ limit: 500, offset: 0, order: [['id', 'ASC']] });
     });
 
     it('rewrites an episode NFO for a series video', async () => {

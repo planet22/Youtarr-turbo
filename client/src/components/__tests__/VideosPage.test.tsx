@@ -728,6 +728,9 @@ describe('VideosPage Component', () => {
 
       const image = screen.getByAltText('thumbnail') as HTMLImageElement;
 
+      // First failure (local file) retries with the YouTube CDN; only the
+      // second failure falls through to the placeholder.
+      fireEvent.error(image);
       fireEvent.error(image);
 
       await waitFor(() => {

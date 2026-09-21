@@ -92,7 +92,7 @@ class NfoGenerator {
   _extractCommonFields(jsonData) {
     const title = this.escapeXml(jsonData.fulltitle || jsonData.title || 'Unknown Title');
     const plot = this.escapeXml(jsonData.description || '');
-    const youtubeId = jsonData.id || '';
+    const youtubeId = this.escapeXml(jsonData.id || '');
     const premiered = this.formatDate(jsonData.upload_date);
     const year = premiered ? premiered.substring(0, 4) : null;
 
@@ -196,6 +196,15 @@ class NfoGenerator {
 
     const tagLine = `  <tag>${this.escapeXml(tag)}</tag>`;
     if (xml.includes(tagLine)) return false;
+
+    // A different, earlier "Available: ..." tag (the video's tiers changed)
+    // is replaced in place rather than left next to the new one.
+    const staleTag = xml.match(/^ {2}<tag>Available: [^<]*<\/tag>$/m);
+    if (staleTag) {
+      const replaced = xml.slice(0, staleTag.index) + tagLine + xml.slice(staleTag.index + staleTag[0].length);
+      await fs.promises.writeFile(nfoPath, replaced, 'utf8');
+      return true;
+    }
 
     // Keep the new tag grouped with any existing <tag>/<genre> lines by
     // inserting right after the last one; otherwise fall back to just
@@ -436,7 +445,7 @@ class NfoGenerator {
         xml += `  <trailer>${this.buildYouTubeTrailerUrl(youtubeId)}</trailer>\n`;
       }
 
-      xml += `\n  <thumb>${parsedPath.name}.jpg</thumb>\n`;
+      xml += `\n  <thumb>${this.escapeXml(parsedPath.name)}.jpg</thumb>\n`;
       xml += '</episodedetails>\n';
 
       fs.writeFileSync(nfoPath, xml, 'utf8');

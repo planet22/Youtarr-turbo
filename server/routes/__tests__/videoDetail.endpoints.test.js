@@ -230,8 +230,16 @@ describe('videoDetail routes: remaining endpoints', () => {
         const res = await get();
 
         expect(res.status).toBe(500);
-        expect(JSON.parse(res.body.toString())).toEqual({ error: 'Error reading file' });
+        expect(res.body).toEqual({ error: 'Error reading file' });
         expect(log.error).toHaveBeenCalledWith(expect.objectContaining({ youtubeId: YT_ID }), 'Stream read error');
+      });
+
+      it('labels the read error as JSON rather than as the video', async () => {
+        videoMetadataModule.getVideoStreamInfo.mockResolvedValue(streamInfo({ filePath: path.join(dir, 'gone.mp4') }));
+
+        const res = await get();
+
+        expect(res.headers['content-type']).toMatch(/application\/json/);
       });
     });
 
@@ -240,6 +248,16 @@ describe('videoDetail routes: remaining endpoints', () => {
         const chunks = [];
         res.on('data', (c) => chunks.push(c));
         res.on('end', () => cb(null, Buffer.concat(chunks)));
+      });
+
+      it('answers a read error on a range request with JSON and no content range', async () => {
+        videoMetadataModule.getVideoStreamInfo.mockResolvedValue(streamInfo({ filePath: path.join(dir, 'gone.mp4') }));
+
+        const res = await ranged('bytes=2-5');
+
+        expect(res.status).toBe(500);
+        expect(res.headers['content-type']).toMatch(/application\/json/);
+        expect(res.headers['content-range']).toBeUndefined();
       });
 
       it('returns the requested bytes with a content range', async () => {
@@ -272,12 +290,47 @@ describe('videoDetail routes: remaining endpoints', () => {
         expect(res.headers['cache-control']).toBe('no-store');
       });
 
+      it('serves the last N bytes for a suffix range', async () => {
+        const res = await ranged('bytes=-5');
+
+        expect(res.status).toBe(206);
+        expect(res.headers['content-range']).toBe('bytes 15-19/20');
+        expect(res.body.toString()).toBe('fghij');
+      });
+
+      it('serves the whole file for a suffix range longer than the file', async () => {
+        const res = await ranged('bytes=-500');
+
+        expect(res.status).toBe(206);
+        expect(res.headers['content-range']).toBe('bytes 0-19/20');
+      });
+
+      it.each([
+        ['bytes=5-20', 'bytes 5-19/20', 15],
+        ['bytes=5-999', 'bytes 5-19/20', 15],
+        ['bytes=0-19', 'bytes 0-19/20', 20],
+      ])('clamps %s to the end of the file', async (range, contentRange, length) => {
+        const res = await ranged(range);
+
+        expect(res.status).toBe(206);
+        expect(res.headers['content-range']).toBe(contentRange);
+        expect(res.headers['content-length']).toBe(String(length));
+      });
+
+      it('serves only the first range of a multi-range request', async () => {
+        const res = await ranged('bytes=0-3,10-12');
+
+        expect(res.status).toBe(206);
+        expect(res.headers['content-range']).toBe('bytes 0-3/20');
+      });
+
       it.each([
         ['starts past the end of the file', 'bytes=20-25'],
-        ['ends past the end of the file', 'bytes=5-20'],
         ['ends before it starts', 'bytes=10-5'],
         ['is not numeric', 'bytes=abc-def'],
-        ['is a negative start', 'bytes=-5-10'],
+        ['has two dashes', 'bytes=-5-10'],
+        ['has no numbers', 'bytes=-'],
+        ['asks for the last zero bytes', 'bytes=-0'],
       ])('answers 416 with the file size for a range that %s', async (_label, range) => {
         const res = await ranged(range);
 

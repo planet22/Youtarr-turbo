@@ -1,9 +1,12 @@
 const express = require('express');
-const router = express.Router();
 const https = require('https');
 const logger = require('../logger');
 const databaseHealth = require('../modules/databaseHealthModule');
 const ytdlpModule = require('../modules/ytdlpModule');
+
+// How long the latest-release lookup is remembered, so page loads do not each
+// spend one of GitHub's 60 unauthenticated requests per hour.
+const RELEASE_CACHE_TTL_MS = 10 * 60 * 1000;
 
 /**
  * Creates health routes
@@ -15,6 +18,10 @@ const ytdlpModule = require('../modules/ytdlpModule');
  * @returns {express.Router}
  */
 module.exports = function createHealthRoutes({ getCachedYtDlpVersion, refreshYtDlpVersionCache, verifyToken, configModule }) {
+  const router = express.Router();
+  // Latest release tag from the last successful GitHub lookup (null = none published).
+  let releaseCache = null;
+
   /**
    * @swagger
    * /api/health:
@@ -106,6 +113,21 @@ module.exports = function createHealthRoutes({ getCachedYtDlpVersion, refreshYtD
   router.get('/getCurrentReleaseVersion', async (req, res) => {
     try {
       const ytDlpVersion = getCachedYtDlpVersion();
+      const sendVersion = (version) => {
+        const response = { version };
+        if (ytDlpVersion) {
+          response.ytDlpVersion = ytDlpVersion;
+        }
+        return res.json(response);
+      };
+      const rememberVersion = (version) => {
+        releaseCache = { version, expiresAt: Date.now() + RELEASE_CACHE_TTL_MS };
+        return sendVersion(version);
+      };
+
+      if (releaseCache && releaseCache.expiresAt > Date.now()) {
+        return sendVersion(releaseCache.version);
+      }
 
       https
         .get(
@@ -121,11 +143,7 @@ module.exports = function createHealthRoutes({ getCachedYtDlpVersion, refreshYtD
             resp.on('end', () => {
               // No releases published yet is not an error condition
               if (resp.statusCode === 404) {
-                const response = { version: null };
-                if (ytDlpVersion) {
-                  response.ytDlpVersion = ytDlpVersion;
-                }
-                return res.json(response);
+                return rememberVersion(null);
               }
 
               if (resp.statusCode !== 200) {
@@ -141,11 +159,7 @@ module.exports = function createHealthRoutes({ getCachedYtDlpVersion, refreshYtD
                 return res.status(502).json({ error: 'Failed to parse GitHub release response', details: data.slice(0, 1024) });
               }
 
-              const response = { version: releaseData.tag_name || null };
-              if (ytDlpVersion) {
-                response.ytDlpVersion = ytDlpVersion;
-              }
-              res.json(response);
+              rememberVersion(releaseData.tag_name || null);
             });
           }
         )

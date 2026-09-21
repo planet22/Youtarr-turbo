@@ -123,6 +123,24 @@ describe('ytdlpArgs', () => {
       expect(loadYoutubeCookieHeader(file)).toBe('B=2');
     });
 
+    it('keeps HttpOnly cookies, which Netscape files mark with a #HttpOnly_ prefix', () => {
+      const file = write([cookie('#HttpOnly_.youtube.com', 'SID', 'a'), cookie('.youtube.com', 'B', '2')].join('\n'));
+
+      expect(loadYoutubeCookieHeader(file)).toBe('SID=a; B=2');
+    });
+
+    it('still filters HttpOnly cookies by domain', () => {
+      const file = write([cookie('#HttpOnly_.example.com', 'A', '1'), cookie('.youtube.com', 'B', '2')].join('\n'));
+
+      expect(loadYoutubeCookieHeader(file)).toBe('B=2');
+    });
+
+    it('still skips other comment lines that merely mention HttpOnly', () => {
+      const file = write(['# HttpOnly cookies are prefixed', cookie('.youtube.com', 'B', '2')].join('\n'));
+
+      expect(loadYoutubeCookieHeader(file)).toBe('B=2');
+    });
+
     it('skips lines with too few columns', () => {
       const file = write(['.youtube.com\tTRUE\t/', cookie('.youtube.com', 'B', '2')].join('\n'));
 
@@ -133,6 +151,18 @@ describe('ytdlpArgs', () => {
       const file = write([cookie('.youtube.com', '', 'v'), cookie('.youtube.com', 'B', '2')].join('\n'));
 
       expect(loadYoutubeCookieHeader(file)).toBe('B=2');
+    });
+
+    it('keeps a cookie whose value is empty', () => {
+      const file = write([cookie('.youtube.com', 'A', ''), cookie('.youtube.com', 'B', '2')].join('\n'));
+
+      expect(loadYoutubeCookieHeader(file)).toBe('A=; B=2');
+    });
+
+    it('keeps a cookie whose value is empty on a Windows line ending', () => {
+      const file = write([cookie('.youtube.com', 'A', ''), cookie('.youtube.com', 'B', '2')].join('\r\n'));
+
+      expect(loadYoutubeCookieHeader(file)).toBe('A=; B=2');
     });
 
     it('handles Windows line endings', () => {

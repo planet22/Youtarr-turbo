@@ -22,6 +22,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const logger = require('../logger');
+const { escapeLikeWildcards } = require('../utils/escapeLike');
 const configModule = require('../modules/configModule');
 const ytDlpRunner = require('../modules/ytDlpRunner');
 const { streamDebug } = require('../modules/ytstream/streamDebug');
@@ -275,20 +276,21 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
       }
       const search = (req.query.search || '').trim();
       if (search) {
+        const likePattern = `%${escapeLikeWildcards(search)}%`;
         // Title isn't a stream_history column (it's joined from Video below
         // for display) - resolve matching youtube_ids from Video first so a
         // title search can still be OR'd in against the other columns.
         const matchingVideoIds = models.Video
           ? (await models.Video.findAll({
-            where: { youTubeVideoName: { [Op.like]: `%${search}%` } },
+            where: { youTubeVideoName: { [Op.like]: likePattern } },
             attributes: ['youtubeId'],
             limit: 500,
           })).map((v) => v.youtubeId)
           : [];
         where[Op.or] = [
-          { youtube_id: { [Op.like]: `%${search}%` } },
-          { client_ip: { [Op.like]: `%${search}%` } },
-          { user_agent: { [Op.like]: `%${search}%` } },
+          { youtube_id: { [Op.like]: likePattern } },
+          { client_ip: { [Op.like]: likePattern } },
+          { user_agent: { [Op.like]: likePattern } },
           ...(matchingVideoIds.length ? [{ youtube_id: { [Op.in]: matchingVideoIds } }] : []),
         ];
       }

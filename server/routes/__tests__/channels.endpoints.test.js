@@ -20,11 +20,11 @@ const supertest = require('supertest');
 
 const createChannelRoutes = require('../channels');
 const channelSettingsModule = require('../../modules/channelSettingsModule');
+const logger = require('../../logger');
 
 describe('channel routes: remaining endpoints', () => {
   let log;
   let channelModule;
-  let consoleError;
 
   const makeApp = () => {
     const app = express();
@@ -54,11 +54,6 @@ describe('channel routes: remaining endpoints', () => {
       getChannelVideos: jest.fn(),
       isFetchInProgress: jest.fn(),
     };
-    consoleError = jest.spyOn(console, 'error').mockImplementation(() => {});
-  });
-
-  afterEach(() => {
-    consoleError.mockRestore();
   });
 
   describe('GET /getchannels', () => {
@@ -181,6 +176,15 @@ describe('channel routes: remaining endpoints', () => {
       expect(res.body).toEqual({ id: 'UC1' });
       expect(channelModule.getChannelInfo).toHaveBeenCalledWith('UC1', true);
     });
+
+    it('answers 500 with the reason instead of leaving the request hanging when it fails', async () => {
+      channelModule.getChannelInfo.mockRejectedValue(new Error('yt-dlp failed'));
+
+      const res = await makeApp().get('/getchannelinfo/UC1');
+
+      expect(res.status).toBe(500);
+      expect(res.body).toEqual({ error: 'yt-dlp failed' });
+    });
   });
 
   describe('channel settings', () => {
@@ -209,6 +213,7 @@ describe('channel routes: remaining endpoints', () => {
 
       expect(res.status).toBe(500);
       expect(res.body).toEqual({ error: 'db down' });
+      expect(logger.error).toHaveBeenCalledWith({ err: expect.any(Error), channelId: 'UC1' }, 'Error getting channel settings');
     });
 
     it('updates the settings with the request body', async () => {
@@ -220,12 +225,17 @@ describe('channel routes: remaining endpoints', () => {
       expect(channelSettingsModule.updateChannelSettings).toHaveBeenCalledWith('UC1', { video_quality: '720' });
     });
 
-    it('answers 409 while downloads for the channel are in progress', async () => {
-      channelSettingsModule.updateChannelSettings.mockRejectedValue(new Error('Cannot change subfolder while downloads are in progress for this channel'));
+    it.each([
+      [400, 'Invalid video quality'],
+      [404, 'Channel not found'],
+      [409, 'Cannot change subfolder while downloads are in progress for this channel'],
+    ])('answers %i with the reason when the module reports that status', async (statusCode, message) => {
+      channelSettingsModule.updateChannelSettings.mockRejectedValue(Object.assign(new Error(message), { statusCode }));
 
       const res = await makeApp().put('/api/channels/UC1/settings').send({ sub_folder: 'x' });
 
-      expect(res.status).toBe(409);
+      expect(res.status).toBe(statusCode);
+      expect(res.body).toEqual({ error: message });
     });
 
     it('answers 500 with the reason for other failures', async () => {
@@ -258,6 +268,7 @@ describe('channel routes: remaining endpoints', () => {
 
       expect(res.status).toBe(500);
       expect(res.body).toEqual({ error: 'db down' });
+      expect(logger.error).toHaveBeenCalledWith({ err: expect.any(Error) }, expect.stringMatching(/^Error getting /));
     });
   });
 
@@ -286,6 +297,7 @@ describe('channel routes: remaining endpoints', () => {
 
       expect(res.status).toBe(500);
       expect(res.body).toEqual({ error: 'bad regex' });
+      expect(logger.error).toHaveBeenCalledWith({ err: expect.any(Error), channelId: 'UC1' }, 'Error previewing title filter');
     });
 
     it('previews the combined filters', async () => {
@@ -312,6 +324,7 @@ describe('channel routes: remaining endpoints', () => {
 
       expect(res.status).toBe(500);
       expect(res.body).toEqual({ error: 'bad regex' });
+      expect(logger.error).toHaveBeenCalledWith({ err: expect.any(Error), channelId: 'UC1' }, 'Error previewing combined filters');
     });
   });
 

@@ -306,11 +306,18 @@ module.exports = function createChannelRoutes({ verifyToken, channelModule, arch
    *     responses:
    *       200:
    *         description: Channel information
+   *       500:
+   *         description: Failed to get channel information
    */
   router.get('/getchannelinfo/:channelId', verifyToken, async (req, res) => {
     const channelId = req.params.channelId;
-    const channelInfo = await channelModule.getChannelInfo(channelId, true);
-    res.json(channelInfo);
+    try {
+      const channelInfo = await channelModule.getChannelInfo(channelId, true);
+      res.json(channelInfo);
+    } catch (error) {
+      logger.error({ err: error, channelId }, 'Error getting channel info');
+      res.status(500).json({ error: error.message });
+    }
   });
 
   /**
@@ -520,7 +527,7 @@ module.exports = function createChannelRoutes({ verifyToken, channelModule, arch
       }
       res.json(settings);
     } catch (error) {
-      console.error('Error getting channel settings:', error);
+      logger.error({ err: error, channelId: req.params.channelId }, 'Error getting channel settings');
       res.status(500).json({ error: error.message });
     }
   });
@@ -566,6 +573,10 @@ module.exports = function createChannelRoutes({ verifyToken, channelModule, arch
    *     responses:
    *       200:
    *         description: Settings updated successfully
+   *       400:
+   *         description: Invalid settings
+   *       404:
+   *         description: Channel not found
    *       409:
    *         description: Cannot change subfolder while downloads are in progress
    *       500:
@@ -579,8 +590,10 @@ module.exports = function createChannelRoutes({ verifyToken, channelModule, arch
       );
       res.json(result);
     } catch (error) {
-      console.error('Error updating channel settings:', error);
-      const statusCode = error.message.includes('Cannot change subfolder while downloads are in progress') ? 409 : 500;
+      const statusCode = error.statusCode || 500;
+      if (statusCode >= 500) {
+        logger.error({ err: error, channelId: req.params.channelId }, 'Error updating channel settings');
+      }
       res.status(statusCode).json({ error: error.message });
     }
   });
@@ -609,7 +622,7 @@ module.exports = function createChannelRoutes({ verifyToken, channelModule, arch
       const subfolders = await channelSettingsModule.getAllSubFolders();
       res.json(subfolders);
     } catch (error) {
-      console.error('Error getting subfolders:', error);
+      logger.error({ err: error }, 'Error getting subfolders');
       res.status(500).json({ error: error.message });
     }
   });
@@ -639,7 +652,7 @@ module.exports = function createChannelRoutes({ verifyToken, channelModule, arch
       const result = await channelSettingsModule.getChannelsUsingDefaultSubfolder();
       res.json(result);
     } catch (error) {
-      console.error('Error getting channels using default subfolder:', error);
+      logger.error({ err: error }, 'Error getting channels using default subfolder');
       res.status(500).json({ error: error.message });
     }
   });
@@ -714,7 +727,7 @@ module.exports = function createChannelRoutes({ verifyToken, channelModule, arch
       );
       res.json(result);
     } catch (error) {
-      console.error('Error previewing title filter:', error);
+      logger.error({ err: error, channelId: req.params.channelId }, 'Error previewing title filter');
       res.status(500).json({ error: error.message });
     }
   });
@@ -757,7 +770,7 @@ module.exports = function createChannelRoutes({ verifyToken, channelModule, arch
       );
       res.json(result);
     } catch (error) {
-      console.error('Error previewing combined filters:', error);
+      logger.error({ err: error, channelId: req.params.channelId }, 'Error previewing combined filters');
       res.status(500).json({ error: error.message });
     }
   });

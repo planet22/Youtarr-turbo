@@ -12,6 +12,7 @@ import RatingBadge from '../../shared/RatingBadge';
 import DownloadFormatIndicator from '../../shared/DownloadFormatIndicator';
 import ProtectionShieldButton from '../../shared/ProtectionShieldButton';
 import ThumbnailClickOverlay from '../../shared/ThumbnailClickOverlay';
+import { handleThumbnailError } from '../thumbnailFallback';
 import AvailabilityChip from '../../shared/AvailabilityChip';
 import WatchedChip from '../../shared/WatchedChip';
 import { SHARED_STATUS_CHIP_SMALL_STYLE } from '../../shared/chipStyles';
@@ -161,7 +162,7 @@ function VideosListMobile({
                     objectFit: video.media_type === 'short' ? 'contain' : 'cover',
                     filter: video.removed ? 'grayscale(100%) brightness(0.6)' : 'none',
                   }}
-                  onError={() => onImageError(video.youtubeId)}
+                  onError={(e) => handleThumbnailError(e, video.youtubeId, onImageError)}
                 />
               )}
               <ThumbnailClickOverlay
@@ -189,7 +190,7 @@ function VideosListMobile({
                   Untracked
                 </Box>
               )}
-              {video.youtube_removed && (
+              {Boolean(video.youtube_removed) && (
                 <Box
                   style={{
                     position: 'absolute',
@@ -208,7 +209,7 @@ function VideosListMobile({
                   Removed
                 </Box>
               )}
-              {video.removed && (
+              {Boolean(video.removed) && (
                 <Box
                   style={{
                     position: 'absolute',

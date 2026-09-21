@@ -1,5 +1,10 @@
 /* eslint-env jest */
+const path = require('path');
 const { Sequelize } = require('sequelize');
+
+// The module builds paths with path.join, so expected paths must use the platform separator too.
+const vp = (...parts) => path.join('/test/output/dir', ...parts);
+const sp = (...parts) => path.join('/test/dir', ...parts);
 
 describe('VideosModule', () => {
   let VideosModule;
@@ -359,6 +364,17 @@ describe('VideosModule', () => {
       expect(countQuery).toContain('(Videos.youTubeVideoName LIKE :search OR Videos.youTubeChannelName LIKE :search)');
       expect(videosQuery).toContain('(Videos.youTubeVideoName LIKE :search OR Videos.youTubeChannelName LIKE :search)');
       expect(replacements.search).toBe('%test video%');
+    });
+
+    test('matches search text literally by escaping LIKE wildcards', async () => {
+      mockSequelize.query.mockResolvedValueOnce([{ total: 0 }]);
+      mockSequelize.query.mockResolvedValueOnce([]);
+      mockSequelize.query.mockResolvedValueOnce([]); // getAllUniqueChannels
+
+      await VideosModule.getVideosPaginated({ search: '100%_sure\\' });
+
+      const replacements = mockSequelize.query.mock.calls[1][1].replacements;
+      expect(replacements.search).toBe('%100\\%\\_sure\\\\%');
     });
 
     test('should handle pagination parameters correctly', async () => {
@@ -821,13 +837,13 @@ describe('VideosModule', () => {
 
       expect(fileMap.size).toBe(2);
       expect(fileMap.get('root123')).toEqual({
-        videoFilePath: '/test/dir/video [root123].mp4',
+        videoFilePath: sp('video [root123].mp4'),
         videoFileSize: 1000,
         audioFilePath: null,
         audioFileSize: null
       });
       expect(fileMap.get('channel1_123')).toEqual({
-        videoFilePath: '/test/dir/Channel1/video [channel1_123].mp4',
+        videoFilePath: sp('Channel1/video [channel1_123].mp4'),
         videoFileSize: 2000,
         audioFilePath: null,
         audioFileSize: null
@@ -963,6 +979,16 @@ describe('VideosModule', () => {
       expect(result.timeElapsed).toBeDefined();
     });
 
+    test('reads videos in id order so consecutive chunks cannot overlap or skip rows', async () => {
+      mockFs.readdir.mockResolvedValueOnce([]);
+      mockVideo.count.mockResolvedValueOnce(1);
+      mockVideo.findAll.mockResolvedValueOnce([]);
+
+      await VideosModule.backfillVideoMetadata();
+
+      expect(mockVideo.findAll.mock.calls[0][0]).toMatchObject({ order: [['id', 'ASC']] });
+    });
+
     test('probes the file with ffprobe when video_resolution is NULL', async () => {
       mockFs.readdir.mockResolvedValueOnce([
         { name: 'Video [abc12345678].mp4', isDirectory: () => false, isFile: () => true }
@@ -975,7 +1001,7 @@ describe('VideosModule', () => {
         {
           id: 1,
           youtubeId: 'abc12345678',
-          filePath: '/test/output/dir/Video [abc12345678].mp4',
+          filePath: vp('Video [abc12345678].mp4'),
           fileSize: '1000',
           audioFilePath: null,
           audioFileSize: null,
@@ -989,7 +1015,7 @@ describe('VideosModule', () => {
 
       expect(mockExecFile).toHaveBeenCalledWith(
         'ffprobe',
-        expect.arrayContaining(['/test/output/dir/Video [abc12345678].mp4']),
+        expect.arrayContaining([vp('Video [abc12345678].mp4')]),
         expect.objectContaining({ timeout: expect.any(Number) }),
         expect.any(Function)
       );
@@ -998,7 +1024,7 @@ describe('VideosModule', () => {
       );
       expect(updateCalls.length).toBe(1);
       const [, options] = updateCalls[0];
-      expect(options.replacements).toEqual(['/test/output/dir/Video [abc12345678].mp4', 1000, '1280x720', 0, 1]);
+      expect(options.replacements).toEqual([vp('Video [abc12345678].mp4'), 1000, '1280x720', 0, 1]);
     });
 
     test('preserves already-flushed probe results when the time limit trips mid-chunk', async () => {
@@ -1106,7 +1132,7 @@ describe('VideosModule', () => {
         {
           id: 1,
           youtubeId: 'abc12345678',
-          filePath: '/test/output/dir/Video [abc12345678].mp4',
+          filePath: vp('Video [abc12345678].mp4'),
           fileSize: '1000',
           audioFilePath: null,
           audioFileSize: null,
@@ -1125,7 +1151,7 @@ describe('VideosModule', () => {
       const [sql, options] = updateCalls[0];
       expect(sql).toContain('video_resolution = ?');
       // filePath, fileSize, video_resolution = '0x0' (sentinel), removed = 0, id = 1
-      expect(options.replacements).toEqual(['/test/output/dir/Video [abc12345678].mp4', 1000, '0x0', 0, 1]);
+      expect(options.replacements).toEqual([vp('Video [abc12345678].mp4'), 1000, '0x0', 0, 1]);
     });
 
     test('skips ffprobe entirely for .strm files and stamps the 0x0 sentinel directly', async () => {
@@ -1141,7 +1167,7 @@ describe('VideosModule', () => {
         {
           id: 1,
           youtubeId: 'abc12345678',
-          filePath: '/test/output/dir/Video [abc12345678].strm',
+          filePath: vp('Video [abc12345678].strm'),
           fileSize: '200',
           audioFilePath: null,
           audioFileSize: null,
@@ -1159,7 +1185,7 @@ describe('VideosModule', () => {
       );
       expect(updateCalls.length).toBe(1);
       const [, options] = updateCalls[0];
-      expect(options.replacements).toEqual(['/test/output/dir/Video [abc12345678].strm', 200, '0x0', 0, 1]);
+      expect(options.replacements).toEqual([vp('Video [abc12345678].strm'), 200, '0x0', 0, 1]);
     });
 
     test('clears video_resolution when the video file is gone but audio remains', async () => {
@@ -1173,9 +1199,9 @@ describe('VideosModule', () => {
         {
           id: 1,
           youtubeId: 'abc12345678',
-          filePath: '/test/output/dir/Video [abc12345678].mp4',
+          filePath: vp('Video [abc12345678].mp4'),
           fileSize: '1000',
-          audioFilePath: '/test/output/dir/Video [abc12345678].mp3',
+          audioFilePath: vp('Video [abc12345678].mp3'),
           audioFileSize: '500',
           removed: false,
           video_resolution: '1920x1080'
@@ -1197,7 +1223,7 @@ describe('VideosModule', () => {
       expect(options.replacements).toEqual([
         null,
         null,
-        '/test/output/dir/Video [abc12345678].mp3',
+        vp('Video [abc12345678].mp3'),
         500,
         null,
         0,
@@ -1216,7 +1242,7 @@ describe('VideosModule', () => {
         {
           id: 1,
           youtubeId: 'abc12345678',
-          filePath: '/test/output/dir/Video [abc12345678].mp4',
+          filePath: vp('Video [abc12345678].mp4'),
           fileSize: '1000',
           audioFilePath: null,
           audioFileSize: null,

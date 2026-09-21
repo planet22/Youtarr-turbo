@@ -1,5 +1,5 @@
 import React from 'react';
-import { act, screen } from '@testing-library/react';
+import { act, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 import { NotificationsSection } from '../NotificationsSection';
@@ -409,14 +409,14 @@ describe('NotificationsSection editing, deleting and testing services', () => {
       expect(await screen.findByText('✗ Network error - check console')).toBeInTheDocument();
     });
 
-    it('reports a network error when the failure response is not JSON', async () => {
+    it('reports the HTTP status when the failure response is not JSON', async () => {
       const user = setupUser();
-      mockFetch.mockResolvedValue({ ok: false, json: jest.fn().mockRejectedValue(new SyntaxError('bad json')) });
+      mockFetch.mockResolvedValue({ ok: false, status: 502, json: jest.fn().mockRejectedValue(new SyntaxError('bad json')) });
       renderWithProviders(<NotificationsSection {...createProps()} />);
 
       await user.click(screen.getAllByRole('button', { name: 'Test notification' })[0]);
 
-      expect(await screen.findByText('✗ Network error - check console')).toBeInTheDocument();
+      expect(await screen.findByText('✗ Failed to send (HTTP 502)')).toBeInTheDocument();
     });
 
     it('tests only the chosen service', async () => {
@@ -481,6 +481,36 @@ describe('NotificationsSection editing, deleting and testing services', () => {
         });
 
         expect(screen.getByText('✓ Sent successfully!')).toBeInTheDocument();
+      });
+
+      it('does not let the countdown of a removed service clear the result of the one that moved up', async () => {
+        const user = userEvent.setup({ delay: null, advanceTimers: jest.advanceTimersByTime });
+        mockFetch.mockResolvedValue({ ok: true });
+        const props = createProps();
+        const { rerender } = renderWithProviders(<NotificationsSection {...props} />);
+        await user.click(screen.getAllByRole('button', { name: 'Test notification' })[0]);
+        await screen.findByText('✓ Sent successfully!');
+        act(() => {
+          jest.advanceTimersByTime(2000);
+        });
+        await user.click(screen.getAllByRole('button', { name: 'Test notification' })[1]);
+        await waitFor(() => expect(screen.getAllByText('✓ Sent successfully!')).toHaveLength(2));
+        act(() => {
+          jest.advanceTimersByTime(2000);
+        });
+
+        await user.click(screen.getAllByRole('button', { name: 'Remove notification URL' })[0]);
+        await user.click(screen.getByRole('button', { name: /^Remove$/ }));
+        rerender(<NotificationsSection {...props} config={createConfig({ appriseUrls: [TELEGRAM] })} />);
+        act(() => {
+          jest.advanceTimersByTime(2000);
+        });
+
+        expect(screen.getByText('✓ Sent successfully!')).toBeInTheDocument();
+        act(() => {
+          jest.advanceTimersByTime(3000);
+        });
+        expect(screen.queryByText('✓ Sent successfully!')).not.toBeInTheDocument();
       });
     });
 

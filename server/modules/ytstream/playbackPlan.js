@@ -154,7 +154,10 @@ async function resolveVideoCodec(youtubeId, quality, config, playerClient, quali
   const stdout = await ytDlpRunner.run(args, { timeoutMs: 30000 });
   const codec = String(stdout).trim().split(/\r?\n/)[0] || '';
   streamDebug({ youtubeId, quality, playerClient, qualityStrictness, videoFormat, codec }, 'ytstream: resolveVideoCodec resolved via live yt-dlp probe');
-  codecCache.set(cacheKey, codec);
+  // An empty result means the probe found nothing usable this time; don't
+  // remember it, so the next request retries instead of skipping the
+  // copy->h264 compatibility check for the life of the process.
+  if (codec) codecCache.set(cacheKey, codec);
   return codec;
 }
 
@@ -374,7 +377,9 @@ async function resolvePlaybackPlan(youtubeId, req, config, { probe }) {
     });
   }
 
-  const seekSeconds = req.query.t ? Number(req.query.t) : null;
+  // A t that is not a non-negative number (e.g. t=abc) means "no seek", not NaN.
+  const requestedSeek = req.query.t ? Number(req.query.t) : null;
+  const seekSeconds = Number.isFinite(requestedSeek) && requestedSeek >= 0 ? requestedSeek : null;
 
   // getModeFieldCompatibility is the single canonical source for all of
   // this - both the forced-value ENFORCEMENT below and the dry-run TEXT

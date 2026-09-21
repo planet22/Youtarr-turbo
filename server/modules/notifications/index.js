@@ -225,7 +225,9 @@ class NotificationModule {
       }
     }));
 
-    if (errors.length > 0 && errors.length === urls.length) {
+    // Report partial failures too: a test that quietly passes while one
+    // configured service is broken defeats its purpose.
+    if (errors.length > 0) {
       throw new Error(errors.join('; '));
     }
   }

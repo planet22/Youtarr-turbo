@@ -1,3 +1,7 @@
+// This suite's fixtures are POSIX paths, so run the code under test against POSIX
+// path semantics on every platform (a no-op on Linux).
+jest.mock('path', () => jest.requireActual('path').posix);
+
 jest.mock('fs');
 jest.mock('../../logger', () => ({
   info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn(),

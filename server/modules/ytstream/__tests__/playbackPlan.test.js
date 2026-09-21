@@ -189,6 +189,16 @@ describe('ytstream playbackPlan', () => {
       expect(ytDlpRunner.run).toHaveBeenCalledTimes(1);
     });
 
+    it('does not cache an empty result, so the next request probes again', async () => {
+      ytDlpRunner.run.mockResolvedValueOnce('').mockResolvedValueOnce('avc1');
+
+      await playbackPlan.resolveVideoCodec(YT_ID, '720', {}, 'web', 'fallback');
+      const second = await playbackPlan.resolveVideoCodec(YT_ID, '720', {}, 'web', 'fallback');
+
+      expect(second).toBe('avc1');
+      expect(ytDlpRunner.run).toHaveBeenCalledTimes(2);
+    });
+
     it('treats a missing strictness as fallback for caching', async () => {
       ytDlpRunner.run.mockResolvedValue('avc1');
 
@@ -300,6 +310,14 @@ describe('ytstream playbackPlan', () => {
 
       it('reads the seek position from t', async () => {
         expect((await plan({ t: '90' })).seekSeconds).toBe(90);
+      });
+
+      it.each(['abc', '-5', 'Infinity', '12s'])('treats t=%s as no seek position', async (t) => {
+        expect((await plan({ t })).seekSeconds).toBeNull();
+      });
+
+      it('keeps a fractional seek position', async () => {
+        expect((await plan({ t: '12.5' })).seekSeconds).toBe(12.5);
       });
 
       it('starts with the probe shortcut step', async () => {

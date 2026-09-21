@@ -312,6 +312,51 @@ describe('videos routes: remaining endpoints', () => {
     });
   });
 
+  describe('bulk delete and purge size limit', () => {
+    const ids = (n) => Array.from({ length: n }, (_, i) => i + 1);
+
+    it.each([
+      ['videoIds', { videoIds: ids(501) }],
+      ['youtubeIds', { youtubeIds: ids(501).map(String) }],
+    ])('rejects a delete with more than 500 %s', async (_label, body) => {
+      const { app } = makeApp();
+
+      const res = await supertest(app).delete('/api/videos').send(body);
+
+      expect(res.status).toBe(400);
+      expect(res.body).toEqual({ success: false, error: 'ids array exceeds maximum of 500' });
+      expect(videoDeletionModule.deleteVideos).not.toHaveBeenCalled();
+    });
+
+    it('accepts a delete of exactly 500 ids', async () => {
+      videoDeletionModule.deleteVideos.mockResolvedValue({ success: true });
+      const { app } = makeApp();
+
+      const res = await supertest(app).delete('/api/videos').send({ videoIds: ids(500) });
+
+      expect(res.status).toBe(200);
+    });
+
+    it('rejects a purge of more than 500 ids', async () => {
+      const { app } = makeApp();
+
+      const res = await supertest(app).delete('/api/videos/purge').send({ videoIds: ids(501) });
+
+      expect(res.status).toBe(400);
+      expect(res.body).toEqual({ success: false, error: 'videoIds array exceeds maximum of 500' });
+      expect(videoDeletionModule.purgeVideos).not.toHaveBeenCalled();
+    });
+
+    it('accepts a purge of exactly 500 ids', async () => {
+      videoDeletionModule.purgeVideos.mockResolvedValue({ success: true });
+      const { app } = makeApp();
+
+      const res = await supertest(app).delete('/api/videos/purge').send({ videoIds: ids(500) });
+
+      expect(res.status).toBe(200);
+    });
+  });
+
   describe('DELETE /api/videos/purge', () => {
     it.each([['missing', {}], ['empty', { videoIds: [] }], ['not an array', { videoIds: 4 }]])('rejects videoIds that are %s', async (_label, body) => {
       const { app } = makeApp();
@@ -501,15 +546,37 @@ describe('videos routes: remaining endpoints', () => {
       });
     });
 
-    it('answers 500 when reverting throws', async () => {
-      videoDeletionModule.revertToStrm.mockRejectedValue(new Error('io'));
+    it('records a video whose revert throws as failed and carries on with the rest', async () => {
+      videoDeletionModule.revertToStrm
+        .mockResolvedValueOnce({ success: true })
+        .mockRejectedValueOnce(new Error('io'))
+        .mockResolvedValueOnce({ success: true });
       const { app, log } = makeApp();
 
-      const res = await supertest(app).post('/api/videos/strm/revert').send({ videoIds: [1] });
+      const res = await supertest(app).post('/api/videos/strm/revert').send({ videoIds: [1, 2, 3] });
 
-      expect(res.status).toBe(500);
-      expect(res.body).toEqual({ success: false, error: 'io' });
-      expect(log.error).toHaveBeenCalled();
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ success: false, processed: [1, 3], failed: [{ videoId: 2, error: 'io' }] });
+      expect(log.error).toHaveBeenCalledWith(expect.objectContaining({ videoId: 2 }), 'Failed to revert video to STRM');
+    });
+
+    it('rejects more than 500 ids', async () => {
+      const { app } = makeApp();
+
+      const res = await supertest(app).post('/api/videos/strm/revert').send({ videoIds: Array.from({ length: 501 }, (_, i) => i + 1) });
+
+      expect(res.status).toBe(400);
+      expect(res.body).toEqual({ success: false, error: 'videoIds array exceeds maximum of 500' });
+      expect(videoDeletionModule.revertToStrm).not.toHaveBeenCalled();
+    });
+
+    it('accepts exactly 500 ids', async () => {
+      videoDeletionModule.revertToStrm.mockResolvedValue({ success: true });
+      const { app } = makeApp();
+
+      const res = await supertest(app).post('/api/videos/strm/revert').send({ videoIds: Array.from({ length: 500 }, (_, i) => i + 1) });
+
+      expect(res.status).toBe(200);
     });
   });
 
@@ -532,7 +599,7 @@ describe('videos routes: remaining endpoints', () => {
       await supertest(app).post('/api/auto-removal/dry-run').send({
         autoRemovalEnabled: true,
         autoRemovalVideoAgeThreshold: 30,
-        autoRemovalFreeSpaceThreshold: 5,
+        autoRemovalFreeSpaceThreshold: '5GB',
         autoRemovalWatchedEnabled: false,
         autoRemovalWatchedMinDaysSinceWatched: 7,
         autoRemovalWatchedMinVideoAgeDays: 14,
@@ -544,13 +611,60 @@ describe('videos routes: remaining endpoints', () => {
         overrides: {
           autoRemovalEnabled: true,
           autoRemovalVideoAgeThreshold: 30,
-          autoRemovalFreeSpaceThreshold: 5,
+          autoRemovalFreeSpaceThreshold: '5GB',
           autoRemovalWatchedEnabled: false,
           autoRemovalWatchedMinDaysSinceWatched: 7,
           autoRemovalWatchedMinVideoAgeDays: 14,
           autoRemovalKeepRecentCount: 3,
         },
       });
+    });
+
+    it.each([
+      ['autoRemovalVideoAgeThreshold', 'abc'],
+      ['autoRemovalVideoAgeThreshold', '30days'],
+      ['autoRemovalVideoAgeThreshold', -1],
+      ['autoRemovalVideoAgeThreshold', 1.5],
+      ['autoRemovalFreeSpaceThreshold', 5],
+      ['autoRemovalFreeSpaceThreshold', '5TB'],
+      ['autoRemovalFreeSpaceThreshold', 'lots'],
+      ['autoRemovalWatchedMinDaysSinceWatched', 'x'],
+      ['autoRemovalWatchedMinVideoAgeDays', {}],
+      ['autoRemovalKeepRecentCount', '3.5'],
+    ])('rejects %s = %p with 400 and runs nothing', async (field, value) => {
+      const { app } = makeApp();
+
+      const res = await supertest(app).post('/api/auto-removal/dry-run').send({ [field]: value });
+
+      expect(res.status).toBe(400);
+      expect(res.body).toEqual({ success: false, error: `Invalid ${field}` });
+      expect(videoDeletionModule.performAutomaticCleanup).not.toHaveBeenCalled();
+    });
+
+    it('accepts blank and zero overrides, which the settings page sends for "off"', async () => {
+      const { app } = makeApp();
+
+      const res = await supertest(app).post('/api/auto-removal/dry-run').send({
+        autoRemovalVideoAgeThreshold: '',
+        autoRemovalFreeSpaceThreshold: '',
+        autoRemovalWatchedMinDaysSinceWatched: null,
+        autoRemovalWatchedMinVideoAgeDays: '',
+        autoRemovalKeepRecentCount: 0,
+      });
+
+      expect(res.status).toBe(200);
+    });
+
+    it('accepts numbers given as digit strings and storage sizes with a unit', async () => {
+      const { app } = makeApp();
+
+      const res = await supertest(app).post('/api/auto-removal/dry-run').send({
+        autoRemovalVideoAgeThreshold: '30',
+        autoRemovalFreeSpaceThreshold: '500MB',
+        autoRemovalKeepRecentCount: '3',
+      });
+
+      expect(res.status).toBe(200);
     });
 
     it.each([
@@ -711,6 +825,20 @@ describe('videos routes: remaining endpoints', () => {
       expect(res.body).toEqual({ success: false, error: 'URL is required' });
     });
 
+    it.each([
+      ['an array', [VIDEO_URL]],
+      ['a number', 12345],
+      ['an object', { href: VIDEO_URL }],
+    ])('rejects a url that is %s', async (_label, url) => {
+      const { app, downloadModule } = makeApp();
+
+      const res = await post(app, { url });
+
+      expect(res.status).toBe(400);
+      expect(res.body).toEqual({ success: false, error: 'URL must be a string' });
+      expect(downloadModule.doGroupedManualDownloads).not.toHaveBeenCalled();
+    });
+
     it('rejects a url over 2048 characters', async () => {
       const { app } = makeApp();
 
@@ -812,6 +940,24 @@ describe('videos routes: remaining endpoints', () => {
       expect(res.status).toBe(200);
       await new Promise((resolve) => setImmediate(resolve));
       expect(log.warn).toHaveBeenCalledWith({ err: expect.any(Error) }, 'Failed to register download subfolder');
+    });
+
+    it('does not register the subfolder when the url fails metadata validation', async () => {
+      videoValidationModule.validateVideo.mockResolvedValue({ isValidUrl: false, error: 'Video unavailable' });
+      const { app } = makeApp();
+
+      const res = await post(app, { url: VIDEO_URL, subfolder: 'Music' });
+
+      expect(res.status).toBe(400);
+      expect(subfolderModule.register).not.toHaveBeenCalled();
+    });
+
+    it('does not register the subfolder when the url format is invalid', async () => {
+      const { app } = makeApp();
+
+      await post(app, { url: 'https://example.com/x', subfolder: 'Music' });
+
+      expect(subfolderModule.register).not.toHaveBeenCalled();
     });
 
     it('rejects a url that fails metadata validation with its reason', async () => {
@@ -1177,13 +1323,21 @@ describe('videos routes: remaining endpoints', () => {
       expect(downloadModule.doChannelAndPlaylistDownloads).not.toHaveBeenCalled();
     });
 
-    it.each([0, 51, 'abc', -1])('rejects the video count %p', async (videoCount) => {
+    it.each([0, 51, 'abc', -1, '25abc', 1.9, '1.9', null, ''])('rejects the video count %p', async (videoCount) => {
       const { app } = makeApp();
 
       const res = await post(app, { overrideSettings: { videoCount } });
 
       expect(res.status).toBe(400);
       expect(res.body.error).toBe('Invalid video count. Must be between 1 and 50');
+    });
+
+    it('passes the video count on as a number', async () => {
+      const { app, downloadModule } = makeApp();
+
+      await post(app, { overrideSettings: { videoCount: '25' } });
+
+      expect(downloadModule.doChannelAndPlaylistDownloads).toHaveBeenCalledWith({ overrideSettings: { videoCount: 25 } });
     });
 
     it.each([1, 50, '25'])('accepts the video count %p', async (videoCount) => {

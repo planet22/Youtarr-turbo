@@ -12,6 +12,7 @@ const { AUDIO_EXTENSIONS, MEDIA_EXTENSIONS } = require('./filesystem/constants')
 const { probeVideoDimensions } = require('./resolutionTier');
 const createLimiter = require('./subscriptionImport/concurrencyLimiter');
 const { formatRelativeTimeAgo } = require('./relativeTimeFormatter');
+const { escapeLikeWildcards } = require('../utils/escapeLike');
 
 // Backfill row updates are applied in parameterized batches of this size,
 // and flushed mid-chunk at the same cadence so completed work survives a
@@ -118,7 +119,7 @@ class VideosModule {
 
       if (search) {
         whereConditions.push('(Videos.youTubeVideoName LIKE :search OR Videos.youTubeChannelName LIKE :search)');
-        replacements.search = `%${search}%`;
+        replacements.search = `%${escapeLikeWildcards(search)}%`;
       }
 
       if (channelFilter) {
@@ -677,7 +678,7 @@ class VideosModule {
         OR JSON_UNQUOTE(JSON_EXTRACT(raw_info_json, '$.uploader')) LIKE :search
         OR JSON_UNQUOTE(JSON_EXTRACT(raw_info_json, '$.channel')) LIKE :search
       )`);
-      metadataReplacements.search = `%${search}%`;
+      metadataReplacements.search = `%${escapeLikeWildcards(search)}%`;
     }
     if (dateFrom) {
       // upload_date is yt-dlp's YYYYMMDD text, same format/comparison as
@@ -941,7 +942,7 @@ class VideosModule {
       // Get all channels from the channels table
       const Channel = require('../models/channel');
       const allChannels = await Channel.findAll({
-        attributes: ['title'],
+        attributes: ['uploader'],
         order: [['title', 'ASC']]
       });
 
@@ -1200,6 +1201,7 @@ class VideosModule {
         // Fetch a chunk of videos
         const videos = await Video.findAll({
           attributes: ['id', 'youtubeId', 'filePath', 'fileSize', 'audioFilePath', 'audioFileSize', 'removed', 'video_resolution'],
+          order: [['id', 'ASC']],
           limit: VIDEO_CHUNK_SIZE,
           offset: offset,
           raw: true
@@ -1594,6 +1596,7 @@ class VideosModule {
         checkTimeLimit();
         const videos = await Video.findAll({
           attributes: ['id', 'youtubeId', 'filePath'],
+          order: [['id', 'ASC']],
           limit: CHUNK_SIZE,
           offset,
           raw: true,
@@ -1930,6 +1933,7 @@ class VideosModule {
             'id', 'youtubeId', 'filePath', 'youTubeChannelName',
             'season', 'episode', 'normalized_rating', 'rating_source', 'is_strm', 'removed',
           ],
+          order: [['id', 'ASC']],
           limit: CHUNK_SIZE,
           offset,
           raw: true,

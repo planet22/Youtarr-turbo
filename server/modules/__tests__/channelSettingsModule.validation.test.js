@@ -20,7 +20,7 @@ describe('ChannelSettingsModule validators and previews', () => {
 
     execFileSync = jest.fn();
     Channel = { findOne: jest.fn(), findAll: jest.fn().mockResolvedValue([]) };
-    ChannelVideo = { findAll: jest.fn().mockResolvedValue([]) };
+    ChannelVideo = { findAll: jest.fn().mockResolvedValue([]), findOne: jest.fn().mockResolvedValue(null) };
     Video = { findOne: jest.fn() };
     JobVideoDownload = { count: jest.fn().mockResolvedValue(0), findAll: jest.fn().mockResolvedValue([]) };
     jobModule = { getAllJobs: jest.fn().mockReturnValue({}) };
@@ -50,7 +50,16 @@ describe('ChannelSettingsModule validators and previews', () => {
       const [cmd, args, options] = execFileSync.mock.calls[0];
       expect(cmd).toBe('python3');
       expect(args.slice(1)).toEqual(['(?P<season>\\d)', 'S2E5']);
-      expect(options).toMatchObject({ encoding: 'utf8', timeout: 1000 });
+      expect(options).toMatchObject({ encoding: 'utf8', timeout: 5000 });
+    });
+
+    it('reports a timeout as a timeout rather than as the raw spawn error', () => {
+      execFileSync.mockImplementation(() => { throw Object.assign(new Error('spawnSync python3 ETIMEDOUT'), { code: 'ETIMEDOUT' }); });
+
+      const result = mod.decodeSeasonEpisode('p', 't');
+
+      expect(result.matches).toBe(false);
+      expect(result.error).toBe('Timed out while checking the regex. The server may be busy - please try again.');
     });
 
     it('passes an empty title when none is given', () => {
@@ -116,6 +125,40 @@ describe('ChannelSettingsModule validators and previews', () => {
       execFileSync.mockReturnValue(JSON.stringify({ error: 'missing named groups' }));
 
       expect(mod.validateSeasonEpisodeRegex('bad')).toEqual({ valid: false, error: 'missing named groups' });
+    });
+
+    it('says the check timed out instead of blaming the pattern when python is too slow', () => {
+      execFileSync.mockImplementation(() => { throw Object.assign(new Error('spawnSync python3 ETIMEDOUT'), { code: 'ETIMEDOUT' }); });
+
+      expect(mod.validateSeasonEpisodeRegex('(?P<season>\\d)(?P<episode>\\d)')).toEqual({
+        valid: false,
+        error: 'Timed out while checking the regex. The server may be busy - please try again.',
+      });
+    });
+  });
+
+  describe('validateTitleRegex timeouts', () => {
+    it('gives the python check five seconds', () => {
+      execFileSync.mockReturnValue(JSON.stringify({ matches: false }));
+
+      mod.validateTitleRegex('a.*');
+
+      expect(execFileSync.mock.calls[0][2]).toMatchObject({ timeout: 5000 });
+    });
+
+    it('says the check timed out instead of calling the regex invalid', () => {
+      execFileSync.mockImplementation(() => { throw Object.assign(new Error('spawnSync python3 ETIMEDOUT'), { code: 'ETIMEDOUT' }); });
+
+      expect(mod.validateTitleRegex('a.*')).toEqual({
+        valid: false,
+        error: 'Timed out while checking the regex. The server may be busy - please try again.',
+      });
+    });
+
+    it('still reports other failures as an invalid pattern', () => {
+      execFileSync.mockImplementation(() => { throw new Error('spawn python3 ENOENT'); });
+
+      expect(mod.validateTitleRegex('a.*').error).toBe('Invalid Python regex pattern: spawn python3 ENOENT');
     });
   });
 
@@ -409,13 +452,36 @@ describe('ChannelSettingsModule validators and previews', () => {
       await expect(mod.hasActiveDownloads('UC1')).resolves.toBe(false);
     });
 
-    it('cannot attribute a download whose video row does not exist yet', async () => {
+    it('attributes a first-time download to the channel that lists the video', async () => {
       jobModule.getAllJobs.mockReturnValue(activeJob('j1'));
       JobVideoDownload.count.mockResolvedValue(1);
       JobVideoDownload.findAll.mockResolvedValue([{ youtube_id: 'brand-new' }]);
       Video.findOne.mockResolvedValue(null);
+      ChannelVideo.findOne.mockResolvedValue({ id: 5 });
+
+      await expect(mod.hasActiveDownloads('UC1')).resolves.toBe(true);
+      expect(ChannelVideo.findOne).toHaveBeenCalledWith({ where: { youtube_id: 'brand-new', channel_id: 'UC1' }, attributes: ['id'] });
+    });
+
+    it('is false for a first-time download that no listing of the channel contains', async () => {
+      jobModule.getAllJobs.mockReturnValue(activeJob('j1'));
+      JobVideoDownload.count.mockResolvedValue(1);
+      JobVideoDownload.findAll.mockResolvedValue([{ youtube_id: 'brand-new' }]);
+      Video.findOne.mockResolvedValue(null);
+      ChannelVideo.findOne.mockResolvedValue(null);
 
       await expect(mod.hasActiveDownloads('UC1')).resolves.toBe(false);
+    });
+
+    it('does not consult the listing when the video row already names another channel', async () => {
+      jobModule.getAllJobs.mockReturnValue(activeJob('j1'));
+      JobVideoDownload.count.mockResolvedValue(1);
+      JobVideoDownload.findAll.mockResolvedValue([{ youtube_id: 'a' }]);
+      Video.findOne.mockResolvedValue({ channel_id: 'other' });
+
+      await mod.hasActiveDownloads('UC1');
+
+      expect(ChannelVideo.findOne).not.toHaveBeenCalled();
     });
 
     it('looks the video up by YouTube id', async () => {

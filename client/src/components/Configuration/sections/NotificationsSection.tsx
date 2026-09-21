@@ -156,6 +156,17 @@ export const NotificationsSection: React.FC<NotificationsSectionProps> = ({
       setEditingName('');
       setEditingRichFormatting(true);
     }
+    // Pending clear-timers are keyed by index too: drop the removed webhook's
+    // and restart the others at their shifted index, so a timer can't later
+    // reset the status of a different webhook that moved into its old slot.
+    const pendingIndexes = Array.from(testStatusTimeoutsRef.current.keys());
+    pendingIndexes.forEach((timerIndex) => {
+      clearTimeout(testStatusTimeoutsRef.current.get(timerIndex));
+      testStatusTimeoutsRef.current.delete(timerIndex);
+    });
+    pendingIndexes
+      .filter((timerIndex) => timerIndex !== deleteIndex)
+      .forEach((timerIndex) => scheduleSuccessClear(timerIndex > deleteIndex ? timerIndex - 1 : timerIndex));
     // Clean up test status for removed webhook
     setWebhookTestStatus(prev => {
       const newStatus = { ...prev };
@@ -175,6 +186,21 @@ export const NotificationsSection: React.FC<NotificationsSectionProps> = ({
     
     setDeleteDialogOpen(false);
     setDeleteIndex(null);
+  };
+
+  // Clear the success status of the webhook at `index` after 5 seconds
+  const scheduleSuccessClear = (index: number) => {
+    const existingTimeout = testStatusTimeoutsRef.current.get(index);
+    if (existingTimeout) {
+      clearTimeout(existingTimeout);
+    }
+    testStatusTimeoutsRef.current.set(index, setTimeout(() => {
+      testStatusTimeoutsRef.current.delete(index);
+      setWebhookTestStatus(prev => ({
+        ...prev,
+        [index]: { status: 'idle' }
+      }));
+    }, 5000));
   };
 
   const handleTestWebhook = async (index: number, entry: AppriseUrlEntry) => {
@@ -203,23 +229,15 @@ export const NotificationsSection: React.FC<NotificationsSectionProps> = ({
           ...prev,
           [index]: { status: 'success', message: 'Sent successfully!' }
         }));
-        // Clear success status after 5 seconds
-        const existingTimeout = testStatusTimeoutsRef.current.get(index);
-        if (existingTimeout) {
-          clearTimeout(existingTimeout);
-        }
-        testStatusTimeoutsRef.current.set(index, setTimeout(() => {
-          testStatusTimeoutsRef.current.delete(index);
-          setWebhookTestStatus(prev => ({
-            ...prev,
-            [index]: { status: 'idle' }
-          }));
-        }, 5000));
+        scheduleSuccessClear(index);
       } else {
-        const error = await response.json();
+        const error = await response.json().catch(() => null);
+        const message = error
+          ? error.message || 'Failed to send'
+          : `Failed to send (HTTP ${response.status})`;
         setWebhookTestStatus(prev => ({
           ...prev,
-          [index]: { status: 'error', message: error.message || 'Failed to send' }
+          [index]: { status: 'error', message }
         }));
       }
     } catch (error) {

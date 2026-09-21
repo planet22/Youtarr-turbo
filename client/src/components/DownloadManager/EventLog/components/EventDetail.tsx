@@ -1,7 +1,7 @@
 import React from 'react';
 import { Box, Typography } from '../../../ui';
 import type { JobEvent } from '../../../../types/JobEvent';
-import { describeDetailEntries, trackedLabel } from '../eventLogFormat';
+import { componentLabel, describeDetailEntries, trackedLabel } from '../eventLogFormat';
 
 interface EventDetailProps {
   event: JobEvent;
@@ -19,7 +19,7 @@ const EventDetail: React.FC<EventDetailProps> = ({ event }) => {
     { label: 'Exact time', value: event.occurredAt },
     { label: 'Event type', value: event.eventType },
     { label: 'Level', value: event.level },
-    { label: 'Actor', value: event.actor || '' },
+    { label: 'Component', value: componentLabel(event.actor) },
     { label: 'In library', value: trackedLabel(event.isTracked) },
     { label: 'Video id', value: event.youtubeId || '' },
     { label: 'Video title', value: event.videoTitle || '' },

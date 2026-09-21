@@ -106,6 +106,34 @@ export function describeDetailEntries(detail: Record<string, unknown> | null): D
 }
 
 // Whether the video was in the library when the event happened.
+// ---- Component: which part of the app recorded the event ------------------
+
+// The stored value is the internal name ("media-server"); people read this.
+// "Video library" rather than "Library" so it is not mistaken for the Library
+// (in the library or not) column and filter.
+const COMPONENT_LABELS: Record<string, string> = {
+  downloader: 'Downloader',
+  library: 'Video library',
+  job: 'Job',
+  nzb: 'NZB',
+  strm: 'STRM',
+  ytstream: 'Streaming',
+  'media-server': 'Media server',
+  youtube: 'YouTube',
+  maintenance: 'Maintenance',
+  'auto-removal': 'Auto-removal',
+  'strm-cache-expiry': 'STRM cache expiry',
+};
+
+// Anything not listed reads as its own name with dashes as spaces.
+export function componentLabel(actor: string | null): string {
+  if (!actor) return '';
+  const known = COMPONENT_LABELS[actor];
+  if (known) return known;
+  const spaced = actor.replace(/[-_]+/g, ' ');
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+}
+
 export const TRACKED_OPTIONS: readonly string[] = ['tracked', 'untracked'];
 
 export function trackedLabel(isTracked: boolean | null): string {

@@ -22,6 +22,7 @@ import {
   dayStartIso,
   EVENT_LEVEL_FILTER_OPTIONS,
   TRACKED_OPTIONS,
+  componentLabel,
 } from './eventLogFormat';
 
 // Deep-link parameters (e.g. from a link to one job's or video's timeline).
@@ -127,7 +128,13 @@ const EventLog: React.FC<EventLogProps> = ({ token }) => {
       { id: 'select', label: 'Level', value: level, options: [...EVENT_LEVEL_FILTER_OPTIONS], onChange: setLevel },
       { id: 'select', label: 'Event type', value: eventType, options: facets.eventTypes, onChange: setEventType },
       { id: 'select', label: 'Source', value: source, options: facets.sources, onChange: setSource },
-      { id: 'select', label: 'Actor', value: actor, options: facets.actors, onChange: setActor },
+      {
+        id: 'select',
+        label: 'Component',
+        value: componentLabel(actor),
+        options: facets.actors.map(componentLabel),
+        onChange: (label: string) => setActor(facets.actors.find((name) => componentLabel(name) === label) ?? label),
+      },
       { id: 'select', label: 'Channel', value: channel, options: facets.channels, onChange: setChannel },
       { id: 'select', label: 'Library', value: tracked, options: [...TRACKED_OPTIONS], onChange: setTracked },
       { id: 'dateRangeString', label: 'Occurred', dateFrom, dateTo, onFromChange: setDateFrom, onToChange: setDateTo },

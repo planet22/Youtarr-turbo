@@ -1,4 +1,4 @@
-import { EVENT_LEVEL_OPTIONS, eventLevelColor, formatEventDelta, formatEventTime } from '../eventLogFormat';
+import { componentLabel, EVENT_LEVEL_OPTIONS, eventLevelColor, formatEventDelta, formatEventTime } from '../eventLogFormat';
 
 describe('eventLogFormat', () => {
   describe('formatEventTime', () => {
@@ -113,5 +113,28 @@ describe('detail formatting', () => {
 
   test('has nothing to show when there is no detail', () => {
     expect(describeDetailEntries(null)).toEqual([]);
+  });
+});
+
+describe('componentLabel', () => {
+  test.each([
+    ['downloader', 'Downloader'],
+    ['library', 'Video library'],
+    ['media-server', 'Media server'],
+    ['ytstream', 'Streaming'],
+    ['nzb', 'NZB'],
+    ['strm', 'STRM'],
+    ['youtube', 'YouTube'],
+    ['strm-cache-expiry', 'STRM cache expiry'],
+  ])('shows %s as %s', (actor, label) => {
+    expect(componentLabel(actor)).toBe(label);
+  });
+
+  test('reads an unlisted component as its own name with dashes as spaces', () => {
+    expect(componentLabel('some-new-part')).toBe('Some new part');
+  });
+
+  test('is empty when there is no component', () => {
+    expect(componentLabel(null)).toBe('');
   });
 });

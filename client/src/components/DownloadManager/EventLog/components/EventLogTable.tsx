@@ -16,7 +16,7 @@ import { ChevronDown } from 'lucide-react';
 import type { JobEvent } from '../../../../types/JobEvent';
 import type { VideoData } from '../../../../types/VideoData';
 import VideoThumbnail from '../../VideoThumbnail';
-import { eventLevelColor, formatEventDelta, formatEventTime, trackedLabel } from '../eventLogFormat';
+import { componentLabel, eventLevelColor, formatEventDelta, formatEventTime, trackedLabel } from '../eventLogFormat';
 import EventDetail from './EventDetail';
 
 interface EventLogTableProps {
@@ -180,7 +180,7 @@ const EventLogTable: React.FC<EventLogTableProps> = ({ events, timeline, isMobil
                 <ChannelCell {...cell} />
                 <SourceCell {...cell} />
                 <Typography variant="caption" color="secondary">{event.eventType}</Typography>
-                {event.actor && <Typography variant="caption" color="secondary">{event.actor}</Typography>}
+                {event.actor && <Typography variant="caption" color="secondary">{componentLabel(event.actor)}</Typography>}
               </Box>
               {expanded.has(event.id) && <EventDetail event={event} />}
             </Box>
@@ -203,7 +203,7 @@ const EventLogTable: React.FC<EventLogTableProps> = ({ events, timeline, isMobil
             <TableCell component="th">Library</TableCell>
             <TableCell component="th">Source</TableCell>
             <TableCell component="th">Type</TableCell>
-            <TableCell component="th">Actor</TableCell>
+            <TableCell component="th">Component</TableCell>
             <TableCell component="th">Level</TableCell>
             <TableCell component="th">Event</TableCell>
           </TableRow>
@@ -222,7 +222,7 @@ const EventLogTable: React.FC<EventLogTableProps> = ({ events, timeline, isMobil
                   <TableCell>{trackedLabel(event.isTracked)}</TableCell>
                   <TableCell><SourceCell {...cell} /></TableCell>
                   <TableCell>{event.eventType}</TableCell>
-                  <TableCell>{event.actor || ''}</TableCell>
+                  <TableCell>{componentLabel(event.actor)}</TableCell>
                   <TableCell><LevelCell {...cell} /></TableCell>
                   <TableCell>{event.message}</TableCell>
                 </TableRow>

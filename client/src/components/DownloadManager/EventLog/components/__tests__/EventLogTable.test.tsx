@@ -62,11 +62,11 @@ describe('EventLogTable', () => {
       expect(screen.getByText('nzb.untracked')).toBeInTheDocument();
     });
 
-    test('shows the actor in its own column', () => {
-      setup([event(1)]);
+    test('shows the component in its own column, in plain words', () => {
+      setup([event(1, { actor: 'media-server' })]);
 
-      expect(screen.getByRole('columnheader', { name: 'Actor' })).toBeInTheDocument();
-      expect(screen.getByText('nzb')).toBeInTheDocument();
+      expect(screen.getByRole('columnheader', { name: 'Component' })).toBeInTheDocument();
+      expect(screen.getByText('Media server')).toBeInTheDocument();
     });
 
     test('shows the channel in its own column', () => {

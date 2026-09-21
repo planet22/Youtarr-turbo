@@ -251,7 +251,7 @@ function VideosTable({
                           Untracked
                         </Box>
                       )}
-                      {video.youtube_removed && (
+                      {Boolean(video.youtube_removed) && (
                         <Box
                           style={{
                             position: 'absolute',
@@ -270,7 +270,7 @@ function VideosTable({
                           Removed
                         </Box>
                       )}
-                      {video.removed && (
+                      {Boolean(video.removed) && (
                         <Box
                           style={{
                             position: 'absolute',

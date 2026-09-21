@@ -157,7 +157,7 @@ function VideoCard({
           </Box>
         )}
 
-        {video.youtube_removed && (
+        {Boolean(video.youtube_removed) && (
           <Box
             style={{
               position: 'absolute',
@@ -177,7 +177,7 @@ function VideoCard({
           </Box>
         )}
 
-        {video.removed && (
+        {Boolean(video.removed) && (
           <Box
             style={{
               position: 'absolute',

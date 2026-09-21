@@ -189,7 +189,7 @@ function VideosListMobile({
                   Untracked
                 </Box>
               )}
-              {video.youtube_removed && (
+              {Boolean(video.youtube_removed) && (
                 <Box
                   style={{
                     position: 'absolute',
@@ -208,7 +208,7 @@ function VideosListMobile({
                   Removed
                 </Box>
               )}
-              {video.removed && (
+              {Boolean(video.removed) && (
                 <Box
                   style={{
                     position: 'absolute',

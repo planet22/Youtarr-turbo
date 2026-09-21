@@ -273,6 +273,9 @@ function VideosPage({ token }: VideosPageProps) {
   // branch). Mobile's List view is the main place this was visible, since
   // its compact rows make scrolling deep into hot-loaded pages routine.
   const refetchList = useCallback(() => {
+    // Give thumbnails that errored earlier (e.g. requested before the file
+    // landed) another chance instead of staying "No thumbnail" until reload.
+    setImageErrors({});
     if (useInfiniteScroll && page > 1) {
       setVideos([]);
       setPage(1);

@@ -12,6 +12,7 @@ jest.mock('../configModule', () => ({ directoryPath: mockRoot }));
 jest.mock('child_process', () => ({ spawn: jest.fn() }));
 
 const { spawn } = require('child_process');
+const jobEventLog = require('../jobEventLog');
 const { ensureSeekableMp4, findExistingSeekableMp4 } = require('../tsRemuxCache');
 
 const CACHE_DIR = path.join(mockRoot, '.youtarr_ytstream_cache', 'ts-remux');
@@ -84,6 +85,51 @@ describe('tsRemuxCache', () => {
       fs.writeFileSync(sourcePath, 'a different and longer set of bytes');
 
       expect(findExistingSeekableMp4(sourcePath)).toBeNull();
+    });
+  });
+
+  describe('ensureSeekableMp4 events', () => {
+    it('records the remux against the video named in the file name', async () => {
+      const namedPath = path.join(sourceDir, 'Channel - Title  [abcDEF12345].ts');
+      fs.writeFileSync(namedPath, 'mpegts-bytes');
+      succeedWith('remuxed');
+
+      const cachePath = await ensureSeekableMp4(namedPath);
+
+      expect(jobEventLog.record).toHaveBeenCalledWith('cache.remuxed_for_playback', {
+        youtubeId: 'abcDEF12345',
+        detail: { filePath: namedPath, cachePath, size: 'remuxed'.length },
+      });
+    });
+
+    it('still records the remux, without a video, when the file name has no video id', async () => {
+      succeedWith();
+
+      await ensureSeekableMp4(sourcePath);
+
+      expect(jobEventLog.record).toHaveBeenCalledWith('cache.remuxed_for_playback', expect.objectContaining({ youtubeId: undefined }));
+    });
+
+    it('does not record again when the remux was already cached', async () => {
+      succeedWith();
+      await ensureSeekableMp4(sourcePath);
+      jobEventLog.record.mockClear();
+
+      await ensureSeekableMp4(sourcePath);
+
+      expect(jobEventLog.record).not.toHaveBeenCalled();
+    });
+
+    it('records nothing when ffmpeg fails', async () => {
+      spawn.mockImplementation(() => {
+        const ff = fakeFfmpeg();
+        setImmediate(() => ff.emit('close', 1));
+        return ff;
+      });
+
+      await ensureSeekableMp4(sourcePath);
+
+      expect(jobEventLog.record).not.toHaveBeenCalled();
     });
   });
 

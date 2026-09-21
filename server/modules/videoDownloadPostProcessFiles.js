@@ -13,6 +13,8 @@ const { probeVideoDimensions, probeVideoDuration, selectionTierForHeight } = req
 const hardwareEncoderModule = require('./hardwareEncoderModule');
 const { TRANSCODE_PROGRESS_MARKER } = require('./constants/outputMarkers');
 const { JobVideoDownload } = require('../models');
+const jobEventLog = require('./jobEventLog');
+const { EVENT_TYPES } = require('./jobEventLog/eventCatalog');
 const videoPersistence = require('./videoPersistence');
 const { VIDEO_PERSISTED_MARKER } = require('./constants/outputMarkers');
 const logger = require('../logger');
@@ -667,6 +669,8 @@ async function resolveTrackedOwnerChannelId(youtubeId, metadataChannelId) {
 // Main execution wrapped in async IIFE to handle async operations
 (async () => {
   if (fs.existsSync(jsonPath)) {
+    // Set when the optional post-download transcode changes the file; logged once the video id is known.
+    let transcodeEvent = null;
     // Optional post-download transcode (config.downloadTranscodeVideoCodec,
     // off by default) - run first, before anything else (NFO/AtomicParsley/
     // moves) touches the file, so every downstream step already sees the
@@ -676,6 +680,11 @@ async function resolveTrackedOwnerChannelId(youtubeId, metadataChannelId) {
     if (parsedPath.ext.toLowerCase() !== '.mp3') {
       const transcodedPath = await transcodeDownloadedVideo(videoPath);
       if (transcodedPath !== videoPath) {
+        transcodeEvent = {
+          at: new Date(),
+          from: path.basename(videoPath),
+          codec: configModule.getConfig().downloadTranscodeVideoCodec,
+        };
         videoPath = transcodedPath;
         parsedPath = path.parse(videoPath);
       }
@@ -1600,6 +1609,30 @@ async function resolveTrackedOwnerChannelId(youtubeId, metadataChannelId) {
         if (updatedCount > 0) {
           logger.info({ id, activeJobId, finalVideoPath }, 'Marked video as completed in tracking');
         }
+        // Size is best-effort context for the log only; a stat failure must not matter here.
+        let finalFileSize;
+        try {
+          finalFileSize = fs.statSync(finalVideoPath).size;
+        } catch (statErr) {
+          finalFileSize = undefined;
+        }
+        if (transcodeEvent) {
+          jobEventLog.record(EVENT_TYPES.VIDEO_TRANSCODED, {
+            jobId: activeJobId,
+            youtubeId: id,
+            videoTitle: jsonData.title,
+            channelName: jsonData.uploader || jsonData.channel,
+            occurredAt: transcodeEvent.at,
+            detail: { from: transcodeEvent.from, to: path.basename(finalVideoPath), codec: transcodeEvent.codec },
+          });
+        }
+        jobEventLog.record(EVENT_TYPES.VIDEO_FILE_FINALIZED, {
+          jobId: activeJobId,
+          youtubeId: id,
+          videoTitle: jsonData.title,
+          channelName: jsonData.uploader || jsonData.channel,
+          detail: { filePath: finalVideoPath, fileSize: finalFileSize },
+        });
       } catch (err) {
         logger.error({ err, id }, 'Error updating JobVideoDownload status');
         // Don't fail the entire post-processing if this fails

@@ -1,5 +1,7 @@
 const path = require('path');
 const logger = require('../logger');
+const jobEventLog = require('./jobEventLog');
+const { EVENT_TYPES } = require('./jobEventLog/eventCatalog');
 
 /**
  * Opportunistically caches a STRM library item to a real downloaded file the
@@ -98,7 +100,7 @@ async function _enqueueCacheDownload(youtubeId) {
   logger.info({ youtubeId, targetDir, fileStem }, 'STRM cache-on-play: enqueuing background download');
 
   const downloadModule = require('./downloadModule');
-  await downloadModule.doSpecificDownloads({
+  const cacheJobId = await downloadModule.doSpecificDownloads({
     body: {
       urls: [`https://www.youtube.com/watch?v=${youtubeId}`],
       jobLabel: `${STRM_CACHE_LABEL_PREFIX}${video.youTubeVideoName || youtubeId} [${youtubeId}]`,
@@ -124,6 +126,12 @@ async function _enqueueCacheDownload(youtubeId) {
   // not full job completion, same as every other caller. This enqueues as a
   // normal 'Pending' job - the only existing concurrency guard (one global
   // in-progress job) - it never jumps ahead of anything already queued.
+  jobEventLog.record(EVENT_TYPES.STRM_CACHE_ON_PLAY_QUEUED, {
+    jobId: cacheJobId || undefined,
+    youtubeId,
+    videoTitle: video.youTubeVideoName,
+    detail: { targetDir },
+  });
   return { queued: true };
 }
 

@@ -20,6 +20,8 @@ const path = require('path');
 const { pipeline } = require('stream/promises');
 const logger = require('../../logger');
 const configModule = require('../configModule');
+const jobEventLog = require('../jobEventLog');
+const { EVENT_TYPES } = require('../jobEventLog/eventCatalog');
 const { streamDebug } = require('./streamDebug');
 const { resolveVideoTargetResolution } = require('./videoResolution');
 const { findWarmUntrackedBufferCache, getUntrackedBufferCacheMp4Path } = require('./untrackedBufferCache');
@@ -387,6 +389,12 @@ function createCacheFinalize({ hlsSessions }) {
         timeCreated: jobInstance.timeCreated,
         data: { videos: [{ id: videoInstance.id }] },
       };
+
+      jobEventLog.record(EVENT_TYPES.CACHE_PROMOTED_TO_LIBRARY, {
+        jobId: jobInstance.id,
+        youtubeId,
+        detail: { filePath: libraryMp4Path, fileSize, hiddenTsPath },
+      });
 
       logger.info(
         { ...context, hiddenTsPath, libraryMp4Path },

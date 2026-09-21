@@ -94,6 +94,7 @@ function initialize(deps = {}) {
   const notificationModule = require('./notificationModule');
   const ytdlpModule = require('./ytdlpModule');
   const configModule = require('./configModule');
+  const jobEventLog = require('./jobEventLog');
   const { refreshYtDlpVersionCache } = deps;
 
   logger.info('Initializing scheduled cron jobs');
@@ -110,7 +111,10 @@ function initialize(deps = {}) {
   }, async () => {
     logger.info('Running automatic video cleanup cron job');
     try {
-      const result = await videoDeletionModule.performAutomaticCleanup();
+      const result = await jobEventLog.runWithContext(
+        { actor: 'auto-removal', reason: 'automatic removal' },
+        () => videoDeletionModule.performAutomaticCleanup()
+      );
 
       if (result.totalDeleted > 0) {
         logger.info({
@@ -159,7 +163,10 @@ function initialize(deps = {}) {
     confirm: false,
   }, async () => {
     try {
-      const result = await videoDeletionModule.sweepExpiredCachedVideos();
+      const result = await jobEventLog.runWithContext(
+        { actor: 'strm-cache-expiry', reason: 'STRM cache-on-play expiry' },
+        () => videoDeletionModule.sweepExpiredCachedVideos()
+      );
       if (result.reverted > 0 || result.failed > 0) {
         logger.info(result, 'STRM cache-on-play expiry sweep completed');
       }
@@ -173,7 +180,10 @@ function initialize(deps = {}) {
     // ytstream.js's sweepExpiredUntrackedBufferCache doc comment.
     try {
       const ytstreamRoutes = require('../routes/ytstream');
-      const bufferResult = await ytstreamRoutes.sweepExpiredUntrackedBufferCache();
+      const bufferResult = await jobEventLog.runWithContext(
+        { actor: 'strm-cache-expiry', reason: 'STRM cache-on-play expiry' },
+        () => ytstreamRoutes.sweepExpiredUntrackedBufferCache()
+      );
       if (bufferResult.deleted > 0) {
         logger.info(bufferResult, 'Untracked hls-buffer cache expiry sweep completed');
       }
@@ -282,6 +292,26 @@ function initialize(deps = {}) {
       if (result > 0) logger.info({ removed: result, retentionDays }, 'Pruned stale entries from the untracked-video YouTube metadata cache');
     } catch (error) {
       logger.error({ err: error }, 'Error pruning youtube_metadata_cache');
+    }
+  });
+
+  // ============================================================================
+  // VIDEO/EVENTS LOG PRUNE - 3:25 AM Daily
+  // ============================================================================
+  // job_events (server/modules/jobEventLog) is append-only, so this is the only
+  // thing that ever removes rows. Retention is jobEventLogRetentionDays
+  // (default 180, 0 keeps everything).
+  defineTask({
+    id: 'job-event-prune',
+    label: 'Video/events log prune',
+    description: 'Removes video/events log rows older than the configured retention.',
+    cron: '25 3 * * *',
+    confirm: false,
+  }, async () => {
+    try {
+      await jobEventLog.prune();
+    } catch (error) {
+      logger.error({ err: error }, 'Error pruning the video/events log');
     }
   });
 

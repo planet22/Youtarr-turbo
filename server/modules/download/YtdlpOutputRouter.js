@@ -7,6 +7,8 @@ const logger = require('../../logger');
 const MessageEmitter = require('../messageEmitter');
 const filesystem = require('../filesystem');
 const { JobVideoDownload } = require('../../models');
+const jobEventLog = require('../jobEventLog');
+const { EVENT_TYPES } = require('../jobEventLog/eventCatalog');
 const { VIDEO_PERSISTED_MARKER, TRANSCODE_PROGRESS_MARKER } = require('../constants/outputMarkers');
 
 const PROGRESS_THROTTLE_MS = 250;
@@ -112,6 +114,17 @@ class YtdlpOutputRouter {
                   youtube_id: youtubeId,
                   file_path: videoDir,
                   status: 'in_progress'
+                }
+              }).then((result) => {
+                // findOrCreate resolves [row, created]; log only the first
+                // sighting of this video's destination, not every later file
+                // (thumbnail, subtitles, fragments) for the same video.
+                if (result && result[1]) {
+                  jobEventLog.record(EVENT_TYPES.VIDEO_DOWNLOAD_STARTED, {
+                    jobId: this.jobId,
+                    youtubeId,
+                    detail: { destination: destPath },
+                  });
                 }
               }).catch(err => {
                 logger.error({ err }, 'Error creating JobVideoDownload tracking entry');

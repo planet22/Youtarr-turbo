@@ -5,6 +5,8 @@ const path = require('path');
 const logger = require('../logger');
 const { isVideoDirectory, cleanupEmptyChannelDirectory, cleanupEmptyParents, removeEmptyDescendants, isSubfolderDir, listSubdirectories, removeDirectoryResilient } = require('./filesystem');
 const m3uGenerator = require('./m3uGenerator');
+const jobEventLog = require('./jobEventLog');
+const { EVENT_TYPES } = require('./jobEventLog/eventCatalog');
 
 class VideoDeletionModule {
   constructor() {}
@@ -82,6 +84,21 @@ class VideoDeletionModule {
     }
   }
 
+  // Title/channel come from the row in hand, so the log entry stays readable
+  // even if the Video row is later purged. Who asked for the deletion (the
+  // nightly auto-removal, ...) arrives via jobEventLog.runWithContext.
+  recordVideoDeleted(video, detail = {}) {
+    jobEventLog.record(EVENT_TYPES.VIDEO_DELETED, {
+      youtubeId: video.youtubeId,
+      videoTitle: video.youTubeVideoName,
+      channelName: video.youTubeChannelName,
+      // A purge deletes the row itself, so the video is no longer in the library;
+      // an ordinary delete keeps the row (marked removed), so nothing is claimed.
+      isTracked: detail.purged ? false : undefined,
+      detail,
+    });
+  }
+
   /**
    * Delete a single video by ID
    * Deletes the video directory from disk and marks the video as removed in the database
@@ -114,6 +131,7 @@ class VideoDeletionModule {
       if (!video.filePath) {
         // No file path, just mark as removed in database
         await video.update({ removed: true });
+        this.recordVideoDeleted(video, { noFilePath: true });
         return {
           success: true,
           videoId,
@@ -198,6 +216,7 @@ class VideoDeletionModule {
 
       // Mark video as removed in database
       await video.update({ removed: true });
+      this.recordVideoDeleted(video, { filePath: video.filePath });
 
       // Best-effort cleanup of empty channel directory
       await this._tryCleanupChannelDirectory(video.filePath, flat);
@@ -319,6 +338,13 @@ class VideoDeletionModule {
           logger.warn({ err: archiveErr, videoId: video.id, youtubeId: video.youtubeId }, '[Auto-Removal] Failed to remove reverted video from yt-dlp archive');
         }
       }
+
+      jobEventLog.record(EVENT_TYPES.VIDEO_REVERTED_TO_STRM, {
+        youtubeId: video.youtubeId,
+        videoTitle: video.youTubeVideoName,
+        channelName: video.youTubeChannelName,
+        detail: { restoredStrmPath },
+      });
 
       return {
         success: true,
@@ -594,6 +620,7 @@ class VideoDeletionModule {
         await VideoWatchStatus.destroy({ where: { video_id: videoId }, transaction });
         await video.destroy({ transaction });
       });
+      this.recordVideoDeleted(video, { purged: true });
 
       // yt-dlp's download-archive otherwise still remembers this video, so a
       // later backfillFromCompleteList run (server startup, or the daily

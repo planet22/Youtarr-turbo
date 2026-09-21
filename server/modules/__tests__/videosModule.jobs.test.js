@@ -645,5 +645,48 @@ describe('VideosModule maintenance jobs', () => {
 
       await expect(videosModule.setVideoProtection(4, true)).rejects.toThrow('Video not found');
     });
+
+    describe('video/events log', () => {
+      const row = () => ({
+        id: 4, youtubeId: 'abc123', youTubeVideoName: 'A Title', youTubeChannelName: 'A Channel',
+        update: jest.fn().mockResolvedValue(undefined),
+      });
+
+      it('records video.protected with the video facts when protection is turned on', async () => {
+        Video.findByPk = jest.fn().mockResolvedValue(row());
+
+        await videosModule.setVideoProtection(4, true);
+
+        expect(require('../jobEventLog').record).toHaveBeenCalledWith('video.protected', {
+          youtubeId: 'abc123', videoTitle: 'A Title', channelName: 'A Channel',
+        });
+      });
+
+      it('records video.unprotected when protection is turned off', async () => {
+        Video.findByPk = jest.fn().mockResolvedValue(row());
+
+        await videosModule.setVideoProtection(4, false);
+
+        expect(require('../jobEventLog').record).toHaveBeenCalledWith('video.unprotected', expect.objectContaining({ youtubeId: 'abc123' }));
+      });
+
+      it('records nothing when the video does not exist', async () => {
+        Video.findByPk = jest.fn().mockResolvedValue(null);
+
+        await expect(videosModule.setVideoProtection(4, true)).rejects.toThrow('Video not found');
+
+        expect(require('../jobEventLog').record).not.toHaveBeenCalled();
+      });
+
+      it('records nothing when saving the flag fails', async () => {
+        const failing = row();
+        failing.update.mockRejectedValue(new Error('db down'));
+        Video.findByPk = jest.fn().mockResolvedValue(failing);
+
+        await expect(videosModule.setVideoProtection(4, true)).rejects.toThrow('db down');
+
+        expect(require('../jobEventLog').record).not.toHaveBeenCalled();
+      });
+    });
   });
 });

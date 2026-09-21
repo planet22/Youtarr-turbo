@@ -52,6 +52,7 @@ const videoSearchModule = require('../../modules/videoSearchModule');
 const nzbThumbnailProbe = require('../../modules/nzbThumbnailProbe');
 const nzbDiagnosticLog = require('../../modules/nzbDiagnosticLog');
 const jobModule = require('../../modules/jobModule');
+const jobEventLog = require('../../modules/jobEventLog');
 const downloadModule = require('../../modules/downloadModule');
 const archiveModule = require('../../modules/archiveModule');
 const { cleanupEmptyParents } = require('../../modules/filesystem');
@@ -250,6 +251,30 @@ describe('nzb routes', () => {
         await get(url('&t=search&q=my+show'));
 
         expect(videoSearchModule.searchVideos).toHaveBeenCalledWith('my show', 25, { origin: 'nzb', searchId: expect.any(String) });
+      });
+
+      it('remembers the real title and channel of each result for the video/events log', async () => {
+        videoSearchModule.searchVideos.mockResolvedValue([result('aaaaaaaaaaa', 'Match One', { channelName: 'Some Channel' })]);
+
+        await get(url('&t=search&q=cats'));
+
+        expect(jobEventLog.rememberVideo).toHaveBeenCalledWith('aaaaaaaaaaa', { title: 'Match One', channelName: 'Some Channel' });
+      });
+
+      it('remembers every result offered, not just the first', async () => {
+        videoSearchModule.searchVideos.mockResolvedValue([result('aaaaaaaaaaa', 'One'), result('bbbbbbbbbbb', 'Two')]);
+
+        await get(url('&t=search&q=cats'));
+
+        expect(jobEventLog.rememberVideo).toHaveBeenCalledTimes(2);
+      });
+
+      it('remembers nothing when the search finds nothing', async () => {
+        videoSearchModule.searchVideos.mockResolvedValue([]);
+
+        await get(url('&t=search&q=cats'));
+
+        expect(jobEventLog.rememberVideo).not.toHaveBeenCalled();
       });
 
       it('returns the results as a feed', async () => {

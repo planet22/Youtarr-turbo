@@ -5,6 +5,8 @@ const configModule = require('./configModule');
 const plexModule = require('./plexModule');
 const { Op } = require('sequelize');
 const logger = require('../logger');
+const jobEventLog = require('./jobEventLog');
+const { EVENT_TYPES } = require('./jobEventLog/eventCatalog');
 const ratingMapper = require('./ratingMapper');
 
 const { MEDIA_TAB_TYPE_MAP, VALID_TAB_TYPES, parseTabCsv } = require('./tabsUtils');
@@ -1369,7 +1371,17 @@ class ChannelSettingsModule {
           continue;
         }
 
+        const previousPaths = { filePath: video.filePath, audioFilePath: video.audioFilePath };
         await video.update(update);
+        jobEventLog.record(EVENT_TYPES.VIDEO_MOVED, {
+          youtubeId: video.youtubeId,
+          videoTitle: video.youTubeVideoName,
+          channelName: video.youTubeChannelName,
+          detail: {
+            from: previousPaths.filePath || previousPaths.audioFilePath,
+            to: update.filePath || update.audioFilePath,
+          },
+        });
         logger.info({ videoId: video.id, update }, 'Updated video file paths');
         updateCount++;
       }

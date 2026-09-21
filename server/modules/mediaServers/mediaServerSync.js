@@ -1,4 +1,6 @@
 const logger = require('../../logger');
+const jobEventLog = require('../jobEventLog');
+const { EVENT_TYPES } = require('../jobEventLog/eventCatalog');
 const configModule = require('../configModule');
 const serverRegistry = require('./serverRegistry');
 const { MediaServerUnavailableError, describeHttpError } = require('./adapters/baseAdapter');
@@ -30,6 +32,7 @@ class MediaServerSync {
     // Tradeoff: if the initial run rejects, joiners share that rejection and
     // any rerun they requested is dropped (a later call starts fresh).
     this._inFlight = new Map();
+    this.lastSyncedIds = new Map();
   }
 
   syncPlaylist(playlistId) {
@@ -133,10 +136,13 @@ class MediaServerSync {
       entries.map((entry) => entry.filePath)
     );
     const itemIds = [];
+    const syncedYoutubeIds = [];
     for (const entry of entries) {
       const id = resolvedByPath.get(entry.filePath);
-      if (id) itemIds.push(id);
-      else logger.warn(
+      if (id) {
+        itemIds.push(id);
+        syncedYoutubeIds.push(entry.youtube_id);
+      } else logger.warn(
         { youtube_id: entry.youtube_id, serverType },
         `Unable to sync item ${entry.youtube_id} for playlist "${playlist.title}" to ${SERVER_DISPLAY_NAME[serverType] || serverType}: not found on server, skipping`
       );
@@ -168,6 +174,7 @@ class MediaServerSync {
       return;
     }
 
+    const createdOnServer = !state?.server_playlist_id;
     if (state?.server_playlist_id) {
       // Pass name+public so adapters that implement replace as delete+recreate
       // (Jellyfin, Emby) can construct the new playlist. Plex replaces in place
@@ -201,6 +208,41 @@ class MediaServerSync {
           last_synced_at: new Date(),
         });
       }
+    }
+
+    this._recordSyncEvents(playlist, serverType, syncedYoutubeIds, createdOnServer, byYoutubeId);
+  }
+
+  // What each playlist last sent to each server, in this process only. The
+  // servers are told the whole list every time, so "added"/"removed" can only
+  // be known relative to the previous sync we made; after a restart there is
+  // no previous list and only the summary is logged (never every video as new).
+  _recordSyncEvents(playlist, serverType, youtubeIds, created, videoRows) {
+    const server = SERVER_DISPLAY_NAME[serverType] || serverType;
+    const base = { playlistTitle: playlist.title, server };
+    jobEventLog.record(EVENT_TYPES.PLAYLIST_SYNCED, {
+      detail: { ...base, created, itemCount: youtubeIds.length, playlistId: playlist.playlist_id },
+    });
+
+    const key = `${playlist.id}:${serverType}`;
+    const previous = this.lastSyncedIds.get(key);
+    this.lastSyncedIds.set(key, new Set(youtubeIds));
+    if (!previous) return;
+
+    const current = new Set(youtubeIds);
+    for (const youtubeId of youtubeIds) {
+      if (previous.has(youtubeId)) continue;
+      const row = videoRows.get(youtubeId);
+      jobEventLog.record(EVENT_TYPES.PLAYLIST_ITEM_ADDED, {
+        youtubeId,
+        videoTitle: row && row.youTubeVideoName,
+        channelName: row && row.youTubeChannelName,
+        detail: base,
+      });
+    }
+    for (const youtubeId of previous) {
+      if (current.has(youtubeId)) continue;
+      jobEventLog.record(EVENT_TYPES.PLAYLIST_ITEM_REMOVED, { youtubeId, detail: base });
     }
   }
 

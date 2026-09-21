@@ -930,6 +930,16 @@ Settings for API key authentication used by bookmarklets, mobile shortcuts, and 
 
 For detailed information on creating and using API keys, see [API Integration Guide](API_INTEGRATION.md).
 
+## Video/Events Log
+
+### Event Log Retention
+- **Config Key**: `jobEventLogRetentionDays`
+- **Type**: `number`
+- **Default**: `180`
+- **Description**: How many days of the append-only video/events log (`job_events` table, see [DATABASE.md](DATABASE.md)) to keep. A nightly task (3:25 AM, server local time) deletes rows older than this.
+- **Range**: `0`-`3650`. `0` keeps everything. A negative or non-numeric value falls back to `180`.
+- **Note**: Read live, no restart needed. This is independent of Compact History and of the 42-day in-memory Download History window.
+
 ## yt-dlp Auto-Update
 
 Youtarr-Turbo can optionally check for and install yt-dlp updates on a daily schedule (4:00 AM). The channel picker, toggle, and status display live with the manual yt-dlp update button on the Settings -> YT-DLP page.

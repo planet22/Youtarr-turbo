@@ -6,6 +6,8 @@ const configModule = require('./configModule');
 const fileCheckModule = require('./fileCheckModule');
 const watchStatusQueries = require('./mediaServers/watchStatusQueries');
 const logger = require('../logger');
+const jobEventLog = require('./jobEventLog');
+const { EVENT_TYPES } = require('./jobEventLog/eventCatalog');
 const messageEmitter = require('./messageEmitter');
 const m3uGenerator = require('./m3uGenerator');
 const { AUDIO_EXTENSIONS, MEDIA_EXTENSIONS } = require('./filesystem/constants');
@@ -496,6 +498,11 @@ class VideosModule {
             logger.info({ youtubeId: video.youtubeId }, 'Video no longer exists on YouTube, marking as removed');
             video.youtube_removed = true;
             video.youtube_removed_checked_at = now;
+            jobEventLog.record(EVENT_TYPES.VIDEO_UNAVAILABLE_ON_YOUTUBE, {
+              youtubeId: video.youtubeId,
+              videoTitle: video.youTubeVideoName,
+              channelName: video.youTubeChannelName,
+            });
             return { id: video.id, removed: true, checked_at: now };
           } else {
             // Video exists, just update the timestamp
@@ -894,9 +901,16 @@ class VideosModule {
           continue;
         }
 
+        const previousRating = video.normalized_rating;
         await video.update({
           normalized_rating: rating,
           rating_source: 'Manual Override'
+        });
+        jobEventLog.record(EVENT_TYPES.VIDEO_RATING_CHANGED, {
+          youtubeId: video.youtubeId,
+          videoTitle: video.youTubeVideoName,
+          channelName: video.youTubeChannelName,
+          detail: { rating, previousRating },
         });
 
         if (video.filePath) {
@@ -2134,6 +2148,11 @@ class VideosModule {
       throw new Error('Video not found');
     }
     await video.update({ protected: protectedState });
+    jobEventLog.record(protectedState ? EVENT_TYPES.VIDEO_PROTECTED : EVENT_TYPES.VIDEO_UNPROTECTED, {
+      youtubeId: video.youtubeId,
+      videoTitle: video.youTubeVideoName,
+      channelName: video.youTubeChannelName,
+    });
     return { id: video.id, protected: protectedState };
   }
 }

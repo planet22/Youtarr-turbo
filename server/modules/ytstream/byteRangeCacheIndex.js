@@ -21,6 +21,8 @@ const fs = require('fs');
 const path = require('path');
 const logger = require('../../logger');
 const { YTSTREAM_CACHE_DIR } = require('./paths');
+const jobEventLog = require('../jobEventLog');
+const { EVENT_TYPES } = require('../jobEventLog/eventCatalog');
 
 const PERSISTENT_CACHE_DIR = path.join(YTSTREAM_CACHE_DIR, '.byterange-cache');
 const META_EXT = '.json';
@@ -120,6 +122,12 @@ async function deleteByteRangeCacheForVideo(youtubeId) {
     const result = await deleteEntryFiles(path.basename(name, META_EXT));
     totals.deletedFiles += result.deletedFiles;
     totals.freedBytes += result.freedBytes;
+    if (result.deletedFiles > 0) {
+      jobEventLog.record(EVENT_TYPES.CACHE_DELETED, {
+        youtubeId,
+        detail: { freedBytes: result.freedBytes, reason: 'playback cache deleted for the video' },
+      });
+    }
   }
   return totals;
 }
@@ -147,18 +155,33 @@ async function getByteRangeCacheTotals() {
  * encodes (see isFreshPartial) - for user-initiated "clear everything".
  * @returns {Promise<{deleted: number, freedBytes: number}>}
  */
-async function sweepExpiredByteRangeCache(cutoffMs, { protectLivePartials = false } = {}) {
+async function sweepExpiredByteRangeCache(cutoffMs, { protectLivePartials = false, reason = 'expired playback cache' } = {}) {
   let deleted = 0;
   let freedBytes = 0;
   if (!fs.existsSync(PERSISTENT_CACHE_DIR)) return { deleted, freedBytes };
-  for (const name of await fs.promises.readdir(PERSISTENT_CACHE_DIR)) {
+  const names = await fs.promises.readdir(PERSISTENT_CACHE_DIR);
+  // The sidecar names the video, and it can be deleted before its data file
+  // below, so read them all first.
+  const videoIdByBaseName = new Map();
+  for (const name of names) {
+    if (path.extname(name) !== META_EXT) continue;
+    const meta = readMeta(path.join(PERSISTENT_CACHE_DIR, name));
+    if (meta && typeof meta.youtubeId === 'string') videoIdByBaseName.set(path.basename(name, META_EXT), meta.youtubeId);
+  }
+  for (const name of names) {
     const filePath = path.join(PERSISTENT_CACHE_DIR, name);
     try {
       const stat = await fs.promises.stat(filePath);
       if (!stat.isFile() || stat.mtimeMs >= cutoffMs) continue;
       if (protectLivePartials && isFreshPartial(name, stat)) continue;
       await fs.promises.unlink(filePath);
-      if (isEntryFile(name)) deleted += 1; // sidecars/temp/in-progress files add bytes, not entries
+      if (isEntryFile(name)) {
+        deleted += 1; // sidecars/temp/in-progress files add bytes, not entries
+        jobEventLog.record(EVENT_TYPES.CACHE_DELETED, {
+          youtubeId: videoIdByBaseName.get(path.basename(name, path.extname(name))),
+          detail: { filePath, freedBytes: stat.size, reason },
+        });
+      }
       freedBytes += stat.size;
     } catch (err) {
       if (err.code !== 'ENOENT') logger.warn({ err, filePath }, 'ytstream: failed to expire one byte-range cache file');
@@ -169,7 +192,7 @@ async function sweepExpiredByteRangeCache(cutoffMs, { protectLivePartials = fals
 
 /** Deletes every file in the directory. @returns {Promise<{deletedFiles: number, freedBytes: number}>} */
 async function clearByteRangeCache() {
-  const { deleted, freedBytes } = await sweepExpiredByteRangeCache(Infinity, { protectLivePartials: true });
+  const { deleted, freedBytes } = await sweepExpiredByteRangeCache(Infinity, { protectLivePartials: true, reason: 'playback cache cleared' });
   return { deletedFiles: deleted, freedBytes };
 }
 

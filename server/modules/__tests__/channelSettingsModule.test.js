@@ -1542,4 +1542,58 @@ describe('ChannelSettingsModule', () => {
       expect(channelSettingsModule.validateAutoRemovalKeepRecentCount('5').valid).toBe(false);
     });
   });
+
+  describe('updateVideoFilePaths video/events log', () => {
+    const video = (over = {}) => ({
+      youtubeId: 'abc123', youTubeVideoName: 'A Title', youTubeChannelName: 'A Channel',
+      filePath: '/old/path/TestChannel/video1.mp4', update: jest.fn(), ...over,
+    });
+
+    test('records video.moved with where the file was and where it is now', async () => {
+      Video.findAll.mockResolvedValue([video()]);
+
+      await channelSettingsModule.updateVideoFilePaths('UC1', '/old/path/TestChannel', '/new/path/TestChannel');
+
+      expect(require('../jobEventLog').record).toHaveBeenCalledWith('video.moved', {
+        youtubeId: 'abc123', videoTitle: 'A Title', channelName: 'A Channel',
+        detail: { from: '/old/path/TestChannel/video1.mp4', to: '/new/path/TestChannel/video1.mp4' },
+      });
+    });
+
+    test('records the old path as it was before the update, not after', async () => {
+      const row = video();
+      row.update.mockImplementation((values) => { row.filePath = values.filePath; });
+      Video.findAll.mockResolvedValue([row]);
+
+      await channelSettingsModule.updateVideoFilePaths('UC1', '/old/path/TestChannel', '/new/path/TestChannel');
+
+      expect(require('../jobEventLog').record.mock.calls[0][1].detail.from).toBe('/old/path/TestChannel/video1.mp4');
+    });
+
+    test('records one entry per video whose path changed', async () => {
+      Video.findAll.mockResolvedValue([video(), video({ filePath: '/old/path/TestChannel/video2.mp4' })]);
+
+      await channelSettingsModule.updateVideoFilePaths('UC1', '/old/path/TestChannel', '/new/path/TestChannel');
+
+      expect(require('../jobEventLog').record).toHaveBeenCalledTimes(2);
+    });
+
+    test('records nothing for a video outside the moved folder', async () => {
+      Video.findAll.mockResolvedValue([video({ filePath: '/elsewhere/video.mp4' })]);
+
+      await channelSettingsModule.updateVideoFilePaths('UC1', '/old/path/TestChannel', '/new/path/TestChannel');
+
+      expect(require('../jobEventLog').record).not.toHaveBeenCalled();
+    });
+
+    test('records nothing when saving the new path fails', async () => {
+      const failing = video();
+      failing.update.mockRejectedValue(new Error('db down'));
+      Video.findAll.mockResolvedValue([failing]);
+
+      await expect(channelSettingsModule.updateVideoFilePaths('UC1', '/old/path/TestChannel', '/new/path/TestChannel')).rejects.toThrow('db down');
+
+      expect(require('../jobEventLog').record).not.toHaveBeenCalled();
+    });
+  });
 });

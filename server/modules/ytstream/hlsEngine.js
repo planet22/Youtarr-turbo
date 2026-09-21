@@ -26,6 +26,8 @@ const path = require('path');
 const crypto = require('crypto');
 const { spawn } = require('child_process');
 const logger = require('../../logger');
+const jobEventLog = require('../jobEventLog');
+const { EVENT_TYPES } = require('../jobEventLog/eventCatalog');
 const configModule = require('../configModule');
 const youtubeMetadataCache = require('../youtubeMetadataCache');
 const streamEncoderTuning = require('../streamEncoderTuning');
@@ -1033,6 +1035,7 @@ function startHlsBufferFetch(session) {
     return;
   }
   markBufferFetchStarted(youtubeId);
+  jobEventLog.record(EVENT_TYPES.CACHE_FETCH_STARTED, { youtubeId, detail: { quality } });
   // Wall-clock start of this fetch - threaded through to finalizeTapOutput
   // below purely so a successful finish can record downloadDurationSeconds/
   // avgDownloadMBps for Download History, same as any other download.

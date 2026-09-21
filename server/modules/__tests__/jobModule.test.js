@@ -2473,6 +2473,34 @@ describe('JobModule', () => {
       JobModule = require('../jobModule');
     });
 
+    test('records the video as re-added to the library when its row is recreated', async () => {
+      const jobEventLog = require('../jobEventLog');
+      fsPromises.readFile.mockImplementation(async (p) => {
+        if (p.includes('complete.list')) return 'youtube vid-recreated\n';
+        if (p.includes('vid-recreated.info.json')) {
+          return JSON.stringify({
+            id: 'vid-recreated', uploader: 'A Channel', title: 'A Title', duration: 10, upload_date: '20240101', channel_id: 'c1',
+          });
+        }
+        throw new Error('Unknown file');
+      });
+      fsPromises.stat.mockRejectedValue(new Error('ENOENT'));
+      Video.findAll.mockResolvedValue([]);
+      ChannelVideo.findAll.mockResolvedValue([]);
+      Video.findOne.mockResolvedValue(null);
+      Video.create.mockResolvedValueOnce({ id: 7 });
+
+      await JobModule.backfillFromCompleteList();
+
+      expect(jobEventLog.record).toHaveBeenCalledWith('video.recreated', expect.objectContaining({
+        youtubeId: 'vid-recreated',
+        videoTitle: 'A Title',
+        channelName: 'A Channel',
+        isTracked: true,
+        detail: expect.objectContaining({ videoId: 7, hasFile: false }),
+      }));
+    });
+
     test('should skip when complete.list does not exist', async () => {
       fsPromises.readFile.mockRejectedValue({ code: 'ENOENT' });
 

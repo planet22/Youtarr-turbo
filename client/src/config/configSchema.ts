@@ -614,6 +614,9 @@ export const CONFIG_FIELDS = {
   // API Keys
   apiKeyRateLimit: { default: 10, trackChanges: true },
 
+  // Video/events log retention in days (server/modules/jobEventLog); 0 keeps everything
+  jobEventLogRetentionDays: { default: 180, trackChanges: true },
+
   // yt-dlp auto-update
   autoUpdateYtdlp: { default: false, trackChanges: true },
   ytdlpUpdateChannel: { default: 'stable' as 'stable' | 'nightly', trackChanges: true },

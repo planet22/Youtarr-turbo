@@ -714,4 +714,99 @@ describe('mediaServerSync', () => {
       { public: false, mediaType: 'video' }
     );
   });
+
+  describe('video/events log', () => {
+    const playlist = { id: 1, playlist_id: 'PL1', title: 'My PL', sync_to_plex: true, sync_to_jellyfin: false, sync_to_emby: false, public_on_servers: false };
+
+    // Runs one sync in which the playlist holds the given videos, all found on the server.
+    async function syncWith(youtubeIds, { existingState = null } = {}) {
+      Playlist.findByPk.mockResolvedValue(playlist);
+      PlaylistVideo.findAll.mockResolvedValue(youtubeIds.map((id, i) => ({ youtube_id: id, position: i + 1, ignored: false })));
+      Video.findAll.mockResolvedValue(youtubeIds.map((id) => ({ youtubeId: id, youTubeVideoName: 'Title ' + id, youTubeChannelName: 'Chan', filePath: '/y/' + id + '.mp4' })));
+      PlaylistSyncState.findOne.mockResolvedValue(existingState);
+      PlaylistSyncState.create.mockResolvedValue({ id: 1 });
+      const adapter = makeAdapter('PlexAdapter', {
+        resolveItemIdByFilepath: jest.fn((p) => Promise.resolve('rk-' + p)),
+        createPlaylist: jest.fn().mockResolvedValue({ id: 'pid' }),
+        replacePlaylistItems: jest.fn().mockResolvedValue({ id: 'pid' }),
+      });
+      serverRegistry.getEnabledAdapters.mockReturnValue([adapter]);
+      await mediaServerSync.syncPlaylist(1);
+    }
+    const existing = () => ({ server_playlist_id: 'pid', update: jest.fn().mockResolvedValue(undefined) });
+    const recorded = () => require('../../jobEventLog').record.mock.calls;
+    const typesRecorded = () => recorded().map(([type]) => type);
+
+    test('records a playlist.synced summary, marked as created on the first sync', async () => {
+      await syncWith(['v1', 'v2']);
+
+      expect(recorded()[0]).toEqual(['playlist.synced', {
+        detail: { playlistTitle: 'My PL', server: expect.any(String), created: true, itemCount: 2, playlistId: 'PL1' },
+      }]);
+    });
+
+    test('logs no per-video entries on the first sync, so nothing shows as newly added after a restart', async () => {
+      await syncWith(['v1', 'v2']);
+
+      expect(typesRecorded()).toEqual(['playlist.synced']);
+    });
+
+    test('marks a later sync of an existing server playlist as an update', async () => {
+      await syncWith(['v1'], { existingState: existing() });
+
+      expect(recorded()[0][1].detail.created).toBe(false);
+    });
+
+    test('records each video added since the previous sync, with its title', async () => {
+      await syncWith(['v1']);
+      require('../../jobEventLog').record.mockClear();
+
+      await syncWith(['v1', 'v2'], { existingState: existing() });
+
+      expect(recorded().find(([type]) => type === 'playlist.item_added')[1]).toMatchObject({
+        youtubeId: 'v2', videoTitle: 'Title v2', channelName: 'Chan',
+        detail: { playlistTitle: 'My PL' },
+      });
+    });
+
+    test('records each video removed since the previous sync', async () => {
+      await syncWith(['v1', 'v2']);
+      require('../../jobEventLog').record.mockClear();
+
+      await syncWith(['v1'], { existingState: existing() });
+
+      expect(recorded().find(([type]) => type === 'playlist.item_removed')[1]).toMatchObject({ youtubeId: 'v2' });
+    });
+
+    test('records no add or remove when the playlist did not change', async () => {
+      await syncWith(['v1', 'v2']);
+      require('../../jobEventLog').record.mockClear();
+
+      await syncWith(['v1', 'v2'], { existingState: existing() });
+
+      expect(typesRecorded()).toEqual(['playlist.synced']);
+    });
+
+    test('records nothing when the sync is deferred because nothing resolved', async () => {
+      Playlist.findByPk.mockResolvedValue(playlist);
+      PlaylistVideo.findAll.mockResolvedValue([{ youtube_id: 'v1', position: 1, ignored: false }]);
+      Video.findAll.mockResolvedValue([{ youtubeId: 'v1', filePath: '/y/v1.mp4' }]);
+      PlaylistSyncState.findOne.mockResolvedValue(null);
+      const adapter = makeAdapter('PlexAdapter', { resolveItemIdByFilepath: jest.fn().mockResolvedValue(null), createPlaylist: jest.fn() });
+      serverRegistry.getEnabledAdapters.mockReturnValue([adapter]);
+
+      // Collapse the backoff sleeps so the test runs instantly.
+      const setTimeoutSpy = jest.spyOn(global, 'setTimeout').mockImplementation((cb) => {
+        cb();
+        return 0;
+      });
+      try {
+        await mediaServerSync.syncPlaylist(1);
+      } finally {
+        setTimeoutSpy.mockRestore();
+      }
+
+      expect(recorded()).toHaveLength(0);
+    });
+  });
 });

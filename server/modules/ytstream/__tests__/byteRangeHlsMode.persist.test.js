@@ -20,6 +20,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { probeDurationSeconds } = require('../byteRangeResume');
+const jobEventLog = require('../../jobEventLog');
 const { PERSISTENT_CACHE_DIR } = require('../byteRangeCacheIndex');
 const { persistFreshEncode, buildSessionKey, computeIdleTimeoutMs } = require('../byteRangeHlsMode');
 
@@ -135,6 +136,21 @@ describe('byteRangeHlsMode stealth cache persistence', () => {
       await persistFreshEncode(makeInPlaceSession({ ytVideo: { exitCode: null } }));
       expect(JSON.parse(fs.readFileSync(metaPath, 'utf8')).complete).toBe(false);
     });
+  });
+
+  it('records the playback cache being saved, with its size and completeness', async () => {
+    await persistFreshEncode(makeSession());
+    expect(jobEventLog.record).toHaveBeenCalledWith('cache.byte_range_saved', {
+      youtubeId: 'vid00000001',
+      detail: { cachePath, complete: true, sizeBytes: 2048, durationSeconds: 120 },
+    });
+  });
+
+  it('records a cut-off encode as a partial cache', async () => {
+    await persistFreshEncode(makeSession({ ytVideo: { exitCode: 1 } }));
+    expect(jobEventLog.record).toHaveBeenCalledWith('cache.byte_range_saved', expect.objectContaining({
+      detail: expect.objectContaining({ complete: false }),
+    }));
   });
 
   it('marks a cleanly finished session as persistedComplete', async () => {

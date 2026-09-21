@@ -329,4 +329,58 @@ describe('VideosModule file scanning, rating updates and backfill flushing', () 
       expect(sequelize.query).toHaveBeenCalledTimes(250);
     });
   });
+
+  describe('bulkUpdateVideoRatings video/events log', () => {
+    const video = (over = {}) => ({
+      youtubeId: 'abc123', youTubeVideoName: 'A Title', youTubeChannelName: 'A Channel',
+      normalized_rating: 'PG', filePath: null, update: jest.fn().mockResolvedValue(undefined), ...over,
+    });
+
+    it('records video.rating_changed with the new and previous rating', async () => {
+      Video.findByPk.mockResolvedValue(video());
+
+      await videosModule.bulkUpdateVideoRatings([1], 'R');
+
+      expect(require('../jobEventLog').record).toHaveBeenCalledWith('video.rating_changed', {
+        youtubeId: 'abc123', videoTitle: 'A Title', channelName: 'A Channel',
+        detail: { rating: 'R', previousRating: 'PG' },
+      });
+    });
+
+    it('records the previous rating as it was before the update, not after', async () => {
+      const row = video();
+      row.update.mockImplementation(async (values) => { row.normalized_rating = values.normalized_rating; });
+      Video.findByPk.mockResolvedValue(row);
+
+      await videosModule.bulkUpdateVideoRatings([1], 'R');
+
+      expect(require('../jobEventLog').record.mock.calls[0][1].detail.previousRating).toBe('PG');
+    });
+
+    it('records one entry per video changed', async () => {
+      Video.findByPk.mockResolvedValue(video());
+
+      await videosModule.bulkUpdateVideoRatings([1, 2, 3], 'R');
+
+      expect(require('../jobEventLog').record).toHaveBeenCalledTimes(3);
+    });
+
+    it('records nothing for a video that does not exist', async () => {
+      Video.findByPk.mockResolvedValue(null);
+
+      await videosModule.bulkUpdateVideoRatings([1], 'R');
+
+      expect(require('../jobEventLog').record).not.toHaveBeenCalled();
+    });
+
+    it('records nothing when saving the rating fails', async () => {
+      const failing = video();
+      failing.update.mockRejectedValue(new Error('db down'));
+      Video.findByPk.mockResolvedValue(failing);
+
+      await videosModule.bulkUpdateVideoRatings([1], 'R');
+
+      expect(require('../jobEventLog').record).not.toHaveBeenCalled();
+    });
+  });
 });

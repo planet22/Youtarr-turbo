@@ -16,6 +16,8 @@ const downloadCleanup = require('./downloadCleanup');
 const transient403RetryPlanner = require('./transient403RetryPlanner');
 const failureAdvisor = require('./failureAdvisor');
 const failedVideoEnricher = require('./failedVideoEnricher');
+const jobEventLog = require('../jobEventLog');
+const { EVENT_TYPES } = require('../jobEventLog/eventCatalog');
 const { runCompletionSideEffects } = require('./downloadCompletionEffects');
 const {
   computeOutcomeFlags,
@@ -54,6 +56,55 @@ function stderrHasOnlyBenignWarnings(stderrBuffer = '') {
   return lines.every((line) =>
     BENIGN_STDERR_WARNING_PATTERNS.some((pattern) => pattern.test(line))
   );
+}
+
+// One log entry per failed video (and one more for those handed to an
+// auto-retry job), written once the failure is final and diagnosed.
+function recordFailedVideoEvents(jobId, failedVideosList, diagnoses = []) {
+  for (const failed of failedVideosList || []) {
+    // Same "likely cause" advice Download History shows for the failure.
+    const diagnosis = diagnoses.find((entry) => entry.key === failed.diagnosisKey);
+    jobEventLog.record(EVENT_TYPES.VIDEO_FAILED, {
+      jobId,
+      youtubeId: failed.youtubeId,
+      videoTitle: failed.title,
+      channelName: failed.channel,
+      detail: {
+        error: failed.error,
+        diagnosisKey: failed.diagnosisKey,
+        diagnosisTitle: diagnosis && diagnosis.title,
+        diagnosisMessage: diagnosis && diagnosis.message,
+        url: failed.url || undefined,
+        autoRetryQueued: Boolean(failed.autoRetryQueued),
+      },
+    });
+    if (failed.autoRetryQueued) {
+      jobEventLog.record(EVENT_TYPES.VIDEO_AUTO_RETRY_QUEUED, {
+        jobId,
+        youtubeId: failed.youtubeId,
+        videoTitle: failed.title,
+        channelName: failed.channel,
+      });
+    }
+  }
+}
+
+// One entry per video that downloaded, carrying its size, how long it took and
+// the average rate - the figures Download History shows in its Speed column.
+function recordDownloadedVideoEvents(jobId, videoData) {
+  for (const video of videoData || []) {
+    jobEventLog.record(EVENT_TYPES.VIDEO_DOWNLOADED, {
+      jobId,
+      youtubeId: video.youtubeId,
+      videoTitle: video.youTubeVideoName,
+      channelName: video.youTubeChannelName,
+      detail: {
+        fileSize: video.fileSize ? Number(video.fileSize) : undefined,
+        downloadDurationSeconds: video.downloadDurationSeconds,
+        avgDownloadMBps: video.avgDownloadMBps,
+      },
+    });
+  }
 }
 
 async function persistCompletedVideosBeforeTerminalUpdate(jobId, videoData, failedVideosList) {
@@ -253,6 +304,8 @@ async function finalizeDownloadJob({
     }
 
     logger.info({ jobType, jobId }, 'Job complete (with or without errors)');
+    recordDownloadedVideoEvents(jobId, videoData);
+    recordFailedVideoEvents(jobId, failedVideosList, diagnoses);
 
     const flags = computeOutcomeFlags({
       code,

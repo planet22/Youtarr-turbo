@@ -55,6 +55,50 @@ describe('cronJobs nightly maintenance tasks', () => {
   };
   const task = (id) => cronJobs.getTasks().find((t) => t.id === id);
 
+  describe('deletions run inside a video/events log context', () => {
+    it('runs the nightly auto-removal as the auto-removal actor', async () => {
+      videoDeletionModule.performAutomaticCleanup.mockResolvedValue({ totalDeleted: 0, freedBytes: 0, errors: [] });
+
+      await run('0 2 * * *');
+
+      expect(require('../jobEventLog').runWithContext).toHaveBeenCalledWith(
+        { actor: 'auto-removal', reason: 'automatic removal' },
+        expect.any(Function)
+      );
+    });
+
+    it('runs the STRM cache expiry sweep as the strm-cache-expiry actor', async () => {
+      await run('10 2 * * *');
+
+      expect(require('../jobEventLog').runWithContext).toHaveBeenCalledWith(
+        { actor: 'strm-cache-expiry', reason: 'STRM cache-on-play expiry' },
+        expect.any(Function)
+      );
+    });
+  });
+
+  describe('video/events log prune (3:25 AM)', () => {
+    it('is registered as its own task', () => {
+      expect(task('job-event-prune')).toMatchObject({ cron: '25 3 * * *', confirm: false });
+    });
+
+    it('prunes the log through jobEventLog', async () => {
+      const jobEventLog = require('../jobEventLog');
+
+      await run('25 3 * * *');
+
+      expect(jobEventLog.prune).toHaveBeenCalled();
+    });
+
+    it('logs instead of throwing when the prune fails', async () => {
+      require('../jobEventLog').prune.mockRejectedValueOnce(new Error('db down'));
+
+      await run('25 3 * * *');
+
+      expect(logger.error).toHaveBeenCalledWith({ err: expect.any(Error) }, 'Error pruning the video/events log');
+    });
+  });
+
   describe('STRM cache-on-play expiry (2:10 AM)', () => {
     it('is registered as its own task', () => {
       expect(task('strm-cache-expiry')).toMatchObject({ cron: '10 2 * * *', confirm: false });

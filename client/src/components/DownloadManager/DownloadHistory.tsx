@@ -49,6 +49,9 @@ interface DownloadHistoryProps {
   // can never hide the linked job.
   jobIdFilter?: string | null;
   onClearJobIdFilter?: () => void;
+  // When given, each job row offers a "Timeline" link to that job's step-by-step
+  // entries in the event log.
+  onOpenTimeline?: (jobId: string) => void;
 }
 
 function cleanJobTypeLabel(jobType: string): string {
@@ -70,7 +73,7 @@ function cleanJobTypeLabel(jobType: string): string {
 
 // Shared with the "Source" column and its filter dropdown, so the filter's
 // option list always matches exactly what's displayed in that column.
-function getJobSourceLabel(jobType: string): string {
+export function getJobSourceLabel(jobType: string): string {
   if (jobType.startsWith('Auto-retry')) return 'Auto-retry';
   if (jobType.includes('Channel Downloads')) return 'Channels';
   if (jobType.includes('Manually Added Urls')) {
@@ -83,6 +86,8 @@ function getJobSourceLabel(jobType: string): string {
     return categoryMatch ? `NZB (${categoryMatch[1]})` : 'NZB';
   }
   if (jobType.startsWith('STRM Cache: ')) return 'STRM Cache-on-play';
+  // "Download all videos" for a channel tab (Channel Download All: <title>)
+  if (jobType.startsWith('Channel Download All: ')) return 'Download All';
   // Grouped under the same "HLS Buffer Cache" filter option as the fetch
   // it finalizes, rather than fragmenting the Source dropdown - the two are
   // the same feature, just two separate history lines now (see
@@ -290,7 +295,19 @@ const DownloadHistory: React.FC<DownloadHistoryProps> = ({
   onVideoDeleted,
   jobIdFilter = null,
   onClearJobIdFilter,
+  onOpenTimeline,
 }) => {
+  const timelineLink = (job: Job) =>
+    onOpenTimeline ? (
+      <Link
+        component="button"
+        type="button"
+        onClick={(e: React.MouseEvent) => { e.stopPropagation(); onOpenTimeline(job.id); }}
+        style={{ background: 'none', border: 'none', padding: 0, textAlign: 'left', display: 'block' }}
+      >
+        <Typography variant="caption">Timeline</Typography>
+      </Link>
+    ) : null;
   const [modalVideo, setModalVideo] = useState<VideoData | null>(null);
   // Persisted the same way as the search box above, so switching away from
   // this page and back (or reloading) doesn't quietly drop the filters back
@@ -625,6 +642,7 @@ const DownloadHistory: React.FC<DownloadHistoryProps> = ({
                       <Typography variant="caption" color="secondary">Date:</Typography>
                       <Typography variant="caption" className="font-medium">{formattedTimeCreated}</Typography>
                     </Box>
+                    {timelineLink(job)}
                     <Box className="flex items-baseline gap-x-4 gap-y-0.5 flex-wrap">
                       {formattedJobType && (
                         <Box className="flex items-baseline gap-1">
@@ -643,6 +661,7 @@ const DownloadHistory: React.FC<DownloadHistoryProps> = ({
                     <Typography variant="caption" color="secondary">
                       Date: {formattedTimeCreated}
                     </Typography>
+                    {timelineLink(job)}
                     {formattedJobType && (
                       <Typography variant="caption" color="secondary">
                         Source: {formattedJobType}
@@ -809,7 +828,10 @@ const DownloadHistory: React.FC<DownloadHistoryProps> = ({
                           </Typography>
                         )}
                       </TableCell>
-                      <TableCell>{formattedJobType}</TableCell>
+                      <TableCell>
+                        {formattedJobType}
+                        {timelineLink(job)}
+                      </TableCell>
                       <TableCell>{durationString}</TableCell>
                       {/* Blank at the summary-row level - this rolls up multiple
                           videos, each with its own file size/speed; see the
@@ -952,7 +974,10 @@ const DownloadHistory: React.FC<DownloadHistoryProps> = ({
                       </Box>
                     )}
                   </TableCell>
-                  <TableCell>{formattedJobType || '---'}</TableCell>
+                  <TableCell>
+                    {formattedJobType || '---'}
+                    {timelineLink(job)}
+                  </TableCell>
                   <TableCell>{durationString}</TableCell>
                   <TableCell>{singleVideo ? videoFileSizeText(singleVideo) : ''}</TableCell>
                   <TableCell>{singleVideo ? formatDownloadSpeed(singleVideo.avgDownloadMBps) : ''}</TableCell>

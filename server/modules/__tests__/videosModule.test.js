@@ -679,6 +679,11 @@ describe('VideosModule', () => {
       expect(updateOptions).toEqual({ where: { id: [1] } });
       expect(result.videos[0].youtube_removed).toBe(true);
       expect(result.videos[0].youtube_removed_checked_at).toBeInstanceOf(Date);
+      expect(require('../jobEventLog').record).toHaveBeenCalledWith('video.unavailable_on_youtube', {
+        youtubeId: 'abc123',
+        videoTitle: 'Test Video',
+        channelName: 'Test Channel',
+      });
     });
 
     test('should skip YouTube validation when recently checked', async () => {

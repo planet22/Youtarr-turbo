@@ -17,6 +17,7 @@ jest.mock('../../modules/jobModule', () => ({
 jest.mock('../../modules/nzbDiagnosticLog', () => ({
   resolveLogLimit: jest.fn(() => 20),
   recordDiagnosticEvent: jest.fn().mockResolvedValue(undefined),
+  getDiagnosticEvents: jest.fn().mockResolvedValue([]),
 }));
 jest.mock('../../modules/archiveModule', () => ({
   removeVideoFromArchive: jest.fn().mockResolvedValue(undefined),

@@ -39,8 +39,8 @@ function NzbFailedGrabsMobileList({ grabs }: { grabs: NzbFailedGrab[] }) {
   }
   return (
     <Box style={{ maxHeight: 420, overflowY: 'auto' }}>
-      {grabs.map((grab) => (
-        <Box key={grab.jobId} style={{ padding: '10px 16px', borderBottom: '1px solid var(--border)' }}>
+      {grabs.map((grab, index) => (
+        <Box key={`${grab.jobId}-${grab.youtubeId ?? grab.nzbName ?? 'x'}-${index}`} style={{ padding: '10px 16px', borderBottom: '1px solid var(--border)' }}>
           <Box style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
             <Typography
               variant="body2"
@@ -137,8 +137,8 @@ function NzbFailedGrabsTable({ grabs: unsortedGrabs, onDeleteAll }: NzbFailedGra
                 </TableCell>
               </TableRow>
             )}
-            {grabs.map((grab) => (
-              <TableRow hover key={grab.jobId}>
+            {grabs.map((grab, index) => (
+              <TableRow hover key={`${grab.jobId}-${grab.youtubeId ?? grab.nzbName ?? 'x'}-${index}`}>
                 <TableCell style={{ maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   <GrabLink grab={grab} />
                 </TableCell>

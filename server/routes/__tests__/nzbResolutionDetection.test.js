@@ -14,8 +14,9 @@ jest.mock('../../modules/nzbThumbnailProbe', () => ({
 }));
 jest.mock('../../modules/jobModule', () => ({}));
 jest.mock('../../modules/nzbDiagnosticLog', () => ({
+  resolveLogLimit: jest.fn(() => 20),
   recordDiagnosticEvent: jest.fn(),
-  getDiagnosticEvents: jest.fn(),
+  getDiagnosticEvents: jest.fn().mockResolvedValue([]),
 }));
 jest.mock('../../logger', () => ({
   info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn(),

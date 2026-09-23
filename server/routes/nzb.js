@@ -899,19 +899,25 @@ async function getRecentSearchTraces() {
 // itself isn't marked Error/Terminated. Deduped by job id (recordedFailedGrabJobIds)
 // so Sonarr/Radarr's repeated history polling doesn't push the same failure
 // in over and over. Row cap is nzb.diagnosticLogLimits.failedGrabs.
-// Dedup only, not the log itself (that's nzb_diagnostic_log now) - reset on
-// restart, so a job whose failure was already recorded before a restart can
-// in theory be recorded a second time by the next history poll. Harmless:
-// worst case is one duplicate row that ages out of the capped window like
-// any other.
+// The in-memory Set is only a fast path for the common case (repeated polls
+// within one process lifetime) - it resets on restart, so the first poll
+// per job after a restart also checks the persisted log itself before
+// inserting, so a still-failing job that Sonarr/Radarr keeps polling can't
+// accumulate a fresh duplicate row on every restart.
 const recordedFailedGrabJobIds = new Set();
 
 async function recordFailedGrab(job, message) {
   if (recordedFailedGrabJobIds.has(job.id)) return;
-  recordedFailedGrabJobIds.add(job.id);
+  const jobId = String(job.id);
   const max = nzbDiagnosticLog.resolveLogLimit(configModule.getConfig(), 'failedGrabs');
+  const existing = await nzbDiagnosticLog.getDiagnosticEvents('failedGrab', max);
+  if (existing.some((entry) => entry.jobId === jobId)) {
+    recordedFailedGrabJobIds.add(job.id);
+    return;
+  }
+  recordedFailedGrabJobIds.add(job.id);
   await nzbDiagnosticLog.recordDiagnosticEvent('failedGrab', {
-    jobId: String(job.id),
+    jobId,
     categoryName: job.data?.nzb?.categoryName || null,
     youtubeId: job.data?.nzb?.youtubeId || null,
     nzbName: job.data?.nzb?.nzbName || null,

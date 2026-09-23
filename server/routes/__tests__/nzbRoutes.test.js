@@ -24,7 +24,7 @@ jest.mock('../../modules/nzbThumbnailProbe', () => ({ fillUnknownDefinitions: je
 jest.mock('../../modules/nzbDiagnosticLog', () => ({
   resolveLogLimit: jest.fn(() => 20),
   recordDiagnosticEvent: jest.fn().mockResolvedValue(undefined),
-  getDiagnosticEvents: jest.fn(),
+  getDiagnosticEvents: jest.fn().mockResolvedValue([]),
 }));
 jest.mock('../../modules/jobModule', () => ({
   getRunningJobs: jest.fn(),
@@ -971,6 +971,20 @@ describe('nzb routes', () => {
         expect(first.body.history.slots[0]).toMatchObject({ status: 'Failed', fail_message: expect.stringContaining('No video file was produced') });
         expect(nzbDiagnosticLog.recordDiagnosticEvent).toHaveBeenCalledTimes(1);
         expect(nzbDiagnosticLog.recordDiagnosticEvent.mock.calls[0][0]).toBe('failedGrab');
+      });
+
+      it('does not re-record a failed grab already persisted from before a restart', async () => {
+        // Simulates the in-memory dedup Set being empty (as after a process
+        // restart) while the failure was already persisted in an earlier
+        // process's run - the persisted-log check must still catch it.
+        nzbDiagnosticLog.getDiagnosticEvents.mockResolvedValueOnce([{ jobId: '201' }]);
+        const job = historyJob({ id: 201, data: { nzb: { nzbName: 'R', categoryName: 'TV', youtubeId: YT_ID }, videos: [] } });
+        jobModule.getRunningJobs.mockReturnValue([job]);
+
+        const res = await get(sab('&mode=history'));
+
+        expect(res.body.history.slots[0].status).toBe('Failed');
+        expect(nzbDiagnosticLog.recordDiagnosticEvent).not.toHaveBeenCalled();
       });
 
       it('finds an already downloaded video by id when the job has none of its own', async () => {

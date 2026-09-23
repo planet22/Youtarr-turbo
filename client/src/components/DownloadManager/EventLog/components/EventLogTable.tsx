@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Box,
   Chip,
@@ -12,16 +12,18 @@ import {
   TableRow,
   Typography,
 } from '../../../ui';
-import { ChevronDown } from 'lucide-react';
+import { ChevronDown, Library, Link2 } from 'lucide-react';
 import type { JobEvent } from '../../../../types/JobEvent';
 import type { VideoData } from '../../../../types/VideoData';
 import VideoThumbnail from '../../VideoThumbnail';
 import {
+  componentAbbr,
   componentLabel,
   eventLevelColor,
   formatEventDelta,
   formatEventTime,
   formatEventTimeParts,
+  hasDetail,
   trackedLabel,
 } from '../eventLogFormat';
 import EventDetail from './EventDetail';
@@ -36,7 +38,16 @@ interface EventLogTableProps {
   onSelectJob: (jobId: string) => void;
   // Opens the video detail popup (the same one Download History uses).
   onOpenVideo: (event: JobEvent) => void;
+  // Opens and scrolls to one row (a swimlane dot was clicked). A new seq re-reveals the same row.
+  reveal?: EventReveal | null;
 }
+
+export interface EventReveal {
+  eventId: number;
+  seq: number;
+}
+
+export const eventRowId = (eventId: number): string => `event-row-${eventId}`;
 
 const THUMBNAIL_WIDTH = 96;
 const THUMBNAIL_HEIGHT = 54;
@@ -129,17 +140,13 @@ const VideoCell: React.FC<CellProps> = ({ event, onSelectVideo, onOpenVideo }) =
 const ChannelCell: React.FC<CellProps> = ({ event }) => <span>{event.channelName || ''}</span>;
 
 // Where the event came from - the label stored with the event (Channels,
-// Playlists, NZB (TV), Manual Videos, ...), the same ones Download History uses.
-const SourceCell: React.FC<CellProps> = ({ event, onSelectJob }) => {
-  if (!event.jobId || !event.source) {
+// Playlists, NZB (TV), Manual Videos, ...), the same ones Download History
+// uses. Plain text - the row's link icon is what selects the job.
+const SourceCell: React.FC<CellProps> = ({ event }) => {
+  if (!event.source) {
     return <Typography variant="caption" color="secondary">-</Typography>;
   }
-  const jobId = event.jobId;
-  return (
-    <Link component="button" type="button" style={linkStyle} onClick={() => onSelectJob(jobId)}>
-      {event.source}
-    </Link>
-  );
+  return <span>{event.source}</span>;
 };
 
 const LevelCell: React.FC<CellProps> = ({ event }) => (
@@ -149,6 +156,31 @@ const LevelCell: React.FC<CellProps> = ({ event }) => (
 const ExpandChevron: React.FC<{ expanded: boolean }> = ({ expanded }) => (
   <ChevronDown style={{ transform: expanded ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 200ms' }} />
 );
+
+// A row with a job: hovering (or focusing) this highlights every row from
+// that job currently on screen, so its steps are easy to pick out from
+// whatever else is interleaved with it; clicking it selects the job, the
+// same as clicking its Source label.
+const JobLinkButton: React.FC<{ jobId: string; onSelectJob: (jobId: string) => void; onHoverJobChange: (jobId: string | null) => void }> = ({
+  jobId,
+  onSelectJob,
+  onHoverJobChange,
+}) => (
+  <IconButton
+    size="small"
+    aria-label="Highlight and select this job"
+    title="Highlight this job's rows - click to view only this job"
+    onMouseEnter={() => onHoverJobChange(jobId)}
+    onMouseLeave={() => onHoverJobChange(null)}
+    onFocus={() => onHoverJobChange(jobId)}
+    onBlur={() => onHoverJobChange(null)}
+    onClick={() => onSelectJob(jobId)}
+  >
+    <Link2 size={14} />
+  </IconButton>
+);
+
+const HIGHLIGHT_BACKGROUND = 'var(--accent-muted, rgba(255,220,0,0.15))';
 
 // The date over the time, so the column stays narrow.
 const TimeStack: React.FC<{ iso: string }> = ({ iso }) => {
@@ -161,36 +193,60 @@ const TimeStack: React.FC<{ iso: string }> = ({ iso }) => {
   );
 };
 
+// Lets a long type name ("video.download_interrupted") wrap at its dot or
+// underscore instead of being cut mid-word in a narrow column.
+const BreakableType: React.FC<{ type: string }> = ({ type }) => (
+  <span>
+    {type.split(/(?<=[._])/).map((part, index) => (
+      <React.Fragment key={index}>
+        {index > 0 && <wbr />}
+        {part}
+      </React.Fragment>
+    ))}
+  </span>
+);
+
 // Columns in the desktop table before the optional "since previous" column.
 const BASE_COLUMN_COUNT = 10;
 
-// Every column but Event has a set width; Event takes whatever is left, which
-// makes it the widest. minWidth keeps Event from being squeezed on a narrow
-// screen - the table scrolls sideways instead.
+// The small columns have set widths (their text wraps); Video and Event have
+// none, so they share everything that is left and are the widest. The minimums
+// keep them from being squeezed on a narrow screen - the table scrolls
+// sideways instead.
 const COLUMN_WIDTHS = {
-  expander: 40,
+  expander: 64,
   time: 118,
   sincePrevious: 80,
-  video: 240,
-  channel: 120,
-  library: 64,
-  source: 104,
-  type: 128,
-  component: 100,
-  level: 68,
+  channel: 100,
+  library: 48,
+  source: 84,
+  type: 100,
+  component: 84,
+  level: 66,
 };
 const FIXED_WIDTH_TOTAL = Object.values(COLUMN_WIDTHS).reduce((sum, width) => sum + width, 0) - COLUMN_WIDTHS.sincePrevious;
-const MIN_EVENT_COLUMN_WIDTH = 340;
+const MIN_VIDEO_COLUMN_WIDTH = 240;
+const MIN_EVENT_COLUMN_WIDTH = 260;
 
 const cellStyle = (width?: number, nowrap = false): React.CSSProperties => ({
-  padding: '6px 8px',
+  padding: '6px 5px',
   overflowWrap: 'anywhere',
   ...(width ? { width } : {}),
   ...(nowrap ? { whiteSpace: 'nowrap' } : {}),
 });
 
-const EventLogTable: React.FC<EventLogTableProps> = ({ events, timeline, isMobile, onSelectVideo, onSelectJob, onOpenVideo }) => {
+const EventLogTable: React.FC<EventLogTableProps> = ({ events, timeline, isMobile, onSelectVideo, onSelectJob, onOpenVideo, reveal }) => {
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
+  const [hoveredJobId, setHoveredJobId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!reveal || !events.some((event) => event.id === reveal.eventId)) return;
+    setExpanded((previous) => new Set(previous).add(reveal.eventId));
+    document.getElementById(eventRowId(reveal.eventId))?.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
+    // Only a new reveal request should act; a refetch of the same events must not re-open a closed row.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reveal]);
+
   const toggle = (id: number) =>
     setExpanded((previous) => {
       const next = new Set(previous);
@@ -218,19 +274,35 @@ const EventLogTable: React.FC<EventLogTableProps> = ({ events, timeline, isMobil
           return (
             <Box
               key={event.id}
+              id={eventRowId(event.id)}
+              data-testid={eventRowId(event.id)}
               className="p-3"
-              style={{ border: 'var(--border-weight) solid var(--border)', borderRadius: 'var(--radius-ui)' }}
+              style={{
+                border: 'var(--border-weight) solid var(--border)',
+                borderRadius: 'var(--radius-ui)',
+                backgroundColor: hoveredJobId && event.jobId === hoveredJobId ? HIGHLIGHT_BACKGROUND : undefined,
+              }}
             >
               <Box className="flex items-start justify-between gap-2">
                 <Typography variant="caption" color="secondary" className="block">
                   {formatEventTime(event.occurredAt)}
                   {delta ? ` (${delta})` : ''}
                 </Typography>
-                {expander(event)}
+                <Box className="flex items-center shrink-0">
+                  {event.jobId && (
+                    <JobLinkButton jobId={event.jobId} onSelectJob={onSelectJob} onHoverJobChange={setHoveredJobId} />
+                  )}
+                  {expander(event)}
+                </Box>
               </Box>
               <VideoCell {...cell} />
               <Box className="flex items-center gap-2 flex-wrap">
-                <EventMessage message={event.message} expanded={expanded.has(event.id)} onMore={() => toggle(event.id)} />
+                <EventMessage
+                  message={event.message}
+                  expanded={expanded.has(event.id)}
+                  onMore={() => toggle(event.id)}
+                  hasDetail={hasDetail(event.detail)}
+                />
                 <LevelCell {...cell} />
               </Box>
               <Box className="flex items-center gap-3 flex-wrap mt-1">
@@ -252,20 +324,25 @@ const EventLogTable: React.FC<EventLogTableProps> = ({ events, timeline, isMobil
       <Table
         style={{
           tableLayout: 'fixed',
-          minWidth: FIXED_WIDTH_TOTAL + MIN_EVENT_COLUMN_WIDTH + (timeline ? COLUMN_WIDTHS.sincePrevious : 0),
+          minWidth: FIXED_WIDTH_TOTAL + MIN_VIDEO_COLUMN_WIDTH + MIN_EVENT_COLUMN_WIDTH + (timeline ? COLUMN_WIDTHS.sincePrevious : 0),
         }}
       >
         <TableHead>
           <TableRow>
             <TableCell component="th" style={cellStyle(COLUMN_WIDTHS.expander)} />
             <TableCell component="th" style={cellStyle(COLUMN_WIDTHS.time)}>Time</TableCell>
-            {timeline && <TableCell component="th" style={cellStyle(COLUMN_WIDTHS.sincePrevious)}>Since previous</TableCell>}
-            <TableCell component="th" style={cellStyle(COLUMN_WIDTHS.video)}>Video</TableCell>
+            {timeline && (
+              <TableCell component="th" title="Time since the previous step" style={cellStyle(COLUMN_WIDTHS.sincePrevious)}>Δ</TableCell>
+            )}
+            <TableCell component="th" style={cellStyle()}>Video</TableCell>
             <TableCell component="th" style={cellStyle(COLUMN_WIDTHS.channel)}>Channel</TableCell>
-            <TableCell component="th" style={cellStyle(COLUMN_WIDTHS.library)}>Library</TableCell>
+            <TableCell component="th" title="In library" style={cellStyle(COLUMN_WIDTHS.library)}>
+              <Library size={16} aria-hidden="true" />
+              <span className="sr-only">Library</span>
+            </TableCell>
             <TableCell component="th" style={cellStyle(COLUMN_WIDTHS.source)}>Source</TableCell>
             <TableCell component="th" style={cellStyle(COLUMN_WIDTHS.type)}>Type</TableCell>
-            <TableCell component="th" style={cellStyle(COLUMN_WIDTHS.component)}>Component</TableCell>
+            <TableCell component="th" title="Component" style={cellStyle(COLUMN_WIDTHS.component)}>Comp.</TableCell>
             <TableCell component="th" style={cellStyle(COLUMN_WIDTHS.level)}>Level</TableCell>
             <TableCell component="th" style={cellStyle()}>Event</TableCell>
           </TableRow>
@@ -275,19 +352,35 @@ const EventLogTable: React.FC<EventLogTableProps> = ({ events, timeline, isMobil
             const cell = { event, onSelectVideo, onSelectJob, onOpenVideo };
             return (
               <React.Fragment key={event.id}>
-                <TableRow hover>
-                  <TableCell style={cellStyle()}>{expander(event)}</TableCell>
+                <TableRow
+                  hover
+                  id={eventRowId(event.id)}
+                  style={{ backgroundColor: hoveredJobId && event.jobId === hoveredJobId ? HIGHLIGHT_BACKGROUND : undefined }}
+                >
+                  <TableCell style={cellStyle()}>
+                    <Box className="flex items-center">
+                      {event.jobId && (
+                        <JobLinkButton jobId={event.jobId} onSelectJob={onSelectJob} onHoverJobChange={setHoveredJobId} />
+                      )}
+                      {expander(event)}
+                    </Box>
+                  </TableCell>
                   <TableCell style={cellStyle(undefined, true)}><TimeStack iso={event.occurredAt} /></TableCell>
                   {timeline && <TableCell style={cellStyle(undefined, true)}>{deltaFor(events, index, timeline) ?? ''}</TableCell>}
                   <TableCell style={cellStyle()}><VideoCell {...cell} /></TableCell>
                   <TableCell style={cellStyle()}><ChannelCell {...cell} /></TableCell>
                   <TableCell style={cellStyle()}>{trackedLabel(event.isTracked)}</TableCell>
                   <TableCell style={cellStyle()}><SourceCell {...cell} /></TableCell>
-                  <TableCell style={cellStyle()}>{event.eventType}</TableCell>
-                  <TableCell style={cellStyle()}>{componentLabel(event.actor)}</TableCell>
+                  <TableCell style={cellStyle()}><BreakableType type={event.eventType} /></TableCell>
+                  <TableCell style={cellStyle()} title={componentLabel(event.actor)}>{componentAbbr(event.actor)}</TableCell>
                   <TableCell style={cellStyle()}><LevelCell {...cell} /></TableCell>
                   <TableCell style={cellStyle()}>
-                    <EventMessage message={event.message} expanded={expanded.has(event.id)} onMore={() => toggle(event.id)} />
+                    <EventMessage
+                      message={event.message}
+                      expanded={expanded.has(event.id)}
+                      onMore={() => toggle(event.id)}
+                      hasDetail={hasDetail(event.detail)}
+                    />
                   </TableCell>
                 </TableRow>
                 {expanded.has(event.id) && (

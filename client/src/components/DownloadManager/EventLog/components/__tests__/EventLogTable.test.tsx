@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import EventLogTable from '../EventLogTable';
 import type { JobEvent } from '../../../../../types/JobEvent';
@@ -27,7 +27,7 @@ describe('EventLogTable', () => {
     const onSelectVideo = jest.fn();
     const onSelectJob = jest.fn();
     const onOpenVideo = jest.fn();
-    render(
+    const { unmount } = render(
       <EventLogTable
         events={events}
         timeline={false}
@@ -38,7 +38,7 @@ describe('EventLogTable', () => {
         {...props}
       />
     );
-    return { onSelectVideo, onSelectJob, onOpenVideo };
+    return { onSelectVideo, onSelectJob, onOpenVideo, unmount };
   };
 
   describe('desktop table', () => {
@@ -78,10 +78,24 @@ describe('EventLogTable', () => {
       expect(screen.queryByRole('button', { name: 'more…' })).not.toBeInTheDocument();
     });
 
-    test('does not offer more on a short message', () => {
+    test('does not offer more on a short message with no detail', () => {
       setup([event(1)]);
 
       expect(screen.queryByRole('button', { name: 'more…' })).not.toBeInTheDocument();
+    });
+
+    test('offers more on a short message when there is detail behind it', () => {
+      setup([event(1, { detail: { error: 'HTTP 403' } })]);
+
+      expect(screen.getByRole('button', { name: 'more…' })).toBeInTheDocument();
+    });
+
+    test('more on a short message opens the row, same as a long one', async () => {
+      setup([event(1, { detail: { error: 'HTTP 403' } })]);
+
+      await userEvent.click(screen.getByRole('button', { name: 'more…' }));
+
+      expect(screen.getByTestId('event-detail')).toHaveTextContent('HTTP 403');
     });
 
     test('shows the event type in its own column', () => {
@@ -91,11 +105,11 @@ describe('EventLogTable', () => {
       expect(screen.getByText('nzb.untracked')).toBeInTheDocument();
     });
 
-    test('shows the component in its own column, in plain words', () => {
+    test('shows the component in its own column, abbreviated, in full on hover', () => {
       setup([event(1, { actor: 'media-server' })]);
 
-      expect(screen.getByRole('columnheader', { name: 'Component' })).toBeInTheDocument();
-      expect(screen.getByText('Media server')).toBeInTheDocument();
+      expect(screen.getByRole('columnheader', { name: 'Comp.' })).toBeInTheDocument();
+      expect(screen.getByText('Media')).toHaveAttribute('title', 'Media server');
     });
 
     test('shows the channel in its own column', () => {
@@ -104,11 +118,18 @@ describe('EventLogTable', () => {
       expect(screen.getByRole('columnheader', { name: 'Channel' })).toBeInTheDocument();
     });
 
-    test('shows the source label stored with the event', () => {
+    test('shows the source label stored with the event, as plain text', () => {
       setup([event(1)]);
 
       expect(screen.getByRole('columnheader', { name: 'Source' })).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: 'NZB (TV)' })).toBeInTheDocument();
+      expect(screen.getByText('NZB (TV)')).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'NZB (TV)' })).not.toBeInTheDocument();
+    });
+
+    test('shows a dash in the source cell when there is no source', () => {
+      setup([event(1, { jobId: null, source: null })]);
+
+      expect(screen.getAllByText('-').length).toBeGreaterThan(0);
     });
 
     test('shows the video snapshot title and channel', () => {
@@ -131,7 +152,7 @@ describe('EventLogTable', () => {
     });
 
     test('shows a dash in the video and source cells when there is neither a video nor a job', () => {
-      setup([event(1, { youtubeId: null, videoTitle: null, channelName: null, jobType: null, jobId: null })]);
+      setup([event(1, { youtubeId: null, videoTitle: null, channelName: null, jobType: null, jobId: null, source: null })]);
 
       expect(screen.getAllByText('-')).toHaveLength(2);
     });
@@ -165,10 +186,10 @@ describe('EventLogTable', () => {
       expect(onSelectVideo).not.toHaveBeenCalled();
     });
 
-    test('has no "since previous" column outside a timeline', () => {
+    test('has no delta column outside a timeline', () => {
       setup([event(1), event(2)]);
 
-      expect(screen.queryByRole('columnheader', { name: 'Since previous' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('columnheader', { name: 'Δ' })).not.toBeInTheDocument();
     });
 
     test('shows the level of every event, including info', () => {
@@ -198,19 +219,6 @@ describe('EventLogTable', () => {
       expect(onSelectVideo).toHaveBeenCalledWith('abc123');
     });
 
-    test('selects the job when its source is clicked', async () => {
-      const { onSelectJob } = setup([event(1)]);
-
-      await userEvent.click(screen.getByRole('button', { name: 'NZB (TV)' }));
-
-      expect(onSelectJob).toHaveBeenCalledWith('job-1');
-    });
-
-    test('offers no job link for an event without a job', () => {
-      setup([event(1, { jobId: null })]);
-
-      expect(screen.queryByRole('button', { name: 'NZB (TV)' })).not.toBeInTheDocument();
-    });
   });
 
   describe('tracked state', () => {
@@ -232,6 +240,40 @@ describe('EventLogTable', () => {
       expect(screen.queryByTestId('untracked-badge')).not.toBeInTheDocument();
     });
 
+    test('labels the Library icon header for hover', () => {
+      setup([event(1)]);
+
+      expect(screen.getByRole('columnheader', { name: 'Library' })).toHaveAttribute('title', 'In library');
+    });
+
+    test('abbreviates the Component header to keep the column narrow, in full on hover', () => {
+      setup([event(1)]);
+
+      expect(screen.getByRole('columnheader', { name: 'Comp.' })).toHaveAttribute('title', 'Component');
+    });
+
+    test('abbreviates the maintenance component to keep the column narrow', () => {
+      setup([event(1, { actor: 'maintenance' })]);
+
+      expect(screen.getByText('Maint.')).toBeInTheDocument();
+    });
+
+    test('shows a long event type in full so it can wrap at its dot or underscore', () => {
+      setup([event(1, { eventType: 'video.download_interrupted' })]);
+
+      expect(screen.getByText('video.download_interrupted')).toBeInTheDocument();
+    });
+
+    test('makes the table wider in a timeline, for the Since previous column', () => {
+      const { unmount } = setup([event(1)]);
+      const plainWidth = parseInt(screen.getByRole('table').style.minWidth, 10);
+      unmount();
+
+      setup([event(1), event(2)], { timeline: true });
+
+      expect(parseInt(screen.getByRole('table').style.minWidth, 10)).toBeGreaterThan(plainWidth);
+    });
+
     test('has a Library column', () => {
       setup([event(1)]);
 
@@ -249,6 +291,48 @@ describe('EventLogTable', () => {
 
       expect(screen.queryByRole('cell', { name: 'Yes' })).not.toBeInTheDocument();
       expect(screen.queryByRole('cell', { name: 'No' })).not.toBeInTheDocument();
+    });
+
+    test('opens a long message from its more link on a mobile card', async () => {
+      const longMessage = 'Failed to fetch video metadata: ' + 'a very long reason '.repeat(10);
+      setup([event(1, { message: longMessage })], { isMobile: true });
+
+      await userEvent.click(screen.getByRole('button', { name: 'more…' }));
+
+      expect(screen.getByTestId('event-detail')).toHaveTextContent(longMessage.trim());
+    });
+
+    test('opens the details of a revealed event', () => {
+      setup([event(1), event(2)], { reveal: { eventId: 2, seq: 1 } });
+
+      expect(screen.getByTestId('event-detail')).toHaveTextContent('Message 2');
+    });
+
+    test('ignores a reveal for an event that is not on this page', () => {
+      setup([event(1)], { reveal: { eventId: 99, seq: 1 } });
+
+      expect(screen.queryByTestId('event-detail')).not.toBeInTheDocument();
+    });
+
+    test('opens a revealed event again after its row was closed', async () => {
+      const events = [event(1)];
+      const table = (seq: number) => (
+        <EventLogTable
+          events={events}
+          timeline={false}
+          isMobile={false}
+          onSelectVideo={jest.fn()}
+          onSelectJob={jest.fn()}
+          onOpenVideo={jest.fn()}
+          reveal={{ eventId: 1, seq }}
+        />
+      );
+      const { rerender } = render(table(1));
+      await userEvent.click(screen.getByRole('button', { name: 'Hide details' }));
+
+      rerender(table(2));
+
+      expect(screen.getByTestId('event-detail')).toBeInTheDocument();
     });
 
     test('shows the badge on the mobile cards too', () => {
@@ -282,6 +366,16 @@ describe('EventLogTable', () => {
       await userEvent.click(screen.getByRole('button', { name: 'Show details' }));
 
       expect(screen.getByTestId('event-detail')).toHaveStyle({ maxWidth: '60rem' });
+    });
+
+    test('leaves out expansion rows that have no value', async () => {
+      setup([event(1, { youtubeId: null, channelName: null, jobId: null, jobType: null })]);
+
+      await userEvent.click(screen.getByRole('button', { name: 'Show details' }));
+
+      const detail = screen.getByTestId('event-detail');
+      expect(detail).not.toHaveTextContent('Video id');
+      expect(detail).not.toHaveTextContent('Job id');
     });
 
     test('shows whether the video was in the library in the expansion row', async () => {
@@ -336,11 +430,82 @@ describe('EventLogTable', () => {
     });
   });
 
+  describe('job link icon', () => {
+    test('shows a link icon on a row that has a job', () => {
+      setup([event(1)]);
+
+      expect(screen.getByRole('button', { name: 'Highlight and select this job' })).toBeInTheDocument();
+    });
+
+    test('has no link icon on a row with no job', () => {
+      setup([event(1, { jobId: null })]);
+
+      expect(screen.queryByRole('button', { name: 'Highlight and select this job' })).not.toBeInTheDocument();
+    });
+
+    test('selects the job when clicked', async () => {
+      const { onSelectJob } = setup([event(1)]);
+
+      await userEvent.click(screen.getByRole('button', { name: 'Highlight and select this job' }));
+
+      expect(onSelectJob).toHaveBeenCalledWith('job-1');
+    });
+
+    test('highlights every row from the same job on hover', async () => {
+      setup([event(1), event(2, { jobId: 'job-2' }), event(3)]);
+      const rows = screen.getAllByRole('row').slice(1); // drop the header row
+
+      await userEvent.hover(screen.getAllByRole('button', { name: 'Highlight and select this job' })[0]);
+
+      expect(rows[0]).toHaveStyle({ backgroundColor: 'var(--accent-muted, rgba(255,220,0,0.15))' });
+      expect(rows[2]).toHaveStyle({ backgroundColor: 'var(--accent-muted, rgba(255,220,0,0.15))' });
+      expect(rows[1]).not.toHaveStyle({ backgroundColor: 'var(--accent-muted, rgba(255,220,0,0.15))' });
+    });
+
+    test('removes the highlight when the pointer leaves', async () => {
+      setup([event(1)]);
+      const row = screen.getAllByRole('row')[1];
+      const link = screen.getByRole('button', { name: 'Highlight and select this job' });
+
+      await userEvent.hover(link);
+      await userEvent.unhover(link);
+
+      expect(row).not.toHaveStyle({ backgroundColor: 'var(--accent-muted, rgba(255,220,0,0.15))' });
+    });
+
+    test('highlights on keyboard focus too, and clears on blur', () => {
+      setup([event(1)]);
+      const row = screen.getAllByRole('row')[1];
+      const link = screen.getByRole('button', { name: 'Highlight and select this job' });
+
+      fireEvent.focus(link);
+      expect(row).toHaveStyle({ backgroundColor: 'var(--accent-muted, rgba(255,220,0,0.15))' });
+
+      fireEvent.blur(link);
+      expect(row).not.toHaveStyle({ backgroundColor: 'var(--accent-muted, rgba(255,220,0,0.15))' });
+    });
+
+    test('shows the link icon on a mobile card too', () => {
+      setup([event(1)], { isMobile: true });
+
+      expect(screen.getByRole('button', { name: 'Highlight and select this job' })).toBeInTheDocument();
+    });
+
+    test('highlights a mobile card on hover too', async () => {
+      setup([event(1)], { isMobile: true });
+      const card = screen.getByTestId('event-row-1');
+
+      await userEvent.hover(screen.getByRole('button', { name: 'Highlight and select this job' }));
+
+      expect(card).toHaveStyle({ backgroundColor: 'var(--accent-muted, rgba(255,220,0,0.15))' });
+    });
+  });
+
   describe('timeline', () => {
-    test('adds a "since previous" column', () => {
+    test('adds a delta ("since previous") column', () => {
       setup([event(1), event(2)], { timeline: true });
 
-      expect(screen.getByRole('columnheader', { name: 'Since previous' })).toBeInTheDocument();
+      expect(screen.getByRole('columnheader', { name: 'Δ' })).toHaveAttribute('title', 'Time since the previous step');
     });
 
     test('shows the gap to the previous step', () => {
@@ -385,6 +550,12 @@ describe('EventLogTable', () => {
 
     test('cuts a long message and offers more, like the table', () => {
       setup([event(1, { message: 'File finalized at ' + '/very/long/path/segment'.repeat(10) })], { isMobile: true });
+
+      expect(screen.getByRole('button', { name: 'more…' })).toBeInTheDocument();
+    });
+
+    test('offers more on a short message with detail, like the table', () => {
+      setup([event(1, { detail: { error: 'HTTP 403' } })], { isMobile: true });
 
       expect(screen.getByRole('button', { name: 'more…' })).toBeInTheDocument();
     });

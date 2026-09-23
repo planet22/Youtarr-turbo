@@ -76,6 +76,17 @@ export function eventLevelColor(level: JobEventLevel | string): EventChipColor {
   return 'default';
 }
 
+// An event type as a short step name for a chain of steps: "video.download_started"
+// -> "download started". The job and video families are implied by the row they
+// sit in, so only the others keep their family ("strm created").
+const IMPLIED_FAMILIES = new Set(['job', 'video']);
+
+export function stepLabel(eventType: string): string {
+  const [family, ...rest] = eventType.split('.');
+  const name = rest.length > 0 && IMPLIED_FAMILIES.has(family) ? rest.join('.') : eventType;
+  return name.replace(/[._]/g, ' ');
+}
+
 export const EVENT_LEVEL_OPTIONS: ReadonlyArray<{ value: string; label: string }> = [
   { value: '', label: 'All levels' },
   { value: 'error', label: 'Errors' },
@@ -107,9 +118,14 @@ export const EVENT_LEVEL_FILTER_OPTIONS: readonly string[] = ['error', 'warn', '
 
 const BYTE_KEYS = new Set(['fileSize', 'newFileSize', 'freedBytes']);
 
-// "avgDownloadMBps" -> "Avg download MBps", "filePath" -> "File path"
+// "avgDownloadMBps" -> "Avg download MBps", "filePath" -> "File path".
+// A word with two or more capitals (MBps, NZB) is an abbreviation and keeps its case.
 export function detailLabel(key: string): string {
-  const spaced = key.replace(/([a-z0-9])([A-Z])/g, '$1 $2').toLowerCase();
+  const spaced = key
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .split(' ')
+    .map((word) => (/[A-Z].*[A-Z]/.test(word) ? word : word.toLowerCase()))
+    .join(' ');
   return spaced.charAt(0).toUpperCase() + spaced.slice(1);
 }
 
@@ -135,6 +151,14 @@ export function describeDetailEntries(detail: Record<string, unknown> | null): D
     .filter((entry) => entry.value !== '');
 }
 
+// Whether the event recorded anything worth expanding for - lets the main
+// line offer "more…" even when the message itself is short (e.g. a failure
+// whose real detail, like the underlying error, only shows in the expansion).
+export function hasDetail(detail: Record<string, unknown> | null): boolean {
+  if (!detail) return false;
+  return Object.values(detail).some((value) => value !== null && value !== undefined && value !== '');
+}
+
 // Whether the video was in the library when the event happened.
 // ---- Component: which part of the app recorded the event ------------------
 
@@ -150,7 +174,7 @@ const COMPONENT_LABELS: Record<string, string> = {
   ytstream: 'Streaming',
   'media-server': 'Media server',
   youtube: 'YouTube',
-  maintenance: 'Maintenance',
+  maintenance: 'Maint.',
   'auto-removal': 'Auto-removal',
   'strm-cache-expiry': 'STRM cache expiry',
 };
@@ -162,6 +186,23 @@ export function componentLabel(actor: string | null): string {
   if (known) return known;
   const spaced = actor.replace(/[-_]+/g, ' ');
   return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+}
+
+// Shorter than componentLabel's, for the Component table column specifically
+// (narrow by design); the filter dropdown and the expansion row keep the full
+// word via componentLabel. Only the ones that don't already fit need an entry.
+const COMPONENT_ABBR: Record<string, string> = {
+  downloader: 'DL',
+  library: 'Library',
+  'media-server': 'Media',
+  ytstream: 'Stream',
+  'auto-removal': 'Auto-rm',
+  'strm-cache-expiry': 'STRM exp.',
+};
+
+export function componentAbbr(actor: string | null): string {
+  if (!actor) return '';
+  return COMPONENT_ABBR[actor] ?? componentLabel(actor);
 }
 
 export const TRACKED_OPTIONS: readonly string[] = ['tracked', 'untracked'];

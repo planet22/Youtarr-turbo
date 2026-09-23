@@ -1,5 +1,8 @@
 import {
+  componentAbbr,
   componentLabel,
+  dayEndIso,
+  dayStartIso,
   EVENT_LEVEL_OPTIONS,
   eventLevelColor,
   formatEventDelta,
@@ -7,6 +10,7 @@ import {
   formatEventTimeParts,
   MESSAGE_PREVIEW_LENGTH,
   previewMessage,
+  stepLabel,
 } from '../eventLogFormat';
 
 describe('eventLogFormat', () => {
@@ -96,6 +100,10 @@ describe('detail formatting', () => {
     expect(detailLabel('diagnosisMessage')).toBe('Diagnosis message');
   });
 
+  test('keeps the capitals of an abbreviation in a key', () => {
+    expect(detailLabel('avgDownloadMBps')).toBe('Avg download MBps');
+  });
+
   test('labels a single word', () => {
     expect(detailLabel('error')).toBe('Error');
   });
@@ -106,6 +114,14 @@ describe('detail formatting', () => {
 
   test('formats a duration in seconds', () => {
     expect(describeDetailEntries({ downloadDurationSeconds: 12 })).toEqual([{ label: 'Download duration seconds', value: '12s' }]);
+  });
+
+  test('formats a download speed', () => {
+    expect(describeDetailEntries({ avgDownloadMBps: 5.5 })).toEqual([{ label: 'Avg download MBps', value: '5.5 MB/s' }]);
+  });
+
+  test('shows a zero download speed as a plain number', () => {
+    expect(describeDetailEntries({ avgDownloadMBps: 0 })).toEqual([{ label: 'Avg download MBps', value: '0' }]);
   });
 
   test('shows text values as they are', () => {
@@ -125,6 +141,22 @@ describe('detail formatting', () => {
   });
 });
 
+describe('stepLabel', () => {
+  test.each([
+    ['video.download_started', 'download started'],
+    ['job.finished', 'finished'],
+    ['strm.created', 'strm created'],
+    ['nzb.import_detected', 'nzb import detected'],
+    ['cache.hls_buffer_finalized', 'cache hls buffer finalized'],
+  ])('shows %s as %s', (type, label) => {
+    expect(stepLabel(type)).toBe(label);
+  });
+
+  test('leaves a type with no family as it is', () => {
+    expect(stepLabel('started')).toBe('started');
+  });
+});
+
 describe('componentLabel', () => {
   test.each([
     ['downloader', 'Downloader'],
@@ -135,6 +167,7 @@ describe('componentLabel', () => {
     ['strm', 'STRM'],
     ['youtube', 'YouTube'],
     ['strm-cache-expiry', 'STRM cache expiry'],
+    ['maintenance', 'Maint.'],
   ])('shows %s as %s', (actor, label) => {
     expect(componentLabel(actor)).toBe(label);
   });
@@ -145,6 +178,42 @@ describe('componentLabel', () => {
 
   test('is empty when there is no component', () => {
     expect(componentLabel(null)).toBe('');
+  });
+});
+
+describe('componentAbbr', () => {
+  test.each([
+    ['downloader', 'DL'],
+    ['library', 'Library'],
+    ['media-server', 'Media'],
+    ['ytstream', 'Stream'],
+    ['auto-removal', 'Auto-rm'],
+    ['strm-cache-expiry', 'STRM exp.'],
+  ])('abbreviates %s to %s', (actor, abbr) => {
+    expect(componentAbbr(actor)).toBe(abbr);
+  });
+
+  test('falls back to the full label for a component that is already short', () => {
+    expect(componentAbbr('nzb')).toBe('NZB');
+  });
+
+  test('is empty when there is no component', () => {
+    expect(componentAbbr(null)).toBe('');
+  });
+});
+
+describe('dayStartIso / dayEndIso', () => {
+  test('turns a date key into local midnight', () => {
+    expect(new Date(dayStartIso('2026-09-19') as string).getTime()).toBe(new Date(2026, 8, 19, 0, 0, 0, 0).getTime());
+  });
+
+  test('turns a date key into the last millisecond of that local day', () => {
+    expect(new Date(dayEndIso('2026-09-19') as string).getTime()).toBe(new Date(2026, 8, 19, 23, 59, 59, 999).getTime());
+  });
+
+  test('is undefined for a malformed date key', () => {
+    expect(dayStartIso('not-a-date')).toBeUndefined();
+    expect(dayEndIso('not-a-date')).toBeUndefined();
   });
 });
 

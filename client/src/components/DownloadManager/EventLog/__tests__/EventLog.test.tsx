@@ -47,9 +47,10 @@ const lastParams = () => listCalls()[listCalls().length - 1][1]?.params;
 
 jest.mock('../../../shared/VideoModal', () => ({
   __esModule: true,
-  default: ({ video, onClose }: { video: { title: string }; onClose: () => void }) =>
+  default: ({ video, onClose, onVideoDeleted }: { video: { title: string }; onClose: () => void; onVideoDeleted: () => void }) =>
     require('react').createElement('div', { 'data-testid': 'video-modal' }, video.title,
-      require('react').createElement('button', { onClick: onClose }, 'Close modal')),
+      require('react').createElement('button', { onClick: onClose }, 'Close modal'),
+      require('react').createElement('button', { onClick: onVideoDeleted }, 'Delete video')),
 }));
 
 type Filter = (message: { destination?: string; type?: string }) => boolean;
@@ -135,7 +136,7 @@ describe('EventLog page', () => {
       respond([event(1), event(2)]);
       renderPage('/downloads/log?job=job-1');
 
-      expect(await screen.findByRole('columnheader', { name: 'Since previous' })).toBeInTheDocument();
+      expect(await screen.findByRole('columnheader', { name: 'Δ time' })).toBeInTheDocument();
     });
 
     test('a ?video= link filters to that video, oldest first', async () => {
@@ -186,13 +187,40 @@ describe('EventLog page', () => {
       await waitFor(() => expect(lastParams()).toMatchObject({ youtubeId: 'abc123', order: 'asc' }));
     });
 
-    test('clicking a job label switches to that job', async () => {
+    test('clicking a row\'s job link switches to that job', async () => {
       respond([event(1)]);
       renderPage();
 
-      await userEvent.click(await screen.findByRole('button', { name: 'Channels' }));
+      await userEvent.click(await screen.findByRole('button', { name: 'Highlight and select this job' }));
 
       await waitFor(() => expect(lastParams()).toMatchObject({ jobId: 'job-1', order: 'asc' }));
+    });
+
+    test('clearing the Single job only chip goes back to the whole log', async () => {
+      respond([event(1)]);
+      renderPage('/downloads/log?job=job-1');
+
+      await userEvent.click(await screen.findByText('Single job only'));
+
+      await waitFor(() => expect(lastParams().jobId).toBeUndefined());
+    });
+
+    test('clearing the Single video only chip goes back to the whole log', async () => {
+      respond([event(1)]);
+      renderPage('/downloads/log?video=abc123');
+
+      await userEvent.click(await screen.findByText('Single video only'));
+
+      await waitFor(() => expect(lastParams().youtubeId).toBeUndefined());
+    });
+
+    test('a saved component filter reads in plain words and clears from its chip', async () => {
+      window.localStorage.setItem('youtarr:eventLog:filter:actor', JSON.stringify('downloader'));
+      renderPage();
+
+      await userEvent.click(await screen.findByText('Component: Downloader'));
+
+      await waitFor(() => expect(lastParams().actor).toBeUndefined());
     });
 
     test('typing in the search box filters the log', async () => {
@@ -202,6 +230,183 @@ describe('EventLog page', () => {
       fireEvent.change(screen.getByPlaceholderText(/Search events/), { target: { value: 'juice' } });
 
       await waitFor(() => expect(lastParams()).toMatchObject({ q: 'juice', order: 'asc' }));
+    });
+  });
+
+  describe('optional log views', () => {
+    const jobEvents = () => [
+      event(1, { youtubeId: null, videoTitle: null, eventType: 'job.started' }),
+      event(2, { eventType: 'video.started' }),
+      event(3, { eventType: 'video.downloaded' }),
+    ];
+
+    test('offers both views when one job is shown', async () => {
+      respond(jobEvents());
+      renderPage('/downloads/log?job=job-1');
+
+      expect(await screen.findByRole('button', { name: 'Swimlanes' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'By job' })).toBeInTheDocument();
+    });
+
+    test('offers By job for the whole log too', async () => {
+      respond(jobEvents());
+      renderPage();
+
+      expect(await screen.findByRole('button', { name: 'By job' })).toBeInTheDocument();
+    });
+
+    test('does not offer Swimlanes for the whole log - it only makes sense for one job', async () => {
+      respond(jobEvents());
+      renderPage();
+      await screen.findByText('Message 2');
+
+      expect(screen.queryByRole('button', { name: 'Swimlanes' })).not.toBeInTheDocument();
+    });
+
+    test('has both views off by default', async () => {
+      respond(jobEvents());
+      renderPage('/downloads/log?job=job-1');
+      await screen.findByText('Message 2');
+
+      expect(screen.queryByTestId('event-swimlanes')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('event-group')).not.toBeInTheDocument();
+    });
+
+    test('shows the swimlanes above the table when switched on', async () => {
+      respond(jobEvents());
+      renderPage('/downloads/log?job=job-1');
+
+      await userEvent.click(await screen.findByRole('button', { name: 'Swimlanes' }));
+
+      expect(screen.getByTestId('event-swimlanes')).toBeInTheDocument();
+      expect(screen.getByText('Message 2')).toBeInTheDocument();
+    });
+
+    test('groups the events by job when switched on', async () => {
+      respond(jobEvents());
+      renderPage('/downloads/log?job=job-1');
+
+      await userEvent.click(await screen.findByRole('button', { name: 'By job' }));
+
+      expect(screen.getAllByTestId('event-group')).toHaveLength(1);
+    });
+
+    test('remembers the swimlanes choice', async () => {
+      respond(jobEvents());
+      renderPage('/downloads/log?job=job-1');
+
+      await userEvent.click(await screen.findByRole('button', { name: 'Swimlanes' }));
+
+      expect(window.localStorage.getItem('youtarr:eventLog:view:swimlanes')).toBe('true');
+    });
+
+    test('remembers the grouping choice', async () => {
+      respond(jobEvents());
+      renderPage('/downloads/log?job=job-1');
+
+      await userEvent.click(await screen.findByRole('button', { name: 'By job' }));
+
+      expect(window.localStorage.getItem('youtarr:eventLog:view:groupByVideo')).toBe('true');
+    });
+
+    test('applies a remembered swimlanes choice on the next visit', async () => {
+      window.localStorage.setItem('youtarr:eventLog:view:swimlanes', JSON.stringify(true));
+      respond(jobEvents());
+      renderPage('/downloads/log?job=job-1');
+
+      expect(await screen.findByTestId('event-swimlanes')).toBeInTheDocument();
+    });
+
+    test('opens the row of a clicked swimlane dot', async () => {
+      window.localStorage.setItem('youtarr:eventLog:view:swimlanes', JSON.stringify(true));
+      respond(jobEvents());
+      renderPage('/downloads/log?job=job-1');
+
+      await userEvent.click(await screen.findByRole('button', { name: 'downloaded - Message 3' }));
+
+      expect(screen.getByTestId('event-detail')).toHaveTextContent('Message 3');
+    });
+
+    test('opens the group of a clicked swimlane dot when grouped', async () => {
+      window.localStorage.setItem('youtarr:eventLog:view:swimlanes', JSON.stringify(true));
+      window.localStorage.setItem('youtarr:eventLog:view:groupByVideo', JSON.stringify(true));
+      respond(jobEvents());
+      renderPage('/downloads/log?job=job-1');
+
+      await userEvent.click(await screen.findByRole('button', { name: 'downloaded - Message 3' }));
+
+      expect(screen.getByTestId('event-detail')).toHaveTextContent('Message 3');
+    });
+
+    test('keeps different jobs in separate groups on the whole log', async () => {
+      respond([
+        event(1, { jobId: 'job-1', youtubeId: null, videoTitle: null, jobType: 'Channel Downloads', eventType: 'job.started' }),
+        event(2, { jobId: 'job-2', youtubeId: null, videoTitle: null, jobType: 'Manual downloads', eventType: 'job.started' }),
+      ]);
+      renderPage();
+
+      await userEvent.click(await screen.findByRole('button', { name: 'By job' }));
+
+      expect(screen.getByText('Job: Channel Downloads')).toBeInTheDocument();
+      expect(screen.getByText('Job: Manual downloads')).toBeInTheDocument();
+    });
+
+    test('selecting a video from within the grouped view updates the params', async () => {
+      respond(jobEvents());
+      renderPage();
+      await userEvent.click(await screen.findByRole('button', { name: 'By job' }));
+      await userEvent.click(await screen.findByRole('button', { name: 'Expand Job: Channel Downloads' }));
+
+      await userEvent.click(screen.getAllByRole('button', { name: 'Celebrity Juice S26E09' })[0]);
+
+      await waitFor(() => expect(lastParams()).toMatchObject({ youtubeId: 'abc123', order: 'asc' }));
+    });
+
+    test('selecting a job from within the grouped view updates the params', async () => {
+      respond(jobEvents());
+      renderPage();
+      await userEvent.click(await screen.findByRole('button', { name: 'By job' }));
+      await userEvent.click(await screen.findByRole('button', { name: 'Expand Job: Channel Downloads' }));
+
+      await userEvent.click(screen.getAllByRole('button', { name: 'Highlight and select this job' })[0]);
+
+      await waitFor(() => expect(lastParams()).toMatchObject({ jobId: 'job-1', order: 'asc' }));
+    });
+
+    test('offers Timeline once By job is on, and remembers it', async () => {
+      respond(jobEvents());
+      renderPage('/downloads/log?job=job-1');
+      await userEvent.click(await screen.findByRole('button', { name: 'By job' }));
+
+      expect(screen.queryByTestId('event-swimlane')).not.toBeInTheDocument();
+      await userEvent.click(await screen.findByRole('button', { name: 'Timeline' }));
+
+      expect(screen.getAllByTestId('event-swimlane').length).toBeGreaterThan(0);
+      expect(window.localStorage.getItem('youtarr:eventLog:view:groupTimeline')).toBe('true');
+    });
+  });
+
+  describe('filter order', () => {
+    test('lists the filters in the order of the table columns', async () => {
+      respond([event(1)]);
+      renderPage();
+      await userEvent.click(await screen.findByTestId('video-list-filters-button'));
+
+      // "Occurred" is a plain field label; the rest are "Filter by X" buttons (see ChannelFilter).
+      const finders = [
+        () => screen.getByText('Occurred'),
+        () => screen.getByRole('button', { name: 'Filter by Channel' }),
+        () => screen.getByRole('button', { name: 'Filter by Library' }),
+        () => screen.getByRole('button', { name: 'Filter by Source' }),
+        () => screen.getByRole('button', { name: 'Filter by Event type' }),
+        () => screen.getByRole('button', { name: 'Filter by Component' }),
+        () => screen.getByRole('button', { name: 'Filter by Level' }),
+      ];
+      const positions = finders.map((find) => find());
+      const inOrder = positions.every(
+        (node, index) => index === 0 || Boolean(positions[index - 1].compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING)
+      );
+      expect(inOrder).toBe(true);
     });
   });
 
@@ -221,6 +426,18 @@ describe('EventLog page', () => {
       await screen.findByText('Message 1');
 
       expect(screen.queryByTestId('video-modal')).not.toBeInTheDocument();
+    });
+
+    test('deleting the video from the popup closes it and reloads the list', async () => {
+      respond([event(1)]);
+      renderPage();
+      await userEvent.click(await screen.findByTestId('video-thumbnail'));
+      const callsBefore = listCalls().length;
+
+      await userEvent.click(screen.getByRole('button', { name: 'Delete video' }));
+
+      expect(screen.queryByTestId('video-modal')).not.toBeInTheDocument();
+      await waitFor(() => expect(listCalls().length).toBeGreaterThan(callsBefore));
     });
 
     test('closing the popup removes it', async () => {

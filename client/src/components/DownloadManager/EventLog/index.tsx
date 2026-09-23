@@ -16,7 +16,10 @@ import {
   type FilterConfig,
 } from '../../shared/VideoList';
 import { useJobEvents } from './hooks/useJobEvents';
-import EventLogTable from './components/EventLogTable';
+import EventLogTable, { type EventReveal } from './components/EventLogTable';
+import EventGroupedTable from './components/EventGroupedTable';
+import EventSwimlanes from './components/EventSwimlanes';
+import JobViewToggles from './components/JobViewToggles';
 import {
   dayEndIso,
   dayStartIso,
@@ -58,6 +61,11 @@ const EventLog: React.FC<EventLogProps> = ({ token }) => {
 
   const [pageSize, setPageSize] = useListPageSize('youtarr.eventLog.pageSize');
   const [page, setPage] = useState(1);
+  // Optional views of whatever's on screen; off until switched on, then remembered.
+  const [showSwimlanes, setShowSwimlanes] = usePersistedFilterState('youtarr:eventLog:view:swimlanes', false);
+  const [groupByJob, setGroupByJob] = usePersistedFilterState('youtarr:eventLog:view:groupByVideo', false);
+  const [groupTimeline, setGroupTimeline] = usePersistedFilterState('youtarr:eventLog:view:groupTimeline', false);
+  const [reveal, setReveal] = useState<EventReveal | null>(null);
   const [modalEvent, setModalEvent] = useState<JobEvent | null>(null);
 
   const filters = useMemo<JobEventFilters>(
@@ -125,9 +133,12 @@ const EventLog: React.FC<EventLogProps> = ({ token }) => {
       ...(youtubeId
         ? [{ id: 'toggle' as const, label: 'Single video only', icon: <ClearIcon size={16} />, value: true, onChange: () => clearParam(PARAM_VIDEO) }]
         : []),
-      { id: 'select', label: 'Level', value: level, options: [...EVENT_LEVEL_FILTER_OPTIONS], onChange: setLevel },
-      { id: 'select', label: 'Event type', value: eventType, options: facets.eventTypes, onChange: setEventType },
+      // In the order of the table's columns (Video and Event are covered by the search box).
+      { id: 'dateRangeString', label: 'Occurred', dateFrom, dateTo, onFromChange: setDateFrom, onToChange: setDateTo },
+      { id: 'select', label: 'Channel', value: channel, options: facets.channels, onChange: setChannel },
+      { id: 'select', label: 'Library', value: tracked, options: [...TRACKED_OPTIONS], onChange: setTracked },
       { id: 'select', label: 'Source', value: source, options: facets.sources, onChange: setSource },
+      { id: 'select', label: 'Event type', value: eventType, options: facets.eventTypes, onChange: setEventType },
       {
         id: 'select',
         label: 'Component',
@@ -135,12 +146,15 @@ const EventLog: React.FC<EventLogProps> = ({ token }) => {
         options: facets.actors.map(componentLabel),
         onChange: (label: string) => setActor(facets.actors.find((name) => componentLabel(name) === label) ?? label),
       },
-      { id: 'select', label: 'Channel', value: channel, options: facets.channels, onChange: setChannel },
-      { id: 'select', label: 'Library', value: tracked, options: [...TRACKED_OPTIONS], onChange: setTracked },
-      { id: 'dateRangeString', label: 'Occurred', dateFrom, dateTo, onFromChange: setDateFrom, onToChange: setDateTo },
+      { id: 'select', label: 'Level', value: level, options: [...EVENT_LEVEL_FILTER_OPTIONS], onChange: setLevel },
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [jobId, youtubeId, level, eventType, source, actor, channel, tracked, facets, dateFrom, dateTo, clearParam]
+  );
+
+  const revealEvent = useCallback(
+    (eventId: number) => setReveal((previous) => ({ eventId, seq: (previous?.seq ?? 0) + 1 })),
+    []
   );
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
@@ -176,20 +190,48 @@ const EventLog: React.FC<EventLogProps> = ({ token }) => {
         searchPlaceholder="Search events by video, channel or message..."
         searchTooltip="Searches the event text, video title and channel name."
         headerSlot={headerSlot}
+        toolbarExtras={
+          <JobViewToggles
+            swimlanes={showSwimlanes}
+            onSwimlanesChange={setShowSwimlanes}
+            swimlanesAvailable={Boolean(jobId)}
+            groupByJob={groupByJob}
+            onGroupByJobChange={setGroupByJob}
+            groupTimeline={groupTimeline}
+            onGroupTimelineChange={setGroupTimeline}
+          />
+        }
         itemCount={events.length}
         isLoading={loading && events.length === 0}
         isError={Boolean(error)}
         errorMessage={error}
         customEmptyMessage={hasFilters ? 'No events found matching your filters' : 'No events recorded yet'}
         renderContent={() => (
-          <EventLogTable
-            events={events}
-            timeline={singleSubject}
-            isMobile={isMobile}
-            onSelectVideo={(id) => setParam(PARAM_VIDEO, id)}
-            onSelectJob={(id) => setParam(PARAM_JOB, id)}
-            onOpenVideo={setModalEvent}
-          />
+          <>
+            {jobId && showSwimlanes && <EventSwimlanes events={events} onSelectEvent={revealEvent} />}
+            {groupByJob ? (
+              <EventGroupedTable
+                events={events}
+                isMobile={isMobile}
+                onSelectVideo={(id) => setParam(PARAM_VIDEO, id)}
+                onSelectJob={(id) => setParam(PARAM_JOB, id)}
+                onOpenVideo={setModalEvent}
+                reveal={reveal}
+                onSelectEvent={revealEvent}
+                showTimeline={groupTimeline}
+              />
+            ) : (
+              <EventLogTable
+                events={events}
+                timeline={singleSubject}
+                isMobile={isMobile}
+                onSelectVideo={(id) => setParam(PARAM_VIDEO, id)}
+                onSelectJob={(id) => setParam(PARAM_JOB, id)}
+                onOpenVideo={setModalEvent}
+                reveal={reveal}
+              />
+            )}
+          </>
         )}
         pagination={paginationBar('bottom')}
         paginationTop={paginationBar('top')}

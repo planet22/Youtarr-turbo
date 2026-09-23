@@ -132,6 +132,13 @@ describe('useJobEvents', () => {
     await waitFor(() => expect(result.current.error).toBe('Network Error'));
   });
 
+  test('falls back to a generic message when the failure is not an Error', async () => {
+    listDefault = () => Promise.reject('boom');
+    const { result } = render();
+
+    await waitFor(() => expect(result.current.error).toBe('Failed to load the events log'));
+  });
+
   test('loads the new page when the page changes', async () => {
     listAlways(page([2, 1], 50));
     const { result, rerender } = render();
@@ -186,6 +193,16 @@ describe('useJobEvents', () => {
       });
 
       expect(result.current.loading).toBe(false);
+    });
+
+    test('does nothing without a token', async () => {
+      const { result } = render({ token: null });
+
+      await act(async () => {
+        await result.current.refresh();
+      });
+
+      expect(mockedGet).not.toHaveBeenCalled();
     });
 
     test('keeps what is on screen when the refresh fails', async () => {

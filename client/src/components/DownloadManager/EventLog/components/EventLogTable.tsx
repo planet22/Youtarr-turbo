@@ -332,7 +332,7 @@ const EventLogTable: React.FC<EventLogTableProps> = ({ events, timeline, isMobil
             <TableCell component="th" style={cellStyle(COLUMN_WIDTHS.expander)} />
             <TableCell component="th" style={cellStyle(COLUMN_WIDTHS.time)}>Time</TableCell>
             {timeline && (
-              <TableCell component="th" title="Time since the previous step" style={cellStyle(COLUMN_WIDTHS.sincePrevious)}>Δ</TableCell>
+              <TableCell component="th" title="Time since the previous step" style={cellStyle(COLUMN_WIDTHS.sincePrevious)}>Δ time</TableCell>
             )}
             <TableCell component="th" style={cellStyle()}>Video</TableCell>
             <TableCell component="th" style={cellStyle(COLUMN_WIDTHS.channel)}>Channel</TableCell>

@@ -35,10 +35,33 @@ describe('EventMessage', () => {
     expect(onMore).toHaveBeenCalledTimes(1);
   });
 
-  test('shows the whole message, with no link, once the row is open', () => {
+  test('shows the whole message and a "less…" link once the row is open', () => {
     render(<EventMessage message={LONG_MESSAGE} expanded onMore={jest.fn()} />);
 
     expect(screen.getByText(LONG_MESSAGE)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'more…' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'less…' })).toBeInTheDocument();
+  });
+
+  test('collapses the row when less is clicked', async () => {
+    const onMore = jest.fn();
+    render(<EventMessage message={LONG_MESSAGE} expanded onMore={onMore} />);
+
+    await userEvent.click(screen.getByRole('button', { name: 'less…' }));
+
+    expect(onMore).toHaveBeenCalledTimes(1);
+  });
+
+  test('shows a short message with no detail plainly even when the row is open', () => {
+    render(<EventMessage message="Download started" expanded onMore={jest.fn()} />);
+
+    expect(screen.getByText('Download started')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'less…' })).not.toBeInTheDocument();
+  });
+
+  test('offers "less…" for a short message with detail, once open', () => {
+    render(<EventMessage message="Download failed" expanded onMore={jest.fn()} hasDetail />);
+
+    expect(screen.getByRole('button', { name: 'less…' })).toBeInTheDocument();
   });
 });

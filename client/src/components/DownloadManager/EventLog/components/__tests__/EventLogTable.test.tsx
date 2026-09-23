@@ -189,7 +189,7 @@ describe('EventLogTable', () => {
     test('has no delta column outside a timeline', () => {
       setup([event(1), event(2)]);
 
-      expect(screen.queryByRole('columnheader', { name: 'Δ' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('columnheader', { name: 'Δ time' })).not.toBeInTheDocument();
     });
 
     test('shows the level of every event, including info', () => {
@@ -505,7 +505,7 @@ describe('EventLogTable', () => {
     test('adds a delta ("since previous") column', () => {
       setup([event(1), event(2)], { timeline: true });
 
-      expect(screen.getByRole('columnheader', { name: 'Δ' })).toHaveAttribute('title', 'Time since the previous step');
+      expect(screen.getByRole('columnheader', { name: 'Δ time' })).toHaveAttribute('title', 'Time since the previous step');
     });
 
     test('shows the gap to the previous step', () => {

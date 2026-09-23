@@ -136,7 +136,7 @@ describe('EventLog page', () => {
       respond([event(1), event(2)]);
       renderPage('/downloads/log?job=job-1');
 
-      expect(await screen.findByRole('columnheader', { name: 'Δ' })).toBeInTheDocument();
+      expect(await screen.findByRole('columnheader', { name: 'Δ time' })).toBeInTheDocument();
     });
 
     test('a ?video= link filters to that video, oldest first', async () => {

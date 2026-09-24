@@ -192,6 +192,13 @@ describe('nzbFeedModule', () => {
       expect(xml).toContain('<title>A &amp; B [1080p]</title>');
     });
 
+    it('passes the size estimate on in the download link', () => {
+      const xml = nzbFeedModule.buildSearchXml([result], baseOpts);
+      const size = xml.match(/<size>(\d+)<\/size>/)[1];
+
+      expect(xml).toContain(`&amp;size=${size}`);
+    });
+
     it('falls back to the video id when there is no title', () => {
       const xml = nzbFeedModule.buildSearchXml([{ youtubeId: 'abc123DEF45' }], baseOpts);
 
@@ -310,6 +317,11 @@ describe('nzbFeedModule', () => {
       expect(withBoth).toContain('<meta type="episode">7</meta>');
       expect(seasonOnly).not.toContain('type="season"');
     });
+
+    it('includes the size estimate only when given', () => {
+      expect(nzbFeedModule.buildNzbXml({ ...input, size: 5000 })).toContain('<meta type="size">5000</meta>');
+      expect(nzbFeedModule.buildNzbXml(input)).not.toContain('type="size"');
+    });
   });
 
   describe('parseNzbXml', () => {
@@ -324,6 +336,14 @@ describe('nzbFeedModule', () => {
 
     it('recovers the release name', () => {
       expect(roundTrip({ youtubeId: 'abc123DEF45', categoryName: 'Cat', title: 'My Video' }).nzbName).toBe('My Video [abc123DEF45]');
+    });
+
+    it('recovers the size estimate as a number', () => {
+      expect(roundTrip({ youtubeId: 'abc123DEF45', categoryName: 'Cat', size: 5000 }).size).toBe(5000);
+    });
+
+    it('has no size when the file carries none', () => {
+      expect(roundTrip({ youtubeId: 'abc123DEF45', categoryName: 'Cat' }).size).toBeNull();
     });
 
     it('recovers season and episode as numbers', () => {
@@ -380,7 +400,7 @@ describe('nzbFeedModule', () => {
     });
 
     it('returns nulls and warns when nothing can be recovered', () => {
-      expect(nzbFeedModule.parseNzbXml('<nzb></nzb>')).toEqual({ youtubeId: null, categoryName: null, nzbName: null, season: null, ep: null });
+      expect(nzbFeedModule.parseNzbXml('<nzb></nzb>')).toEqual({ youtubeId: null, categoryName: null, nzbName: null, season: null, ep: null, size: null });
       expect(logger.warn).toHaveBeenCalled();
     });
 

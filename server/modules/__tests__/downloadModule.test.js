@@ -1288,6 +1288,26 @@ describe('DownloadModule', () => {
       jobModuleMock.addOrUpdateJob.mockResolvedValue(mockJobId);
     });
 
+    it('primes the event log with the videos, headed for the library, before creating the job', async () => {
+      jobModuleMock.getJob.mockReturnValue({ status: 'Pending' });
+      const { primeVideosForEventLog } = require('../download/eventLogVideoPrimer');
+
+      await downloadModule.doSpecificDownloads({ body: { urls: ['https://www.youtube.com/watch?v=abc123DEF45'] } });
+
+      expect(primeVideosForEventLog).toHaveBeenCalledWith(['abc123DEF45'], { destinedTracked: true });
+    });
+
+    it('primes an untracked-strategy NZB grab as kept out of the library', async () => {
+      jobModuleMock.getJob.mockReturnValue({ status: 'Pending' });
+      const { primeVideosForEventLog } = require('../download/eventLogVideoPrimer');
+
+      await downloadModule.doSpecificDownloads({
+        body: { urls: ['https://www.youtube.com/watch?v=abc123DEF45'], nzb: { importStrategy: 'untracked' } },
+      });
+
+      expect(primeVideosForEventLog).toHaveBeenCalledWith(['abc123DEF45'], { destinedTracked: false });
+    });
+
     it('should handle request object with body', async () => {
       jobModuleMock.getJob.mockReturnValue({ status: 'In Progress' });
       const request = {

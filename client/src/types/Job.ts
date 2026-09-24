@@ -39,6 +39,9 @@ export interface Job {
       categoryName?: string;
       youtubeId?: string;
       nzbName?: string;
+      importStrategy?: 'hardlink' | 'untracked';
+      // Set once Sonarr/Radarr imported the file and Youtarr dropped its own copy.
+      untracked?: boolean;
       // Server-computed, display-only summary of this NZB grab's real
       // post-download lifecycle (queued for Sonarr/Radarr import, imported,
       // removed from Sonarr/Radarr's own history, etc.) - see

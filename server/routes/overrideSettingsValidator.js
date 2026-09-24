@@ -1,5 +1,8 @@
 const ALLOWED_RESOLUTIONS = ['360', '480', '720', '1080', '1440', '2160'];
 const ALLOWED_AUDIO_FORMATS = ['video_mp3', 'mp3_only'];
+// 'both' is deliberately not offered as a per-download override: the download
+// pipeline only branches on 'strm', so 'both' would behave exactly like 'download'.
+const ALLOWED_MEDIA_MODES = ['download', 'strm'];
 
 /**
  * Builds a download override-settings validator for route input. Shared by
@@ -38,6 +41,10 @@ function createOverrideSettingsValidator({ channelSettingsModule, ratingMapper }
       if (input.audioFormat !== null && !ALLOWED_AUDIO_FORMATS.includes(input.audioFormat)) return { ok: false };
       out.audioFormat = input.audioFormat;
     }
+    if ('mediaMode' in input) {
+      if (!ALLOWED_MEDIA_MODES.includes(input.mediaMode)) return { ok: false };
+      out.mediaMode = input.mediaMode;
+    }
     if ('rating' in input) {
       const ratingResult = ratingMapper.validateRating(input.rating);
       if (!ratingResult.valid) return { ok: false };
@@ -47,4 +54,4 @@ function createOverrideSettingsValidator({ channelSettingsModule, ratingMapper }
   };
 }
 
-module.exports = { createOverrideSettingsValidator };
+module.exports = { createOverrideSettingsValidator, ALLOWED_MEDIA_MODES };

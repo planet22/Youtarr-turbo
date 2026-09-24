@@ -9,6 +9,8 @@ const { MANUAL_DOWNLOAD_LABEL, playlistJobLabel, autoRetryJobLabel } = require('
 const MessageEmitter = require('./messageEmitter');
 const ChannelVideo = require('../models/channelvideo');
 const logger = require('../logger');
+const { primeVideosForEventLog } = require('./download/eventLogVideoPrimer');
+const { videoIdFromUrl } = require('./jobEventLog/jobVideoRef');
 
 const DEFAULT_FILES_TO_DOWNLOAD = 5;
 
@@ -677,6 +679,12 @@ class DownloadModule {
     const urls = reqOrJobData.body
       ? reqOrJobData.body.urls
       : reqOrJobData.data.urls;
+    // Before the job exists, so its very first event (job.created) already
+    // carries each video's name and the library state the job is headed for.
+    const nzbData = this.getJobDataValue(jobData, 'nzb');
+    await primeVideosForEventLog((urls || []).map(videoIdFromUrl), {
+      destinedTracked: nzbData ? nzbData.importStrategy !== 'untracked' : true,
+    });
     const jobId = await jobModule.addOrUpdateJob(
       {
         jobType: jobType,
@@ -792,6 +800,12 @@ class DownloadModule {
             subFolder: strmSubFolder,
             skipVideoFolder,
             libraryMode,
+            // Threaded through to videoPersistence.upsertVideoForJob's
+            // tracked-state logging: strmMaterializer's own Job.findOne
+            // lookup there gets a Sequelize row with no `data` column (that
+            // only lives on jobModule's in-memory job objects), so it can't
+            // read this itself - see the comment where it's used.
+            nzbImportStrategy: jobModule.getJob(jobId)?.data?.nzb?.importStrategy || null,
             // Passed explicitly because channelRecord was already resolved
             // here - strmMaterializer's own channelRecord lookup is skipped
             // whenever a caller (like this one) already resolved

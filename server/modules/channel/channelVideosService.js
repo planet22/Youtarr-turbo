@@ -1,6 +1,7 @@
 const logger = require('../../logger');
 const jobEventLog = require('../jobEventLog');
 const { EVENT_TYPES } = require('../jobEventLog/eventCatalog');
+const { primeVideosForEventLog } = require('../download/eventLogVideoPrimer');
 const Channel = require('../../models/channel');
 const ChannelVideo = require('../../models/channelvideo');
 const { TAB_TYPES, MEDIA_TAB_TYPE_MAP } = require('../tabsUtils');
@@ -278,9 +279,12 @@ class ChannelVideosService {
             logger.info({ youtubeId, channelId }, 'Video no longer exists on YouTube, marking as removed');
             video.youtube_removed = true;
             video.youtube_removed_checked_at = now;
+            // Channel name (not on this row) for the log, looked up before recording.
+            await primeVideosForEventLog([youtubeId]);
             jobEventLog.record(EVENT_TYPES.VIDEO_UNAVAILABLE_ON_YOUTUBE, {
               youtubeId,
               videoTitle: video.title,
+              occurredAt: now,
               detail: { channelId },
             });
             return { youtube_id: youtubeId, channel_id: channelId, removed: true, checked_at: now };

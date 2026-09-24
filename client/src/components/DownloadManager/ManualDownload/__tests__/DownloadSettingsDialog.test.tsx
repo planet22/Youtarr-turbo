@@ -1159,6 +1159,81 @@ describe('DownloadSettingsDialog', () => {
     });
   });
 
+  describe('Media Mode Override Select', () => {
+    const openCustomSettings = () => {
+      fireEvent.click(screen.getByRole('checkbox', { name: /Use custom settings/i }));
+    };
+
+    test('names the known media mode in the No override option', () => {
+      render(<DownloadSettingsDialog {...defaultProps} mode="manual" defaultMediaMode="strm" />);
+      openCustomSettings();
+
+      expect(screen.getByLabelText('Media Mode')).toHaveTextContent('No override (STRM only)');
+    });
+
+    test('emits mediaMode strm when STRM only is selected', async () => {
+      const user = userEvent.setup();
+      render(<DownloadSettingsDialog {...defaultProps} mode="manual" />);
+      openCustomSettings();
+
+      await user.click(screen.getByLabelText('Media Mode'));
+      await user.click(screen.getByRole('option', { name: /STRM only/ }));
+      fireEvent.click(screen.getByRole('button', { name: /Start Download/i }));
+
+      expect(mockOnConfirm).toHaveBeenCalledWith(expect.objectContaining({ mediaMode: 'strm' }));
+    });
+
+    test('hides the Download Type select when STRM only is selected', async () => {
+      const user = userEvent.setup();
+      render(<DownloadSettingsDialog {...defaultProps} mode="manual" />);
+      openCustomSettings();
+
+      await user.click(screen.getByLabelText('Media Mode'));
+      await user.click(screen.getByRole('option', { name: /STRM only/ }));
+
+      expect(screen.queryByLabelText('Download Type')).not.toBeInTheDocument();
+    });
+
+    test('drops a previously chosen MP3 download type when switching to STRM only', async () => {
+      const user = userEvent.setup();
+      render(<DownloadSettingsDialog {...defaultProps} mode="manual" />);
+      openCustomSettings();
+
+      await user.click(screen.getByLabelText('Download Type'));
+      await user.click(screen.getByRole('option', { name: 'MP3 Only' }));
+      await user.click(screen.getByLabelText('Media Mode'));
+      await user.click(screen.getByRole('option', { name: /STRM only/ }));
+      fireEvent.click(screen.getByRole('button', { name: /Start Download/i }));
+
+      expect(mockOnConfirm.mock.calls[0][0]).not.toHaveProperty('audioFormat');
+    });
+
+    test('hides the Download Type select when the batch defaults to STRM only', () => {
+      render(<DownloadSettingsDialog {...defaultProps} mode="manual" defaultMediaMode="strm" />);
+      openCustomSettings();
+
+      expect(screen.queryByLabelText('Download Type')).not.toBeInTheDocument();
+    });
+
+    test('offers the Download Type select again when a STRM default is overridden to download', async () => {
+      const user = userEvent.setup();
+      render(<DownloadSettingsDialog {...defaultProps} mode="manual" defaultMediaMode="strm" />);
+      openCustomSettings();
+
+      await user.click(screen.getByLabelText('Media Mode'));
+      await user.click(screen.getByRole('option', { name: 'Download full files' }));
+
+      expect(screen.getByLabelText('Download Type')).toBeInTheDocument();
+    });
+
+    test('is not offered for channel-mode downloads', () => {
+      render(<DownloadSettingsDialog {...defaultProps} mode="channel" />);
+      openCustomSettings();
+
+      expect(screen.queryByLabelText('Media Mode')).not.toBeInTheDocument();
+    });
+  });
+
   describe('Large Batch Warning', () => {
     const renderDialog = (props: { videoCount?: number }) =>
       render(<DownloadSettingsDialog {...defaultProps} mode="manual" {...props} />);

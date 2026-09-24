@@ -592,6 +592,7 @@ function ChannelVideos({
           allowRedownload: settings.allowRedownload,
           subfolder: settings.subfolder,
           audioFormat: settings.audioFormat,
+          mediaMode: settings.mediaMode,
           rating: settings.rating,
           skipVideoFolder: settings.skipVideoFolder,
         }

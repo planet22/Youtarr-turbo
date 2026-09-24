@@ -12,6 +12,7 @@ describe('JobModule.updateJob', () => {
   let Video;
   let JobVideo;
   let MessageEmitter;
+  let nzbDiagnosticLog;
 
   beforeEach(() => {
     jest.resetModules();
@@ -21,6 +22,7 @@ describe('JobModule.updateJob', () => {
     Video = { findAll: jest.fn().mockResolvedValue([]), findOne: jest.fn().mockResolvedValue(null) };
     JobVideo = { findAll: jest.fn().mockResolvedValue([]) };
     MessageEmitter = { emitMessage: jest.fn() };
+    nzbDiagnosticLog = { resolveLogLimit: jest.fn(() => 20), recordDiagnosticEvent: jest.fn().mockResolvedValue(undefined) };
 
     jest.doMock('uuid', () => ({ v4: () => 'uuid' }));
     jest.doMock('node-cron', () => ({ schedule: jest.fn() }));
@@ -33,6 +35,7 @@ describe('JobModule.updateJob', () => {
       promises: { readFile: jest.fn(), writeFile: jest.fn(), access: jest.fn(), mkdir: jest.fn(), readdir: jest.fn() },
     }));
     jest.doMock('../messageEmitter.js', () => MessageEmitter);
+    jest.doMock('../nzbDiagnosticLog', () => nzbDiagnosticLog);
     jest.doMock('../configModule', () => ({ getJobsPath: () => '/jobs', getConfig: () => ({}) }));
     jest.doMock('../../models/job', () => ({ findAll: jest.fn().mockResolvedValue([]), findOne: jest.fn() }));
     jest.doMock('../../models/video', () => Video);
@@ -132,6 +135,14 @@ describe('JobModule.updateJob', () => {
 
       expect(job.output).toBe('2 videos.');
       expect(job.status).toBe('Complete');
+    });
+
+    it('keeps the STRM summary as the output of a successful STRM batch', async () => {
+      jobModule.jobs.j1 = { id: 'j1', jobType: DOWNLOAD, status: 'In Progress', data: { isStrmBatch: true } };
+
+      await jobModule.updateJob('j1', { status: 'Complete', output: 'STRM: 1 ok, 0 failed', data: { failedVideos: [] } });
+
+      expect(jobModule.jobs.j1.output).toBe('STRM: 1 ok, 0 failed');
     });
 
     it('keeps the warnings status', async () => {
@@ -267,6 +278,63 @@ describe('JobModule.updateJob', () => {
       await jobModule.updateJob('j1', { status: 'Killed' });
 
       expect(jobModule.saveJobOnly).toHaveBeenCalled();
+    });
+  });
+
+  describe('NZB failed-grab snapshot', () => {
+    const NZB = { youtubeId: 'abc', categoryName: 'TV', nzbName: 'Show S01E01' };
+    const nzbJob = (overrides = {}) => ({
+      id: 'n1', jobType: DOWNLOAD, status: 'In Progress', timeInitiated: 1000, data: { nzb: { ...NZB } }, ...overrides,
+    });
+
+    it('records a completed NZB grab that produced no video', async () => {
+      jobModule.jobs.n1 = nzbJob();
+
+      await jobModule.updateJob('n1', { status: 'Complete', data: { videos: [] } });
+      await settle();
+
+      expect(nzbDiagnosticLog.recordDiagnosticEvent).toHaveBeenCalledWith('failedGrab', {
+        jobId: 'n1', categoryName: 'TV', youtubeId: 'abc', nzbName: 'Show S01E01',
+        message: expect.stringContaining('no video file produced'), timestamp: 1000,
+      }, 20);
+    });
+
+    it('records an errored NZB grab with its output as the message', async () => {
+      jobModule.jobs.n1 = nzbJob();
+
+      await jobModule.updateJob('n1', { status: 'Error', output: 'bot check' });
+      await settle();
+
+      expect(nzbDiagnosticLog.recordDiagnosticEvent.mock.calls[0][1].message).toBe('bot check');
+    });
+
+    it('does not record a completed NZB grab whose video is already in the library', async () => {
+      Video.findOne.mockResolvedValue({ id: 5 });
+      jobModule.jobs.n1 = nzbJob();
+
+      await jobModule.updateJob('n1', { status: 'Complete', data: { videos: [] } });
+      await settle();
+
+      expect(nzbDiagnosticLog.recordDiagnosticEvent).not.toHaveBeenCalled();
+    });
+
+    it('does not record again when an already-finished NZB job is updated', async () => {
+      jobModule.jobs.n1 = nzbJob({ status: 'Complete' });
+
+      await jobModule.updateJob('n1', { status: 'Deleted' });
+      await jobModule.updateJob('n1', { status: 'Complete' });
+      await settle();
+
+      expect(nzbDiagnosticLog.recordDiagnosticEvent).not.toHaveBeenCalled();
+    });
+
+    it('ignores non-NZB jobs', async () => {
+      jobModule.jobs.j1 = { id: 'j1', jobType: DOWNLOAD, status: 'In Progress', data: {} };
+
+      await jobModule.updateJob('j1', { status: 'Complete', data: { videos: [] } });
+      await settle();
+
+      expect(nzbDiagnosticLog.recordDiagnosticEvent).not.toHaveBeenCalled();
     });
   });
 });

@@ -6,6 +6,7 @@ import { parseClientLabel, formatModeLabel, formatModeChipLabel, modeChipColor }
 import { resultChipFor, formatStarted, formatDuration } from './StreamHistoryTable';
 import StreamFormatChips from './StreamFormatChips';
 import { SHARED_STATUS_CHIP_SMALL_STYLE, SHARED_COMPACT_CHIP_OVERRIDES } from '../../shared/chipStyles';
+import StreamThumbnail from './StreamThumbnail';
 
 export interface StreamHistoryListMobileProps {
   rows: StreamHistoryRow[];
@@ -51,9 +52,8 @@ function StreamHistoryListMobile({ rows, selectedIds, onToggleSelect }: StreamHi
             }}
           >
             <Box style={{ position: 'relative', flexShrink: 0, width: 96, height: 54 }} onClick={(e) => e.stopPropagation()}>
-              <Box
-                component="img"
-                src={`/images/videothumb-${row.youtubeId}.jpg`}
+              <StreamThumbnail
+                youtubeId={row.youtubeId}
                 alt={row.title || row.youtubeId}
                 style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 'var(--radius-thumb)' }}
               />

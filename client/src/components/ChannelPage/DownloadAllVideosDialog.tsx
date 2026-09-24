@@ -121,6 +121,7 @@ function DownloadAllVideosDialog({
           resolution: settings.resolution,
           subfolder: settings.subfolder,
           audioFormat: settings.audioFormat,
+          mediaMode: settings.mediaMode,
           rating: settings.rating,
           skipVideoFolder: settings.skipVideoFolder,
         }

@@ -35,3 +35,9 @@ jest.mock('./server/modules/jobEventLog', () => {
     LEVELS,
   };
 });
+
+// Feeds that log's memory from the DB before events are recorded; stubbed for
+// the same reason. Its own test loads the real one via requireActual.
+jest.mock('./server/modules/download/eventLogVideoPrimer', () => ({
+  primeVideosForEventLog: jest.fn(() => Promise.resolve(new Map())),
+}));

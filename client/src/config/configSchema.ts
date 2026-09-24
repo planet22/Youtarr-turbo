@@ -512,8 +512,8 @@ export const CONFIG_FIELDS = {
       } as { fixed: boolean; thumb: boolean; extract: boolean },
       // How many rows each of the three nzb_diagnostic_log-backed logs
       // (see server/modules/nzbDiagnosticLog.js) keeps before pruning the
-      // oldest on every write - server/routes/nzb.js's recordSearchTrace/
-      // recordFailedGrab and server/modules/videoSearchModule.js's
+      // oldest on every write - server/routes/nzb.js's recordSearchTrace,
+      // jobModule.recordNzbFailedGrab and server/modules/videoSearchModule.js's
       // recordNzbQuery. 1-100 each; these back the NZB diagnostics page's
       // Recent Queries, Search Detail/Debug, and Failed Grabs tables.
       diagnosticLogLimits: {

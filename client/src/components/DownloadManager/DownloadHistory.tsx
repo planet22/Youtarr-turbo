@@ -120,6 +120,13 @@ function nzbFallbackVideo(job: Job): VideoData | null {
   };
 }
 
+// An 'untracked'-strategy grab never becomes a lasting library entry, so it
+// reads as untracked from the start, same as the Event Log shows it.
+function isUntrackedNzbJob(job: Job): boolean {
+  const nzb = job.data?.nzb;
+  return Boolean(nzb && (nzb.untracked || nzb.importStrategy === 'untracked'));
+}
+
 // Rotates a single chevron rather than swapping two icon components, so the
 // toggle reads as one continuous motion instead of a hard cut.
 const ExpandChevron: React.FC<{ expanded: boolean }> = ({ expanded }) => (
@@ -633,6 +640,7 @@ const DownloadHistory: React.FC<DownloadHistoryProps> = ({
                     hasError={!!imageErrors[singleVideo.youtubeId]}
                     onError={() => handleImageError(singleVideo.youtubeId)}
                     iconSize={24}
+                    untracked={isUntrackedNzbJob(job)}
                   />
                 )}
 
@@ -744,7 +752,7 @@ const DownloadHistory: React.FC<DownloadHistoryProps> = ({
         <Table>
           <TableHead>
             <TableRow>
-              <TableCell>Date / Time</TableCell>
+              <TableCell className="whitespace-nowrap">Date / Time</TableCell>
               <TableCell>Title</TableCell>
               <TableCell>Source</TableCell>
               <TableCell>Status</TableCell>
@@ -800,7 +808,7 @@ const DownloadHistory: React.FC<DownloadHistoryProps> = ({
                 return (
                   <React.Fragment key={job.id}>
                     <TableRow hover onClick={() => handleExpandCell(job.id)}>
-                      <TableCell>{formattedTimeCreated}</TableCell>
+                      <TableCell className="whitespace-nowrap">{formattedTimeCreated}</TableCell>
                       <TableCell>
                         <Box className="flex items-center gap-2 flex-wrap">
                           <span>{summaryLabel}</span>
@@ -909,7 +917,7 @@ const DownloadHistory: React.FC<DownloadHistoryProps> = ({
                     backgroundColor: highlightedJobId === job.id ? 'var(--accent-muted, rgba(255,220,0,0.15))' : undefined,
                   }}
                 >
-                  <TableCell>{formattedTimeCreated}</TableCell>
+                  <TableCell className="whitespace-nowrap">{formattedTimeCreated}</TableCell>
                   <TableCell>
                     {singleVideo ? (
                       <Box className="flex items-start gap-3">
@@ -922,6 +930,7 @@ const DownloadHistory: React.FC<DownloadHistoryProps> = ({
                           hasError={!!imageErrors[singleVideo.youtubeId]}
                           onError={() => handleImageError(singleVideo.youtubeId)}
                           iconSize={32}
+                          untracked={isUntrackedNzbJob(job)}
                         />
                         <Box className="min-w-0 flex-1">
                           {isNzbFallback ? (

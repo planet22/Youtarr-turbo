@@ -68,7 +68,7 @@ const mockJobVideoDownload = { update: jest.fn() };
 jest.mock('../../models/channel', () => mockChannel);
 jest.mock('../../models/channelvideo', () => ({ findAll: jest.fn(() => Promise.resolve([])) }));
 jest.mock('../../models', () => ({ JobVideoDownload: mockJobVideoDownload, Channel: mockChannel, Job: mockJob }));
-jest.mock('../jobEventLog', () => ({ record: (...args) => mockRecordEvent(...args) }));
+jest.mock('../jobEventLog', () => ({ record: (...args) => mockRecordEvent(...args), rememberJob: jest.fn(), isTracked: jest.fn(() => null) }));
 jest.mock('../videoPersistence', () => ({ persistDownloadedVideoForJob: jest.fn(() => Promise.resolve(null)) }));
 jest.mock('../../logger');
 jest.mock('../filesystem', () => ({

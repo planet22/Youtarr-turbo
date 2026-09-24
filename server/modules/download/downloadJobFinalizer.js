@@ -60,7 +60,10 @@ function stderrHasOnlyBenignWarnings(stderrBuffer = '') {
 
 // One log entry per failed video (and one more for those handed to an
 // auto-retry job), written once the failure is final and diagnosed.
-function recordFailedVideoEvents(jobId, failedVideosList, diagnoses = []) {
+// libraryIds: which failed videos still have a library row (e.g. a failed
+// re-download), or null when unknown. Recorded explicitly because the job
+// marked every video as headed for the library when it was created.
+function recordFailedVideoEvents(jobId, failedVideosList, diagnoses = [], libraryIds = null) {
   for (const failed of failedVideosList || []) {
     // Same "likely cause" advice Download History shows for the failure.
     const diagnosis = diagnoses.find((entry) => entry.key === failed.diagnosisKey);
@@ -69,6 +72,7 @@ function recordFailedVideoEvents(jobId, failedVideosList, diagnoses = []) {
       youtubeId: failed.youtubeId,
       videoTitle: failed.title,
       channelName: failed.channel,
+      isTracked: libraryIds && failed.youtubeId ? libraryIds.has(failed.youtubeId) : undefined,
       detail: {
         error: failed.error,
         diagnosisKey: failed.diagnosisKey,
@@ -86,6 +90,18 @@ function recordFailedVideoEvents(jobId, failedVideosList, diagnoses = []) {
         channelName: failed.channel,
       });
     }
+  }
+}
+
+async function findFailedVideosInLibrary(failedVideosList) {
+  const ids = [...new Set((failedVideosList || []).map((failed) => failed && failed.youtubeId).filter(Boolean))];
+  if (ids.length === 0) return new Set();
+  try {
+    const metaById = await failedVideoEnricher.lookupKnownMetadata(ids);
+    return new Set(ids.filter((id) => metaById.get(id)?.inLibrary));
+  } catch (err) {
+    logger.warn({ err, videoCount: ids.length }, 'Failed to check library state of failed videos');
+    return null;
   }
 }
 
@@ -305,7 +321,7 @@ async function finalizeDownloadJob({
 
     logger.info({ jobType, jobId }, 'Job complete (with or without errors)');
     recordDownloadedVideoEvents(jobId, videoData);
-    recordFailedVideoEvents(jobId, failedVideosList, diagnoses);
+    recordFailedVideoEvents(jobId, failedVideosList, diagnoses, await findFailedVideosInLibrary(failedVideosList));
 
     const flags = computeOutcomeFlags({
       code,

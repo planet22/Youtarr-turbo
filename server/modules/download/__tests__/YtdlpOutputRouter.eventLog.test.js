@@ -22,6 +22,7 @@ jest.mock('../../../models', () => ({
 
 const { JobVideoDownload } = require('../../../models');
 const jobEventLog = require('../../jobEventLog');
+const { primeVideosForEventLog } = require('../eventLogVideoPrimer');
 const YtdlpOutputRouter = require('../YtdlpOutputRouter');
 
 const DESTINATION_LINE = '[download] Destination: /output/Channel - Title [abc123XYZ_d].mp4\n';
@@ -61,8 +62,28 @@ describe('YtdlpOutputRouter video/events log', () => {
     expect(jobEventLog.record).toHaveBeenCalledWith('video.download_started', {
       jobId: 'job-123',
       youtubeId: 'abc123XYZ_d',
+      occurredAt: expect.any(Date),
       detail: { destination: '/output/Channel - Title [abc123XYZ_d].mp4' },
     });
+  });
+
+  it('primes the video name and library destination before recording the start', async () => {
+    router.handleStdoutChunk(DESTINATION_LINE);
+    await settle();
+
+    expect(primeVideosForEventLog).toHaveBeenCalledWith(['abc123XYZ_d'], { destinedTracked: true });
+  });
+
+  it('marks the video tracked when the post-processor reports it persisted', () => {
+    router.handleStdoutChunk('[Youtarr:videoPersisted] abc123XYZ_d\n');
+
+    expect(jobEventLog.markTracked).toHaveBeenCalledWith('abc123XYZ_d', true);
+  });
+
+  it('marks the video untracked when the post-processor reports an untracked import', () => {
+    router.handleStdoutChunk('[Youtarr:videoPersisted] abc123XYZ_d untracked\n');
+
+    expect(jobEventLog.markTracked).toHaveBeenCalledWith('abc123XYZ_d', false);
   });
 
   it('records nothing when the tracking row already existed', async () => {

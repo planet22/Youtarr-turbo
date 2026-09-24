@@ -37,6 +37,7 @@ import {
   FORMAT_COLUMN_CHIP_STYLE,
   FORMAT_COLUMN_LABEL_CLASS,
 } from './StreamFormatChips';
+import StreamThumbnail from './StreamThumbnail';
 
 export interface StreamsTableProps {
   streams: StreamSnapshot[];
@@ -103,9 +104,8 @@ function StreamRow({
     <TableRow hover>
       <TableCell>
         <Box style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <Box
-            component="img"
-            src={`/images/videothumb-${stream.youtubeId}.jpg`}
+          <StreamThumbnail
+            youtubeId={stream.youtubeId}
             alt={stream.title || stream.youtubeId}
             style={{ width: 64, height: 36, objectFit: 'cover', borderRadius: 4, flexShrink: 0 }}
           />

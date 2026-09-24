@@ -29,6 +29,7 @@ const ratingMapper = require('../modules/ratingMapper');
 const subfolderModule = require('../modules/subfolderModule');
 const cronJobs = require('../modules/cronJobs');
 const jobEventLog = require('../modules/jobEventLog');
+const { primeVideosForEventLog } = require('../modules/download/eventLogVideoPrimer');
 const playlistVideoFilters = require('../modules/playlistVideoFilters');
 const models = require('../models');
 const createYtStreamRoutes = require('./ytstream');
@@ -79,7 +80,7 @@ function registerRoutes(app, deps) {
   app.use(createConfigRoutes({ verifyToken, configModule, validateEnvAuthCredentials, isWslEnvironment, filenamePreviewRateLimiter }));
 
   // Channel routes
-  app.use(createChannelRoutes({ verifyToken, channelModule, archiveModule, channelDownloadAllModule, ratingMapper, jobEventLog }));
+  app.use(createChannelRoutes({ verifyToken, channelModule, archiveModule, channelDownloadAllModule, ratingMapper, jobEventLog, primeVideosForEventLog }));
 
   // Video routes
   app.use(createVideoRoutes({ verifyToken, videosModule, downloadModule, videoOembedEnricher }));
@@ -115,7 +116,7 @@ function registerRoutes(app, deps) {
   app.use(createVideoDetailRoutes({ verifyToken, videoMetadataModule, mediaServers }));
 
   // Playlist routes
-  app.use(createPlaylistRoutes({ verifyToken, playlistModule, downloadModule, m3uGenerator, mediaServers, models, channelSettingsModule, ratingMapper, subfolderModule, playlistVideoFilters, jobEventLog }));
+  app.use(createPlaylistRoutes({ verifyToken, playlistModule, downloadModule, m3uGenerator, mediaServers, models, channelSettingsModule, ratingMapper, subfolderModule, playlistVideoFilters, jobEventLog, primeVideosForEventLog }));
 
   // Media server routes
   app.use(createMediaServerRoutes({ verifyToken, configModule, mediaServers }));

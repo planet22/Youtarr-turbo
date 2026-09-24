@@ -79,7 +79,7 @@ jest.mock('../../models/channel', () => mockChannel);
 jest.mock('../../models/channelvideo', () => mockChannelVideo);
 jest.mock('../channelSettingsModule', () => mockChannelSettings);
 jest.mock('../../models', () => ({ JobVideoDownload: mockJobVideoDownload, Channel: mockChannel }));
-jest.mock('../jobEventLog', () => ({ record: (...args) => mockRecordEvent(...args) }));
+jest.mock('../jobEventLog', () => ({ record: (...args) => mockRecordEvent(...args), rememberJob: jest.fn(), isTracked: jest.fn(() => null) }));
 jest.mock('../videoPersistence', () => ({ persistDownloadedVideoForJob: jest.fn(() => Promise.resolve(null)) }));
 jest.mock('../../logger');
 jest.mock('../filesystem', () => ({

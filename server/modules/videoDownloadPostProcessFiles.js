@@ -29,6 +29,9 @@ const {
 } = require('./filesystem');
 
 const activeJobId = process.env.YOUTARR_JOB_ID;
+// This subprocess has no job memory of its own; without this its event-log
+// rows would carry no source.
+jobEventLog.rememberJob(activeJobId, process.env.YOUTARR_JOB_TYPE);
 
 // Flat mode: skip video subfolder, files go directly in channel folder.
 // Describes the INCOMING temp layout written by the yt-dlp output template.
@@ -1586,7 +1589,10 @@ async function resolveTrackedOwnerChannelId(youtubeId, metadataChannelId) {
         if (persisted) {
           // Control marker, not a log line: stdout flows through yt-dlp to
           // YtdlpOutputRouter, which broadcasts videosUpdated to the listing pages.
-          process.stdout.write(`${VIDEO_PERSISTED_MARKER}${id}\n`);
+          // Carries the library decision videoPersistence just made (an
+          // 'untracked' NZB grab stays out) so the parent's later events match.
+          const trackedSuffix = jobEventLog.isTracked(id) === false ? ' untracked' : '';
+          process.stdout.write(`${VIDEO_PERSISTED_MARKER}${id}${trackedSuffix}\n`);
         }
       } catch (err) {
         logger.error({ err, id }, 'Error persisting downloaded video during post-processing');

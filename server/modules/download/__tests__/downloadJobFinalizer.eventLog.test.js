@@ -28,7 +28,10 @@ jest.mock('../downloadCleanup', () => ({
   cleanupPartialFiles: jest.fn().mockResolvedValue()
 }));
 jest.mock('../downloadCompletionEffects', () => ({ runCompletionSideEffects: jest.fn().mockResolvedValue() }));
-jest.mock('../failedVideoEnricher', () => ({ enrichFailedVideos: jest.fn().mockResolvedValue() }));
+jest.mock('../failedVideoEnricher', () => ({
+  enrichFailedVideos: jest.fn().mockResolvedValue(),
+  lookupKnownMetadata: jest.fn().mockResolvedValue(new Map()),
+}));
 
 const downloadResultProcessor = require('../downloadResultProcessor');
 const jobEventLog = require('../../jobEventLog');
@@ -96,8 +99,28 @@ describe('downloadJobFinalizer video/events log', () => {
       youtubeId: 'abc123def45',
       videoTitle: 'A Title',
       channelName: 'A Channel',
+      isTracked: false,
       detail: { error: 'Video unavailable', diagnosisKey: undefined, autoRetryQueued: false },
     });
+  });
+
+  it('records a failed video with no library row as untracked', async () => {
+    failing([{ youtubeId: 'abc123def45', error: 'Video unavailable' }]);
+
+    await finalizeDownloadJob(context());
+
+    const fields = jobEventLog.record.mock.calls.find(([type]) => type === 'video.failed')[1];
+    expect(fields.isTracked).toBe(false);
+  });
+
+  it('records a failed re-download of a library video as still tracked', async () => {
+    require('../failedVideoEnricher').lookupKnownMetadata.mockResolvedValueOnce(new Map([['abc123def45', { inLibrary: true }]]));
+    failing([{ youtubeId: 'abc123def45', error: 'Video unavailable' }]);
+
+    await finalizeDownloadJob(context());
+
+    const fields = jobEventLog.record.mock.calls.find(([type]) => type === 'video.failed')[1];
+    expect(fields.isTracked).toBe(true);
   });
 
   it('records one video.failed per failed video', async () => {

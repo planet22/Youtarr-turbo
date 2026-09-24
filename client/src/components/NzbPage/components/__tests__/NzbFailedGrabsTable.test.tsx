@@ -61,7 +61,7 @@ describe('NzbFailedGrabsTable', () => {
     render(<MemoryRouter><NzbFailedGrabsTable grabs={[grab]} onDeleteAll={jest.fn()} /></MemoryRouter>);
     expect(screen.getByText('2m ago')).toBeInTheDocument();
   });
-  test('links the grab to its job in Download History', () => {
+  test('links the grab to its job in the Event Log', () => {
     render(
       <MemoryRouter>
         <NzbFailedGrabsTable grabs={[grab]} onDeleteAll={jest.fn()} />
@@ -69,7 +69,7 @@ describe('NzbFailedGrabsTable', () => {
     );
     expect(screen.getByRole('link', { name: 'Some Show S01E01' })).toHaveAttribute(
       'href',
-      '/downloads/history?job=job-1'
+      '/downloads/log?job=job-1'
     );
   });
 

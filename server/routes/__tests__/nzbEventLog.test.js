@@ -105,6 +105,14 @@ describe('nzb.js video/events log', () => {
       expect(callFor('nzb.history_removed')[1].videoTitle).toBeUndefined();
     });
 
+    it('forces the history-removed entry untracked too, since this strategy always ends there', async () => {
+      jobModule.getJob.mockReturnValue(buildJob('TV'));
+
+      await nzb.handleHistoryDeleteRequest(['job-1']);
+
+      expect(callFor('nzb.history_removed')[1].isTracked).toBe(false);
+    });
+
     it('names the trigger and the destroyed row counts in the untrack detail', async () => {
       jobModule.getJob.mockReturnValue(buildJob('TV'));
 
@@ -151,6 +159,14 @@ describe('nzb.js video/events log', () => {
       await nzb.handleHistoryDeleteRequest(['job-1']);
 
       expect(callFor('nzb.history_removed')[1].occurredAt).toBe(job.data.nzb.historyRemovedAt);
+    });
+
+    it('does not force the history-removed entry untracked, since a hardlink video is a real permanent library entry', async () => {
+      jobModule.getJob.mockReturnValue(buildJob('Keep'));
+
+      await nzb.handleHistoryDeleteRequest(['job-1']);
+
+      expect(callFor('nzb.history_removed')[1].isTracked).toBeUndefined();
     });
   });
 

@@ -1,6 +1,7 @@
 import React from 'react';
 import { Card, Typography, Link, Box } from '../../ui';
 import { YOUTUBE_URL_BASE } from '../../shared/VideoModal/constants';
+import StreamThumbnail from './StreamThumbnail';
 
 export interface StreamCardLayoutProps {
   youtubeId: string;
@@ -43,8 +44,8 @@ function StreamCardLayout({ youtubeId, title, thumbnailOverlay, headerChips, chi
           border: 'var(--media-placeholder-border)',
         }}
       >
-        <img
-          src={`/images/videothumb-${youtubeId}.jpg`}
+        <StreamThumbnail
+          youtubeId={youtubeId}
           alt={title}
           style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', objectFit: 'cover' }}
         />

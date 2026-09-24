@@ -1032,8 +1032,15 @@ describe('JobModule', () => {
         status: undefined,
         output: '',
         timeInitiated: expect.any(Number),
-        timeCreated: expect.any(Number)
+        timeCreated: expect.any(Number),
+        aux_data: null
       });
+    });
+
+    test('should save the job data to aux_data when the job is created', async () => {
+      await JobModule.addJob({ jobType: 'download', data: { nzb: { importStrategy: 'untracked' } } });
+
+      expect(JSON.parse(Job.create.mock.calls[0][0].aux_data)).toEqual({ nzb: { importStrategy: 'untracked' } });
     });
 
     test('should handle save errors', async () => {

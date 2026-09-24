@@ -28,6 +28,9 @@ export type FilterConfig =
       // drawer subtitle, and active-filter chip text. Defaults to
       // "Published" for the original single-date-filter consumers.
       label?: string;
+      // Inline panel only: forces every filter after this one onto a new
+      // row instead of wrapping wherever the flex row runs out of width.
+      breakAfter?: boolean;
     }
   | {
       id: 'maxRating';

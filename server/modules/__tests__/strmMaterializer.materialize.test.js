@@ -62,6 +62,7 @@ const Job = require('../../models/job');
 const Video = require('../../models/video');
 const channelSettingsModule = require('../channelSettingsModule');
 const jobModule = require('../jobModule');
+const jobEventLog = require('../jobEventLog');
 const strmMaterializer = require('../strmMaterializer');
 
 const buildMeta = (overrides = {}) => ({
@@ -459,6 +460,28 @@ describe('strmMaterializer', () => {
         expect((await strmMaterializer.materializeOne('abc123DEF45')).nfoPath).toBeNull();
       });
 
+      it('copies the thumbnail as a -backdrop.jpg when backdrop images are enabled', async () => {
+        configModule.getConfig.mockReturnValue({ strm: {}, writeBackdropImages: true });
+
+        await strmMaterializer.materializeOne('abc123DEF45');
+
+        expect(copySyncWithFallback).toHaveBeenCalledWith('/thumb.jpg', expect.stringMatching(/-backdrop\.jpg$/));
+      });
+
+      it('copies the thumbnail as a -fanart.jpg when video fanart is enabled', async () => {
+        configModule.getConfig.mockReturnValue({ strm: {}, writeVideoFanart: true });
+
+        await strmMaterializer.materializeOne('abc123DEF45');
+
+        expect(copySyncWithFallback).toHaveBeenCalledWith('/thumb.jpg', expect.stringMatching(/-fanart\.jpg$/));
+      });
+
+      it('writes no per-video artwork copies when both settings are off', async () => {
+        await strmMaterializer.materializeOne('abc123DEF45');
+
+        expect(copySyncWithFallback).not.toHaveBeenCalledWith('/thumb.jpg', expect.stringMatching(/-(backdrop|fanart)\.jpg$/));
+      });
+
       it('skips the thumbnail when disabled', async () => {
         configModule.getConfig.mockReturnValue({ strm: { writeThumbnail: false } });
 
@@ -683,13 +706,36 @@ describe('strmMaterializer', () => {
       });
 
       it('links the video to the job when one is given and exists', async () => {
-        const job = { id: 'j1' };
+        // The Jobs table has no `data` column (only jobModule's in-memory
+        // job objects carry job.data.nzb), so the row itself can't supply
+        // this - the caller (downloadModule.js) threads it through options
+        // instead. See videoPersistence.upsertVideoForJob's tracked-state
+        // logging for why this matters (an 'untracked' NZB grab must not be
+        // marked tracked just because its row was briefly created).
+        const job = { id: 'j1', jobType: 'NZB Grab: TV' };
         Job.findOne.mockResolvedValue(job);
 
-        await strmMaterializer.materializeOne('abc123DEF45', { jobId: 'j1' });
+        await strmMaterializer.materializeOne('abc123DEF45', { jobId: 'j1', nzbImportStrategy: 'untracked' });
 
-        expect(videoPersistence.upsertVideoForJob).toHaveBeenCalledWith(expect.objectContaining({ youtubeId: 'abc123DEF45' }), job, true);
+        expect(videoPersistence.upsertVideoForJob).toHaveBeenCalledWith(
+          expect.objectContaining({ youtubeId: 'abc123DEF45' }),
+          { id: 'j1', jobType: 'NZB Grab: TV', data: { nzb: { importStrategy: 'untracked' } } },
+          true
+        );
         expect(Video.create).not.toHaveBeenCalled();
+      });
+
+      it('preserves the real job id so the JobVideo link does not break', async () => {
+        // Regression test: an earlier version of this passed a hand-built
+        // object that dropped .id, which upsertVideoForJob needs for its
+        // real `where: { job_id }` query - every job then failed with
+        // "WHERE parameter 'job_id' has invalid 'undefined' value".
+        Job.findOne.mockResolvedValue({ id: 'real-job-id', jobType: 'Channel Downloads' });
+
+        await strmMaterializer.materializeOne('abc123DEF45', { jobId: 'real-job-id' });
+
+        const passedJobArg = videoPersistence.upsertVideoForJob.mock.calls[0][1];
+        expect(passedJobArg.id).toBe('real-job-id');
       });
 
       it('saves the video on its own when the job no longer exists', async () => {
@@ -699,6 +745,25 @@ describe('strmMaterializer', () => {
 
         expect(videoPersistence.upsertVideoForJob).not.toHaveBeenCalled();
         expect(Video.create).toHaveBeenCalled();
+      });
+
+      it('marks a self-saved video tracked when the job no longer exists', async () => {
+        Job.findOne.mockResolvedValue(null);
+
+        await strmMaterializer.materializeOne('abc123DEF45', { jobId: 'gone' });
+
+        expect(jobEventLog.markTracked).toHaveBeenCalledWith('abc123DEF45', true);
+      });
+
+      it('does not mark a self-saved video tracked for an untracked-strategy NZB grab', async () => {
+        // Same race as above (job row not found yet) but for a grab whose
+        // category strategy is 'untracked' - it must not read as tracked
+        // just because this fallback path lost track of the job context.
+        Job.findOne.mockResolvedValue(null);
+
+        await strmMaterializer.materializeOne('abc123DEF45', { jobId: 'gone', nzbImportStrategy: 'untracked' });
+
+        expect(jobEventLog.markTracked).not.toHaveBeenCalled();
       });
 
       it('records the channel video entry', async () => {

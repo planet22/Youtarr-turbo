@@ -78,3 +78,71 @@ describe('videoPersistence STRM archive log entries', () => {
     expect(mockFs.renameSync).toHaveBeenCalledWith('/lib/x.strm', '/lib/x.strm.cached');
   });
 });
+
+// An 'untracked'-strategy NZB grab gets a real Video row too (until Sonarr/
+// Radarr's history-delete removes it) - marking it tracked here would make
+// every later event in that job's log (strm.created, video.downloaded,
+// job.finished, ...) read as "tracked" even though the whole point of the
+// strategy is to end up untracked. See server/routes/nzb.js's
+// NZB_GRAB_REQUESTED, which already records the correct isTracked: false.
+describe('videoPersistence upsertVideoForJob tracked-state bookkeeping', () => {
+  let videoPersistence;
+  let jobEventLog;
+  let Video;
+  let JobVideo;
+  const video = { youtubeId: 'abc123', youTubeVideoName: 'A Title', youTubeChannelName: 'A Channel' };
+  const createdRow = { id: 999, youtubeId: 'abc123', youTubeVideoName: 'A Title', youTubeChannelName: 'A Channel' };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    jest.resetModules();
+    jobEventLog = require('../jobEventLog');
+    videoPersistence = require('../videoPersistence');
+    Video = require('../../models/video');
+    JobVideo = require('../../models/jobvideo');
+    Video.findOne.mockResolvedValue(null);
+    Video.create.mockResolvedValue(createdRow);
+    JobVideo.findOne.mockResolvedValue(null);
+  });
+
+  test('marks a freshly created video tracked for an ordinary job', async () => {
+    await videoPersistence.upsertVideoForJob(video, { id: 'job-1', jobType: 'Channel Downloads', data: {} });
+
+    expect(jobEventLog.markTracked).toHaveBeenCalledWith('abc123', true);
+  });
+
+  test('marks it untracked for an untracked-strategy NZB grab', async () => {
+    await videoPersistence.upsertVideoForJob(video, { id: 'job-1', data: { nzb: { importStrategy: 'untracked' } } });
+
+    expect(jobEventLog.markTracked).toHaveBeenCalledWith('abc123', false);
+  });
+
+  test('still marks it tracked for a hardlink-strategy NZB grab', async () => {
+    await videoPersistence.upsertVideoForJob(video, { id: 'job-1', data: { nzb: { importStrategy: 'hardlink' } } });
+
+    expect(jobEventLog.markTracked).toHaveBeenCalledWith('abc123', true);
+  });
+
+  test('marks it untracked when the untracked strategy is only in a DB row aux_data', async () => {
+    const aux_data = JSON.stringify({ nzb: { importStrategy: 'untracked' } });
+    await videoPersistence.upsertVideoForJob(video, { id: 'job-1', jobType: 'Sonarr/Radarr: TV [abc123]', aux_data });
+
+    expect(jobEventLog.markTracked).toHaveBeenCalledWith('abc123', false);
+  });
+
+  test('still marks it tracked for a job with no nzb data at all', async () => {
+    await videoPersistence.upsertVideoForJob(video, { id: 'job-1', data: {} });
+
+    expect(jobEventLog.markTracked).toHaveBeenCalledWith('abc123', true);
+  });
+
+  // Regression: a plain object built to carry the tracked-state hint must
+  // still carry .id, or this real DB query gets job_id: undefined and
+  // Sequelize rejects it - "WHERE parameter 'job_id' has invalid 'undefined'
+  // value" - failing the job for every video, not just NZB ones.
+  test('links the new video to the real job id, not just the tracked-state hint', async () => {
+    await videoPersistence.upsertVideoForJob(video, { id: 'job-1', data: { nzb: { importStrategy: 'untracked' } } });
+
+    expect(JobVideo.create).toHaveBeenCalledWith({ job_id: 'job-1', video_id: 999 });
+  });
+});

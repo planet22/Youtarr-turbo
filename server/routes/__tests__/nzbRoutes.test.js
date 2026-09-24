@@ -570,6 +570,12 @@ describe('nzb routes', () => {
       expect(res.status).toBe(200);
     });
 
+    it('carries the size estimate into the nzb', async () => {
+      const res = await dl(`${YT_ID}.nzb`, '&size=5000');
+
+      expect(res.text).toContain('<meta type="size">5000</meta>');
+    });
+
     it('titles the file after the id when no title is given', async () => {
       const res = await dl(`${YT_ID}.nzb`);
 
@@ -681,7 +687,13 @@ describe('nzb routes', () => {
         const body = downloadModule.doSpecificDownloads.mock.calls[0][0].body;
         expect(body.urls).toEqual([`https://www.youtube.com/watch?v=${YT_ID}`]);
         expect(body.overrideSettings).toMatchObject({ subfolder: 'Sonarr', mediaMode: 'download', skipMediaSidecarFiles: true });
-        expect(body.nzb).toEqual({ categoryName: 'TV', youtubeId: YT_ID, nzbName: 'My Video [abc]', importStrategy: 'hardlink' });
+        expect(body.nzb).toEqual({ categoryName: 'TV', youtubeId: YT_ID, nzbName: 'My Video [abc]', importStrategy: 'hardlink', estimatedBytes: null });
+      });
+
+      it('keeps the size estimate the nzb carries', async () => {
+        await upload(nzbFile({ extra: '<meta type="size">5000</meta>' }));
+
+        expect(downloadModule.doSpecificDownloads.mock.calls[0][0].body.nzb.estimatedBytes).toBe(5000);
       });
 
       it('applies the real season and episode when both are present', async () => {
@@ -704,6 +716,22 @@ describe('nzb routes', () => {
         const body = downloadModule.doSpecificDownloads.mock.calls[0][0].body;
         expect(body.overrideSettings).toMatchObject({ mediaMode: 'strm', subfolder: null });
         expect(body.nzb.importStrategy).toBe('untracked');
+      });
+
+      it('forces the grab-requested event untracked for an untracked-strategy category', async () => {
+        mockCfg = baseConfig({ categories: [tvCategory({ importStrategy: 'untracked' })] });
+
+        await upload(nzbFile());
+
+        const call = jobEventLog.record.mock.calls.find(([type]) => type === 'nzb.grab_requested');
+        expect(call[1].isTracked).toBe(false);
+      });
+
+      it('does not force the grab-requested event untracked for a hardlink-strategy category', async () => {
+        await upload(nzbFile());
+
+        const call = jobEventLog.record.mock.calls.find(([type]) => type === 'nzb.grab_requested');
+        expect(call[1].isTracked).toBeUndefined();
       });
 
       it('answers 200 with an error when enqueueing fails', async () => {
@@ -761,6 +789,26 @@ describe('nzb routes', () => {
         const res = await get(sab('&mode=queue'));
 
         expect(res.body.queue.slots[0]).toMatchObject({ mb: 10, mbleft: 6, percentage: 40, timeleft: '1:02:05', filename: 'Release One', cat: 'TV' });
+      });
+
+      it('reports the size estimate before the real size is known', async () => {
+        jobModule.getRunningJobs.mockReturnValue([activeJob({ data: { nzb: { nzbName: 'R', estimatedBytes: 10 * 1024 * 1024 } } })]);
+
+        const res = await get(sab('&mode=queue'));
+
+        expect(res.body.queue.slots[0]).toMatchObject({ mb: 10, mbleft: 10, percentage: 0 });
+      });
+
+      it('reports the real size over the estimate once it is known', async () => {
+        jobModule.getRunningJobs.mockReturnValue([activeJob({ data: { nzb: { nzbName: 'R', estimatedBytes: 99 * 1024 * 1024 } } })]);
+        downloadModule.getCurrentActivitySnapshot.mockReturnValue({
+          jobId: 7,
+          activity: { progress: { totalBytes: 10 * 1024 * 1024, downloadedBytes: 4 * 1024 * 1024, percent: 40 } },
+        });
+
+        const res = await get(sab('&mode=queue'));
+
+        expect(res.body.queue.slots[0]).toMatchObject({ mb: 10, mbleft: 6 });
       });
 
       it('reports zero progress for a job that is not the running one', async () => {
@@ -961,29 +1009,13 @@ describe('nzb routes', () => {
         expect(res.body.history.slots[0].fail_message).toBe('Failed');
       });
 
-      it('reports a completed job with no video as failed and records it once', async () => {
+      it('reports a completed job with no video as failed without writing the failed-grab log', async () => {
         const job = historyJob({ data: { nzb: { nzbName: 'R', categoryName: 'TV', youtubeId: YT_ID }, videos: [] } });
-        jobModule.getRunningJobs.mockReturnValue([job]);
-
-        const first = await get(sab('&mode=history'));
-        await get(sab('&mode=history'));
-
-        expect(first.body.history.slots[0]).toMatchObject({ status: 'Failed', fail_message: expect.stringContaining('No video file was produced') });
-        expect(nzbDiagnosticLog.recordDiagnosticEvent).toHaveBeenCalledTimes(1);
-        expect(nzbDiagnosticLog.recordDiagnosticEvent.mock.calls[0][0]).toBe('failedGrab');
-      });
-
-      it('does not re-record a failed grab already persisted from before a restart', async () => {
-        // Simulates the in-memory dedup Set being empty (as after a process
-        // restart) while the failure was already persisted in an earlier
-        // process's run - the persisted-log check must still catch it.
-        nzbDiagnosticLog.getDiagnosticEvents.mockResolvedValueOnce([{ jobId: '201' }]);
-        const job = historyJob({ id: 201, data: { nzb: { nzbName: 'R', categoryName: 'TV', youtubeId: YT_ID }, videos: [] } });
         jobModule.getRunningJobs.mockReturnValue([job]);
 
         const res = await get(sab('&mode=history'));
 
-        expect(res.body.history.slots[0].status).toBe('Failed');
+        expect(res.body.history.slots[0]).toMatchObject({ status: 'Failed', fail_message: expect.stringContaining('No video file was produced') });
         expect(nzbDiagnosticLog.recordDiagnosticEvent).not.toHaveBeenCalled();
       });
 

@@ -134,7 +134,7 @@ const EventLog: React.FC<EventLogProps> = ({ token }) => {
         ? [{ id: 'toggle' as const, label: 'Single video only', icon: <ClearIcon size={16} />, value: true, onChange: () => clearParam(PARAM_VIDEO) }]
         : []),
       // In the order of the table's columns (Video and Event are covered by the search box).
-      { id: 'dateRangeString', label: 'Occurred', dateFrom, dateTo, onFromChange: setDateFrom, onToChange: setDateTo },
+      { id: 'dateRangeString', label: 'Occurred', dateFrom, dateTo, onFromChange: setDateFrom, onToChange: setDateTo, breakAfter: true },
       { id: 'select', label: 'Channel', value: channel, options: facets.channels, onChange: setChannel },
       { id: 'select', label: 'Library', value: tracked, options: [...TRACKED_OPTIONS], onChange: setTracked },
       { id: 'select', label: 'Source', value: source, options: facets.sources, onChange: setSource },

@@ -272,4 +272,9 @@ describe('default baseEnv', () => {
       delete process.env.YTDLP_ENV_BUILDER_TEST_MARKER;
     }
   });
+
+  test('passes the job type to the post-processor for its event-log source', () => {
+    const env = buildYtdlpEnv({ jobId: 'job-1', jobType: 'Manually Added Urls', tempBasePath: '/tmp', baseEnv: {} });
+    expect(env.YOUTARR_JOB_TYPE).toBe('Manually Added Urls');
+  });
 });

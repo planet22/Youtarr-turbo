@@ -130,6 +130,7 @@ async function _enqueueCacheDownload(youtubeId) {
     jobId: cacheJobId || undefined,
     youtubeId,
     videoTitle: video.youTubeVideoName,
+    channelName: video.youTubeChannelName,
     detail: { targetDir },
   });
   return { queued: true };

@@ -94,40 +94,17 @@ const VideoCell: React.FC<CellProps> = ({ event, onSelectVideo, onOpenVideo }) =
   const youtubeId = event.youtubeId;
   return (
     <Box className="flex items-start gap-2">
-      <Box className="relative shrink-0" style={{ width: THUMBNAIL_WIDTH, height: THUMBNAIL_HEIGHT }}>
-        <VideoThumbnail
-          video={thumbnailVideo(event)}
-          width={THUMBNAIL_WIDTH}
-          height={THUMBNAIL_HEIGHT}
-          onClick={() => onOpenVideo(event)}
-          hasError={false}
-          onError={noop}
-          iconSize={20}
-        />
-        {/* Recorded when the event happened, so it stays true after the row is gone.
-            Same banner the Videos library puts across an untracked row's thumbnail. */}
-        {event.isTracked === false && (
-          <Box
-            data-testid="untracked-badge"
-            className="pointer-events-none"
-            style={{
-              position: 'absolute',
-              top: 0,
-              left: 0,
-              right: 0,
-              backgroundColor: 'var(--media-overlay-background, rgba(0,0,0,0.6))',
-              color: 'var(--media-overlay-foreground)',
-              padding: '2px 4px',
-              fontSize: '0.6rem',
-              fontWeight: 'bold',
-              textAlign: 'center',
-              zIndex: 2,
-            }}
-          >
-            Untracked
-          </Box>
-        )}
-      </Box>
+      {/* isTracked is recorded when the event happened, so it stays true after the row is gone. */}
+      <VideoThumbnail
+        video={thumbnailVideo(event)}
+        width={THUMBNAIL_WIDTH}
+        height={THUMBNAIL_HEIGHT}
+        onClick={() => onOpenVideo(event)}
+        hasError={false}
+        onError={noop}
+        iconSize={20}
+        untracked={event.isTracked === false}
+      />
       <Box className="min-w-0">
         <Link component="button" type="button" style={linkStyle} onClick={() => onSelectVideo(youtubeId)}>
           {event.videoTitle || youtubeId}

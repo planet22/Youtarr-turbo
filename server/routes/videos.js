@@ -2,6 +2,7 @@ const express = require('express');
 const rateLimit = require('express-rate-limit');
 const { ROOT_SENTINEL, GLOBAL_DEFAULT_SENTINEL } = require('../modules/filesystem/constants');
 const youtubeUrlParser = require('../modules/youtubeUrlParser');
+const { ALLOWED_MEDIA_MODES } = require('./overrideSettingsValidator');
 
 // Upper bound on how many videoIds a single /api/videos/strm/download or
 // /api/videos/strm/revert request may process, to avoid an unbounded batch of
@@ -1098,6 +1099,10 @@ module.exports = function createVideoRoutes({ verifyToken, videosModule, downloa
    *                     type: string
    *                     enum: ['360', '480', '720', '1080', '1440', '2160']
    *                     description: Override download resolution
+   *                   mediaMode:
+   *                     type: string
+   *                     enum: [download, strm]
+   *                     description: Override the channel/playlist/global media mode for this download (strm writes .strm pointer files instead of downloading)
    *               videoChannelMap:
    *                 type: object
    *                 additionalProperties:
@@ -1154,6 +1159,12 @@ module.exports = function createVideoRoutes({ verifyToken, videosModule, downloa
       if (overrideSettings.skipVideoFolder !== undefined && typeof overrideSettings.skipVideoFolder !== 'boolean') {
         return res.status(400).json({
           error: 'skipVideoFolder must be a boolean'
+        });
+      }
+
+      if (overrideSettings.mediaMode !== undefined && !ALLOWED_MEDIA_MODES.includes(overrideSettings.mediaMode)) {
+        return res.status(400).json({
+          error: `mediaMode must be one of: ${ALLOWED_MEDIA_MODES.join(', ')}`
         });
       }
 

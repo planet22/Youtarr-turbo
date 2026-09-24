@@ -20,7 +20,7 @@ const MAX_BULK_IGNORE_YOUTUBE_IDS = 500;
  * @param {Object} deps.ratingMapper - Rating validation/normalization module
  * @returns {express.Router}
  */
-module.exports = function createChannelRoutes({ verifyToken, channelModule, archiveModule, channelDownloadAllModule, ratingMapper, jobEventLog = { record: () => {} } }) {
+module.exports = function createChannelRoutes({ verifyToken, channelModule, archiveModule, channelDownloadAllModule, ratingMapper, jobEventLog = { record: () => {} }, primeVideosForEventLog = async () => {} }) {
   const router = express.Router();
   const logger = require('../logger');
   const channelSettingsModule = require('../modules/channelSettingsModule');
@@ -1103,6 +1103,9 @@ module.exports = function createChannelRoutes({ verifyToken, channelModule, arch
    *                     type: string
    *                     nullable: true
    *                     enum: [video_mp3, mp3_only]
+   *                   mediaMode:
+   *                     type: string
+   *                     enum: [download, strm]
    *                   rating:
    *                     type: string
    *                     nullable: true
@@ -1201,6 +1204,7 @@ module.exports = function createChannelRoutes({ verifyToken, channelModule, arch
       });
 
       await archiveModule.addVideoToArchive(youtubeId);
+      await primeVideosForEventLog([youtubeId]);
       jobEventLog.record(EVENT_TYPES.VIDEO_IGNORED, { youtubeId, videoTitle: channelVideo.title, detail: { channelId } });
 
       req.log.info({ channelId, youtubeId }, 'Successfully ignored channel video');
@@ -1266,6 +1270,7 @@ module.exports = function createChannelRoutes({ verifyToken, channelModule, arch
       });
 
       await archiveModule.removeVideoFromArchive(youtubeId);
+      await primeVideosForEventLog([youtubeId]);
       jobEventLog.record(EVENT_TYPES.VIDEO_UNIGNORED, { youtubeId, videoTitle: channelVideo.title, detail: { channelId } });
 
       req.log.info({ channelId, youtubeId }, 'Successfully unignored channel video');
@@ -1348,6 +1353,7 @@ module.exports = function createChannelRoutes({ verifyToken, channelModule, arch
           { where: { channel_id: channelId, youtube_id: Array.from(foundIds) } }
         );
         await Promise.all(Array.from(foundIds).map((youtubeId) => archiveModule.addVideoToArchive(youtubeId)));
+        await primeVideosForEventLog(Array.from(foundIds));
         channelVideos.forEach((cv) => jobEventLog.record(EVENT_TYPES.VIDEO_IGNORED, { youtubeId: cv.youtube_id, videoTitle: cv.title, detail: { channelId, bulk: true } }));
       }
 

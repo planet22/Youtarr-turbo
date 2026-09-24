@@ -124,4 +124,14 @@ describe('VideoThumbnail', () => {
     );
     expect(screen.getByRole('img', { name: 'Test Video' })).toHaveStyle({ objectFit: 'cover' });
   });
+
+  test('shows the Untracked banner when untracked', () => {
+    renderThumbnail({ untracked: true });
+    expect(screen.getByTestId('untracked-badge')).toHaveTextContent('Untracked');
+  });
+
+  test('shows no Untracked banner by default', () => {
+    renderThumbnail();
+    expect(screen.queryByTestId('untracked-badge')).not.toBeInTheDocument();
+  });
 });

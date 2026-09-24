@@ -12,6 +12,7 @@ import {
 } from '../../../../lib/icons';
 import { VideoModalData } from '../types';
 import { YOUTUBE_URL_BASE } from '../constants';
+import { videoThumbnailUrl } from '../../../../utils/videoThumbnail';
 
 interface VideoPlayerProps {
   video: VideoModalData;
@@ -28,13 +29,10 @@ function VideoPlayer({ video, token, onDownloadClick, isMobile }: VideoPlayerPro
   const [streamError, setStreamError] = useState(false);
   const [infoTooltipOpen, setInfoTooltipOpen] = useState(false);
   const [streamAspectRatio, setStreamAspectRatio] = useState<number | null>(null);
-  // video.thumbnailUrl is always the LOCAL /images/videothumb-*.jpg path
-  // (see videoDataToModalData) - that file only exists once something has
-  // actually written it (a real download, channel sync, STRM
-  // materialization), so a video that's merely been previewed/cache-warmed
-  // (never downloaded) 404s there. Same local-then-YouTube-CDN fallback as
-  // DownloadManager/VideoThumbnail.tsx, so the popup shows a real thumbnail
-  // instead of the browser's broken-image icon.
+  // video.thumbnailUrl is whatever the opening page had (usually the shared
+  // videoThumbnailUrl, sometimes a listing's own URL); if it fails, retry via
+  // the shared no-cache URL (stored copy, else YouTube's) so the popup shows a
+  // real thumbnail instead of the browser's broken-image icon.
   const [thumbnailSrc, setThumbnailSrc] = useState(video.thumbnailUrl);
 
   useEffect(() => {
@@ -46,9 +44,9 @@ function VideoPlayer({ video, token, onDownloadClick, isMobile }: VideoPlayerPro
   }, [video.youtubeId, video.thumbnailUrl]);
 
   const handleThumbnailError = useCallback(() => {
-    const cdnThumbnailUrl = `https://i.ytimg.com/vi/${video.youtubeId}/hqdefault.jpg`;
-    if (thumbnailSrc !== cdnThumbnailUrl) {
-      setThumbnailSrc(cdnThumbnailUrl);
+    const fallbackUrl = videoThumbnailUrl(video.youtubeId, { noCache: true });
+    if (thumbnailSrc !== fallbackUrl) {
+      setThumbnailSrc(fallbackUrl);
     }
   }, [thumbnailSrc, video.youtubeId]);
 

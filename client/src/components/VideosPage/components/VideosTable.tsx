@@ -31,7 +31,7 @@ import RatingBadge from '../../shared/RatingBadge';
 import DownloadFormatIndicator from '../../shared/DownloadFormatIndicator';
 import ProtectionShieldButton from '../../shared/ProtectionShieldButton';
 import ThumbnailClickOverlay from '../../shared/ThumbnailClickOverlay';
-import { handleThumbnailError } from '../thumbnailFallback';
+import { videoThumbnailUrl } from '../../../utils/videoThumbnail';
 import AvailabilityChip from '../../shared/AvailabilityChip';
 import { SHARED_STATUS_CHIP_SMALL_STYLE, SHARED_THEMED_CHIP_SMALL_STYLE } from '../../shared/chipStyles';
 import ChannelNameDisplay from './ChannelNameDisplay';
@@ -216,7 +216,7 @@ function VideosTable({
                         </Typography>
                       ) : (
                         <img
-                          src={`/images/videothumb-${video.youtubeId}.jpg`}
+                          src={videoThumbnailUrl(video.youtubeId)}
                           alt="thumbnail"
                           style={{
                             width: '100%',
@@ -224,7 +224,7 @@ function VideosTable({
                             objectFit: video.media_type === 'short' ? 'contain' : 'cover',
                             filter: video.removed ? 'grayscale(100%) brightness(0.6)' : 'none',
                           }}
-                          onError={(e) => handleThumbnailError(e, video.youtubeId, onImageError)}
+                          onError={() => onImageError(video.youtubeId)}
                         />
                       )}
                       <ThumbnailClickOverlay

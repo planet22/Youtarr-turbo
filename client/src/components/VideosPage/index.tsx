@@ -34,6 +34,7 @@ import VideosListMobile from './components/VideosListMobile';
 import CacheDetailDialog from './components/CacheDetailDialog';
 import { useVideosData } from './hooks/useVideosData';
 import { useCacheActions } from './hooks/useCacheActions';
+import { videoThumbnailUrl } from '../../utils/videoThumbnail';
 import {
   INFINITE_SCROLL_FETCH_SIZE,
   VideoListContainer,
@@ -96,7 +97,7 @@ function videoDataToModalData(video: VideoData): VideoModalData {
     youtubeId: video.youtubeId,
     title: video.youTubeVideoName,
     channelName: video.youTubeChannelName,
-    thumbnailUrl: `/images/videothumb-${video.youtubeId}.jpg`,
+    thumbnailUrl: videoThumbnailUrl(video.youtubeId),
     duration: video.duration,
     publishedAt: video.originalDate || null,
     addedAt: video.timeCreated || null,

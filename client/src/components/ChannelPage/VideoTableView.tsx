@@ -19,6 +19,7 @@ import WatchedChip from '../shared/WatchedChip';
 import { SHARED_STATUS_CHIP_SMALL_STYLE, SHARED_THEMED_CHIP_SMALL_STYLE } from '../shared/chipStyles';
 import { getPublishedDateDisplay } from './publishedDateDisplay';
 import { formatSeasonEpisode, buildChannelFilterPreviewTooltip } from './channelFilterPreviewDisplay';
+import { videoThumbnailUrl } from '../../utils/videoThumbnail';
 
 type SortBy = 'date' | 'title' | 'duration' | 'size';
 type SortOrder = 'asc' | 'desc';
@@ -235,7 +236,7 @@ function VideoTableView({
                 <td style={{ width: 140, padding: '8px 4px' }}>
                   <div style={{ position: 'relative', display: 'inline-block', backgroundColor: 'var(--media-placeholder-background)', borderRadius: 'var(--radius-thumb)', overflow: 'hidden' }}>
                     <img
-                      src={video.thumbnail}
+                      src={videoThumbnailUrl(video.youtube_id, { noCache: true })}
                       alt={decodeHtml(video.title)}
                       style={{
                         width: 120,

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Box, Typography } from '../ui';
 import { AlertCircle as ErrorOutlineIcon } from 'lucide-react';
 import { VideoData } from '../../types/VideoData';
+import { videoThumbnailUrl } from '../../utils/videoThumbnail';
 
 const MISSING_OVERLAY_BG = 'color-mix(in srgb, var(--destructive) 30%, transparent)';
 
@@ -28,22 +29,16 @@ function VideoThumbnail({
   untracked = false,
 }: VideoThumbnailProps) {
   const isMissing = Boolean(video.removed);
-  const localSrc = `/images/videothumb-${video.youtubeId}.jpg`;
-  // YouTube still as last-resort fallback (STRM items often lacked a local UI thumb)
-  const cdnSrc = `https://i.ytimg.com/vi/${video.youtubeId}/hqdefault.jpg`;
-  const [src, setSrc] = useState(localSrc);
+  // The server falls back to (and keeps) YouTube's still, so an error here
+  // means no thumbnail exists anywhere.
+  const src = videoThumbnailUrl(video.youtubeId);
   const [exhausted, setExhausted] = useState(false);
 
   useEffect(() => {
-    setSrc(localSrc);
     setExhausted(false);
-  }, [localSrc, video.youtubeId]);
+  }, [video.youtubeId]);
 
   const handleImgError = () => {
-    if (src === localSrc) {
-      setSrc(cdnSrc);
-      return;
-    }
     setExhausted(true);
     onError();
   };

@@ -95,6 +95,7 @@ function initialize(deps = {}) {
   const ytdlpModule = require('./ytdlpModule');
   const configModule = require('./configModule');
   const jobEventLog = require('./jobEventLog');
+  const videoThumbnailCache = require('./videoThumbnailCache');
   const { refreshYtDlpVersionCache } = deps;
 
   logger.info('Initializing scheduled cron jobs');
@@ -341,6 +342,27 @@ function initialize(deps = {}) {
         });
     } catch (error) {
       logger.error({ err: error }, 'Error starting video metadata backfill');
+    }
+  });
+
+  // ============================================================================
+  // UNUSED VIDEO THUMBNAIL PRUNE - 3:35 AM Daily
+  // ============================================================================
+  // Thumbnails fetched on demand for videos outside the library (untracked NZB
+  // grabs, streamed or previewed videos) would otherwise pile up forever.
+  // Library videos keep theirs; see server/modules/videoThumbnailCache.js.
+  defineTask({
+    id: 'thumbnail-prune',
+    label: 'Unused thumbnail prune',
+    description: 'Deletes stored thumbnails of non-library videos not viewed recently.',
+    cron: '35 3 * * *',
+    confirm: false,
+  }, async () => {
+    try {
+      const deleted = await videoThumbnailCache.pruneUnused();
+      if (deleted > 0) logger.info({ deleted }, 'Pruned unused video thumbnails');
+    } catch (error) {
+      logger.error({ err: error }, 'Error pruning unused video thumbnails');
     }
   });
 

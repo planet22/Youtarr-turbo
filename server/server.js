@@ -667,6 +667,11 @@ const initialize = async () => {
       next();
     });
 
+    // Video thumbnails first: fetch-and-keep on a miss, and each view counts
+    // as use for the nightly unused-thumbnail prune (see routes/thumbnails.js).
+    const createThumbnailRoutes = require('./routes/thumbnails');
+    app.use(createThumbnailRoutes({ videoThumbnailCache: require('./modules/videoThumbnailCache'), logger }));
+
     // Serve images
     app.use('/images', express.static(configModule.getImagePath()));
 

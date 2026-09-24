@@ -26,6 +26,7 @@ import VideoThumbnail from './VideoThumbnail';
 import MissingVideoChip from './MissingVideoChip';
 import FailedVideoChip from './FailedVideoChip';
 import FailedDownloadsDetail from './FailedDownloadsDetail';
+import { videoThumbnailUrl } from '../../utils/videoThumbnail';
 import TerminatedChannelsDetail from './TerminatedChannelsDetail';
 import {
   useListPageSize,
@@ -270,7 +271,7 @@ function jobVideoToModalData(video: VideoData): VideoModalData {
     youtubeId: video.youtubeId,
     title: video.youTubeVideoName,
     channelName: video.youTubeChannelName,
-    thumbnailUrl: `/images/videothumb-${video.youtubeId}.jpg`,
+    thumbnailUrl: videoThumbnailUrl(video.youtubeId),
     duration: video.duration,
     publishedAt: video.originalDate || null,
     addedAt: video.timeCreated || null,

@@ -3,6 +3,7 @@ import { Chip, Tooltip, Box, Grow, Popover, Typography, IconButton } from '../..
 import { Close as CloseIcon, Lock, Link as LinkIcon, Loader2 } from '../../../lib/icons';
 import { History as HistoryIcon } from 'lucide-react';
 import { VideoInfo } from './types';
+import { videoThumbnailUrl } from '../../../utils/videoThumbnail';
 
 interface VideoChipProps {
   video: VideoInfo;
@@ -45,7 +46,7 @@ const VideoThumbnail: React.FC<VideoThumbnailProps> = ({ youtubeId }) => {
   if (!visible) return null;
   return (
     <img
-      src={`https://i.ytimg.com/vi/${youtubeId}/mqdefault.jpg`}
+      src={videoThumbnailUrl(youtubeId, { noCache: true })}
       alt=""
       aria-hidden="true"
       onError={() => setVisible(false)}

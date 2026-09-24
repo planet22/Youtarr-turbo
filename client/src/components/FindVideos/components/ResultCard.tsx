@@ -12,6 +12,7 @@ import {
 import { SHARED_THEMED_CHIP_SMALL_STYLE } from '../../shared/chipStyles';
 import { formatDurationClock } from '../../../utils';
 import { isSelectableForDownload, ResultSelection, SearchResult } from '../types';
+import { videoThumbnailUrl } from '../../../utils/videoThumbnail';
 
 interface ResultCardProps {
   result: SearchResult;
@@ -34,7 +35,7 @@ export default function ResultCard({ result, onClick, selection }: ResultCardPro
         <Box className="relative aspect-video bg-muted">
           {result.thumbnailUrl && (
             <img
-              src={result.thumbnailUrl}
+              src={videoThumbnailUrl(result.youtubeId, { noCache: true })}
               alt=""
               className="w-full h-full object-cover"
               loading="lazy"

@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { videoThumbnailUrl } from '../../../utils/videoThumbnail';
 
 interface StreamThumbnailProps {
   youtubeId: string;
@@ -6,17 +7,15 @@ interface StreamThumbnailProps {
   style?: React.CSSProperties;
 }
 
-// Streamed videos often have no local thumbnail (never downloaded, or untracked),
-// so fall back to YouTube's own image, then to a blank placeholder.
+// Streamed videos are often not downloaded; the shared thumbnail URL has the
+// server fetch and keep YouTube's image, so a load error means there is none
+// anywhere and a blank placeholder is shown instead.
 export default function StreamThumbnail({ youtubeId, alt, style }: StreamThumbnailProps) {
-  const localSrc = `/images/videothumb-${youtubeId}.jpg`;
-  const [src, setSrc] = useState(localSrc);
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
-    setSrc(localSrc);
     setFailed(false);
-  }, [localSrc]);
+  }, [youtubeId]);
 
   if (failed) {
     return (
@@ -28,13 +27,5 @@ export default function StreamThumbnail({ youtubeId, alt, style }: StreamThumbna
     );
   }
 
-  const handleError = () => {
-    if (src === localSrc) {
-      setSrc(`https://i.ytimg.com/vi/${youtubeId}/hqdefault.jpg`);
-      return;
-    }
-    setFailed(true);
-  };
-
-  return <img src={src} alt={alt} style={style} onError={handleError} />;
+  return <img src={videoThumbnailUrl(youtubeId)} alt={alt} style={style} onError={() => setFailed(true)} />;
 }

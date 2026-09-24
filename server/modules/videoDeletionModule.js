@@ -5,6 +5,7 @@ const path = require('path');
 const logger = require('../logger');
 const { isVideoDirectory, cleanupEmptyChannelDirectory, cleanupEmptyParents, removeEmptyDescendants, isSubfolderDir, listSubdirectories, removeDirectoryResilient } = require('./filesystem');
 const m3uGenerator = require('./m3uGenerator');
+const videoThumbnailCache = require('./videoThumbnailCache');
 const jobEventLog = require('./jobEventLog');
 const { EVENT_TYPES } = require('./jobEventLog/eventCatalog');
 
@@ -621,6 +622,7 @@ class VideoDeletionModule {
         await video.destroy({ transaction });
       });
       this.recordVideoDeleted(video, { purged: true });
+      await videoThumbnailCache.removeThumbnail(youtubeId);
 
       // yt-dlp's download-archive otherwise still remembers this video, so a
       // later backfillFromCompleteList run (server startup, or the daily

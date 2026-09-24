@@ -60,6 +60,7 @@ import {
   type VideoListViewMode,
 } from '../shared/VideoList';
 import { intentStyles } from '../../utils/intentStyles';
+import { videoThumbnailUrl } from '../../utils/videoThumbnail';
 
 interface ChannelVideosProps {
   token: string | null;
@@ -93,7 +94,7 @@ function channelVideoToModalData(
     youtubeId: video.youtube_id,
     title: video.title,
     channelName,
-    thumbnailUrl: video.thumbnail,
+    thumbnailUrl: videoThumbnailUrl(video.youtube_id, { noCache: true }),
     duration: video.duration,
     publishedAt: video.publishedAt || null,
     addedAt: null,

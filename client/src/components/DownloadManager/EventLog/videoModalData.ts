@@ -1,5 +1,6 @@
 import type { JobEvent } from '../../../types/JobEvent';
 import type { VideoModalData } from '../../shared/VideoModal/types';
+import { videoThumbnailUrl } from '../../../utils/videoThumbnail';
 
 /**
  * Minimal data for the video detail popup (the one Download History opens)
@@ -13,7 +14,7 @@ export function eventToVideoModalData(event: JobEvent): VideoModalData {
     youtubeId,
     title: event.videoTitle || youtubeId,
     channelName: event.channelName || '',
-    thumbnailUrl: `/images/videothumb-${youtubeId}.jpg`,
+    thumbnailUrl: videoThumbnailUrl(youtubeId),
     duration: null,
     publishedAt: null,
     addedAt: event.occurredAt,

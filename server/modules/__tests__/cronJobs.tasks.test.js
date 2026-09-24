@@ -37,6 +37,7 @@ describe('cronJobs nightly maintenance tasks', () => {
     jest.doMock('../videoDeletionModule', () => videoDeletionModule);
     jest.doMock('../notificationModule', () => ({ sendAutoRemovalNotification: jest.fn() }));
     jest.doMock('../ytdlpModule', () => ({ performUpdate: jest.fn() }));
+    jest.doMock('../videoThumbnailCache', () => ({ pruneUnused: jest.fn(() => Promise.resolve(0)) }));
     jest.doMock('../configModule', () => ({ getConfig: jest.fn(() => configStore), isElfhostedPlatform: jest.fn(() => false) }));
     jest.doMock('../youtubeMetadataCache', () => ({ YOUTUBE_METADATA_CACHE_RETENTION_DAYS: 365 }));
     jest.doMock('../../routes/ytstream', () => ytstreamRoutes);

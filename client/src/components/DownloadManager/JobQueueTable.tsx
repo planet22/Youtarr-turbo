@@ -30,6 +30,7 @@ import { Job } from '../../types/Job';
 import { jobTypeLabel } from '../../utils/jobTypeLabel';
 import { formatAddedDateTime } from '../../utils/formatters';
 import { parseYoutubeUrls } from './ManualDownload/urlParser';
+import { videoThumbnailUrl } from '../../utils/videoThumbnail';
 
 // Scratch flag for ad-hoc verbose tracing (queue reorder/order investigation
 // as of 2026-09-06) - flip live from the browser console with
@@ -155,7 +156,7 @@ function VideoRowThumbnail({ youtubeId }: { youtubeId: string | null }) {
     return (
       <Box style={boxStyle}>
         <img
-          src={`https://i.ytimg.com/vi/${youtubeId}/default.jpg`}
+          src={videoThumbnailUrl(youtubeId, { noCache: true })}
           alt=""
           style={{ width: '100%', height: '100%', objectFit: 'cover' }}
           onError={() => setImgFailed(true)}
@@ -396,7 +397,7 @@ function JobThumbnail({ job }: { job: Job }) {
     return (
       <Box style={boxStyle}>
         <img
-          src={`https://i.ytimg.com/vi/${youtubeId}/hqdefault.jpg`}
+          src={videoThumbnailUrl(youtubeId, { noCache: true })}
           alt=""
           style={{ width: '100%', height: '100%', objectFit: 'cover' }}
           onError={() => setImgFailed(true)}

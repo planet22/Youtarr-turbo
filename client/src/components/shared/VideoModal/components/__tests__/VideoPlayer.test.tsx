@@ -154,7 +154,7 @@ describe('VideoPlayer', () => {
     );
   });
 
-  test('stream error shows fallback UI with YouTube link', async () => {
+  test('stream error falls back to an embedded YouTube player with a warning', async () => {
     const user = userEvent.setup();
     renderPlayer();
 
@@ -165,15 +165,14 @@ describe('VideoPlayer', () => {
     const videoEl = screen.getByTestId('video-stream-element');
     fireEvent.error(videoEl);
 
-    // Error fallback should appear
+    // Fallback: embedded YouTube player plus a warning, no dead-end message
     await waitFor(() => {
-      expect(screen.getByText('Unable to stream video')).toBeInTheDocument();
+      expect(screen.getByText('Local playback failed - playing directly from YouTube')).toBeInTheDocument();
     });
 
-    const youtubeLink = screen.getByRole('link', { name: 'Open in YouTube' });
-    expect(youtubeLink).toHaveAttribute(
-      'href',
-      'https://www.youtube.com/watch?v=abc123'
+    expect(screen.getByTitle('Test Video')).toHaveAttribute(
+      'src',
+      'https://www.youtube.com/embed/abc123?autoplay=1'
     );
   });
 
@@ -208,7 +207,7 @@ describe('VideoPlayer', () => {
       expect(screen.queryByTestId('video-stream-element')).not.toBeInTheDocument();
     });
 
-    test('audio stream error shows fallback UI with YouTube link', async () => {
+    test('audio stream error falls back to an embedded YouTube player', async () => {
       const user = userEvent.setup();
       renderPlayer(mp3OnlyOverride);
 
@@ -216,11 +215,11 @@ describe('VideoPlayer', () => {
       fireEvent.error(screen.getByTestId('audio-stream-element'));
 
       await waitFor(() => {
-        expect(screen.getByText('Unable to stream audio')).toBeInTheDocument();
+        expect(screen.getByText('Local playback failed - playing directly from YouTube')).toBeInTheDocument();
       });
-      expect(screen.getByRole('link', { name: 'Open in YouTube' })).toHaveAttribute(
-        'href',
-        'https://www.youtube.com/watch?v=abc123'
+      expect(screen.getByTitle('Test Video')).toHaveAttribute(
+        'src',
+        'https://www.youtube.com/embed/abc123?autoplay=1'
       );
     });
 

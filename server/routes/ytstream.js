@@ -603,6 +603,21 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
       audioLanguage: String(queryOverrideForExperimentalModes('audioLanguage') || ytCfgForExperimentalModes.audioLanguage || '').trim().slice(0, 16),
       // mode=youtube-hls only: off / proxy / serve - see youtubeHlsProxy.js.
       hlsProxy: normalizeHlsProxyMode(queryOverrideForExperimentalModes('hlsProxy') || ytCfgForExperimentalModes.youtubeHlsProxy),
+      // Read directly off req.query, deliberately bypassing
+      // queryOverrideForExperimentalModes/forceServerSettings: this is not an
+      // admin-configurable setting a viewer could abuse to dodge server
+      // policy, it's a fixed marker the in-app Picture-in-Picture preview
+      // (client/src/hooks/useHlsPipPlayer.ts) always sends on itself, the
+      // same way VideoPlayer.tsx pins its own STRM playback to mode=direct
+      // regardless of config. mode=youtube-hls's 'off'/'proxy' routing (and
+      // 'serve''s redirect) all point a browser JS player (hls.js) straight
+      // at a YouTube CDN segment URL, which YouTube serves with no
+      // Access-Control-Allow-Origin - the browser blocks it outright
+      // (fragLoadError), regardless of what forceServerSettings/defaultMode
+      // say. Only Youtarr fetching the segment itself and piping the bytes
+      // back same-origin avoids that, so this forces exactly that - see
+      // youtubeHlsProxy.js's byteProxy handling in handleSegment.
+      pipPreview: req.query.pipPreview === '1',
       // mode=hls-byterange + deliverAsFile only: 'mkv' writes Matroska
       // instead of fMP4 - see byteRangeHlsMode.js. Anything else is mp4.
       container: String(queryOverrideForExperimentalModes('container') || ytCfgForExperimentalModes.container || 'mp4').toLowerCase(),
@@ -619,6 +634,10 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
       // getOrCreateSession.
       resumeCache: parseBooleanQueryFlag(queryOverrideForExperimentalModes('resumeCache') ?? ytCfgForExperimentalModes.byteRangeResumeCache),
     };
+    if (mode === 'youtube-hls' && params.pipPreview) {
+      params.hlsProxy = 'serve';
+      params.byteProxy = true;
+    }
     return { mode, params };
   }
 

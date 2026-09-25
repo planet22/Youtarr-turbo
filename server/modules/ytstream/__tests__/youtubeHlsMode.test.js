@@ -658,6 +658,16 @@ describe('youtube-hls routing through Youtarr (youtubeHlsProxy)', () => {
       expect(proxyModule.get(PROXY_KEY).mode).toBe('serve');
     });
 
+    it('remembers byteProxy with the registered playlists when the PiP preview asked for it', async () => {
+      await resolvePlaylist({ ...params, proxyMode: 'serve', proxyKey: PROXY_KEY, byteProxy: true }, depsFor(separateMaster));
+      expect(proxyModule.get(PROXY_KEY).byteProxy).toBe(true);
+    });
+
+    it('defaults byteProxy to false for a normal serve-mode session', async () => {
+      await resolvePlaylist({ ...params, proxyMode: 'serve', proxyKey: PROXY_KEY }, depsFor(separateMaster));
+      expect(proxyModule.get(PROXY_KEY).byteProxy).toBe(false);
+    });
+
     it('bases the estimate on the chosen variant bitrate for video and none for audio', async () => {
       await resolvePlaylist({ ...params, proxyMode: 'serve', proxyKey: PROXY_KEY }, depsFor(separateMaster));
       const { kinds } = proxyModule.get(PROXY_KEY);
@@ -727,6 +737,15 @@ describe('youtube-hls routing through Youtarr (youtubeHlsProxy)', () => {
       const routed = await getPlaylist({ ...params, proxyMode: 'proxy' }, deps);
       expect(direct.playlist).not.toBe(routed.playlist);
     });
+
+    it('keeps a separate cache entry for a byteProxy (PiP preview) session vs a normal serve session', async () => {
+      const deps = depsFor(separateMaster);
+      await getPlaylist({ ...params, proxyMode: 'serve', byteProxy: true }, deps);
+      await getPlaylist({ ...params, proxyMode: 'serve' }, deps);
+      // Both resolves ran (not served from one shared cache entry) - if they
+      // collided on one cache key, the second would be a cache hit with 1 call.
+      expect(deps.fetchInfo).toHaveBeenCalledTimes(2);
+    });
   });
 
   describe('handleYoutubeHlsRequest', () => {
@@ -749,6 +768,13 @@ describe('youtube-hls routing through Youtarr (youtubeHlsProxy)', () => {
       const res = mockRes();
       await handleYoutubeHlsRequest(req, res, { ...params, clientIp: '10.0.0.5', userAgent: 'Lavf/62', hlsProxy: 'off' }, depsFor(separateMaster));
       expect(res.send.mock.calls[0][0]).not.toContain('/yth/');
+    });
+
+    it('registers the stream with byteProxy when the request asked for it (PiP preview)', async () => {
+      const res = mockRes();
+      await handleYoutubeHlsRequest(req, res, { ...params, clientIp: '10.0.0.5', userAgent: 'Lavf/62', hlsProxy: 'serve', byteProxy: true }, depsFor(separateMaster));
+      const registered = proxyModule.get(res.send.mock.calls[0][0].match(/\/yth\/(ythp-[a-f0-9]{20})\//)[1]);
+      expect(registered.byteProxy).toBe(true);
     });
   });
 

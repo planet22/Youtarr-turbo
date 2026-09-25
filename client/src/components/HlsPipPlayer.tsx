@@ -1,8 +1,10 @@
 import React from 'react';
 import { Loader2 } from 'lucide-react';
-import { Box, Typography, IconButton, Tooltip } from './ui';
+import { Box, Typography, IconButton, Tooltip, Link } from './ui';
 import { Close as CloseIcon, WarningAmber as WarningAmberIcon } from '../lib/icons';
 import { UseHlsPipPlayerReturn } from '../hooks/useHlsPipPlayer';
+
+const YOUTUBE_URL_BASE = 'https://www.youtube.com/watch?v=';
 
 export interface HlsPipPlayerProps {
   player: UseHlsPipPlayerReturn;
@@ -86,6 +88,18 @@ function HlsPipPlayer({ player }: HlsPipPlayerProps) {
             <Typography variant="caption" style={{ color: 'white' }}>
               {state.errorMessage || 'Unable to play this video'}
             </Typography>
+            {state.youtubeId && (
+              <Link
+                href={`${YOUTUBE_URL_BASE}${state.youtubeId}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                underline="hover"
+                variant="caption"
+                style={{ color: 'var(--primary-foreground, white)' }}
+              >
+                Open in YouTube
+              </Link>
+            )}
           </Box>
         )}
       </Box>

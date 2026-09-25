@@ -305,6 +305,27 @@ describe('GET /api/ytstream/:youtubeId/simulate', () => {
       expect((await call({})).json.mock.calls[0][0].settings.hlsProxy).toBe('off');
     });
 
+    test('mode=youtube-hls: pipPreview forces hlsProxy=serve + byteProxy, regardless of the configured routing mode', async () => {
+      configFor({ defaultMode: 'youtube-hls', quality: '1080', youtubeHlsProxy: 'off' });
+      const body = (await call({ pipPreview: '1' })).json.mock.calls[0][0];
+      expect(body.settings.hlsProxy).toBe('serve');
+      expect(body.requested.byteProxy).toBe(true);
+    });
+
+    test('mode=youtube-hls: pipPreview is a no-op when absent (the normal, non-preview path)', async () => {
+      configFor({ defaultMode: 'youtube-hls', quality: '1080', youtubeHlsProxy: 'off' });
+      const body = (await call({})).json.mock.calls[0][0];
+      expect(body.settings.hlsProxy).toBe('off');
+      expect(body.requested.byteProxy).toBeUndefined();
+    });
+
+    test('mode=youtube-hls: pipPreview still forces byteProxy under forceServerSettings, since it is read independently of query overrides', async () => {
+      configFor({ defaultMode: 'youtube-hls', quality: '1080', youtubeHlsProxy: 'off', forceServerSettings: true });
+      const body = (await call({ pipPreview: '1' })).json.mock.calls[0][0];
+      expect(body.settings.hlsProxy).toBe('serve');
+      expect(body.requested.byteProxy).toBe(true);
+    });
+
     test('mode=youtube-hls shows the configured audio language and the settings it ignores', async () => {
       configFor({ defaultMode: 'youtube-hls', quality: '1080', audioLanguage: 'de' });
       const body = (await call({})).json.mock.calls[0][0];

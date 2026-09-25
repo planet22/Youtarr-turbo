@@ -30,6 +30,8 @@ jest.mock('hls.js', () => {
     MANIFEST_LOAD_ERROR: 'manifestLoadError',
     MANIFEST_PARSING_ERROR: 'manifestParsingError',
     MANIFEST_LOAD_TIMEOUT: 'manifestLoadTimeOut',
+    FRAG_LOAD_ERROR: 'fragLoadError',
+    FRAG_LOAD_TIMEOUT: 'fragLoadTimeOut',
   };
   return { __esModule: true, default: MockHls };
 });
@@ -67,7 +69,7 @@ describe('useHlsPipPlayer', () => {
 
     expect(result.current.state).toMatchObject({ youtubeId: 'abc123', title: 'My Video', status: 'loading' });
     expect(instances).toHaveLength(1);
-    expect(instances[0].loadSource).toHaveBeenCalledWith('/api/ytstream/abc123');
+    expect(instances[0].loadSource).toHaveBeenCalledWith('/api/ytstream/abc123?pipPreview=1');
     expect(instances[0].attachMedia).toHaveBeenCalled();
   });
 
@@ -111,7 +113,7 @@ describe('useHlsPipPlayer', () => {
     });
 
     expect(instances[0].destroy).toHaveBeenCalled();
-    expect(video.getAttribute('src')).toBe('/api/ytstream/abc123');
+    expect(video.getAttribute('src')).toBe('/api/ytstream/abc123?pipPreview=1');
 
     await act(async () => {
       video.dispatchEvent(new Event('loadedmetadata'));
@@ -131,6 +133,19 @@ describe('useHlsPipPlayer', () => {
 
     expect(result.current.state).toMatchObject({ status: 'error', errorMessage: 'bufferStalledError' });
     expect(instances[0].destroy).not.toHaveBeenCalled();
+  });
+
+  test('translates a fragment-load CORS failure into a plain-language message', () => {
+    const { result } = renderHook(() => useHlsPipPlayer());
+    (result.current.videoRef as { current: HTMLVideoElement | null }).current = makeFakeVideo();
+
+    act(() => result.current.play('abc123', 'My Video'));
+    act(() => {
+      instances[0].handlers.hlsError({}, { fatal: true, details: 'fragLoadError' });
+    });
+
+    expect(result.current.state.status).toBe('error');
+    expect(result.current.state.errorMessage).toMatch(/browsers block/i);
   });
 
   test('a stale callback from a superseded play() call does not overwrite the current video', async () => {

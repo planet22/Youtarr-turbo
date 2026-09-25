@@ -17,6 +17,21 @@ const INITIAL_STATE: PipPlayerState = {
   errorMessage: null,
 };
 
+// Some ytstream playback modes (youtube-hls with youtubeHlsProxy=serve)
+// deliver segments as a 302 redirect straight to YouTube's CDN. A native
+// <video> follows that at the OS network level with no issue, but hls.js
+// fetches segments via XHR/fetch, which enforces CORS - and YouTube's CDN
+// sends no Access-Control-Allow-Origin, so the browser blocks the redirected
+// response outright. There is no fallback that makes this play in a
+// browser-based JS player; the raw hls.js error code isn't self-explanatory,
+// so translate the ones this app can actually produce into plain language.
+const FRIENDLY_FATAL_ERROR_MESSAGES: Partial<Record<string, string>> = {
+  [Hls.ErrorDetails.FRAG_LOAD_ERROR]:
+    "This video's playback mode redirects segments straight to YouTube, which browsers block for a JS player (CORS). Try mode=direct in Settings > Streaming.",
+  [Hls.ErrorDetails.FRAG_LOAD_TIMEOUT]:
+    "This video's playback mode redirects segments straight to YouTube, which browsers block for a JS player (CORS). Try mode=direct in Settings > Streaming.",
+};
+
 export interface UseHlsPipPlayerReturn {
   videoRef: React.RefObject<HTMLVideoElement>;
   state: PipPlayerState;
@@ -64,7 +79,12 @@ export function useHlsPipPlayer(): UseHlsPipPlayerReturn {
     setState({ youtubeId, title, status: 'loading', errorMessage: null });
     const video = videoRef.current;
     if (!video) return;
-    const url = `/api/ytstream/${encodeURIComponent(youtubeId)}`;
+    // pipPreview tells the server this is the in-app browser preview, not a
+    // real player - mode=youtube-hls's segment redirects (even in 'serve')
+    // point straight at YouTube's CDN, which browsers CORS-block for a JS
+    // player like hls.js. The server forces real byte-proxying for exactly
+    // this marker; see resolveExperimentalRequest in routes/ytstream.js.
+    const url = `/api/ytstream/${encodeURIComponent(youtubeId)}?pipPreview=1`;
 
     // Only acts on the state this call started - a later play()/close() for
     // a different video (or the same one again) must win over a stale
@@ -120,7 +140,11 @@ export function useHlsPipPlayer(): UseHlsPipPlayerReturn {
           fallbackToDirectSrc();
           return;
         }
-        setOwnState((prev) => ({ ...prev, status: 'error', errorMessage: data.details }));
+        setOwnState((prev) => ({
+          ...prev,
+          status: 'error',
+          errorMessage: FRIENDLY_FATAL_ERROR_MESSAGES[data.details] || data.details,
+        }));
       });
       hls.loadSource(url);
       hls.attachMedia(video);

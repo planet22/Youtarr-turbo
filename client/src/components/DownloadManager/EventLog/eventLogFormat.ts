@@ -159,6 +159,28 @@ export function hasDetail(detail: Record<string, unknown> | null): boolean {
   return Object.values(detail).some((value) => value !== null && value !== undefined && value !== '');
 }
 
+// The event types whose detail is worth a "more…" link on the main line
+// (the real error, who/why). Any other type offers it
+// only when it is a warning or error, or its message is too long to show whole
+// (see EventMessage); every row can still be opened with its expand chevron.
+// Display only.
+const DETAIL_LINK_EVENT_TYPES: ReadonlySet<string> = new Set([
+  'video.failed',
+  'video.auto_retry_queued',
+  'video.download_interrupted',
+  'video.marked_missing',
+  'video.unavailable_on_youtube',
+  'video.deleted',
+  'nzb.untrack_failed',
+  'log.cleared',
+]);
+
+// Whether a row's main line offers "more…" for its detail.
+export function offersDetailLink(event: { eventType: string; level: string; detail: Record<string, unknown> | null }): boolean {
+  if (!hasDetail(event.detail)) return false;
+  return event.level !== 'info' || DETAIL_LINK_EVENT_TYPES.has(event.eventType);
+}
+
 // Whether the video was in the library when the event happened.
 // ---- Component: which part of the app recorded the event ------------------
 

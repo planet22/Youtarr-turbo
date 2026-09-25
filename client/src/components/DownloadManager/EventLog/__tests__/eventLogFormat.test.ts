@@ -9,11 +9,32 @@ import {
   formatEventTime,
   formatEventTimeParts,
   MESSAGE_PREVIEW_LENGTH,
+  offersDetailLink,
   previewMessage,
   stepLabel,
 } from '../eventLogFormat';
 
 describe('eventLogFormat', () => {
+  describe('offersDetailLink', () => {
+    const detail = { status: 'Complete' };
+
+    test('does not offer more… for a routine event type that only has detail', () => {
+      expect(offersDetailLink({ eventType: 'job.created', level: 'info', detail })).toBe(false);
+    });
+
+    test('still offers more… when a routine event type is a warning or error', () => {
+      expect(offersDetailLink({ eventType: 'job.finished', level: 'error', detail })).toBe(true);
+    });
+
+    test('offers more… for an event type whose detail matters', () => {
+      expect(offersDetailLink({ eventType: 'video.failed', level: 'info', detail })).toBe(true);
+    });
+
+    test('does not offer more… when there is no detail', () => {
+      expect(offersDetailLink({ eventType: 'video.failed', level: 'error', detail: null })).toBe(false);
+    });
+  });
+
   describe('formatEventTime', () => {
     test('shows milliseconds', () => {
       expect(formatEventTime('2026-09-19T17:12:59.566Z')).toMatch(/\.566/);

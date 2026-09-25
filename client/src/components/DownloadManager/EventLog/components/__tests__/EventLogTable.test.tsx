@@ -85,13 +85,13 @@ describe('EventLogTable', () => {
     });
 
     test('offers more on a short message when there is detail behind it', () => {
-      setup([event(1, { detail: { error: 'HTTP 403' } })]);
+      setup([event(1, { eventType: 'video.failed', detail: { error: 'HTTP 403' } })]);
 
       expect(screen.getByRole('button', { name: 'more…' })).toBeInTheDocument();
     });
 
     test('more on a short message opens the row, same as a long one', async () => {
-      setup([event(1, { detail: { error: 'HTTP 403' } })]);
+      setup([event(1, { eventType: 'video.failed', detail: { error: 'HTTP 403' } })]);
 
       await userEvent.click(screen.getByRole('button', { name: 'more…' }));
 
@@ -555,7 +555,7 @@ describe('EventLogTable', () => {
     });
 
     test('offers more on a short message with detail, like the table', () => {
-      setup([event(1, { detail: { error: 'HTTP 403' } })], { isMobile: true });
+      setup([event(1, { eventType: 'video.failed', detail: { error: 'HTTP 403' } })], { isMobile: true });
 
       expect(screen.getByRole('button', { name: 'more…' })).toBeInTheDocument();
     });

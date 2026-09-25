@@ -23,7 +23,7 @@ import {
   formatEventDelta,
   formatEventTime,
   formatEventTimeParts,
-  hasDetail,
+  offersDetailLink,
   trackedLabel,
 } from '../eventLogFormat';
 import EventDetail from './EventDetail';
@@ -278,7 +278,7 @@ const EventLogTable: React.FC<EventLogTableProps> = ({ events, timeline, isMobil
                   message={event.message}
                   expanded={expanded.has(event.id)}
                   onMore={() => toggle(event.id)}
-                  hasDetail={hasDetail(event.detail)}
+                  hasDetail={offersDetailLink(event)}
                 />
                 <LevelCell {...cell} />
               </Box>
@@ -356,7 +356,7 @@ const EventLogTable: React.FC<EventLogTableProps> = ({ events, timeline, isMobil
                       message={event.message}
                       expanded={expanded.has(event.id)}
                       onMore={() => toggle(event.id)}
-                      hasDetail={hasDetail(event.detail)}
+                      hasDetail={offersDetailLink(event)}
                     />
                   </TableCell>
                 </TableRow>

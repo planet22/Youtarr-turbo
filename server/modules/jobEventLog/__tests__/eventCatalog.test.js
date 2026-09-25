@@ -127,6 +127,15 @@ describe('file, STRM and cache steps', () => {
     expect(result).toMatchObject({ level: 'warn', message: 'Video file not found on disk, marked missing (/lib/x.mp4)' });
   });
 
+  test('video.file_finalized shows the path relative to the download folder', () => {
+    expect(msg(EVENT_TYPES.VIDEO_FILE_FINALIZED, { filePath: '/usr/src/app/data/__Series/Show/Season 1/Ep [abc123DEF45].mp4' }))
+      .toBe('File finalized at __Series/Show/Season 1/Ep [abc123DEF45].mp4');
+  });
+
+  test('a path outside the download folder is shown in full', () => {
+    expect(msg(EVENT_TYPES.VIDEO_FILE_FINALIZED, { filePath: '/elsewhere/x.mp4' })).toBe('File finalized at /elsewhere/x.mp4');
+  });
+
   test('video.restored names the file', () => {
     expect(msg(EVENT_TYPES.VIDEO_RESTORED, { filePath: '/lib/x.mp4' })).toBe('Video file found again on disk (/lib/x.mp4)');
   });

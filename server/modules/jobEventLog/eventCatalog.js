@@ -64,6 +64,16 @@ const EVENT_TYPES = Object.freeze({
 const has = (value) => value !== undefined && value !== null && value !== '';
 const suffix = (value, text) => (has(value) ? ` ${text.replace('%s', value)}` : '');
 
+// Paths in messages are shown relative to the download folder the user knows
+// ("__Series/Show/Season 1/..."), not the container mount it sits under; the
+// full path stays in the event's detail. Same root as configModule.directoryPath.
+const LIBRARY_ROOT = (process.env.DATA_PATH || '/usr/src/app/data').replace(/\/+$/, '');
+function libraryPath(value) {
+  if (!has(value)) return value;
+  const text = String(value);
+  return text.startsWith(`${LIBRARY_ROOT}/`) ? text.slice(LIBRARY_ROOT.length + 1) : text;
+}
+
 // A short, single-line reason can ride in the event's main line; anything longer
 // (a yt-dlp error is often a paragraph) stays in the event's detail, which the
 // expansion row shows in full. Returns null when the text is too long to inline.
@@ -130,7 +140,7 @@ const EVENT_CATALOG = {
   [EVENT_TYPES.VIDEO_DOWNLOAD_STARTED]: { actor: 'downloader', message: () => 'Download started' },
   [EVENT_TYPES.VIDEO_FILE_FINALIZED]: {
     actor: 'downloader',
-    message: ({ detail = {} }) => `File finalized${suffix(detail.filePath, 'at %s')}${suffix(detail.fileSize, '(%s bytes)')}`,
+    message: ({ detail = {} }) => `File finalized${suffix(libraryPath(detail.filePath), 'at %s')}${suffix(detail.fileSize, '(%s bytes)')}`,
   },
   [EVENT_TYPES.VIDEO_DOWNLOADED]: {
     actor: 'downloader',
@@ -167,11 +177,11 @@ const EVENT_CATALOG = {
   [EVENT_TYPES.VIDEO_MARKED_MISSING]: {
     actor: 'library',
     level: () => LEVELS.WARN,
-    message: ({ detail = {} }) => `Video file not found on disk, marked missing${suffix(detail.filePath, '(%s)')}`,
+    message: ({ detail = {} }) => `Video file not found on disk, marked missing${suffix(libraryPath(detail.filePath), '(%s)')}`,
   },
   [EVENT_TYPES.VIDEO_RESTORED]: {
     actor: 'library',
-    message: ({ detail = {} }) => `Video file found again on disk${suffix(detail.filePath, '(%s)')}`,
+    message: ({ detail = {} }) => `Video file found again on disk${suffix(libraryPath(detail.filePath), '(%s)')}`,
   },
 
   [EVENT_TYPES.VIDEO_PROTECTED]: {
@@ -223,7 +233,7 @@ const EVENT_CATALOG = {
   [EVENT_TYPES.STRM_CREATED]: { actor: 'strm', message: () => 'STRM file created' },
   [EVENT_TYPES.STRM_ARCHIVED]: {
     actor: 'strm',
-    message: ({ detail = {} }) => `STRM file archived after a real download replaced it${suffix(detail.path, '(%s)')}`,
+    message: ({ detail = {} }) => `STRM file archived after a real download replaced it${suffix(libraryPath(detail.path), '(%s)')}`,
   },
   [EVENT_TYPES.STRM_CACHE_ON_PLAY_QUEUED]: {
     actor: 'strm',
@@ -237,7 +247,7 @@ const EVENT_CATALOG = {
   },
   [EVENT_TYPES.NZB_STAGED_FOR_IMPORT]: {
     actor: 'nzb',
-    message: ({ detail = {} }) => `Staged for Sonarr/Radarr import${suffix(detail.stagedPath, 'at %s')}`,
+    message: ({ detail = {} }) => `Staged for Sonarr/Radarr import${suffix(libraryPath(detail.stagedPath), 'at %s')}`,
   },
   [EVENT_TYPES.NZB_IMPORT_DETECTED]: { actor: 'nzb', message: () => 'Import by Sonarr/Radarr detected' },
   [EVENT_TYPES.NZB_HISTORY_REMOVED]: {
@@ -278,7 +288,7 @@ const EVENT_CATALOG = {
   },
   [EVENT_TYPES.CACHE_HLS_BUFFER_FINALIZED]: {
     actor: 'ytstream',
-    message: ({ detail = {} }) => `HLS buffer saved${transferSummary(detail)}${suffix(detail.filePath, 'to %s')}`,
+    message: ({ detail = {} }) => `HLS buffer saved${transferSummary(detail)}${suffix(libraryPath(detail.filePath), 'to %s')}`,
   },
   [EVENT_TYPES.CACHE_DELETED]: {
     actor: 'ytstream',
@@ -300,7 +310,7 @@ const EVENT_CATALOG = {
   },
   [EVENT_TYPES.CACHE_PROMOTED_TO_LIBRARY]: {
     actor: 'ytstream',
-    message: ({ detail = {} }) => `Buffered cache promoted to a library file${suffix(detail.filePath, 'at %s')}`,
+    message: ({ detail = {} }) => `Buffered cache promoted to a library file${suffix(libraryPath(detail.filePath), 'at %s')}`,
   },
 };
 

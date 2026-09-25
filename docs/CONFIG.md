@@ -720,7 +720,7 @@ The old `discordWebhookUrl` and `notificationService` fields are automatically r
 ### Queue Manager UI
 - **Config Key**: `downloadQueueManagerEnabled`
 - **Type**: `boolean`
-- **Default**: `false`
+- **Default**: `true`
 - **Description**: Replaces the simple queued-jobs chip list on the Download Activity page with a reorderable/deletable table plus a queue-pause button.
 - **Note**: Purely a client presentation choice; does not change download behavior.
 

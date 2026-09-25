@@ -127,7 +127,7 @@ export const CONFIG_FIELDS = {
   // Replaces the simple queued-jobs chip list on the Download Activity page
   // with a reorderable/deletable table plus a queue pause button. Purely a
   // client presentation choice - see JobQueueTable.tsx.
-  downloadQueueManagerEnabled: { default: false, trackChanges: true },
+  downloadQueueManagerEnabled: { default: true, trackChanges: true },
 
   // Advanced settings
   sleepRequests: { default: 1, trackChanges: true },

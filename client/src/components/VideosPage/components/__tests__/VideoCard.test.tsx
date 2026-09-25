@@ -46,6 +46,7 @@ const renderCard = (overrides: Partial<React.ComponentProps<typeof VideoCard>> =
   const handlers = {
     onToggleSelect: jest.fn(),
     onOpenModal: jest.fn(),
+    onPipPlay: jest.fn(),
     onToggleProtection: jest.fn(),
     onDeleteSingle: jest.fn(),
     onImageError: jest.fn(),
@@ -130,6 +131,7 @@ describe('VideoCard', () => {
           deleteDisabled={false}
           onToggleSelect={jest.fn()}
           onOpenModal={jest.fn()}
+          onPipPlay={jest.fn()}
           onToggleProtection={jest.fn()}
           onDeleteSingle={jest.fn()}
           onImageError={jest.fn()}

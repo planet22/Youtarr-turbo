@@ -60,6 +60,7 @@ const renderTable = (overrides: Partial<React.ComponentProps<typeof VideosTable>
     onToggleSelect: jest.fn(),
     onSortChange: jest.fn(),
     onOpenModal: jest.fn(),
+    onPipPlay: jest.fn(),
     onToggleProtection: jest.fn(),
     onDeleteSingle: jest.fn(),
     onStrmChipClick: jest.fn(),

@@ -1,7 +1,7 @@
 import React from 'react';
 import { Box, Typography, Chip, Checkbox, Stack, IconButton, Tooltip } from '../../ui';
 import { AlertCircle as ErrorOutlineIcon, Trash2 as DeleteIcon } from 'lucide-react';
-import { Database as MetadataCacheIcon, ClearCache as ClearCacheIcon } from '../../../lib/icons';
+import { Database as MetadataCacheIcon, ClearCache as ClearCacheIcon, PipIcon } from '../../../lib/icons';
 import { formatDuration, formatYTDate } from '../../../utils';
 import { formatAddedDateTime, formatFileSize } from '../../../utils/formatters';
 import { getDisplayPath } from '../../../utils/paths';
@@ -27,6 +27,7 @@ export interface VideosListMobileProps {
   deleteDisabled: boolean;
   onToggleSelect: (youtubeId: string) => void;
   onOpenModal: (video: VideoData) => void;
+  onPipPlay: (video: VideoData) => void;
   onToggleProtection: (videoId: number) => void;
   onDeleteSingle: (videoId: number) => void;
   onImageError: (youtubeId: string) => void;
@@ -63,6 +64,7 @@ function VideosListMobile({
   deleteDisabled,
   onToggleSelect,
   onOpenModal,
+  onPipPlay,
   onToggleProtection,
   onDeleteSingle,
   onImageError,
@@ -398,6 +400,18 @@ function VideosListMobile({
                     ? ` • ${formatFileSize(fileSizeNumber)}`
                     : ''}
                 </Typography>
+                <Tooltip title="Quick play (Picture-in-Picture)">
+                  <span onClick={(e) => e.stopPropagation()}>
+                    <IconButton
+                      size="small"
+                      aria-label="Quick play in Picture-in-Picture"
+                      onClick={() => onPipPlay(video)}
+                      style={{ padding: 2, flexShrink: 0 }}
+                    >
+                      <PipIcon size={16} />
+                    </IconButton>
+                  </span>
+                </Tooltip>
                 {isTracked && video.id !== null && !video.removed && (
                   <Tooltip title="Delete video from disk">
                     <span onClick={(e) => e.stopPropagation()}>

@@ -156,6 +156,7 @@ export {
   SlidersHorizontal,
   Youtube,
   Radio,
+  PictureInPicture2 as PipIcon,
   // Direct exports (used without alias in some components)
   Trash2,
   Ban,

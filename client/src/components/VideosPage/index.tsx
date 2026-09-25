@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
 import { useSwipeable } from 'react-swipeable';
@@ -34,6 +34,7 @@ import VideosListMobile from './components/VideosListMobile';
 import CacheDetailDialog from './components/CacheDetailDialog';
 import { useVideosData } from './hooks/useVideosData';
 import { useCacheActions } from './hooks/useCacheActions';
+import PipPlayerContext from '../../contexts/PipPlayerContext';
 import { videoThumbnailUrl } from '../../utils/videoThumbnail';
 import {
   INFINITE_SCROLL_FETCH_SIZE,
@@ -1085,6 +1086,9 @@ function VideosPage({ token }: VideosPageProps) {
 
   const handleOpenModal = (video: VideoData) => setModalVideo(video);
 
+  const pipPlayerContext = useContext(PipPlayerContext);
+  const handlePipPlay = (video: VideoData) => pipPlayerContext?.play(video.youtubeId, video.youTubeVideoName);
+
   const handleOpenCacheDetail = (youtubeId: string, kind: 'metadata' | 'video') =>
     setCacheDetailTarget({ youtubeId, kind });
 
@@ -1223,6 +1227,7 @@ function VideosPage({ token }: VideosPageProps) {
                 deleteDisabled={deleteLoading}
                 onToggleSelect={handleToggleSelect}
                 onOpenModal={handleOpenModal}
+                onPipPlay={handlePipPlay}
                 onToggleProtection={handleToggleProtection}
                 onDeleteSingle={handleDeleteSingleVideo}
                 onImageError={handleImageError}
@@ -1246,6 +1251,7 @@ function VideosPage({ token }: VideosPageProps) {
           deleteDisabled={deleteLoading}
           onToggleSelect={handleToggleSelect}
           onOpenModal={handleOpenModal}
+          onPipPlay={handlePipPlay}
           onToggleProtection={handleToggleProtection}
           onDeleteSingle={handleDeleteSingleVideo}
           onImageError={handleImageError}
@@ -1269,6 +1275,7 @@ function VideosPage({ token }: VideosPageProps) {
         onToggleSelect={handleToggleSelect}
         onSortChange={handleSortChange}
         onOpenModal={handleOpenModal}
+        onPipPlay={handlePipPlay}
         onToggleProtection={handleToggleProtection}
         onDeleteSingle={handleDeleteSingleVideo}
         onStrmChipClick={handleStrmChipClick}

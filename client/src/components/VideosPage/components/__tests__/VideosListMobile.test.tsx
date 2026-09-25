@@ -40,6 +40,7 @@ const renderList = (overrides: Partial<React.ComponentProps<typeof VideosListMob
   const handlers = {
     onToggleSelect: jest.fn(),
     onOpenModal: jest.fn(),
+    onPipPlay: jest.fn(),
     onToggleProtection: jest.fn(),
     onDeleteSingle: jest.fn(),
     onImageError: jest.fn(),

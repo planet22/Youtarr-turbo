@@ -20,7 +20,7 @@ import {
   AlertCircle as ErrorOutlineIcon,
   Trash2 as DeleteIcon,
 } from 'lucide-react';
-import { Database as MetadataCacheIcon, ClearCache as ClearCacheIcon, Shield as ProtectSpacerIcon } from '../../../lib/icons';
+import { Database as MetadataCacheIcon, ClearCache as ClearCacheIcon, Shield as ProtectSpacerIcon, PipIcon } from '../../../lib/icons';
 import { formatDuration, formatYTDate } from '../../../utils';
 import { formatAddedDateTime, formatExpiresIn } from '../../../utils/formatters';
 import { getDisplayPath } from '../../../utils/paths';
@@ -50,6 +50,7 @@ export interface VideosTableProps {
   onToggleSelect: (youtubeId: string) => void;
   onSortChange: (newOrderBy: 'published' | 'added') => void;
   onOpenModal: (video: VideoData) => void;
+  onPipPlay: (video: VideoData) => void;
   onToggleProtection: (videoId: number) => void;
   onDeleteSingle: (videoId: number) => void;
   onStrmChipClick: (video: VideoData) => void;
@@ -89,6 +90,7 @@ function VideosTable({
   onToggleSelect,
   onSortChange,
   onOpenModal,
+  onPipPlay,
   onToggleProtection,
   onDeleteSingle,
   onStrmChipClick,
@@ -428,6 +430,15 @@ function VideosTable({
                   </TableCell>
                   <TableCell onClick={(e) => e.stopPropagation()}>
                     <Box className="flex items-center gap-1">
+                      <Tooltip title="Quick play (Picture-in-Picture)">
+                        <IconButton
+                          size="small"
+                          aria-label="Quick play in Picture-in-Picture"
+                          onClick={() => onPipPlay(video)}
+                        >
+                          <PipIcon size={16} />
+                        </IconButton>
+                      </Tooltip>
                       {isTracked && video.id !== null && !video.removed ? (
                         <ProtectionShieldButton
                           isProtected={video.protected || false}

@@ -21,6 +21,7 @@ import './themeTokens.css';
 import App from './App';
 import { ThemeEngineProvider } from './contexts/ThemeEngineContext';
 import WebSocketProvider from './providers/WebSocketProvider';
+import PipPlayerProvider from './providers/PipPlayerProvider';
 import { TooltipProvider } from './components/ui/tooltip';
 import ConnectionLostOverlay from './components/ConnectionLostOverlay';
 
@@ -33,7 +34,9 @@ root.render(
       <WebSocketProvider>
         <ConnectionLostOverlay />
         <TooltipProvider>
-          <App />
+          <PipPlayerProvider>
+            <App />
+          </PipPlayerProvider>
         </TooltipProvider>
       </WebSocketProvider>
     </ThemeEngineProvider>

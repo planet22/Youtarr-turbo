@@ -10,8 +10,6 @@ Youtarr-Turbo is a self-hosted YouTube downloader that automatically downloads v
 
 > **Quick guides:** [Streaming (STRM + ytstream)](docs/GETTING_STARTED_STREAMING.md) · [Sonarr/Radarr via NZB](docs/GETTING_STARTED_NZB.md) · [Channel & Playlist Settings](docs/GETTING_STARTED_CHANNELS_PLAYLISTS.md)
 
-https://github.com/user-attachments/assets/a80548fc-bcf9-4ad0-889c-dbd5aac250ee
-
 ## Why Youtarr-Turbo?
 
 - **No Ads or Tracking**: Watch YouTube content without interruptions
@@ -47,9 +45,6 @@ https://github.com/user-attachments/assets/a80548fc-bcf9-4ad0-889c-dbd5aac250ee
 - **Powered by yt-dlp**: Uses [yt-dlp](https://github.com/yt-dlp/yt-dlp) under the hood for YouTube integration and downloads
 - **Content Ratings**: Add per-video and per-channel content ratings (normalized to common media-server values like `G`, `PG`, `PG-13`, `R`, `NC-17`, `TV-*`). Ratings can be set per-download, via channel defaults, or derived from yt-dlp metadata; they show up as badges and can be used for automated policies.
 
-## How Youtarr compares
-
-Youtarr predates [Pinchflat](https://github.com/kieraneglin/pinchflat) (first commits May 2023 vs. January 2024); the two arrived at similar solutions independently and have evolved in parallel since. For a side-by-side of where Youtarr, Pinchflat, and [Tube Archivist](https://github.com/tubearchivist/tubearchivist) differ on Plex integration, in-app playback, watch-status tracking, content ratings, REST API, filename templating, and transcript search, see the [comparison doc](docs/YOUTARR_VS_ALTERNATIVES.md).
 
 ## Quick Start
 

@@ -6,14 +6,6 @@ Youtarr-Turbo wouldn't be where it is today without the help of these awesome pe
 
 - [@Planet22](https://github.com/planet22) - Forked and turbocharged Youtarr
 
-## Core Team
-
-- [@Dialmaster](https://github.com/Dialmaster) - Created Youtarr and keeps the lights on
-
-## Contributors
-
-- [@mkulina](https://github.com/mkulina) - Added API documentation and cleaned up the backend
-
 ---
 
 ## Want to Help?

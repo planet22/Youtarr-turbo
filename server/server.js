@@ -18,18 +18,23 @@ if (process.env.TRUST_PROXY === undefined || process.env.TRUST_PROXY === '') {
   logger.info('TRUST_PROXY is unset; defaulting Express proxy trust to true for backwards compatibility. Rate limits use the direct peer IP until TRUST_PROXY is explicitly configured.');
 }
 
-// Strip auth tokens from URLs before logging. The video streaming endpoint
-// passes the auth token as ?token=... because <video src> cannot set headers,
-// and pino-http otherwise logs the full URL.
+// Strip auth tokens/keys from URLs before logging. The video streaming
+// endpoint passes the auth token as ?token=... because <video src> cannot
+// set headers, and /api/ytstream accepts ?key=... (ytstream.streamKey) for
+// callers with no session at all (media servers reading a .strm file) -
+// pino-http otherwise logs the full URL/query verbatim.
 function redactUrl(url) {
-  if (typeof url !== 'string' || !url.includes('token=')) return url;
-  return url.replace(/([?&])token=[^&]*/g, '$1token=[REDACTED]');
+  if (typeof url !== 'string') return url;
+  return url.replace(/([?&](?:token|key)=)[^&]*/g, '$1[REDACTED]');
 }
 
 function redactQuery(query) {
   if (!query || typeof query !== 'object') return query;
-  if (!('token' in query)) return query;
-  return { ...query, token: '[REDACTED]' };
+  if (!('token' in query) && !('key' in query)) return query;
+  const redacted = { ...query };
+  if ('token' in redacted) redacted.token = '[REDACTED]';
+  if ('key' in redacted) redacted.key = '[REDACTED]';
+  return redacted;
 }
 
 // Setup HTTP request logging with pino-http

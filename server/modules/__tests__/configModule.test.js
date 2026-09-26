@@ -139,6 +139,60 @@ describe('ConfigModule', () => {
       expect(fs.writeFileSync).toHaveBeenCalled(); // Config saved due to merge
     });
 
+    test('should generate a ytstream.streamKey when creating config from template', () => {
+      // Arrange
+      fs.existsSync.mockImplementation((path) => {
+        if (path.includes('config.json')) return false;
+        if (path.includes('config.example.json')) return true;
+        return true;
+      });
+      fs.readFileSync.mockReturnValue(JSON.stringify(defaultTemplate));
+
+      // Act
+      ConfigModule = require('../configModule');
+
+      // Assert
+      const { streamKey } = ConfigModule.getConfig().ytstream;
+      expect(streamKey).toMatch(/^[a-f0-9]{64}$/);
+    });
+
+    test('should preserve an existing ytstream.streamKey', () => {
+      // Arrange
+      const existingConfig = { ...defaultTemplate, ytstream: { streamKey: 'existing-stream-key' } };
+      fs.existsSync.mockReturnValue(true);
+      fs.readFileSync.mockImplementation((path) => {
+        if (path.includes('config.json') && !path.includes('example')) {
+          return JSON.stringify(existingConfig);
+        }
+        return JSON.stringify({ ...defaultTemplate, ytstream: { streamKey: '' } });
+      });
+
+      // Act
+      ConfigModule = require('../configModule');
+
+      // Assert
+      expect(ConfigModule.getConfig().ytstream.streamKey).toBe('existing-stream-key');
+    });
+
+    test('should generate a ytstream.streamKey for a config that predates it', () => {
+      // Arrange
+      const existingConfig = { uuid: 'existing-uuid', plexUrl: 'http://localhost:32400' };
+      const completeTemplate = { ...defaultTemplate, ytstream: { streamKey: '' } };
+      fs.existsSync.mockReturnValue(true);
+      fs.readFileSync.mockImplementation((path) => {
+        if (path.includes('config.json') && !path.includes('example')) {
+          return JSON.stringify(existingConfig);
+        }
+        return JSON.stringify(completeTemplate);
+      });
+
+      // Act
+      ConfigModule = require('../configModule');
+
+      // Assert
+      expect(ConfigModule.getConfig().ytstream.streamKey).toMatch(/^[a-f0-9]{64}$/);
+    });
+
     test('should migrate legacy cronSchedule to channelDownloadFrequency', () => {
       // Arrange
       const legacyConfig = {
@@ -538,6 +592,25 @@ describe('ConfigModule', () => {
 
       // Act
       ConfigModule.updateConfig(newConfig);
+    });
+
+    test('regenerateStreamKey() rotates the key, persists it and returns the new value', () => {
+      // Arrange
+      ConfigModule = require('../configModule');
+      const oldKey = ConfigModule.getConfig().ytstream.streamKey;
+
+      // Act
+      const newKey = ConfigModule.regenerateStreamKey();
+
+      // Assert
+      expect(newKey).toMatch(/^[a-f0-9]{64}$/);
+      expect(newKey).not.toBe(oldKey);
+      expect(ConfigModule.getConfig().ytstream.streamKey).toBe(newKey);
+      expect(fs.writeFileSync).toHaveBeenCalledWith(
+        expect.stringContaining('config.json'),
+        expect.stringContaining(newKey),
+        { mode: 0o640 }
+      );
     });
 
     test('should filter deprecated fields when saving config', () => {

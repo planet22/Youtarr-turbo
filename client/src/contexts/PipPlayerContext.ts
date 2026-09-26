@@ -4,7 +4,7 @@ import { PipPlayerState } from '../hooks/useHlsPipPlayer';
 
 export interface PipPlayerContextType {
   state: PipPlayerState;
-  play: (youtubeId: string, title: string) => void;
+  play: (youtubeId: string, title: string, token: string | null) => void;
   close: () => void;
 }
 

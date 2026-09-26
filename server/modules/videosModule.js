@@ -1875,6 +1875,12 @@ class VideosModule {
     const opts = typeof arg === 'number' ? { timeLimit: arg } : arg;
     const timeLimit = opts.timeLimit ?? 10 * 60 * 1000;
     const trigger = opts.trigger ?? 'manual';
+    // Rewrites the .strm file itself (not just its .strmtool.json sidecar -
+    // see this function's own doc comment) so every existing STRM video
+    // picks up a config change baked into the URL, e.g. a rotated
+    // ytstream.streamKey (see configModule.js) - never on by default,
+    // since a normal metadata regen has no reason to touch the .strm file.
+    const alsoRewriteStrmFile = opts.alsoRewriteStrmFile === true;
 
     if (this._metadataRegenRunning) {
       logger.info({ trigger }, 'Metadata regeneration already running, skipping');
@@ -1916,6 +1922,7 @@ class VideosModule {
     let totalSkippedNoFile = 0;
     let totalErrors = 0;
     let totalStrmToolRegenerated = 0;
+    let totalStrmFilesRewritten = 0;
     // Videos whose .strmtool.json was checked (via updateContainerOnly, the
     // no-cached-metadata fallback) and found to already have the correct
     // container - distinct from totalSkippedNoCache, which only means the
@@ -1965,6 +1972,15 @@ class VideosModule {
           if (!video.filePath || video.removed) {
             totalSkippedNoFile++;
             continue; // no downloaded/materialized file to attach an .nfo to
+          }
+
+          if (alsoRewriteStrmFile && video.is_strm) {
+            try {
+              strmGenerator.writeStrmFile(video.filePath, video.youtubeId);
+              totalStrmFilesRewritten++;
+            } catch (err) {
+              logger.warn({ err, youtubeId: video.youtubeId }, 'Failed to rewrite .strm file');
+            }
           }
 
           let jsonData;
@@ -2046,7 +2062,7 @@ class VideosModule {
       const elapsed = Math.round((Date.now() - startTime) / 1000);
       logger.info({
         elapsed, totalScanned, totalRegenerated, totalSkippedNoCache, totalSkippedNoFile, totalErrors, totalStrmToolRegenerated,
-        totalStrmToolAlreadyCorrect, totalStrmVideosScanned,
+        totalStrmToolAlreadyCorrect, totalStrmVideosScanned, totalStrmFilesRewritten,
       }, 'Metadata regeneration completed');
 
       result = {
@@ -2057,6 +2073,7 @@ class VideosModule {
         errors: totalErrors,
         strmToolRegenerated: totalStrmToolRegenerated,
         strmToolAlreadyCorrect: totalStrmToolAlreadyCorrect,
+        strmFilesRewritten: totalStrmFilesRewritten,
         timeElapsed: elapsed,
         trigger,
         startedAt: startedAtIso,
@@ -2076,6 +2093,7 @@ class VideosModule {
           errors: totalErrors,
           strmToolRegenerated: totalStrmToolRegenerated,
           strmToolAlreadyCorrect: totalStrmToolAlreadyCorrect,
+          strmFilesRewritten: totalStrmFilesRewritten,
           timeElapsed: elapsed,
           trigger,
           startedAt: startedAtIso,
@@ -2092,6 +2110,7 @@ class VideosModule {
         skippedNoFile: totalSkippedNoFile,
         strmToolRegenerated: totalStrmToolRegenerated,
         strmToolAlreadyCorrect: totalStrmToolAlreadyCorrect,
+        strmFilesRewritten: totalStrmFilesRewritten,
         errors: totalErrors,
         timeElapsed: elapsed,
         trigger,
@@ -2128,11 +2147,11 @@ class VideosModule {
    * Atomically check the lock and kick off a metadata regeneration.
    * Mirrors tryStartResolutionTagBackfill/tryStartImageRegen.
    */
-  tryStartMetadataRegen({ trigger = 'manual' } = {}) {
+  tryStartMetadataRegen({ trigger = 'manual', alsoRewriteStrmFile = false } = {}) {
     if (this._metadataRegenRunning) {
       return { started: false, reason: 'already-running' };
     }
-    this.regenerateVideoMetadataFiles({ trigger }).catch((err) => {
+    this.regenerateVideoMetadataFiles({ trigger, alsoRewriteStrmFile }).catch((err) => {
       logger.error({ err }, 'Manual metadata regeneration run failed');
     });
     return { started: true };

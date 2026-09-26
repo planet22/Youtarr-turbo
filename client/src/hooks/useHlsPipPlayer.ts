@@ -35,7 +35,7 @@ const FRIENDLY_FATAL_ERROR_MESSAGES: Partial<Record<string, string>> = {
 export interface UseHlsPipPlayerReturn {
   videoRef: React.RefObject<HTMLVideoElement>;
   state: PipPlayerState;
-  play: (youtubeId: string, title: string) => void;
+  play: (youtubeId: string, title: string, token: string | null) => void;
   close: () => void;
 }
 
@@ -74,8 +74,12 @@ export function useHlsPipPlayer(): UseHlsPipPlayerReturn {
     setState(INITIAL_STATE);
   }, [cleanup]);
 
-  const play = useCallback((youtubeId: string, title: string) => {
+  const play = useCallback((youtubeId: string, title: string, token: string | null) => {
     cleanup();
+    if (!token) {
+      setState({ youtubeId, title, status: 'error', errorMessage: 'Not logged in' });
+      return;
+    }
     setState({ youtubeId, title, status: 'loading', errorMessage: null });
     const video = videoRef.current;
     if (!video) return;
@@ -84,7 +88,11 @@ export function useHlsPipPlayer(): UseHlsPipPlayerReturn {
     // point straight at YouTube's CDN, which browsers CORS-block for a JS
     // player like hls.js. The server forces real byte-proxying for exactly
     // this marker; see resolveExperimentalRequest in routes/ytstream.js.
-    const url = `/api/ytstream/${encodeURIComponent(youtubeId)}?pipPreview=1`;
+    // token: /api/ytstream/:id has no login wall of its own (STRM sidecar
+    // files are plain URLs media servers fetch with no custom headers), so
+    // this in-app call must carry the session token itself as a query param
+    // - see routes/ytstream.js's isAuthorizedYtstreamRequest.
+    const url = `/api/ytstream/${encodeURIComponent(youtubeId)}?pipPreview=1&token=${encodeURIComponent(token)}`;
 
     // Only acts on the state this call started - a later play()/close() for
     // a different video (or the same one again) must win over a stale

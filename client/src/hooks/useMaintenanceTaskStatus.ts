@@ -27,18 +27,18 @@ export interface MaintenanceTaskStatusConfig {
   triggerErrorMessage: string;
 }
 
-export interface UseMaintenanceTaskStatusReturn<TLastRun> {
+export interface UseMaintenanceTaskStatusReturn<TLastRun, TTriggerData = void> {
   running: boolean;
   lastRun: TLastRun | null;
   loading: boolean;
   error: string | null;
-  trigger: () => Promise<void>;
+  trigger: () => Promise<TTriggerData | undefined>;
 }
 
-export function useMaintenanceTaskStatus<TLastRun>(
+export function useMaintenanceTaskStatus<TLastRun, TTriggerData = void>(
   token: string | null,
   config: MaintenanceTaskStatusConfig
-): UseMaintenanceTaskStatusReturn<TLastRun> {
+): UseMaintenanceTaskStatusReturn<TLastRun, TTriggerData> {
   const { statusUrl, triggerUrl, wsMessageType, loadErrorMessage, alreadyRunningMessage, triggerErrorMessage } = config;
 
   const [running, setRunning] = useState(false);
@@ -92,21 +92,23 @@ export function useMaintenanceTaskStatus<TLastRun>(
     return () => ws.unsubscribe(callback);
   }, [ws, wsMessageType]);
 
-  const trigger = useCallback(async () => {
+  const trigger = useCallback(async (): Promise<TTriggerData | undefined> => {
     setError(null);
     setRunning(true);
     const headers = token ? { 'x-access-token': token } : undefined;
     try {
-      await axios.post(triggerUrl, undefined, { headers });
+      const res = await axios.post<TTriggerData>(triggerUrl, undefined, { headers });
+      return res.data;
     } catch (err: unknown) {
       if (axios.isAxiosError(err) && err.response?.status === 409) {
         const data = err.response.data as { error?: string } | undefined;
         setError(data?.error ?? alreadyRunningMessage);
-        return;
+        return undefined;
       }
       setRunning(false);
       const message = err instanceof Error ? err.message : triggerErrorMessage;
       setError(message);
+      return undefined;
     }
   }, [token, triggerUrl, alreadyRunningMessage, triggerErrorMessage]);
 

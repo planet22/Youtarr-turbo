@@ -139,6 +139,13 @@ class StrmGenerator {
     if (byteRangeDeliverAsFile) {
       params.set('deliverAsFile', '1');
     }
+    // Required by /api/ytstream/:youtubeId for any caller without an app
+    // session (Jellyfin/Plex/Emby/StrmToolTurbo reading this .strm file
+    // directly) - see configModule.js's generateStreamKey.
+    const streamKey = cfg.ytstream && cfg.ytstream.streamKey;
+    if (streamKey) {
+      params.set('key', streamKey);
+    }
     return `/api/ytstream/${encodeURIComponent(id)}?${params.toString()}`;
   }
 

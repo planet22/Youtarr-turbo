@@ -1,6 +1,9 @@
 import { useMaintenanceTaskStatus } from './useMaintenanceTaskStatus';
 
-export type MetadataRegenTrigger = 'manual';
+// 'stream-key-rotation' comes from useStreamKeyRegenStatus.ts triggering the
+// same underlying job (videosModule.regenerateVideoMetadataFiles) via a
+// different endpoint - both hooks share this same status/lastRun shape.
+export type MetadataRegenTrigger = 'manual' | 'stream-key-rotation';
 export type MetadataRegenStatus = 'completed' | 'timed-out' | 'error';
 
 export interface MetadataRegenLastRun {
@@ -23,6 +26,8 @@ export interface MetadataRegenLastRun {
    * these videos, which isn't true.
    */
   strmToolAlreadyCorrect: number;
+  /** Count of STRM videos whose .strm file itself was rewritten - only non-zero after a stream-key-rotation trigger. */
+  strmFilesRewritten: number;
   errorMessage?: string | null;
 }
 

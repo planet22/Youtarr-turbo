@@ -22,6 +22,7 @@ jest.mock('../../logger', () => ({
   error: jest.fn(),
   debug: jest.fn(),
 }));
+const logger = require('../../logger');
 
 // directoryPath is read once at module-load time (below) to build the
 // on-disk untracked-cache directory constants, so it must be set on the
@@ -30,10 +31,17 @@ const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'ytstream-test-'));
 jest.mock('../../modules/configModule', () => ({
   getConfig: jest.fn(),
   getCookiesPath: jest.fn().mockReturnValue(null),
+  regenerateStreamKey: jest.fn(),
   directoryPath: '',
 }));
 const configModule = require('../../modules/configModule');
 configModule.directoryPath = TEST_DATA_DIR;
+
+jest.mock('../../modules/videosModule', () => ({
+  isMetadataRegenRunning: jest.fn().mockReturnValue(false),
+  tryStartMetadataRegen: jest.fn().mockReturnValue({ started: true }),
+}));
+const videosModule = require('../../modules/videosModule');
 
 jest.mock('../../modules/ytDlpRunner', () => ({ run: jest.fn() }));
 const ytDlpRunner = require('../../modules/ytDlpRunner');
@@ -201,6 +209,169 @@ describe('GET /api/ytstream/mode-compatibility', () => {
     const body = res.json.mock.calls[0][0];
     expect(body.calculatedLength.status).toBe('ignored');
     expect(body.container.status).toBe('ignored');
+  });
+});
+
+describe('GET /api/ytstream/:youtubeId auth gate (isAuthorizedYtstreamRequest)', () => {
+  // Real work (yt-dlp, ffmpeg, playbackPlan) starts right after the gate, so
+  // a rejected request never gets that far - no need to mock any of it here.
+  const call = (query, { headers = {}, sessionFound = false } = {}) => {
+    const models = buildModels({
+      Session: { findOne: jest.fn().mockResolvedValue(sessionFound ? { update: jest.fn() } : null) },
+    });
+    const handler = getHandler('get', '/api/ytstream/:youtubeId', models);
+    const req = { params: { youtubeId: 'abc123XYZ_' }, query, headers };
+    const res = mockRes();
+    return handler(req, res).then(() => res);
+  };
+
+  test('rejects a request with no session token and no stream key', async () => {
+    configModule.getConfig.mockReturnValue({ ytstream: { streamKey: 'realkey123' } });
+    const res = await call({});
+    expect(res.status).toHaveBeenCalledWith(403);
+  });
+
+  test('rejects a request with the wrong stream key', async () => {
+    configModule.getConfig.mockReturnValue({ ytstream: { streamKey: 'realkey123' } });
+    const res = await call({ key: 'wrongkey' });
+    expect(res.status).toHaveBeenCalledWith(403);
+  });
+
+  test('rejects a session token that does not match any active session', async () => {
+    configModule.getConfig.mockReturnValue({ ytstream: { streamKey: 'realkey123' } });
+    const res = await call({ token: 'not-a-real-session' }, { sessionFound: false });
+    expect(res.status).toHaveBeenCalledWith(403);
+  });
+
+  test('does not reject a request whose key matches ytstream.streamKey', async () => {
+    configModule.getConfig.mockReturnValue({ ytstream: { streamKey: 'realkey123', defaultMode: 'direct' } });
+    const res = await call({ key: 'realkey123' });
+    expect(res.status).not.toHaveBeenCalledWith(403);
+  });
+
+  test('does not reject a valid key with a .strm pipe-syntax User-Agent suffix still attached', async () => {
+    // Every .strm file appends `|User-Agent=...` after the full URL (see
+    // strmGenerator.js). Jellyfin's own metadata-probe request doesn't
+    // split on that pipe and sends the whole remainder as part of the
+    // last query param's value instead - reproduces a live 403 seen from
+    // an actual Jellyfin probe hitting mode=youtube-hls.
+    configModule.getConfig.mockReturnValue({ ytstream: { streamKey: 'realkey123', defaultMode: 'direct' } });
+    const res = await call({ key: 'realkey123|User-Agent=Youtarr-Playback/1.0' });
+    expect(res.status).not.toHaveBeenCalledWith(403);
+  });
+
+  test('does not reject a valid session token with a .strm pipe-syntax User-Agent suffix still attached', async () => {
+    configModule.getConfig.mockReturnValue({ ytstream: { defaultMode: 'direct' } });
+    const findOne = jest.fn().mockResolvedValue({ update: jest.fn() });
+    const models = buildModels({ Session: { findOne } });
+    const handler = getHandler('get', '/api/ytstream/:youtubeId', models);
+    const req = {
+      params: { youtubeId: 'abc123XYZ_' },
+      query: { token: 'a-real-session-token|User-Agent=Youtarr-Playback/1.0' },
+      headers: {},
+    };
+    const res = mockRes();
+    await handler(req, res);
+
+    expect(findOne).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ session_token: 'a-real-session-token' }) }));
+    expect(res.status).not.toHaveBeenCalledWith(403);
+  });
+
+  test('still rejects a genuinely wrong key even with a pipe suffix attached', async () => {
+    configModule.getConfig.mockReturnValue({ ytstream: { streamKey: 'realkey123' } });
+    const res = await call({ key: 'wrongkey|User-Agent=Youtarr-Playback/1.0' });
+    expect(res.status).toHaveBeenCalledWith(403);
+  });
+
+  test('does not reject a request with a valid session token, even with no stream key configured', async () => {
+    configModule.getConfig.mockReturnValue({ ytstream: { defaultMode: 'direct' } });
+    const res = await call({ token: 'a-real-session-token' }, { sessionFound: true });
+    expect(res.status).not.toHaveBeenCalledWith(403);
+  });
+
+  test('accepts the session token from the x-access-token header too', async () => {
+    configModule.getConfig.mockReturnValue({ ytstream: { defaultMode: 'direct' } });
+    const res = await call({}, { headers: { 'x-access-token': 'a-real-session-token' }, sessionFound: true });
+    expect(res.status).not.toHaveBeenCalledWith(403);
+  });
+
+  test('logs a warning on rejection, visible without debug logging, and never logs the attempted key/token value', async () => {
+    configModule.getConfig.mockReturnValue({ ytstream: { streamKey: 'realkey123' } });
+    await call({ key: 'guessed-wrong-key', token: 'guessed-wrong-token' });
+
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ youtubeId: 'abc123XYZ_', keyProvided: true, tokenProvided: true }),
+      expect.stringContaining('rejected')
+    );
+    const loggedPayload = JSON.stringify(logger.warn.mock.calls[0]);
+    expect(loggedPayload).not.toContain('guessed-wrong-key');
+    expect(loggedPayload).not.toContain('guessed-wrong-token');
+  });
+
+  test('skips the gate entirely when AUTH_ENABLED=false', async () => {
+    const original = process.env.AUTH_ENABLED;
+    process.env.AUTH_ENABLED = 'false';
+    try {
+      configModule.getConfig.mockReturnValue({ ytstream: { streamKey: 'realkey123' } });
+      const res = await call({});
+      expect(res.status).not.toHaveBeenCalledWith(403);
+    } finally {
+      process.env.AUTH_ENABLED = original;
+    }
+  });
+});
+
+describe('POST /api/ytstream/regenerate-stream-key', () => {
+  const call = async () => {
+    const handler = getHandler('post', '/api/ytstream/regenerate-stream-key');
+    const req = { params: {}, query: {}, headers: {} };
+    const res = mockRes();
+    await handler(req, res);
+    return res;
+  };
+
+  test('rotates the key and starts a .strm regeneration sweep', async () => {
+    configModule.regenerateStreamKey.mockReturnValue('new-key-value');
+    videosModule.isMetadataRegenRunning.mockReturnValue(false);
+    videosModule.tryStartMetadataRegen.mockReturnValue({ started: true });
+
+    const res = await call();
+
+    expect(configModule.regenerateStreamKey).toHaveBeenCalled();
+    expect(videosModule.tryStartMetadataRegen).toHaveBeenCalledWith({
+      trigger: 'stream-key-rotation',
+      alsoRewriteStrmFile: true,
+    });
+    expect(res.status).toHaveBeenCalledWith(202);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'started', regenerationStarted: true, streamKey: 'new-key-value' })
+    );
+  });
+
+  test('returns the new key value in the response, shown once for manual verification', async () => {
+    configModule.regenerateStreamKey.mockReturnValue('super-secret-value');
+
+    const res = await call();
+
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ streamKey: 'super-secret-value' }));
+  });
+
+  test('refuses (409) and does not rotate the key when a regeneration is already running', async () => {
+    videosModule.isMetadataRegenRunning.mockReturnValue(true);
+
+    const res = await call();
+
+    expect(configModule.regenerateStreamKey).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(409);
+  });
+
+  test('answers 500 if rotating the key throws', async () => {
+    videosModule.isMetadataRegenRunning.mockReturnValue(false);
+    configModule.regenerateStreamKey.mockImplementation(() => { throw new Error('disk full'); });
+
+    const res = await call();
+
+    expect(res.status).toHaveBeenCalledWith(500);
   });
 });
 

@@ -10,7 +10,10 @@
  * so age-restricted and members-only content works here too.
  *
  * Routes:
- *   GET /api/ytstream/:youtubeId            -> resolve + play (mode=direct|ffmpeg|hls)
+ *   GET /api/ytstream/:youtubeId            -> resolve + play (mode=direct|ffmpeg|hls); no
+ *                                               login wall (see isAuthorizedYtstreamRequest),
+ *                                               but requires either an app session or the
+ *                                               ytstream.streamKey query param
  *   GET /api/ytstream/history               -> paginated stream-history audit trail
  *   DELETE /api/ytstream/history            -> delete stream-history entries by streamId
  *   GET /api/ytstream/:youtubeId/formats     -> debug: list yt-dlp formats (auth required)
@@ -21,9 +24,11 @@ const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const { Op } = require('sequelize');
 const logger = require('../logger');
 const { escapeLikeWildcards } = require('../utils/escapeLike');
 const configModule = require('../modules/configModule');
+const videosModule = require('../modules/videosModule');
 const ytDlpRunner = require('../modules/ytDlpRunner');
 const { streamDebug } = require('../modules/ytstream/streamDebug');
 const { loadYoutubeCookieHeader, buildBaseArgs } = require('../modules/ytstream/ytdlpArgs');
@@ -66,6 +71,8 @@ const {
 const {
   resolveDirectUrl,
   redactIncomingHeadersForLogging,
+  redactSensitiveQueryForLogging,
+  redactUrlForLogging,
   proxyDirectStream,
   redirectToDirectUrl,
 } = require('../modules/ytstream/directMode');
@@ -176,6 +183,72 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
     return typeof raw === 'string' ? raw.replace(/^::ffff:/i, '') : raw;
   };
 
+  /**
+   * Whether this request carries a valid app session token. Checked
+   * directly against Session (not via authMiddleware/verifyToken as
+   * Express middleware) because this route needs to accept EITHER a
+   * session OR ytstream.streamKey (see isAuthorizedYtstreamRequest) -
+   * middleware only knows how to reject outright, not fall through.
+   */
+  /**
+   * Every .strm file this app writes carries a trailing pipe-syntax
+   * `|User-Agent=...` marker after the full URL (see strmGenerator.js's
+   * buildStrmContent) so real ffmpeg playback can pick it up as a header
+   * option. Jellyfin's own metadata-probe pass doesn't split on that pipe
+   * at all and instead sends the whole remainder as part of the URL,
+   * landing it inside whichever query param comes last (`key`/`token`). A
+   * real streamKey/session token is opaque hex and never contains a
+   * literal `|`, so truncating at the first one is always safe.
+   */
+  function stripPipeSuffix(value) {
+    if (typeof value !== 'string') return value;
+    const pipeIndex = value.indexOf('|');
+    return pipeIndex === -1 ? value : value.slice(0, pipeIndex);
+  }
+
+  async function hasValidSessionToken(req) {
+    const token = req.headers['x-access-token'] || stripPipeSuffix(req.query.token);
+    if (!token || !models || !models.Session) return false;
+    try {
+      const session = await models.Session.findOne({
+        where: { session_token: token, is_active: true, expires_at: { [Op.gt]: new Date() } },
+      });
+      return Boolean(session);
+    } catch (err) {
+      logger.warn({ err }, 'ytstream: session token lookup failed');
+      return false;
+    }
+  }
+
+  /** Whether the `key` query param matches the configured ytstream.streamKey (constant-time). */
+  function hasValidStreamKey(req) {
+    const configuredKey = (configModule.getConfig().ytstream || {}).streamKey;
+    const providedKey = stripPipeSuffix(req.query.key);
+    if (!configuredKey || typeof providedKey !== 'string' || !providedKey) return false;
+    const a = Buffer.from(configuredKey);
+    const b = Buffer.from(providedKey);
+    if (a.length !== b.length) return false;
+    return crypto.timingSafeEqual(a, b);
+  }
+
+  /**
+   * /api/ytstream/:youtubeId has no login wall by design - media servers
+   * (Jellyfin/Plex/Emby) and StrmToolTurbo read .strm files as plain URLs
+   * with no custom headers, so it can never require a session outright.
+   * Without SOME gate though, anyone who can reach this route could hand it
+   * any YouTube id and have this server run yt-dlp/ffmpeg - and in
+   * hls-buffer mode, cache the whole video to disk - for them, no login
+   * needed. Accepts either an authenticated app session (the two in-app
+   * browser callers, VideoPlayer.tsx and useHlsPipPlayer.ts, already send
+   * their session token as a query param) or ytstream.streamKey (baked into
+   * every generated .strm URL - see strmGenerator.js).
+   */
+  async function isAuthorizedYtstreamRequest(req) {
+    if (process.env.AUTH_ENABLED === 'false') return true;
+    if (hasValidStreamKey(req)) return true;
+    return hasValidSessionToken(req);
+  }
+
   const router = express.Router();
 
   router.use(['/api/ytstream/:youtubeId', '/api/ytstream/:youtubeId/formats', '/api/ytstream/:youtubeId/hls/:sessionKey/:filename', '/api/ytstream/:youtubeId/byterange-hls/:sessionKey/:filename'], (req, res, next) => {
@@ -237,6 +310,33 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
     const transcode = String(req.query.transcode || '');
     const container = String(req.query.container || '');
     res.json(getModeFieldCompatibility({ mode, transcode, container }));
+  });
+
+  /**
+   * @swagger
+   * /api/ytstream/regenerate-stream-key:
+   *   post:
+   *     summary: Rotate ytstream.streamKey and rewrite every existing .strm file to carry the new one
+   *     description: Every .strm file already on disk has the OLD key baked into its URL (see strmGenerator.js) and stops playing the instant the key rotates - this kicks off the existing metadata-regeneration sweep (server/modules/videosModule.js's regenerateVideoMetadataFiles) with alsoRewriteStrmFile, so the fixup happens as part of the same action instead of leaving every .strm file broken until an unrelated regen run. That sweep only scans the Videos table, so only currently-tracked videos (a real, non-removed Video row with is_strm true) get rewritten - any other .strm-like file is left broken. Poll /api/maintenance/regenerate-metadata-status for progress.
+   *     tags: [Streaming]
+   *     responses:
+   *       202:
+   *         description: Key rotated, .strm regeneration started. Response body includes the new streamKey value (shown once, for anyone who wants to hand-verify or manually author a .strm/URL) - it is not persisted anywhere client-side and is not retrievable again after this response.
+   *       409:
+   *         description: A metadata/STRM regeneration is already in progress - the key was not rotated
+   */
+  router.post('/api/ytstream/regenerate-stream-key', authMiddleware, (req, res) => {
+    try {
+      if (videosModule.isMetadataRegenRunning()) {
+        return res.status(409).json({ error: 'A metadata regeneration is already in progress' });
+      }
+      const newKey = configModule.regenerateStreamKey();
+      const result = videosModule.tryStartMetadataRegen({ trigger: 'stream-key-rotation', alsoRewriteStrmFile: true });
+      return res.status(202).json({ status: 'started', trigger: 'stream-key-rotation', regenerationStarted: result.started, streamKey: newKey });
+    } catch (err) {
+      logger.error({ err }, 'Failed to rotate ytstream.streamKey');
+      return res.status(500).json({ error: 'Failed to rotate the stream key' });
+    }
   });
 
   /**
@@ -650,8 +750,8 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
     // headers, probe detection).
     streamDebug(
       {
-        url: req.originalUrl,
-        query: req.query,
+        url: redactUrlForLogging(req.originalUrl),
+        query: redactSensitiveQueryForLogging(req.query),
         method: req.method,
         clientIp: resolveClientIp(req),
         headers: redactIncomingHeadersForLogging(req.headers),
@@ -696,6 +796,24 @@ function createYtStreamRoutes({ verifyToken, getClientAddress, models }) {
     const { youtubeId } = req.params;
     if (!/^[A-Za-z0-9_-]{6,20}$/.test(youtubeId)) {
       return res.status(400).send('Invalid video id');
+    }
+    if (!(await isAuthorizedYtstreamRequest(req))) {
+      // warn, not streamDebug: this is a rejected access attempt (a stale
+      // .strm file after a key rotation, or a real scan/abuse attempt
+      // against an exposed instance) and must be visible without turning on
+      // ytstream.debugLogging first. Never logs the token/key value itself,
+      // only whether one was present.
+      logger.warn(
+        {
+          youtubeId,
+          clientIp: resolveClientIp(req),
+          userAgent: req.headers['user-agent'] || null,
+          keyProvided: typeof req.query.key === 'string' && req.query.key.length > 0,
+          tokenProvided: Boolean(req.headers['x-access-token'] || req.query.token),
+        },
+        'ytstream: rejected a request with no valid session or stream key'
+      );
+      return res.status(403).send('Missing or invalid stream key');
     }
 
     // Experimental modes (hls-byterange, download-cache): intercepted here,

@@ -65,11 +65,11 @@ describe('useHlsPipPlayer', () => {
     const { result } = renderHook(() => useHlsPipPlayer());
     (result.current.videoRef as { current: HTMLVideoElement | null }).current = makeFakeVideo();
 
-    act(() => result.current.play('abc123', 'My Video'));
+    act(() => result.current.play('abc123', 'My Video', 'test-token'));
 
     expect(result.current.state).toMatchObject({ youtubeId: 'abc123', title: 'My Video', status: 'loading' });
     expect(instances).toHaveLength(1);
-    expect(instances[0].loadSource).toHaveBeenCalledWith('/api/ytstream/abc123?pipPreview=1');
+    expect(instances[0].loadSource).toHaveBeenCalledWith('/api/ytstream/abc123?pipPreview=1&token=test-token');
     expect(instances[0].attachMedia).toHaveBeenCalled();
   });
 
@@ -78,7 +78,7 @@ describe('useHlsPipPlayer', () => {
     const video = makeFakeVideo();
     (result.current.videoRef as { current: HTMLVideoElement | null }).current = video;
 
-    act(() => result.current.play('abc123', 'My Video'));
+    act(() => result.current.play('abc123', 'My Video', 'test-token'));
     await act(async () => {
       await instances[0].handlers.hlsManifestParsed();
     });
@@ -94,7 +94,7 @@ describe('useHlsPipPlayer', () => {
     (video.requestPictureInPicture as jest.Mock).mockRejectedValue(new Error('nope'));
     (result.current.videoRef as { current: HTMLVideoElement | null }).current = video;
 
-    act(() => result.current.play('abc123', 'My Video'));
+    act(() => result.current.play('abc123', 'My Video', 'test-token'));
     await act(async () => {
       await instances[0].handlers.hlsManifestParsed();
     });
@@ -107,13 +107,13 @@ describe('useHlsPipPlayer', () => {
     const video = makeFakeVideo();
     (result.current.videoRef as { current: HTMLVideoElement | null }).current = video;
 
-    act(() => result.current.play('abc123', 'My Video'));
+    act(() => result.current.play('abc123', 'My Video', 'test-token'));
     act(() => {
       instances[0].handlers.hlsError({}, { fatal: true, details: 'manifestLoadError' });
     });
 
     expect(instances[0].destroy).toHaveBeenCalled();
-    expect(video.getAttribute('src')).toBe('/api/ytstream/abc123?pipPreview=1');
+    expect(video.getAttribute('src')).toBe('/api/ytstream/abc123?pipPreview=1&token=test-token');
 
     await act(async () => {
       video.dispatchEvent(new Event('loadedmetadata'));
@@ -126,7 +126,7 @@ describe('useHlsPipPlayer', () => {
     const { result } = renderHook(() => useHlsPipPlayer());
     (result.current.videoRef as { current: HTMLVideoElement | null }).current = makeFakeVideo();
 
-    act(() => result.current.play('abc123', 'My Video'));
+    act(() => result.current.play('abc123', 'My Video', 'test-token'));
     act(() => {
       instances[0].handlers.hlsError({}, { fatal: true, details: 'bufferStalledError' });
     });
@@ -139,7 +139,7 @@ describe('useHlsPipPlayer', () => {
     const { result } = renderHook(() => useHlsPipPlayer());
     (result.current.videoRef as { current: HTMLVideoElement | null }).current = makeFakeVideo();
 
-    act(() => result.current.play('abc123', 'My Video'));
+    act(() => result.current.play('abc123', 'My Video', 'test-token'));
     act(() => {
       instances[0].handlers.hlsError({}, { fatal: true, details: 'fragLoadError' });
     });
@@ -148,13 +148,23 @@ describe('useHlsPipPlayer', () => {
     expect(result.current.state.errorMessage).toMatch(/browsers block/i);
   });
 
+  test('does not attempt playback without a token', () => {
+    const { result } = renderHook(() => useHlsPipPlayer());
+    (result.current.videoRef as { current: HTMLVideoElement | null }).current = makeFakeVideo();
+
+    act(() => result.current.play('abc123', 'My Video', null));
+
+    expect(instances).toHaveLength(0);
+    expect(result.current.state).toMatchObject({ youtubeId: 'abc123', status: 'error' });
+  });
+
   test('a stale callback from a superseded play() call does not overwrite the current video', async () => {
     const { result } = renderHook(() => useHlsPipPlayer());
     (result.current.videoRef as { current: HTMLVideoElement | null }).current = makeFakeVideo();
 
-    act(() => result.current.play('first', 'First Video'));
+    act(() => result.current.play('first', 'First Video', 'test-token'));
     const firstInstance = instances[0];
-    act(() => result.current.play('second', 'Second Video'));
+    act(() => result.current.play('second', 'Second Video', 'test-token'));
 
     await act(async () => {
       await firstInstance.handlers.hlsManifestParsed();
@@ -169,7 +179,7 @@ describe('useHlsPipPlayer', () => {
     (result.current.videoRef as { current: HTMLVideoElement | null }).current = video;
     Object.defineProperty(document, 'pictureInPictureElement', { value: video, configurable: true });
 
-    act(() => result.current.play('abc123', 'My Video'));
+    act(() => result.current.play('abc123', 'My Video', 'test-token'));
     act(() => result.current.close());
 
     expect(document.exitPictureInPicture).toHaveBeenCalled();

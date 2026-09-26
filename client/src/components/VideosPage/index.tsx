@@ -1087,7 +1087,7 @@ function VideosPage({ token }: VideosPageProps) {
   const handleOpenModal = (video: VideoData) => setModalVideo(video);
 
   const pipPlayerContext = useContext(PipPlayerContext);
-  const handlePipPlay = (video: VideoData) => pipPlayerContext?.play(video.youtubeId, video.youTubeVideoName);
+  const handlePipPlay = (video: VideoData) => pipPlayerContext?.play(video.youtubeId, video.youTubeVideoName, token);
 
   const handleOpenCacheDetail = (youtubeId: string, kind: 'metadata' | 'video') =>
     setCacheDetailTarget({ youtubeId, kind });

@@ -178,6 +178,13 @@ export const CONFIG_FIELDS = {
   // what a full download would use unless explicitly overridden here.
   ytstream: {
     default: {
+      // Server-generated per-installation secret (server/modules/configModule.js's
+      // generateStreamKey), never edited or displayed here - present purely so
+      // this default object stays structurally aligned with config.example.json
+      // (see configSchemaAlignment.test.ts). The real value always comes from
+      // /getconfig; this empty-string default is only ever used as the
+      // pre-load placeholder, same as every other field here.
+      streamKey: '',
       defaultMode: 'direct' as 'direct' | 'direct-redirect' | 'hls' | 'hls-buffer' | 'hls-byterange' | 'download-cache' | 'youtube-hls',
       // mkv is ffmpeg-mode only (see YtstreamSettingsSection's Container select)
       container: 'mp4' as 'mp4' | 'ts' | 'mkv',

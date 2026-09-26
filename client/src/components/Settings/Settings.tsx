@@ -53,6 +53,7 @@ import { ScheduledTasksSection } from './ScheduledTasksSection';
 import { ResolutionTagBackfillSection } from './ResolutionTagBackfillSection';
 import { ChannelImageRegenSection } from './ChannelImageRegenSection';
 import { MetadataRegenSection } from './MetadataRegenSection';
+import { RegenerateStreamKeySection } from './RegenerateStreamKeySection';
 import { CompactHistorySection } from './CompactHistorySection';
 import { ClearEventLogSection } from './ClearEventLogSection';
 
@@ -518,6 +519,7 @@ export function Settings({ token }: SettingsProps) {
                 <ResolutionTagBackfillSection token={token} />
                 <ChannelImageRegenSection token={token} />
                 <MetadataRegenSection token={token} config={config} onConfigChange={handleConfigChange} />
+                <RegenerateStreamKeySection token={token} />
                 <CompactHistorySection token={token} />
                 <ClearEventLogSection token={token} />
               </>

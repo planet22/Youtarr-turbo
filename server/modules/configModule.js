@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const uuidv4 = require('uuid').v4;
 const EventEmitter = require('events');
 const logger = require('../logger');
@@ -18,6 +19,20 @@ const AUTH_COOKIE_NAMES = new Set([
 // Parses a Netscape-format cookies file for diagnostics only (upload size,
 // age, and how close the auth cookies are to expiring) - never used for the
 // actual yt-dlp auth path, which just points --cookies at the file.
+// Long-lived, per-installation secret embedded in generated .strm file URLs
+// (see strmGenerator.js) and required by /api/ytstream/:youtubeId for any
+// caller that isn't an authenticated app session - without it, that route
+// would run yt-dlp/ffmpeg (and cache the result to disk in hls-buffer mode)
+// for any YouTube id anyone cared to request, no login needed. Not a
+// per-video token: one shared secret is enough to keep a stranger from
+// reaching the route at all, and rotates only if the config field is cleared.
+function generateStreamKey() {
+  // Same length as apiKeyModule.js's own generated keys (32 bytes/64 hex
+  // chars) for consistency, even though this one is compared directly
+  // rather than hashed.
+  return crypto.randomBytes(32).toString('hex');
+}
+
 function parseCookieFileMetadata(filePath) {
   let stat;
   try {
@@ -290,6 +305,20 @@ class ConfigModule extends EventEmitter {
       // Don't set modified=true here since UUID is expected to be missing on first run
     }
 
+    // Same treatment as uuid above, nested under ytstream: preserve an
+    // existing streamKey, generate one if this install predates it. Existing
+    // .strm files written before this key existed won't carry it - they'll
+    // need regenerating (Settings > STRM or a channel/video re-save) before
+    // they play again, which is the intended effect of closing the hole this
+    // key closes, not a bug.
+    if (!mergedConfig.ytstream) mergedConfig.ytstream = {};
+    if (existingConfig.ytstream && existingConfig.ytstream.streamKey) {
+      mergedConfig.ytstream.streamKey = existingConfig.ytstream.streamKey;
+    } else {
+      mergedConfig.ytstream.streamKey = generateStreamKey();
+      logger.info('Generated new ytstream.streamKey for config');
+    }
+
     return { config: mergedConfig, modified };
   }
 
@@ -318,6 +347,10 @@ class ConfigModule extends EventEmitter {
 
     // Generate UUID for this instance
     defaultConfig.uuid = uuidv4();
+
+    // Generate the ytstream stream key for this instance (see generateStreamKey)
+    if (!defaultConfig.ytstream) defaultConfig.ytstream = {};
+    defaultConfig.ytstream.streamKey = generateStreamKey();
 
     // Apply platform-specific environment variable overrides
     if (process.env.PLEX_URL) {
@@ -425,6 +458,26 @@ class ConfigModule extends EventEmitter {
     this.saveConfig();
     // Emit a change event
     this.emit('change');
+  }
+
+  /**
+   * Rotates ytstream.streamKey - see generateStreamKey's own comment for why
+   * it exists. Every .strm file already on disk still has the OLD key baked
+   * into its URL and stops working until it's rewritten; the caller (see
+   * routes/ytstream.js's regenerate-stream-key route) is expected to follow
+   * this with a metadata regeneration run that also rewrites .strm files
+   * (videosModule.regenerateVideoMetadataFiles's alsoRewriteStrmFile option).
+   * That sweep only scans the Videos table, so it only ever reaches TRACKED
+   * videos (a real, non-removed Video row with is_strm true) - any .strm-like
+   * file outside that (already deleted from the library, or otherwise not a
+   * tracked row) is not rewritten and is simply left broken.
+   * @returns {string} the new key
+   */
+  regenerateStreamKey() {
+    const newKey = generateStreamKey();
+    this.updateConfig({ ...this.config, ytstream: { ...(this.config.ytstream || {}), streamKey: newKey } });
+    logger.info('Rotated ytstream.streamKey');
+    return newKey;
   }
 
   saveConfig() {

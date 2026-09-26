@@ -110,6 +110,7 @@ jest.mock('../ScheduledTasksSection', () => ({ ScheduledTasksSection: () => mock
 jest.mock('../ResolutionTagBackfillSection', () => ({ ResolutionTagBackfillSection: () => mockMarker('resolution-backfill') }));
 jest.mock('../ChannelImageRegenSection', () => ({ ChannelImageRegenSection: () => mockMarker('channel-image-regen') }));
 jest.mock('../MetadataRegenSection', () => ({ MetadataRegenSection: () => mockMarker('metadata-regen') }));
+jest.mock('../RegenerateStreamKeySection', () => ({ RegenerateStreamKeySection: () => mockMarker('regenerate-stream-key') }));
 jest.mock('../CompactHistorySection', () => ({ CompactHistorySection: () => mockMarker('compact-history') }));
 
 jest.mock('../../Configuration/hooks', () => ({
@@ -280,7 +281,7 @@ describe('Settings', () => {
     it('groups the maintenance tools under maintenance', () => {
       setup('/settings/maintenance');
 
-      for (const name of ['maintenance', 'scheduled-tasks', 'resolution-backfill', 'channel-image-regen', 'metadata-regen', 'compact-history']) {
+      for (const name of ['maintenance', 'scheduled-tasks', 'resolution-backfill', 'channel-image-regen', 'metadata-regen', 'regenerate-stream-key', 'compact-history']) {
         expect(screen.getByTestId(`${name}-section`)).toBeInTheDocument();
       }
     });

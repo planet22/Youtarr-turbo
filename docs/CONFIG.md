@@ -435,6 +435,13 @@ Three modes cover most setups. Each example sets `forceServerSettings: true`, so
 
 `container`, `transcode`, `hardwareMode`, `tuning`, `calculatedLength`, `probeShortcut`, and `hlsMasterPlaylist` are ignored by `youtube-hls`, and `calculatedLength`, `probeShortcut`, and `hlsMasterPlaylist` are ignored by the byte-range modes. With `hls-byterange`, `container` chooses `mp4` or `mkv` only when `byteRangeDeliverAsFile` is on. The Settings page shows every ignored field disabled with the reason.
 
+### Stream key
+
+- **Config Key**: `ytstream.streamKey`
+- **Type**: `string`
+- **Default**: auto-generated (64 hex characters), same as the top-level `uuid` field
+- **Description**: `GET /api/ytstream/:youtubeId` has no login wall of its own — media servers (Jellyfin/Emby) and StrmToolTurbo read `.strm` files as plain URLs with no way to attach a session header — so this per-installation secret is required as a `key` query param instead. It's baked into every generated `.strm` file's URL (`strmGenerator.js`); the in-app browser preview (video modal, Picture-in-Picture) uses its own session token instead, since it's already logged in. Not exposed in the Settings UI or `CONFIG_FIELDS` for editing — generated once on first run (or backfilled for an existing install missing it) and never round-tripped through a save. Rotate it from Settings → Maintenance → **Stream key** if you suspect it leaked; rotating immediately breaks every `.strm` file already on disk until the same action's automatic regeneration sweep rewrites them (tracked videos only — anything already removed from the library keeps the old, now-invalid key).
+
 ## Sonarr/Radarr Integration (NZB)
 
 - **Config Key**: `nzb` (object)

@@ -176,6 +176,29 @@ describe('VideoPlayer', () => {
     );
   });
 
+  describe('STRM playback', () => {
+    test('includes the session token as a query param (route has no login wall of its own)', async () => {
+      const user = userEvent.setup();
+      renderPlayer({ isStrm: true });
+
+      await user.click(screen.getByRole('button', { name: 'Play video' }));
+
+      expect(screen.getByTestId('video-stream-element')).toHaveAttribute(
+        'src',
+        '/api/ytstream/abc123?mode=direct&quality=720&token=my-test-token'
+      );
+    });
+
+    test('does not attempt playback when there is no token', async () => {
+      const user = userEvent.setup();
+      renderPlayer({ isStrm: true }, { token: null });
+
+      await user.click(screen.getByRole('button', { name: 'Play video' }));
+
+      expect(screen.queryByTestId('video-stream-element')).not.toBeInTheDocument();
+    });
+  });
+
   describe('MP3-only playback', () => {
     const mp3OnlyOverride: Partial<VideoModalData> = {
       filePath: null,

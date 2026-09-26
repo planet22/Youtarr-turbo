@@ -54,6 +54,7 @@ interface Props {
 }
 
 export const DEFAULT_YTSTREAM: YtstreamConfig = {
+  streamKey: '',
   defaultMode: 'direct',
   container: 'mp4',
   probeShortcutContainerOverride: null,

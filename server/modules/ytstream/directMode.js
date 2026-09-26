@@ -136,6 +136,29 @@ function redactIncomingHeadersForLogging(headers) {
   return out;
 }
 
+// `key` (ytstream.streamKey) and `token` (session token) are the two query
+// params that authenticate an otherwise-unauthenticated /api/ytstream
+// request (see routes/ytstream.js's isAuthorizedYtstreamRequest) - neither
+// belongs in a log line, the same way a password or session cookie
+// wouldn't.
+const SENSITIVE_QUERY_PARAM_NAMES = ['key', 'token'];
+
+/** Redacts `key`/`token` before logging a parsed query object. */
+function redactSensitiveQueryForLogging(query) {
+  if (!query || typeof query !== 'object') return query;
+  const out = { ...query };
+  for (const name of SENSITIVE_QUERY_PARAM_NAMES) {
+    if (name in out) out[name] = '[REDACTED]';
+  }
+  return out;
+}
+
+/** Redacts `key=`/`token=` values before logging a raw request URL string. */
+function redactUrlForLogging(url) {
+  if (typeof url !== 'string') return url;
+  return url.replace(/([?&](?:key|token)=)[^&]*/gi, '$1[REDACTED]');
+}
+
 /**
  * Streams a resolved googlevideo.com URL back through this server rather
  * than a bare 302 redirect. A raw redirect would have the player fetch
@@ -281,6 +304,8 @@ module.exports = {
   buildFfmpegUpstreamHeaders,
   redactFfArgsForLogging,
   redactIncomingHeadersForLogging,
+  redactSensitiveQueryForLogging,
+  redactUrlForLogging,
   proxyDirectStream,
   redirectToDirectUrl,
 };

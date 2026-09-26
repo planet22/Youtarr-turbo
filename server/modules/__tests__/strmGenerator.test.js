@@ -131,6 +131,20 @@ describe('strmGenerator', () => {
 
         expect(params.has('deliverAsFile')).toBe(false);
       });
+
+      it('includes the configured ytstream.streamKey', () => {
+        configModule.getConfig.mockReturnValue({ ytstream: { streamKey: 'the-stream-key' } });
+
+        const { params } = parseContent(strmGenerator.buildStrmContent(VIDEO_ID));
+
+        expect(params.get('key')).toBe('the-stream-key');
+      });
+
+      it('omits the key param when no streamKey is configured', () => {
+        const { params } = parseContent(strmGenerator.buildStrmContent(VIDEO_ID));
+
+        expect(params.has('key')).toBe(false);
+      });
     });
 
     describe('id validation', () => {

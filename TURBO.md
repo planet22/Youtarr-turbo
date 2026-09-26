@@ -67,7 +67,7 @@ Series-mode channels use the same content-rating system as movie-mode ones, incl
 
 ## Streaming & STRM-only mode
 
-Upstream Youtarr only ever fully downloads videos. Turbo adds a `mediaMode` setting (`download` / `strm` / `both`) that lets Youtarr-Turbo write `.strm` shortcut files instead — a media server (Jellyfin, Plex, etc.) opens the `.strm` file and gets redirected to a playback URL, with no local copy of the video ever stored, until/unless you opt into caching it (see below).
+Upstream Youtarr only ever fully downloads videos. Turbo adds a `mediaMode` setting (`download` / `strm` / `both`) that lets Youtarr-Turbo write `.strm` shortcut files instead — a media server opens the `.strm` file and gets redirected to a playback URL, with no local copy of the video ever stored, until/unless you opt into caching it (see below). **Plex does not support `.strm` files**; this mode works with Jellyfin, Emby, and Kodi only (see `docs/STRM.md` and the getting-started guide).
 
 ### Where STRM files point (`strm.target`)
 
@@ -214,6 +214,8 @@ Every yt-dlp metadata extraction — whether triggered by streaming a STRM video
 ## Hardware-accelerated transcoding
 
 Turbo adds hardware encoding (QSV / NVENC / VAAPI / AMF, plus software) in **two independent places**:
+
+> **AMF on the published Docker image**: Debian's stock `ffmpeg` package isn't built with `h264_amf` support. Selecting AMF on an AMD GPU will report "unsupported" in the Hardware Capabilities test no matter how the container is configured; using it requires building/supplying a custom `ffmpeg` with AMF support compiled in.
 
 1. **Live playback transcode** (`ytstream.hardwareMode`) — used when a STRM session's `transcode` is `h264`.
 2. **Post-download transcode** (`downloadTranscodeVideoCodec` / `downloadTranscodeHardwareMode` / `downloadTranscodeAudioCodec`, in Settings → YT-DLP) — re-encodes an already-downloaded file to H.264, HEVC, or AV1, independent of whatever codec it was originally downloaded in. If the selected hardware encoder fails to initialize (missing driver, no GPU, wrong container setup), it automatically retries in software rather than failing the download.

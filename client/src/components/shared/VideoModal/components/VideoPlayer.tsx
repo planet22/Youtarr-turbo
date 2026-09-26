@@ -77,8 +77,15 @@ function VideoPlayer({ video, token, onDownloadClick, isMobile }: VideoPlayerPro
   // resolve to an HLS manifest URL from YouTube's own CDN — 720 is the
   // one mapping guaranteed to be a real progressive MP4 (see
   // docs/YTSTREAM.md's direct-mode quality table).
+  // /api/ytstream/:id has no login wall of its own (STRM sidecar files are
+  // plain URLs media servers fetch with no custom headers - see
+  // routes/ytstream.js's isAuthorizedYtstreamRequest), so this in-app call
+  // must carry the session token itself as a query param, same as the
+  // regular-file branch below.
   const streamUrl = isStrm
-    ? `/api/ytstream/${encodeURIComponent(video.youtubeId)}?mode=direct&quality=720`
+    ? (token
+        ? `/api/ytstream/${encodeURIComponent(video.youtubeId)}?mode=direct&quality=720&token=${encodeURIComponent(token)}`
+        : null)
     : token
       ? `/api/videos/${video.youtubeId}/stream?token=${encodeURIComponent(token)}${
           playbackType === 'audio' ? '&type=audio' : ''

@@ -26,7 +26,7 @@ jest.mock('hls.js', () => {
 
 function PlayButton() {
   const ctx = useContext(PipPlayerContext);
-  return <button onClick={() => ctx?.play('abc123', 'My Video')}>Play</button>;
+  return <button onClick={() => ctx?.play('abc123', 'My Video', 'test-token')}>Play</button>;
 }
 
 describe('PipPlayerProvider', () => {

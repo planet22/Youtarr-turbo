@@ -53,7 +53,7 @@ describe('VideosModule maintenance jobs', () => {
     configModule = { getJobsPath: () => jobsDir, getConfig: jest.fn(() => configStore), updateConfig: jest.fn() };
     messageEmitter = { emitMessage: jest.fn() };
     nfoGenerator = { patchExistingNfoWithResolutionTag: jest.fn(), writeVideoNfoFile: jest.fn(() => true), writeEpisodeNfoFile: jest.fn(() => true) };
-    strmGenerator = { resolveYtstreamParams: jest.fn(() => ({ container: 'mp4' })) };
+    strmGenerator = { resolveYtstreamParams: jest.fn(() => ({ container: 'mp4' })), writeStrmFile: jest.fn() };
     strmMediaInfoCache = { updateContainerOnly: jest.fn(), writeMediaInfoCacheFile: jest.fn(() => '/cache/path') };
     youtubeMetadataCache = { getCachedRawInfoJson: jest.fn().mockResolvedValue(null) };
     channelThumbnails = { regenerateChannelImages: jest.fn().mockResolvedValue({ copied: 3, skippedNoSource: 1, skippedNoFolder: 0, errors: 0 }) };
@@ -548,6 +548,56 @@ describe('VideosModule maintenance jobs', () => {
 
           expect(strmMediaInfoCache.updateContainerOnly).not.toHaveBeenCalled();
         });
+      });
+    });
+
+    describe('.strm file rewrite (alsoRewriteStrmFile)', () => {
+      const strmVideo = (overrides = {}) => video(1, { is_strm: true, filePath: '/lib/v1.strm', ...overrides });
+
+      it('is off by default, even for a STRM video', async () => {
+        serveVideos([strmVideo()]);
+
+        const result = await videosModule.regenerateVideoMetadataFiles();
+
+        expect(strmGenerator.writeStrmFile).not.toHaveBeenCalled();
+        expect(result.strmFilesRewritten).toBe(0);
+      });
+
+      it('rewrites the .strm file when enabled', async () => {
+        serveVideos([strmVideo()]);
+
+        const result = await videosModule.regenerateVideoMetadataFiles({ alsoRewriteStrmFile: true });
+
+        expect(strmGenerator.writeStrmFile).toHaveBeenCalledWith('/lib/v1.strm', 'yt1');
+        expect(result.strmFilesRewritten).toBe(1);
+      });
+
+      it('does not touch a regular (non-STRM) video even when enabled', async () => {
+        serveVideos([video(1)]);
+
+        const result = await videosModule.regenerateVideoMetadataFiles({ alsoRewriteStrmFile: true });
+
+        expect(strmGenerator.writeStrmFile).not.toHaveBeenCalled();
+        expect(result.strmFilesRewritten).toBe(0);
+      });
+
+      it('warns and carries on - still regenerates the NFO/sidecar - when the .strm rewrite fails', async () => {
+        writeInfo('yt1');
+        serveVideos([strmVideo()]);
+        strmGenerator.writeStrmFile.mockImplementation(() => { throw new Error('perm'); });
+
+        const result = await videosModule.regenerateVideoMetadataFiles({ alsoRewriteStrmFile: true });
+
+        expect(result).toMatchObject({ strmFilesRewritten: 0, strmToolRegenerated: 1 });
+        expect(logger.warn).toHaveBeenCalledWith(expect.objectContaining({ youtubeId: 'yt1' }), 'Failed to rewrite .strm file');
+      });
+
+      it('skips a video with no file even when enabled', async () => {
+        serveVideos([strmVideo({ filePath: null })]);
+
+        await videosModule.regenerateVideoMetadataFiles({ alsoRewriteStrmFile: true });
+
+        expect(strmGenerator.writeStrmFile).not.toHaveBeenCalled();
       });
     });
 

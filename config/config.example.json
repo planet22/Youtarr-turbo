@@ -111,6 +111,7 @@
         "quality": null
     },
     "ytstream": {
+        "streamKey": "",
         "defaultMode": "direct",
         "container": "mp4",
         "probeShortcutContainerOverride": null,

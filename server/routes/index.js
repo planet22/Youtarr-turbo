@@ -128,10 +128,13 @@ function registerRoutes(app, deps) {
   app.use(createSubfolderRoutes({ verifyToken, subfolderModule }));
 
   /*
- * GET /api/ytstream/:youtubeId is public (no token) so media servers/players
- * can play STRM sidecar files. mode=direct proxies a resolved upstream URL,
- * mode=hls/hls-buffer re-stream through a local ffmpeg process into a real
- * segmented playlist. See docs/YTSTREAM.md.
+ * GET /api/ytstream/:youtubeId has no login wall (no verifyToken) so media
+ * servers/players can play STRM sidecar files with no custom headers -
+ * instead it requires ytstream.streamKey as a query param (baked into every
+ * generated .strm URL) or an app session, checked in the route itself (see
+ * isAuthorizedYtstreamRequest in ytstream.js). mode=direct proxies a
+ * resolved upstream URL, mode=hls/hls-buffer re-stream through a local
+ * ffmpeg process into a real segmented playlist. See docs/YTSTREAM.md.
  */
   app.use(createYtStreamRoutes({ verifyToken, getClientAddress, models }));
 

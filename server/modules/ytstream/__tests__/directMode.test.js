@@ -31,6 +31,8 @@ const {
   buildFfmpegUpstreamHeaders,
   redactFfArgsForLogging,
   redactIncomingHeadersForLogging,
+  redactSensitiveQueryForLogging,
+  redactUrlForLogging,
   proxyDirectStream,
   redirectToDirectUrl,
 } = require('../directMode');
@@ -189,6 +191,45 @@ describe('directMode', () => {
 
     it.each([undefined, null])('returns an empty object for %p', (headers) => {
       expect(redactIncomingHeadersForLogging(headers)).toEqual({});
+    });
+  });
+
+  describe('redactSensitiveQueryForLogging', () => {
+    it.each(['key', 'token'])('redacts %s', (name) => {
+      expect(redactSensitiveQueryForLogging({ [name]: 'secret-value', mode: 'direct' })).toEqual({
+        [name]: '[REDACTED]',
+        mode: 'direct',
+      });
+    });
+
+    it('leaves an ordinary query untouched', () => {
+      const query = { mode: 'direct', quality: '1080' };
+      expect(redactSensitiveQueryForLogging(query)).toEqual(query);
+    });
+
+    it.each([undefined, null])('returns %p as-is', (query) => {
+      expect(redactSensitiveQueryForLogging(query)).toBe(query);
+    });
+  });
+
+  describe('redactUrlForLogging', () => {
+    it('redacts a key query param, including a trailing .strm pipe-syntax User-Agent suffix', () => {
+      const url = '/api/ytstream/abc123?mode=direct&key=secretkeyvalue%7CUser-Agent=Youtarr-Playback%2F1.0';
+      const redacted = redactUrlForLogging(url);
+
+      expect(redacted).toBe('/api/ytstream/abc123?mode=direct&key=[REDACTED]');
+      expect(redacted).not.toContain('secretkeyvalue');
+    });
+
+    it('redacts a token query param', () => {
+      expect(redactUrlForLogging('/api/ytstream/abc123?token=secrettoken&mode=direct')).toBe(
+        '/api/ytstream/abc123?token=[REDACTED]&mode=direct'
+      );
+    });
+
+    it('leaves a URL with neither param untouched', () => {
+      const url = '/api/ytstream/abc123?mode=direct&quality=1080';
+      expect(redactUrlForLogging(url)).toBe(url);
     });
   });
 

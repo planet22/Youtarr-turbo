@@ -1981,7 +1981,15 @@ describe('VideosModule', () => {
       const spy = jest.spyOn(VideosModule, 'regenerateVideoMetadataFiles').mockResolvedValue();
       const result = VideosModule.tryStartMetadataRegen({ trigger: 'manual' });
       expect(result).toEqual({ started: true });
-      expect(spy).toHaveBeenCalledWith({ trigger: 'manual' });
+      expect(spy).toHaveBeenCalledWith({ trigger: 'manual', alsoRewriteStrmFile: false });
+      spy.mockRestore();
+    });
+
+    test('forwards alsoRewriteStrmFile through to regenerateVideoMetadataFiles (used by ytstream.js after a streamKey rotation)', () => {
+      VideosModule._metadataRegenRunning = false;
+      const spy = jest.spyOn(VideosModule, 'regenerateVideoMetadataFiles').mockResolvedValue();
+      VideosModule.tryStartMetadataRegen({ trigger: 'stream-key-rotation', alsoRewriteStrmFile: true });
+      expect(spy).toHaveBeenCalledWith({ trigger: 'stream-key-rotation', alsoRewriteStrmFile: true });
       spy.mockRestore();
     });
 

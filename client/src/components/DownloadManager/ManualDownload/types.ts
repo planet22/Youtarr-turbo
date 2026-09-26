@@ -21,6 +21,7 @@ export interface DownloadSettings {
   audioFormat?: string | null;
   rating?: string | null;
   skipVideoFolder?: boolean;
+  mediaMode?: string;
 }
 
 export interface ValidationResponse {

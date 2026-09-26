@@ -17,6 +17,7 @@ const createYoutubeApiKeyRoutes = require('./youtubeApiKey');
 const createYtdlpOptionsRoutes = require('./ytdlpOptions');
 const createMaintenanceRoutes = require('./maintenance');
 const createSubfolderRoutes = require('./subfolders');
+const createJobEventRoutes = require('./jobEvents');
 const videoMetadataModule = require('../modules/videoMetadataModule');
 const videoOembedEnricher = require('../modules/videoOembedEnricher');
 const playlistModule = require('../modules/playlistModule');
@@ -27,6 +28,8 @@ const channelDownloadAllModule = require('../modules/channelDownloadAllModule');
 const ratingMapper = require('../modules/ratingMapper');
 const subfolderModule = require('../modules/subfolderModule');
 const cronJobs = require('../modules/cronJobs');
+const jobEventLog = require('../modules/jobEventLog');
+const { primeVideosForEventLog } = require('../modules/download/eventLogVideoPrimer');
 const playlistVideoFilters = require('../modules/playlistVideoFilters');
 const models = require('../models');
 const createYtStreamRoutes = require('./ytstream');
@@ -77,7 +80,7 @@ function registerRoutes(app, deps) {
   app.use(createConfigRoutes({ verifyToken, configModule, validateEnvAuthCredentials, isWslEnvironment, filenamePreviewRateLimiter }));
 
   // Channel routes
-  app.use(createChannelRoutes({ verifyToken, channelModule, archiveModule, channelDownloadAllModule, ratingMapper }));
+  app.use(createChannelRoutes({ verifyToken, channelModule, archiveModule, channelDownloadAllModule, ratingMapper, jobEventLog, primeVideosForEventLog }));
 
   // Video routes
   app.use(createVideoRoutes({ verifyToken, videosModule, downloadModule, videoOembedEnricher }));
@@ -97,6 +100,9 @@ function registerRoutes(app, deps) {
   // Job routes
   app.use(createJobRoutes({ verifyToken, jobModule, downloadModule }));
 
+  // Video/events log read routes
+  app.use(createJobEventRoutes({ verifyToken, jobEventLog }));
+
   // Plex routes
   app.use(createPlexRoutes({ verifyToken, plexModule, configModule }));
 
@@ -110,7 +116,7 @@ function registerRoutes(app, deps) {
   app.use(createVideoDetailRoutes({ verifyToken, videoMetadataModule, mediaServers }));
 
   // Playlist routes
-  app.use(createPlaylistRoutes({ verifyToken, playlistModule, downloadModule, m3uGenerator, mediaServers, models, channelSettingsModule, ratingMapper, subfolderModule, playlistVideoFilters }));
+  app.use(createPlaylistRoutes({ verifyToken, playlistModule, downloadModule, m3uGenerator, mediaServers, models, channelSettingsModule, ratingMapper, subfolderModule, playlistVideoFilters, jobEventLog, primeVideosForEventLog }));
 
   // Media server routes
   app.use(createMediaServerRoutes({ verifyToken, configModule, mediaServers }));

@@ -241,4 +241,66 @@ describe('proxy handlers', () => {
       expect(onActivity).toHaveBeenCalledWith(expect.objectContaining({ type: 'init' }));
     });
   });
+
+  describe('byteProxy segments', () => {
+    const segmentAsync = async (params) => {
+      const res = mockRes();
+      await handlers.handleSegment(requestFor(params), res);
+      return res;
+    };
+    const originalFetch = global.fetch;
+    afterEach(() => { global.fetch = originalFetch; });
+
+    it('fetches the real segment itself and sends its bytes, not a redirect', async () => {
+      register(KEY, { ...entryFor(), byteProxy: true });
+      const body = Buffer.from('fake segment bytes');
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        arrayBuffer: async () => body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength),
+        headers: { get: (name) => (name === 'content-type' ? 'video/mp2t' : null) },
+      });
+
+      const res = await segmentAsync({ youtubeId: 'vid00000001', key: KEY, kind: 'video', file: 's0.ts' });
+
+      expect(global.fetch).toHaveBeenCalledWith(SEG1, expect.objectContaining({ signal: expect.anything() }));
+      expect(res.redirected).toBeNull();
+      expect(res.statusCode).toBe(200);
+      expect(Buffer.isBuffer(res.body) ? res.body.toString() : res.body).toBe('fake segment bytes');
+      expect(res.headers['content-type']).toBe('video/mp2t');
+      expect(res.headers['cache-control']).toBe('no-store');
+    });
+
+    it('still reports segment activity when proxying bytes', async () => {
+      register(KEY, { ...entryFor(), byteProxy: true });
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        arrayBuffer: async () => new ArrayBuffer(0),
+        headers: { get: () => null },
+      });
+
+      await segmentAsync({ youtubeId: 'vid00000001', key: KEY, kind: 'video', file: 's1.ts' });
+
+      expect(onActivity).toHaveBeenCalledWith(expect.objectContaining({ type: 'segment', index: 1, positionSeconds: 5 }));
+    });
+
+    it('answers with the upstream status when YouTube rejects the fetch', async () => {
+      register(KEY, { ...entryFor(), byteProxy: true });
+      global.fetch = jest.fn().mockResolvedValue({ ok: false, status: 403, headers: { get: () => null } });
+
+      const res = await segmentAsync({ youtubeId: 'vid00000001', key: KEY, kind: 'video', file: 's0.ts' });
+
+      expect(res.statusCode).toBe(403);
+    });
+
+    it('answers 502 when the fetch to YouTube itself fails', async () => {
+      register(KEY, { ...entryFor(), byteProxy: true });
+      global.fetch = jest.fn().mockRejectedValue(new Error('network down'));
+
+      const res = await segmentAsync({ youtubeId: 'vid00000001', key: KEY, kind: 'video', file: 's0.ts' });
+
+      expect(res.statusCode).toBe(502);
+    });
+  });
 });

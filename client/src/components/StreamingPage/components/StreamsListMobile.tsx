@@ -10,6 +10,7 @@ import { SegmentActivityStrip, segmentVariantForMode } from './SegmentActivityGr
 import { ByteRangeProgressStrip } from './ByteRangeProgressGrid';
 import StreamFormatChips from './StreamFormatChips';
 import { SHARED_STATUS_CHIP_SMALL_STYLE, SHARED_COMPACT_CHIP_OVERRIDES } from '../../shared/chipStyles';
+import StreamThumbnail from './StreamThumbnail';
 
 export interface StreamsListMobileProps {
   streams: StreamSnapshot[];
@@ -42,9 +43,8 @@ function StreamListRow({
 
   return (
     <Box style={{ display: 'flex', gap: 10, padding: '10px 4px', borderBottom: '1px solid var(--border)' }}>
-      <Box
-        component="img"
-        src={`/images/videothumb-${stream.youtubeId}.jpg`}
+      <StreamThumbnail
+        youtubeId={stream.youtubeId}
         alt={stream.title || stream.youtubeId}
         style={{ width: 96, height: 54, objectFit: 'cover', borderRadius: 'var(--radius-thumb)', flexShrink: 0 }}
       />

@@ -6,12 +6,15 @@ const configModule = require('./configModule');
 const fileCheckModule = require('./fileCheckModule');
 const watchStatusQueries = require('./mediaServers/watchStatusQueries');
 const logger = require('../logger');
+const jobEventLog = require('./jobEventLog');
+const { EVENT_TYPES } = require('./jobEventLog/eventCatalog');
 const messageEmitter = require('./messageEmitter');
 const m3uGenerator = require('./m3uGenerator');
 const { AUDIO_EXTENSIONS, MEDIA_EXTENSIONS } = require('./filesystem/constants');
 const { probeVideoDimensions } = require('./resolutionTier');
 const createLimiter = require('./subscriptionImport/concurrencyLimiter');
 const { formatRelativeTimeAgo } = require('./relativeTimeFormatter');
+const { escapeLikeWildcards } = require('../utils/escapeLike');
 
 // Backfill row updates are applied in parameterized batches of this size,
 // and flushed mid-chunk at the same cadence so completed work survives a
@@ -118,7 +121,7 @@ class VideosModule {
 
       if (search) {
         whereConditions.push('(Videos.youTubeVideoName LIKE :search OR Videos.youTubeChannelName LIKE :search)');
-        replacements.search = `%${search}%`;
+        replacements.search = `%${escapeLikeWildcards(search)}%`;
       }
 
       if (channelFilter) {
@@ -495,6 +498,11 @@ class VideosModule {
             logger.info({ youtubeId: video.youtubeId }, 'Video no longer exists on YouTube, marking as removed');
             video.youtube_removed = true;
             video.youtube_removed_checked_at = now;
+            jobEventLog.record(EVENT_TYPES.VIDEO_UNAVAILABLE_ON_YOUTUBE, {
+              youtubeId: video.youtubeId,
+              videoTitle: video.youTubeVideoName,
+              channelName: video.youTubeChannelName,
+            });
             return { id: video.id, removed: true, checked_at: now };
           } else {
             // Video exists, just update the timestamp
@@ -677,7 +685,7 @@ class VideosModule {
         OR JSON_UNQUOTE(JSON_EXTRACT(raw_info_json, '$.uploader')) LIKE :search
         OR JSON_UNQUOTE(JSON_EXTRACT(raw_info_json, '$.channel')) LIKE :search
       )`);
-      metadataReplacements.search = `%${search}%`;
+      metadataReplacements.search = `%${escapeLikeWildcards(search)}%`;
     }
     if (dateFrom) {
       // upload_date is yt-dlp's YYYYMMDD text, same format/comparison as
@@ -893,9 +901,16 @@ class VideosModule {
           continue;
         }
 
+        const previousRating = video.normalized_rating;
         await video.update({
           normalized_rating: rating,
           rating_source: 'Manual Override'
+        });
+        jobEventLog.record(EVENT_TYPES.VIDEO_RATING_CHANGED, {
+          youtubeId: video.youtubeId,
+          videoTitle: video.youTubeVideoName,
+          channelName: video.youTubeChannelName,
+          detail: { rating, previousRating },
         });
 
         if (video.filePath) {
@@ -941,7 +956,7 @@ class VideosModule {
       // Get all channels from the channels table
       const Channel = require('../models/channel');
       const allChannels = await Channel.findAll({
-        attributes: ['title'],
+        attributes: ['uploader'],
         order: [['title', 'ASC']]
       });
 
@@ -1200,6 +1215,7 @@ class VideosModule {
         // Fetch a chunk of videos
         const videos = await Video.findAll({
           attributes: ['id', 'youtubeId', 'filePath', 'fileSize', 'audioFilePath', 'audioFileSize', 'removed', 'video_resolution'],
+          order: [['id', 'ASC']],
           limit: VIDEO_CHUNK_SIZE,
           offset: offset,
           raw: true
@@ -1594,6 +1610,7 @@ class VideosModule {
         checkTimeLimit();
         const videos = await Video.findAll({
           attributes: ['id', 'youtubeId', 'filePath'],
+          order: [['id', 'ASC']],
           limit: CHUNK_SIZE,
           offset,
           raw: true,
@@ -1930,6 +1947,7 @@ class VideosModule {
             'id', 'youtubeId', 'filePath', 'youTubeChannelName',
             'season', 'episode', 'normalized_rating', 'rating_source', 'is_strm', 'removed',
           ],
+          order: [['id', 'ASC']],
           limit: CHUNK_SIZE,
           offset,
           raw: true,
@@ -2130,6 +2148,11 @@ class VideosModule {
       throw new Error('Video not found');
     }
     await video.update({ protected: protectedState });
+    jobEventLog.record(protectedState ? EVENT_TYPES.VIDEO_PROTECTED : EVENT_TYPES.VIDEO_UNPROTECTED, {
+      youtubeId: video.youtubeId,
+      videoTitle: video.youTubeVideoName,
+      channelName: video.youTubeChannelName,
+    });
     return { id: video.id, protected: protectedState };
   }
 }

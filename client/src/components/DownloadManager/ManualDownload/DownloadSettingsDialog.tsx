@@ -40,6 +40,7 @@ import { OptionSelect } from '../../shared/OptionSelect';
 import { RatingSelect } from '../../shared/RatingSelect';
 import { useSubfolders } from '../../../hooks/useSubfolders';
 import { RESOLUTION_OPTIONS, AUDIO_FORMAT_OPTIONS, SelectOption } from '../../../utils/downloadOptions';
+import { MEDIA_MODE_LABEL } from '../../../utils/mediaMode';
 
 const LARGE_DOWNLOAD_WARNING_THRESHOLD = 50;
 
@@ -52,6 +53,11 @@ const VIDEO_ONLY_CHOICE = 'video_only';
 const DOWNLOAD_TYPE_OPTIONS: SelectOption[] = [
   { value: VIDEO_ONLY_CHOICE, label: 'Video Only' },
   ...AUDIO_FORMAT_OPTIONS,
+];
+// 'both' is omitted: the download pipeline treats it exactly like 'download'.
+const MEDIA_MODE_OVERRIDE_OPTIONS: SelectOption[] = [
+  { value: 'download', label: MEDIA_MODE_LABEL.download },
+  { value: 'strm', label: 'STRM only (no media download)' },
 ];
 
 interface DownloadSettingsDialogProps {
@@ -106,7 +112,6 @@ const DownloadSettingsDialog: React.FC<DownloadSettingsDialogProps> = ({
   hideRedownloadOption = false,
   previewVideos,
 }) => {
-  const isStrmOnly = defaultMediaMode === 'strm';
   const [useCustomSettings, setUseCustomSettings] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
   // Override controls default to "no override" (null) so that simply opening
@@ -119,6 +124,18 @@ const DownloadSettingsDialog: React.FC<DownloadSettingsDialogProps> = ({
   const [audioFormat, setAudioFormat] = useState<string | null>(null);
   const [rating, setRating] = useState<string | null>(null);
   const [fileStructure, setFileStructure] = useState<FileStructureChoice>('inherit');
+  const [mediaModeOverride, setMediaModeOverride] = useState<string | null>(null);
+
+  const isDefaultStrmOnly = defaultMediaMode === 'strm';
+  // The media mode this download will actually use: the dialog override when
+  // one is chosen, else the caller's known channel/playlist/global mode.
+  const effectiveMediaModeOverride = useCustomSettings && mode === 'manual' ? mediaModeOverride : null;
+  const isStrmOnly = effectiveMediaModeOverride
+    ? effectiveMediaModeOverride === 'strm'
+    : isDefaultStrmOnly;
+  const mediaModeEmptyLabel = defaultMediaMode
+    ? `No override (${MEDIA_MODE_LABEL[defaultMediaMode] || defaultMediaMode})`
+    : 'No override (per channel, else global setting)';
 
   // Fetch available subfolders
   const { subfolders, loading: subfoldersLoading, createSubfolder } = useSubfolders(token);
@@ -184,6 +201,7 @@ const DownloadSettingsDialog: React.FC<DownloadSettingsDialogProps> = ({
       setAudioFormat(null);
       setRating(null);
       setFileStructure('inherit');
+      setMediaModeOverride(null);
     }
   }, [open]);
 
@@ -247,7 +265,10 @@ const DownloadSettingsDialog: React.FC<DownloadSettingsDialogProps> = ({
         if (subfolderOverride !== null) {
           override.subfolder = subfolderOverride;
         }
-        if (audioFormat !== null) {
+        if (mediaModeOverride !== null) {
+          override.mediaMode = mediaModeOverride;
+        }
+        if (audioFormat !== null && !isStrmOnly) {
           override.audioFormat = audioFormat === VIDEO_ONLY_CHOICE ? null : audioFormat;
         }
         if (fileStructure !== 'inherit') {
@@ -406,8 +427,8 @@ const DownloadSettingsDialog: React.FC<DownloadSettingsDialogProps> = ({
               <Box className="flex items-center gap-2 mb-3">
                 <VideocamIcon size={16} className="text-muted-foreground" />
                 <Typography variant="body2">
-                  <strong>Download Type:</strong> {defaultAudioFormatLabel}
-                  {defaultAudioFormatSource === 'channel' && (
+                  <strong>Download Type:</strong> {isDefaultStrmOnly ? 'STRM pointer (MP3 not available)' : defaultAudioFormatLabel}
+                  {!isDefaultStrmOnly && defaultAudioFormatSource === 'channel' && (
                     <Typography component="span" variant="caption" color="text.secondary" className="ml-1">
                       (channel)
                     </Typography>
@@ -426,7 +447,9 @@ const DownloadSettingsDialog: React.FC<DownloadSettingsDialogProps> = ({
 
               <Typography variant="caption" color="text.secondary" className="block mt-2">
                 Configured channels will use their subfolder settings.
-                Enable custom settings to download MP3 audio.
+                {isDefaultStrmOnly
+                  ? ' Enable custom settings to download full files instead.'
+                  : ' Enable custom settings to download MP3 audio.'}
               </Typography>
             </Paper>
           </Collapse>
@@ -540,21 +563,46 @@ const DownloadSettingsDialog: React.FC<DownloadSettingsDialogProps> = ({
                   />
 
                   <Typography variant="subtitle2" color="text.secondary" className="mb-2 mt-4">
-                    Download Type
+                    Media Mode
                   </Typography>
 
                   <OptionSelect
-                    className="mb-4 audio-control audio-control--download-type"
-                    options={DOWNLOAD_TYPE_OPTIONS}
-                    label="Download Type"
-                    emptyLabel={downloadTypeEmptyLabel}
-                    value={audioFormat}
+                    className="mb-4"
+                    options={MEDIA_MODE_OVERRIDE_OPTIONS}
+                    label="Media Mode"
+                    emptyLabel={mediaModeEmptyLabel}
+                    value={mediaModeOverride}
                     onChange={(value) => {
-                      setAudioFormat(value);
+                      setMediaModeOverride(value);
+                      // MP3 is meaningless for STRM - drop any chosen download type.
+                      if (value === 'strm') setAudioFormat(null);
                       setHasUserInteracted(true);
                     }}
-                    helperText={downloadTypeHelperText}
+                    helperText="STRM only writes .strm pointer files (+ NFO/thumbnail) for on-demand streaming instead of downloading media."
                   />
+
+                  {/* STRM only writes .strm pointers - yt-dlp never runs, so an MP3
+                      download type would be silently ignored. */}
+                  {!isStrmOnly && (
+                    <>
+                      <Typography variant="subtitle2" color="text.secondary" className="mb-2 mt-4">
+                        Download Type
+                      </Typography>
+
+                      <OptionSelect
+                        className="mb-4 audio-control audio-control--download-type"
+                        options={DOWNLOAD_TYPE_OPTIONS}
+                        label="Download Type"
+                        emptyLabel={downloadTypeEmptyLabel}
+                        value={audioFormat}
+                        onChange={(value) => {
+                          setAudioFormat(value);
+                          setHasUserInteracted(true);
+                        }}
+                        helperText={downloadTypeHelperText}
+                      />
+                    </>
+                  )}
                     <Typography variant="subtitle2" color="text.secondary" className="mb-2 mt-4">
                     Content Rating Override
                   </Typography>

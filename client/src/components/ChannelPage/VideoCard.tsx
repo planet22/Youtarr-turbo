@@ -22,6 +22,7 @@ import ThumbnailClickOverlay from '../shared/ThumbnailClickOverlay';
 import { SHARED_STATUS_CHIP_SMALL_STYLE, SHARED_THEMED_CHIP_SMALL_STYLE } from '../shared/chipStyles';
 import { getPublishedDateDisplay } from './publishedDateDisplay';
 import { formatSeasonEpisode, buildChannelFilterPreviewTooltip } from './channelFilterPreviewDisplay';
+import { videoThumbnailUrl } from '../../utils/videoThumbnail';
 
 interface VideoCardProps {
   video: ChannelVideo;
@@ -112,7 +113,7 @@ function VideoCard({
             overflow: 'hidden',
           }}>
             <img
-              src={video.thumbnail}
+              src={videoThumbnailUrl(video.youtube_id, { noCache: true })}
               alt={decodeHtml(video.title)}
               style={{
                 position: 'absolute',

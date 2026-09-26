@@ -1,7 +1,7 @@
 import React from 'react';
 import { Box, Typography, Chip, Checkbox, Stack, IconButton, Tooltip } from '../../ui';
 import { AlertCircle as ErrorOutlineIcon, Trash2 as DeleteIcon } from 'lucide-react';
-import { Database as MetadataCacheIcon, ClearCache as ClearCacheIcon } from '../../../lib/icons';
+import { Database as MetadataCacheIcon, ClearCache as ClearCacheIcon, PipIcon } from '../../../lib/icons';
 import { formatDuration, formatYTDate } from '../../../utils';
 import { formatAddedDateTime, formatFileSize } from '../../../utils/formatters';
 import { getDisplayPath } from '../../../utils/paths';
@@ -12,6 +12,7 @@ import RatingBadge from '../../shared/RatingBadge';
 import DownloadFormatIndicator from '../../shared/DownloadFormatIndicator';
 import ProtectionShieldButton from '../../shared/ProtectionShieldButton';
 import ThumbnailClickOverlay from '../../shared/ThumbnailClickOverlay';
+import { videoThumbnailUrl } from '../../../utils/videoThumbnail';
 import AvailabilityChip from '../../shared/AvailabilityChip';
 import WatchedChip from '../../shared/WatchedChip';
 import { SHARED_STATUS_CHIP_SMALL_STYLE } from '../../shared/chipStyles';
@@ -26,6 +27,7 @@ export interface VideosListMobileProps {
   deleteDisabled: boolean;
   onToggleSelect: (youtubeId: string) => void;
   onOpenModal: (video: VideoData) => void;
+  onPipPlay: (video: VideoData) => void;
   onToggleProtection: (videoId: number) => void;
   onDeleteSingle: (videoId: number) => void;
   onImageError: (youtubeId: string) => void;
@@ -62,6 +64,7 @@ function VideosListMobile({
   deleteDisabled,
   onToggleSelect,
   onOpenModal,
+  onPipPlay,
   onToggleProtection,
   onDeleteSingle,
   onImageError,
@@ -153,7 +156,7 @@ function VideosListMobile({
                 </Typography>
               ) : (
                 <img
-                  src={`/images/videothumb-${video.youtubeId}.jpg`}
+                  src={videoThumbnailUrl(video.youtubeId)}
                   alt="thumbnail"
                   style={{
                     width: '100%',
@@ -189,7 +192,7 @@ function VideosListMobile({
                   Untracked
                 </Box>
               )}
-              {video.youtube_removed && (
+              {Boolean(video.youtube_removed) && (
                 <Box
                   style={{
                     position: 'absolute',
@@ -208,7 +211,7 @@ function VideosListMobile({
                   Removed
                 </Box>
               )}
-              {video.removed && (
+              {Boolean(video.removed) && (
                 <Box
                   style={{
                     position: 'absolute',
@@ -397,6 +400,18 @@ function VideosListMobile({
                     ? ` • ${formatFileSize(fileSizeNumber)}`
                     : ''}
                 </Typography>
+                <Tooltip title="Quick play (Picture-in-Picture)">
+                  <span onClick={(e) => e.stopPropagation()}>
+                    <IconButton
+                      size="small"
+                      aria-label="Quick play in Picture-in-Picture"
+                      onClick={() => onPipPlay(video)}
+                      style={{ padding: 2, flexShrink: 0 }}
+                    >
+                      <PipIcon size={16} />
+                    </IconButton>
+                  </span>
+                </Tooltip>
                 {isTracked && video.id !== null && !video.removed && (
                   <Tooltip title="Delete video from disk">
                     <span onClick={(e) => e.stopPropagation()}>

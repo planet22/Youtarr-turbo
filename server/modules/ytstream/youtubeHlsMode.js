@@ -331,12 +331,12 @@ async function defaultFetchInfo(youtubeId, playerClient) {
  * Youtarr URLs to put in the master in place of YouTube's.
  * @returns {Promise<{variantUri: string, audioUri: string|null}>}
  */
-async function routePlaylistsThroughProxy({ youtubeId, quality, routing, proxyKey, variant, variantUrl, audioUrl, fetchText }) {
+async function routePlaylistsThroughProxy({ youtubeId, quality, routing, proxyKey, variant, variantUrl, audioUrl, fetchText, byteProxy = false }) {
   const basePath = proxy.proxyBasePath(youtubeId, proxyKey);
   const [videoText, audioText] = await Promise.all([fetchText(variantUrl), audioUrl ? fetchText(audioUrl) : Promise.resolve(null)]);
   const kinds = { video: proxy.buildKindEntry({ kind: 'video', playlistUrl: variantUrl, text: videoText, bandwidthBps: bandwidth(variant), basePath }) };
   if (audioText !== null) kinds.audio = proxy.buildKindEntry({ kind: 'audio', playlistUrl: audioUrl, text: audioText, bandwidthBps: 0, basePath });
-  proxy.register(proxyKey, { youtubeId, quality, mode: routing, kinds });
+  proxy.register(proxyKey, { youtubeId, quality, mode: routing, byteProxy, kinds });
   logger.info(
     { youtubeId, routing, videoSegments: kinds.video.segments.length, audioSegments: kinds.audio ? kinds.audio.segments.length : 0, durationSeconds: kinds.video.totalSeconds },
     'ytstream: youtube-hls routing the video and audio playlists through Youtarr'
@@ -350,7 +350,7 @@ async function routePlaylistsThroughProxy({ youtubeId, quality, routing, proxyKe
  * @param {object} params - youtubeId, quality, qualityStrictness, playerClient
  * @param {{fetchInfo?: Function, fetchText?: Function}} [deps] - injectable for tests
  */
-async function resolvePlaylist({ youtubeId, quality, qualityStrictness, playerClient, preferredLanguage, proxyMode = 'off', proxyKey = null }, deps = {}) {
+async function resolvePlaylist({ youtubeId, quality, qualityStrictness, playerClient, preferredLanguage, proxyMode = 'off', proxyKey = null, byteProxy = false }, deps = {}) {
   const fetchInfo = deps.fetchInfo || defaultFetchInfo;
   const fetchText = deps.fetchText || defaultFetchText;
   // Routing needs a registry key; without one (a dry run) nothing is registered.
@@ -384,7 +384,7 @@ async function resolvePlaylist({ youtubeId, quality, qualityStrictness, playerCl
     if (deps.onChoice) deps.onChoice({ manifestHost: hostOf(manifestUrl), routing, servedAs: 'media playlist (the manifest was already one)' });
     if (routing === 'serve') {
       const media = proxy.buildKindEntry({ kind: 'media', playlistUrl: manifestUrl, text: masterText, bandwidthBps: 0, basePath: proxy.proxyBasePath(youtubeId, proxyKey) });
-      proxy.register(proxyKey, { youtubeId, quality, mode: routing, kinds: { media } });
+      proxy.register(proxyKey, { youtubeId, quality, mode: routing, byteProxy, kinds: { media } });
       return media.texts.serve;
     }
     return absolutizeMediaPlaylist(masterText, manifestUrl);
@@ -431,7 +431,7 @@ async function resolvePlaylist({ youtubeId, quality, qualityStrictness, playerCl
     streamDebug({ youtubeId, height: variant.height, variantHost: hostOf(variantUrl), media: summarizePlaylist(mediaText), complete }, 'ytstream: youtube-hls fetched the variant media playlist');
     if (complete && routing === 'serve') {
       const media = proxy.buildKindEntry({ kind: 'media', playlistUrl: variantUrl, text: mediaText, bandwidthBps: bandwidth(variant), basePath: proxy.proxyBasePath(youtubeId, proxyKey) });
-      proxy.register(proxyKey, { youtubeId, quality, mode: routing, kinds: { media } });
+      proxy.register(proxyKey, { youtubeId, quality, mode: routing, byteProxy, kinds: { media } });
       if (deps.onChoice) deps.onChoice({ ...choice, routing, servedAs: 'media playlist with segment URLs served by Youtarr (audio muxed)', segmentCount: media.segments.length, durationSeconds: media.totalSeconds });
       return media.texts.serve;
     }
@@ -451,7 +451,7 @@ async function resolvePlaylist({ youtubeId, quality, qualityStrictness, playerCl
   const audioUrl = chosenAudio && chosenAudio.item.attrs.URI ? absoluteUrl(chosenAudio.item.attrs.URI, manifestUrl) : null;
   const uriOverrides = routing === 'off'
     ? null
-    : await routePlaylistsThroughProxy({ youtubeId, quality, routing, proxyKey, variant, variantUrl, audioUrl, fetchText });
+    : await routePlaylistsThroughProxy({ youtubeId, quality, routing, proxyKey, variant, variantUrl, audioUrl, fetchText, byteProxy });
   const master = buildFilteredMaster(parsed, variant, manifestUrl, { audioLanguage, preferredLanguage, uriOverrides });
   streamDebug({ youtubeId, height: variant.height, routing, served: summarizePlaylist(master) }, 'ytstream: youtube-hls serving a one-variant master playlist');
   logger.info(
@@ -516,12 +516,26 @@ function cacheSet(key, playlist) {
 }
 
 /**
+ * Single source of truth for the playlist cache/registry key, shared by
+ * getPlaylist and describeRun so they can never independently drift apart
+ * (see configResolution.js's createQueryOverrideResolver for the shape of
+ * bug that duplicating this exact kind of logic caused before). byteProxy is
+ * part of the key (not just a param) because it changes what gets
+ * registered under proxyKey - a plain 'serve' session (redirects) and a
+ * pip-preview session (proxies bytes) for the same video/quality must never
+ * share one cached master pointing at the wrong registry entry.
+ */
+function buildPlaylistCacheKey({ youtubeId, quality, qualityStrictness, preferredLanguage, proxyMode, byteProxy }) {
+  return `${youtubeId}|${resolveQualityHeight(quality)}|${qualityStrictness}|${preferredLanguage || ''}|${proxyMode}|${byteProxy ? 'byteProxy' : ''}`;
+}
+
+/**
  * Cached, de-duplicated resolve: repeated probes/plays of one video within the
  * TTL cost nothing, and concurrent requests share a single yt-dlp call.
  */
 async function getPlaylist(params, deps) {
   const proxyMode = proxy.normalizeProxyMode(params.proxyMode);
-  const key = `${params.youtubeId}|${resolveQualityHeight(params.quality)}|${params.qualityStrictness}|${params.preferredLanguage || ''}|${proxyMode}`;
+  const key = buildPlaylistCacheKey({ ...params, proxyMode });
   const proxyKey = proxyMode === 'off' ? null : proxy.buildProxyKey(key);
   let cached = cacheGet(key);
   // The master points at registered playlists: without them it would 404.
@@ -703,7 +717,7 @@ function markPlaylistServed(streamId, playlist, proxyMode = 'off') {
 }
 
 /** Handles the top-level `mode=youtube-hls` request. */
-async function handleYoutubeHlsRequest(req, res, { youtubeId, quality, qualityStrictness, playerClient, audioLanguage, hlsProxy, clientIp, userAgent }, deps) {
+async function handleYoutubeHlsRequest(req, res, { youtubeId, quality, qualityStrictness, playerClient, audioLanguage, hlsProxy, byteProxy, clientIp, userAgent }, deps) {
   const proxyMode = proxy.normalizeProxyMode(hlsProxy);
   const startedAt = Date.now();
   streamDebug(
@@ -712,7 +726,7 @@ async function handleYoutubeHlsRequest(req, res, { youtubeId, quality, qualitySt
   );
   const { streamId, created } = touchLiveRow({ youtubeId, quality, clientIp, userAgent });
   try {
-    const { playlist, cached } = await getPlaylist({ youtubeId, quality, qualityStrictness, playerClient, preferredLanguage: audioLanguage || null, proxyMode }, deps);
+    const { playlist, cached } = await getPlaylist({ youtubeId, quality, qualityStrictness, playerClient, preferredLanguage: audioLanguage || null, proxyMode, byteProxy }, deps);
     markPlaylistServed(streamId, playlist, proxyMode);
     logger.info(
       {
@@ -747,7 +761,7 @@ async function handleYoutubeHlsRequest(req, res, { youtubeId, quality, qualitySt
 async function describeRun({ youtubeId, quality, qualityStrictness, playerClient, audioLanguage, hlsProxy }, { probe = false } = {}, deps = {}) {
   const preferredLanguage = audioLanguage || null;
   const proxyMode = proxy.normalizeProxyMode(hlsProxy);
-  const key = `${youtubeId}|${resolveQualityHeight(quality)}|${qualityStrictness}|${preferredLanguage || ''}|${proxyMode}`;
+  const key = buildPlaylistCacheKey({ youtubeId, quality, qualityStrictness, preferredLanguage, proxyMode });
   const routingText = {
     off: 'the YouTube HLS master playlist, served as-is; the player fetches the media playlists and segments from YouTube',
     proxy: 'the master playlist and both media playlists come from Youtarr; the player fetches segments from YouTube',

@@ -16,10 +16,23 @@
  *            request is seen, giving playback position and an estimated data
  *            rate (the bytes themselves are never counted).
  *
+ * byteProxy (registry-entry flag, not a `youtubeHlsProxy` setting value):
+ * forces 'serve' routing to fetch each segment/init file itself and pipe the
+ * bytes back same-origin instead of redirecting. Only ever set for the
+ * in-app Picture-in-Picture preview (see resolveExperimentalRequest's
+ * pipPreview marker in routes/ytstream.js) - a browser JS player (hls.js)
+ * fetches segments via XHR/fetch, which enforces CORS, and YouTube's CDN
+ * sends no Access-Control-Allow-Origin, so the 302 redirect gets blocked
+ * outright regardless of routing mode. Real players (Jellyfin, a native
+ * <video> via mode=direct's own STRM, etc.) follow the redirect at the OS
+ * network level, which isn't CORS-restricted, so they keep the cheap
+ * redirect path - this costs Youtarr real bandwidth/CPU, so it is never
+ * turned on for anything but this one browser-preview case.
+ *
  * The playlists are fetched when the master is resolved and kept in a small
  * in-memory registry (same lifetime as the resolved master). The handlers
- * only ever serve or redirect to what is in that registry, so they cannot be
- * used to reach any other URL.
+ * only ever serve, redirect to, or proxy what is in that registry, so they
+ * cannot be used to reach any other URL.
  */
 const crypto = require('crypto');
 const logger = require('../../logger');
@@ -38,6 +51,11 @@ const INIT_FILE_PATTERN = /^init\.[a-z0-9]{2,5}$/i;
 const DEFAULT_SEGMENT_EXTENSION = '.ts';
 const INIT_EXTENSION = '.mp4';
 const BITS_PER_BYTE = 8;
+const SEGMENT_FETCH_TIMEOUT_MS = 20 * 1000;
+// Only these are meaningful to hand back to the browser; anything else on
+// YouTube's response (e.g. its own caching/auth headers) is dropped. No
+// range/accept-ranges: every request here is answered as one full 200 body.
+const PASSTHROUGH_RESPONSE_HEADERS = ['content-type', 'content-length'];
 
 /** @returns {'off'|'proxy'|'serve'} a setting value coerced to a known routing mode */
 function normalizeProxyMode(value) {
@@ -202,7 +220,45 @@ function createProxyHandlers({ resolveClientIp, onActivity }) {
     onActivity({ type: 'playlist', key, youtubeId, quality: entry.quality, kind: match[1], mode: entry.mode, bytes: Buffer.byteLength(body), ...who });
   }
 
-  function handleSegment(req, res) {
+  /**
+   * Fetches a segment/init file from YouTube server-side and sends its bytes
+   * back as Youtarr's own same-origin response, instead of redirecting - see
+   * this file's top-of-file comment on byteProxy for why. Buffered rather
+   * than streamed: one HLS segment is a few seconds of video (a few hundred
+   * KB - low single-digit MB), small enough that buffering it is simpler and
+   * safer than a manual pipe, with no meaningful memory cost.
+   */
+  async function pipeSegmentBytes(req, res, target, context) {
+    let upstream;
+    try {
+      upstream = await fetch(target, { signal: AbortSignal.timeout(SEGMENT_FETCH_TIMEOUT_MS) });
+    } catch (err) {
+      streamDebug({ ...context, err: err.message }, 'ytstream: youtube-hls proxy byteProxy fetch to YouTube failed');
+      res.status(502).send('Failed to fetch segment from YouTube');
+      return;
+    }
+    if (!upstream.ok) {
+      streamDebug({ ...context, status: upstream.status }, 'ytstream: youtube-hls proxy byteProxy upstream returned a non-OK status');
+      res.status(upstream.status).send('YouTube returned an error for this segment');
+      return;
+    }
+    let body;
+    try {
+      body = Buffer.from(await upstream.arrayBuffer());
+    } catch (err) {
+      streamDebug({ ...context, err: err.message }, 'ytstream: youtube-hls proxy byteProxy failed to read the upstream body');
+      res.status(502).send('Failed to read segment from YouTube');
+      return;
+    }
+    res.set('Cache-Control', 'no-store');
+    for (const name of PASSTHROUGH_RESPONSE_HEADERS) {
+      const value = upstream.headers.get(name);
+      if (value) res.set(name, value);
+    }
+    res.status(200).send(body);
+  }
+
+  async function handleSegment(req, res) {
     const { youtubeId, key, kind, file } = req.params;
     const segmentMatch = SEGMENT_FILE_PATTERN.exec(file || '');
     const isInit = INIT_FILE_PATTERN.test(file || '');
@@ -219,14 +275,18 @@ function createProxyHandlers({ resolveClientIp, onActivity }) {
       res.status(404).send('Segment not found - start the video again');
       return;
     }
-    res.set('Cache-Control', 'no-store');
-    res.redirect(302, target);
     const who = identify(req);
     const estimatedBytes = segment && stream.bandwidthBps ? Math.round((stream.bandwidthBps * segment.durationSeconds) / BITS_PER_BYTE) : 0;
-    streamDebug(
-      { youtubeId, key, kind, file, index: segmentMatch ? Number(segmentMatch[1]) : null, positionSeconds: segment ? segment.startSeconds : null, durationSeconds: segment ? segment.durationSeconds : null, estimatedBytes, targetHost: new URL(target).host, ...who },
-      'ytstream: youtube-hls proxy redirected a segment request to YouTube (302)'
-    );
+    const debugContext = { youtubeId, key, kind, file, index: segmentMatch ? Number(segmentMatch[1]) : null, positionSeconds: segment ? segment.startSeconds : null, durationSeconds: segment ? segment.durationSeconds : null, estimatedBytes, targetHost: new URL(target).host, ...who };
+
+    if (entry.byteProxy) {
+      await pipeSegmentBytes(req, res, target, debugContext);
+      streamDebug(debugContext, 'ytstream: youtube-hls proxy piped a segment\'s bytes from YouTube (byteProxy)');
+    } else {
+      res.set('Cache-Control', 'no-store');
+      res.redirect(302, target);
+      streamDebug(debugContext, 'ytstream: youtube-hls proxy redirected a segment request to YouTube (302)');
+    }
     onActivity({
       type: isInit ? 'init' : 'segment', key, youtubeId, quality: entry.quality, kind, mode: entry.mode,
       index: segmentMatch ? Number(segmentMatch[1]) : null,

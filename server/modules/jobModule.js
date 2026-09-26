@@ -15,7 +15,11 @@ const configModule = require('./configModule');
 const { isDownloadJob } = require('./download/jobTypes');
 const downloadCleanup = require('./download/downloadCleanup');
 const { serializeAuxData, parseAuxData } = require('./jobAuxData');
+const jobEventLog = require('./jobEventLog');
+const { EVENT_TYPES } = require('./jobEventLog/eventCatalog');
+const { singleVideoRefForJob } = require('./jobEventLog/jobVideoRef');
 const logger = require('../logger');
+const nzbDiagnosticLog = require('./nzbDiagnosticLog');
 
 // Scratch flag for ad-hoc verbose tracing (queue reorder/order investigation
 // as of 2026-09-06) - flip via the DETAILED_DEBUG=true env var, no rebuild
@@ -25,6 +29,8 @@ const logger = require('../logger');
 const DETAILED_DEBUG = process.env.DETAILED_DEBUG === 'true';
 
 const MAX_SAVE_RETRIES = 3;
+const NZB_TERMINAL_STATUSES = ['Complete', 'Complete with Warnings', 'Error', 'Terminated', 'Killed', 'Deleted'];
+const NZB_NO_VIDEO_MESSAGE = 'Completed with no video file produced - check server logs for the underlying error (e.g. age-restricted content, yt-dlp bot-check, network failure).';
 // Download History window: jobs older than this are purged from memory,
 // and at most MAX_HISTORY_JOBS are returned to the client. DB rows are
 // never deleted, so raising these resurfaces older persisted jobs.
@@ -301,6 +307,11 @@ class JobModule {
         // Step 6: Update job status and output
         this.jobs[jobId].status = 'Terminated';
         this.jobs[jobId].output = outputMessage;
+        jobEventLog.record(EVENT_TYPES.JOB_FINISHED, {
+          jobId,
+          jobType: this.jobs[jobId].jobType,
+          detail: { status: 'Terminated', previousStatus: 'In Progress', videoCount: recoveredCount, reason: outputMessage },
+        });
 
         try {
           await Job.update(
@@ -325,6 +336,11 @@ class JobModule {
 
         this.jobs[jobId].status = 'Terminated';
         this.jobs[jobId].output = 'Job terminated during server restart';
+        jobEventLog.record(EVENT_TYPES.JOB_FINISHED, {
+          jobId,
+          jobType: this.jobs[jobId].jobType,
+          detail: { status: 'Terminated', previousStatus: 'Pending', reason: 'Job terminated during server restart' },
+        });
 
         try {
           await Job.update(
@@ -611,6 +627,7 @@ class JobModule {
       return { success: false, error: error.message };
     }
 
+    jobEventLog.record(EVENT_TYPES.JOB_REMOVED, { jobId, jobType: job.jobType, ...singleVideoRefForJob(job) });
     delete this.jobs[jobId];
     this.emitJobsUpdated(jobId, 'Removed');
     return { success: true };
@@ -967,6 +984,13 @@ class JobModule {
           if (!videoInstance && needsVideo) {
             const created = await Video.create(payload);
             videosUpserts += 1;
+            jobEventLog.record(EVENT_TYPES.VIDEO_RECREATED, {
+              youtubeId: info.id,
+              videoTitle: payload.youTubeVideoName,
+              channelName: payload.youTubeChannelName,
+              isTracked: true,
+              detail: { videoId: created.id, hasFile: Boolean(payload.fileSize), filePath: payload.filePath },
+            });
             // Diagnostic for the nzb 'untracked' resurrection bug: this is
             // the exact point where a video whose DB row was removed (by
             // Sonarr/Radarr-triggered untrack) comes back to life, as long
@@ -1379,12 +1403,72 @@ class JobModule {
         output: job.output || '',
         timeInitiated: job.timeInitiated,
         timeCreated: job.timeCreated,
+        // Written now, not only on a later save: the post-processor subprocess
+        // reads job.data (e.g. nzb.importStrategy) from this row mid-download.
+        aux_data: serializeAuxData(job.data),
       });
       this.emitJobsUpdated(jobId, job.status);
+      jobEventLog.rememberJob(jobId, job.jobType);
+      const videoRef = singleVideoRefForJob(job);
+      jobEventLog.record(EVENT_TYPES.JOB_CREATED, { jobId, jobType: job.jobType, ...videoRef, detail: { status: job.status } });
+      if (job.status === 'In Progress') {
+        jobEventLog.record(EVENT_TYPES.JOB_STARTED, { jobId, jobType: job.jobType, ...videoRef });
+      }
       return jobId;
     } catch (error) {
       logger.error({ err: error }, 'Error saving job');
       throw error;
+    }
+  }
+
+  // Records a status transition in the video/events log. Only a real change of
+  // status is logged (updateJob is also called for pure data updates), and
+  // 'Pending' is not an event of its own - job.created already covers it.
+  recordStatusChange(jobId, job, previousStatus, changedAt) {
+    if (job.status === previousStatus || job.status === 'Pending') return;
+    if (job.status === 'In Progress') {
+      jobEventLog.record(EVENT_TYPES.JOB_STARTED, { jobId, jobType: job.jobType, ...singleVideoRefForJob(job), occurredAt: changedAt });
+      return;
+    }
+    const failedStatuses = ['Error', 'Terminated', 'Killed', 'Failed'];
+    jobEventLog.record(EVENT_TYPES.JOB_FINISHED, {
+      jobId,
+      jobType: job.jobType,
+      ...singleVideoRefForJob(job),
+      occurredAt: changedAt,
+      detail: {
+        status: job.status,
+        previousStatus,
+        videoCount: job.data?.videos?.length,
+        failedCount: job.data?.failedVideos?.length,
+        skippedCount: job.data?.cumulativeSkipped,
+        errorCode: job.data?.errorCode,
+        reason: job.data?.notes || (failedStatuses.includes(job.status) ? job.output : undefined),
+      },
+    });
+  }
+
+  // NZB page's Failed Grabs log: one snapshot row written when an NZB grab
+  // first finishes without a video, never re-derived when the log is read.
+  async recordNzbFailedGrab(job) {
+    try {
+      const nzb = job.data.nzb;
+      const succeeded = job.status === 'Complete' || job.status === 'Complete with Warnings';
+      if (succeeded) {
+        if ((job.data.videos || []).some((v) => v && v.filePath)) return;
+        if (nzb.youtubeId && await Video.findOne({ where: { youtubeId: nzb.youtubeId } })) return;
+      }
+      const max = nzbDiagnosticLog.resolveLogLimit(configModule.getConfig(), 'failedGrabs');
+      await nzbDiagnosticLog.recordDiagnosticEvent('failedGrab', {
+        jobId: String(job.id),
+        categoryName: nzb.categoryName || null,
+        youtubeId: nzb.youtubeId || null,
+        nzbName: nzb.nzbName || null,
+        message: succeeded ? NZB_NO_VIDEO_MESSAGE : (job.output || job.status),
+        timestamp: new Date(job.timeInitiated).getTime() || Date.now(),
+      }, max);
+    } catch (err) {
+      logger.warn({ err, jobId: job.id }, 'Failed to record NZB failed grab');
     }
   }
 
@@ -1426,9 +1510,14 @@ class JobModule {
       // descriptive output/notes (see downloadJobFinalizer.js) and callers
       // like nzb.js's resolveNzbJobOutcome depend on 'Error' surviving here
       // to report failed grabs back to Sonarr/Radarr correctly.
+      // STRM batches (downloadModule's STRM early exit) write their own
+      // "STRM: N ok, N failed" summary, so keep it rather than a bare count.
+      const isStrmBatch = !!(job.data?.isStrmBatch || updatedFields.data?.isStrmBatch);
       if (updatedFields.status !== 'Terminated' && updatedFields.status !== 'Error') {
-        let numVideos = updatedFields.data?.videos?.length || 0;
-        updatedFields.output = numVideos + ' videos.';
+        if (!isStrmBatch) {
+          let numVideos = updatedFields.data?.videos?.length || 0;
+          updatedFields.output = numVideos + ' videos.';
+        }
         if (updatedFields.status !== 'Complete with Warnings') {
           updatedFields.status = 'Complete';
         }
@@ -1444,6 +1533,7 @@ class JobModule {
     // NZB queue/history endpoints rely on to recognize the job at all. A
     // job whose data.nzb got dropped here simply vanishes from Sonarr/
     // Radarr's SABnzbd queue AND history once it completes.
+    const previousStatus = job.status;
     for (let field in updatedFields) {
       if (field === 'data') {
         job.data = { ...(job.data || {}), ...updatedFields.data };
@@ -1451,6 +1541,9 @@ class JobModule {
         job[field] = updatedFields[field];
       }
     }
+    // Stamped here, before the completed-job video reload below, so the event
+    // carries the moment the status actually changed rather than after those DB reads.
+    const statusChangedAt = new Date();
 
     // Save only THIS job to DB, don't iterate through all jobs
     const isCompletedJob = updatedFields.status === 'Complete' ||
@@ -1476,17 +1569,22 @@ class JobModule {
           }
         }
 
-        // Update in-memory structure with complete video list from DB
+        // Update in-memory structure with complete video list from DB. An
+        // empty recount (e.g. the JobVideo rows were never saved) must not
+        // wipe the videos the caller just handed in, so it only replaces them
+        // when it found something.
         if (!job.data) {
           job.data = {};
         }
-        job.data.videos = videos;
+        if (videos.length > 0 || !Array.isArray(job.data.videos)) {
+          job.data.videos = videos;
+        }
 
         // Update output message to reflect correct video count - only for
         // genuine successes; Error/Killed jobs keep the descriptive output
         // text their finalizer already set instead of a bare video count.
-        if (updatedFields.status === 'Complete' || updatedFields.status === 'Complete with Warnings') {
-          job.output = `${videos.length} videos.`;
+        if ((updatedFields.status === 'Complete' || updatedFields.status === 'Complete with Warnings') && !job.data.isStrmBatch) {
+          job.output = `${job.data.videos.length} videos.`;
         }
 
         logger.info({ jobId, videoCount: videos.length }, 'Reloaded videos from database for completed job');
@@ -1494,6 +1592,12 @@ class JobModule {
         logger.error({ err: loadErr, jobId }, 'Error loading videos from database for completed job');
         // Continue with save anyway - don't fail the job completion
       }
+    }
+
+    this.recordStatusChange(jobId, job, previousStatus, statusChangedAt);
+
+    if (isCompletedJob && job.data?.nzb && !NZB_TERMINAL_STATUSES.includes(previousStatus)) {
+      this.recordNzbFailedGrab(job);
     }
 
     if (isCompletedJob) {

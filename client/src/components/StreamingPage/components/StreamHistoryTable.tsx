@@ -29,6 +29,7 @@ import {
   FORMAT_COLUMN_LABEL_CLASS,
 } from './StreamFormatChips';
 import { CLIENT_COLUMN_WIDTH, TIGHT_CELL_STYLE } from './StreamsTable';
+import StreamThumbnail from './StreamThumbnail';
 
 export interface StreamHistoryTableProps {
   rows: StreamHistoryRow[];
@@ -150,9 +151,8 @@ function StreamHistoryRowView({
       </TableCell>
       <TableCell>
         <Box style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <Box
-            component="img"
-            src={`/images/videothumb-${row.youtubeId}.jpg`}
+          <StreamThumbnail
+            youtubeId={row.youtubeId}
             alt={row.title || row.youtubeId}
             style={{ width: 64, height: 36, objectFit: 'cover', borderRadius: 4, flexShrink: 0 }}
           />

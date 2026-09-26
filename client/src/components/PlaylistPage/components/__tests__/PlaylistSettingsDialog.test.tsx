@@ -262,4 +262,24 @@ describe('PlaylistSettingsDialog', () => {
 
     expect(screen.queryByText(/applies the next time this playlist syncs/i)).not.toBeInTheDocument();
   });
+
+  test('disables Download Type when the playlist is STRM only', () => {
+    setupDialog({ playlist: { ...basePlaylist, media_mode: 'strm' } });
+    expect(screen.getByLabelText('Download Type')).toBeDisabled();
+  });
+
+  test('clears an MP3 download type when switching to STRM only', async () => {
+    setupDialog({ playlist: { ...basePlaylist, audio_format: 'mp3_only' } });
+
+    fireEvent.mouseDown(screen.getByLabelText('Media mode'));
+    fireEvent.click(await screen.findByRole('option', { name: /STRM only/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => {
+      expect(mockMutationsReturn.updateSettings).toHaveBeenCalledWith(
+        'PL123',
+        expect.objectContaining({ media_mode: 'strm', audio_format: null })
+      );
+    });
+  });
 });

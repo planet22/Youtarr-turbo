@@ -13,6 +13,8 @@ const { probeVideoDimensions, probeVideoDuration, selectionTierForHeight } = req
 const hardwareEncoderModule = require('./hardwareEncoderModule');
 const { TRANSCODE_PROGRESS_MARKER } = require('./constants/outputMarkers');
 const { JobVideoDownload } = require('../models');
+const jobEventLog = require('./jobEventLog');
+const { EVENT_TYPES } = require('./jobEventLog/eventCatalog');
 const videoPersistence = require('./videoPersistence');
 const { VIDEO_PERSISTED_MARKER } = require('./constants/outputMarkers');
 const logger = require('../logger');
@@ -27,6 +29,9 @@ const {
 } = require('./filesystem');
 
 const activeJobId = process.env.YOUTARR_JOB_ID;
+// This subprocess has no job memory of its own; without this its event-log
+// rows would carry no source.
+jobEventLog.rememberJob(activeJobId, process.env.YOUTARR_JOB_TYPE);
 
 // Flat mode: skip video subfolder, files go directly in channel folder.
 // Describes the INCOMING temp layout written by the yt-dlp output template.
@@ -366,14 +371,18 @@ async function transcodeDownloadedVideo(inputPath) {
     return inputPath;
   }
 
-  try {
-    fs.removeSync(inputPath);
-  } catch (err) {
-    logger.warn({ err, inputPath }, '[Post-Process] Could not remove pre-transcode original file');
-  }
   const finalPath = path.join(inputDir, `${inputStem}.mp4`);
   if (outputPath !== finalPath) {
     fs.moveSync(outputPath, finalPath, { overwrite: true });
+  }
+  // Only drop the original once the transcoded file is in place. A same-named
+  // .mp4 original has already been overwritten by the move above.
+  if (inputPath !== finalPath) {
+    try {
+      fs.removeSync(inputPath);
+    } catch (err) {
+      logger.warn({ err, inputPath }, '[Post-Process] Could not remove pre-transcode original file');
+    }
   }
   logger.info({ finalPath, videoCodec, hardwareMode }, '[Post-Process] Transcode complete');
   return finalPath;
@@ -663,6 +672,8 @@ async function resolveTrackedOwnerChannelId(youtubeId, metadataChannelId) {
 // Main execution wrapped in async IIFE to handle async operations
 (async () => {
   if (fs.existsSync(jsonPath)) {
+    // Set when the optional post-download transcode changes the file; logged once the video id is known.
+    let transcodeEvent = null;
     // Optional post-download transcode (config.downloadTranscodeVideoCodec,
     // off by default) - run first, before anything else (NFO/AtomicParsley/
     // moves) touches the file, so every downstream step already sees the
@@ -672,6 +683,11 @@ async function resolveTrackedOwnerChannelId(youtubeId, metadataChannelId) {
     if (parsedPath.ext.toLowerCase() !== '.mp3') {
       const transcodedPath = await transcodeDownloadedVideo(videoPath);
       if (transcodedPath !== videoPath) {
+        transcodeEvent = {
+          at: new Date(),
+          from: path.basename(videoPath),
+          codec: configModule.getConfig().downloadTranscodeVideoCodec,
+        };
         videoPath = transcodedPath;
         parsedPath = path.parse(videoPath);
       }
@@ -1573,7 +1589,10 @@ async function resolveTrackedOwnerChannelId(youtubeId, metadataChannelId) {
         if (persisted) {
           // Control marker, not a log line: stdout flows through yt-dlp to
           // YtdlpOutputRouter, which broadcasts videosUpdated to the listing pages.
-          process.stdout.write(`${VIDEO_PERSISTED_MARKER}${id}\n`);
+          // Carries the library decision videoPersistence just made (an
+          // 'untracked' NZB grab stays out) so the parent's later events match.
+          const trackedSuffix = jobEventLog.isTracked(id) === false ? ' untracked' : '';
+          process.stdout.write(`${VIDEO_PERSISTED_MARKER}${id}${trackedSuffix}\n`);
         }
       } catch (err) {
         logger.error({ err, id }, 'Error persisting downloaded video during post-processing');
@@ -1596,6 +1615,30 @@ async function resolveTrackedOwnerChannelId(youtubeId, metadataChannelId) {
         if (updatedCount > 0) {
           logger.info({ id, activeJobId, finalVideoPath }, 'Marked video as completed in tracking');
         }
+        // Size is best-effort context for the log only; a stat failure must not matter here.
+        let finalFileSize;
+        try {
+          finalFileSize = fs.statSync(finalVideoPath).size;
+        } catch (statErr) {
+          finalFileSize = undefined;
+        }
+        if (transcodeEvent) {
+          jobEventLog.record(EVENT_TYPES.VIDEO_TRANSCODED, {
+            jobId: activeJobId,
+            youtubeId: id,
+            videoTitle: jsonData.title,
+            channelName: jsonData.uploader || jsonData.channel,
+            occurredAt: transcodeEvent.at,
+            detail: { from: transcodeEvent.from, to: path.basename(finalVideoPath), codec: transcodeEvent.codec },
+          });
+        }
+        jobEventLog.record(EVENT_TYPES.VIDEO_FILE_FINALIZED, {
+          jobId: activeJobId,
+          youtubeId: id,
+          videoTitle: jsonData.title,
+          channelName: jsonData.uploader || jsonData.channel,
+          detail: { filePath: finalVideoPath, fileSize: finalFileSize },
+        });
       } catch (err) {
         logger.error({ err, id }, 'Error updating JobVideoDownload status');
         // Don't fail the entire post-processing if this fails

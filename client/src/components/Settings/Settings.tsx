@@ -54,6 +54,7 @@ import { ResolutionTagBackfillSection } from './ResolutionTagBackfillSection';
 import { ChannelImageRegenSection } from './ChannelImageRegenSection';
 import { MetadataRegenSection } from './MetadataRegenSection';
 import { CompactHistorySection } from './CompactHistorySection';
+import { ClearEventLogSection } from './ClearEventLogSection';
 
 interface SettingsProps {
   token: string | null;
@@ -518,6 +519,7 @@ export function Settings({ token }: SettingsProps) {
                 <ChannelImageRegenSection token={token} />
                 <MetadataRegenSection token={token} config={config} onConfigChange={handleConfigChange} />
                 <CompactHistorySection token={token} />
+                <ClearEventLogSection token={token} />
               </>
             }
           />

@@ -224,9 +224,6 @@ function buildSearchXml(results, { categoryName, newznabCategoryIds, baseUrl, ap
     const guid = `https://www.youtube.com/watch?v=${r.youtubeId}`;
     const baseTitle = r.title || r.youtubeId;
     const title = `${baseTitle} ${qualityLabel}`;
-    const downloadUrl =
-      `${baseUrl}/nzb/download/${encodeURIComponent(categoryName)}/${encodeURIComponent(r.youtubeId)}.nzb` +
-      `?title=${encodeURIComponent(baseTitle)}&apikey=${encodeURIComponent(apikey)}${seasonEpisodeParams}`;
     // Real size isn't knowable until downloaded - estimated from the video's
     // actual duration (reliably available from search results) at this
     // result's effective quality tier, rather than one flat number for every
@@ -235,6 +232,11 @@ function buildSearchXml(results, { categoryName, newznabCategoryIds, baseUrl, ap
     const size = typeof r.duration === 'number' && r.duration > 0
       ? estimateFileSizeBytes(heightTier, r.duration)
       : 2147483648;
+    // size rides along to the grab so the SABnzbd queue can report it before
+    // yt-dlp knows the real one.
+    const downloadUrl =
+      `${baseUrl}/nzb/download/${encodeURIComponent(categoryName)}/${encodeURIComponent(r.youtubeId)}.nzb` +
+      `?title=${encodeURIComponent(baseTitle)}&apikey=${encodeURIComponent(apikey)}${seasonEpisodeParams}&size=${size}`;
 
     return `<item>
 <title>${escapeXml(title)}</title>
@@ -274,12 +276,14 @@ ${items}
  * suffix, and a fake segment id) so parseNzbXml can recover it even if a
  * client strips optional-looking tags.
  */
-function buildNzbXml({ youtubeId, categoryName, title, season, ep }) {
+function buildNzbXml({ youtubeId, categoryName, title, season, ep, size }) {
   const displayTitle = `${title || youtubeId} [${youtubeId}]`;
   const segmentId = `${youtubeId}@${categoryName}.youtarr.local`;
   const seasonEpisodeMeta = (season != null && ep != null)
     ? `\n<meta type="season">${escapeXml(season)}</meta>\n<meta type="episode">${escapeXml(ep)}</meta>`
     : '';
+  const sizeMeta = size ? `
+<meta type="size">${escapeXml(size)}</meta>` : '';
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE nzb PUBLIC "-//newzBin//DTD NZB 1.1//EN" "http://www.newzbin.com/DTD/nzb/nzb-1.1.dtd">
 <nzb xmlns="http://www.newzbin.com/DTD/2003/nzb">
@@ -288,7 +292,7 @@ function buildNzbXml({ youtubeId, categoryName, title, season, ep }) {
 <meta type="nzbName">${escapeXml(displayTitle)}</meta>
 <meta type="type">youtarr/${escapeXml(categoryName)}</meta>
 <meta type="youtubeId">${escapeXml(youtubeId)}</meta>
-<meta type="category">${escapeXml(categoryName)}</meta>${seasonEpisodeMeta}
+<meta type="category">${escapeXml(categoryName)}</meta>${seasonEpisodeMeta}${sizeMeta}
 </head>
 <file poster="youtarr@youtarr.local" date="${Math.floor(Date.now() / 1000)}" subject="${escapeXml(displayTitle)}">
 <groups><group>alt.binaries.youtarr</group></groups>
@@ -307,7 +311,7 @@ function buildNzbXml({ youtubeId, categoryName, title, season, ep }) {
  * wrote the file. Regex-based rather than a full XML parser, consistent
  * with escapeXml above (no new XML dependency).
  * @param {Buffer|string} xmlBuffer
- * @returns {{youtubeId: string|null, categoryName: string|null, nzbName: string|null, season: number|null, ep: number|null}}
+ * @returns {{youtubeId: string|null, categoryName: string|null, nzbName: string|null, season: number|null, ep: number|null, size: number|null}}
  */
 function parseNzbXml(xmlBuffer) {
   const xml = Buffer.isBuffer(xmlBuffer) ? xmlBuffer.toString('utf8') : String(xmlBuffer || '');
@@ -325,6 +329,8 @@ function parseNzbXml(xmlBuffer) {
   const epRaw = metaValue('episode');
   const season = seasonRaw !== null ? Number.parseInt(seasonRaw, 10) : null;
   const ep = epRaw !== null ? Number.parseInt(epRaw, 10) : null;
+  const sizeRaw = metaValue('size');
+  const size = sizeRaw !== null ? Number.parseInt(sizeRaw, 10) : null;
 
   if (!youtubeId) {
     const titleMatch = xml.match(/<meta[^>]*type=["']title["'][^>]*>([^<]*)<\/meta>/i) ||
@@ -353,6 +359,7 @@ function parseNzbXml(xmlBuffer) {
     nzbName: nzbName || null,
     season: Number.isFinite(season) ? season : null,
     ep: Number.isFinite(ep) ? ep : null,
+    size: Number.isFinite(size) && size > 0 ? size : null,
   };
 }
 

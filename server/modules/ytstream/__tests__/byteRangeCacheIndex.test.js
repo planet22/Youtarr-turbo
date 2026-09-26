@@ -7,6 +7,7 @@ const path = require('path');
 jest.mock('../paths', () => ({ YTSTREAM_CACHE_DIR: require('path').join(require('os').tmpdir(), 'byterange-index-test-fixed') }));
 
 const paths = require('../paths');
+const jobEventLog = require('../../jobEventLog');
 const {
   PERSISTENT_CACHE_DIR,
   listByteRangeCacheEntries,
@@ -26,6 +27,7 @@ function writeEntry(hash, { youtubeId, complete = true, bytes = 100, withMeta = 
 
 describe('byteRangeCacheIndex', () => {
   beforeEach(() => {
+    jest.clearAllMocks();
     fs.rmSync(paths.YTSTREAM_CACHE_DIR, { recursive: true, force: true });
     fs.mkdirSync(PERSISTENT_CACHE_DIR, { recursive: true });
   });
@@ -112,6 +114,20 @@ describe('byteRangeCacheIndex', () => {
       expect(result.freedBytes).toBeGreaterThanOrEqual(500);
     });
 
+    it('records one cache deletion for the video', async () => {
+      writeEntry('aaa', { youtubeId: 'vid00000001', bytes: 500 });
+      await deleteByteRangeCacheForVideo('vid00000001');
+      expect(jobEventLog.record).toHaveBeenCalledWith('cache.deleted', {
+        youtubeId: 'vid00000001',
+        detail: expect.objectContaining({ reason: 'playback cache deleted for the video' }),
+      });
+    });
+
+    it('records nothing when the video has no cache entries', async () => {
+      await deleteByteRangeCacheForVideo('vid00000001');
+      expect(jobEventLog.record).not.toHaveBeenCalled();
+    });
+
     it('is a no-op when the cache directory does not exist', async () => {
       fs.rmSync(PERSISTENT_CACHE_DIR, { recursive: true, force: true });
       expect(await deleteByteRangeCacheForVideo('vid00000001')).toEqual({ deletedFiles: 0, freedBytes: 0 });
@@ -151,6 +167,53 @@ describe('byteRangeCacheIndex', () => {
       const result = await sweepExpiredByteRangeCache(Date.now() - 24 * 60 * 60 * 1000);
       expect(result.deleted).toBe(1);
       expect(fs.readdirSync(PERSISTENT_CACHE_DIR).sort()).toEqual(['new.json', 'new.mp4']);
+    });
+  });
+
+  describe('sweep and clear events', () => {
+    const past = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000);
+    const age = (hash) => {
+      fs.utimesSync(path.join(PERSISTENT_CACHE_DIR, `${hash}.mp4`), past, past);
+      fs.utimesSync(path.join(PERSISTENT_CACHE_DIR, `${hash}.json`), past, past);
+    };
+
+    it('records each expired entry against its video, even though its sidecar is deleted first', async () => {
+      writeEntry('old', { youtubeId: 'vid00000001', bytes: 300 });
+      age('old');
+      await sweepExpiredByteRangeCache(Date.now() - 24 * 60 * 60 * 1000);
+      expect(jobEventLog.record).toHaveBeenCalledWith('cache.deleted', {
+        youtubeId: 'vid00000001',
+        detail: { filePath: path.join(PERSISTENT_CACHE_DIR, 'old.mp4'), freedBytes: 300, reason: 'expired playback cache' },
+      });
+    });
+
+    it('records one event per entry, not one per file', async () => {
+      writeEntry('old', { youtubeId: 'vid00000001' });
+      age('old');
+      await sweepExpiredByteRangeCache(Date.now() - 24 * 60 * 60 * 1000);
+      expect(jobEventLog.record).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not record entries it left alone', async () => {
+      writeEntry('new', { youtubeId: 'vid00000002' });
+      await sweepExpiredByteRangeCache(Date.now() - 24 * 60 * 60 * 1000);
+      expect(jobEventLog.record).not.toHaveBeenCalled();
+    });
+
+    it('says the cache was cleared when everything is cleared', async () => {
+      writeEntry('aaa', { youtubeId: 'vid00000001' });
+      await clearByteRangeCache();
+      expect(jobEventLog.record).toHaveBeenCalledWith('cache.deleted', {
+        youtubeId: 'vid00000001',
+        detail: expect.objectContaining({ reason: 'playback cache cleared' }),
+      });
+    });
+
+    it('still records an entry whose sidecar is missing, without a video', async () => {
+      writeEntry('orphan', { withMeta: false });
+      fs.utimesSync(path.join(PERSISTENT_CACHE_DIR, 'orphan.mp4'), past, past);
+      await sweepExpiredByteRangeCache(Date.now() - 24 * 60 * 60 * 1000);
+      expect(jobEventLog.record).toHaveBeenCalledWith('cache.deleted', expect.objectContaining({ youtubeId: undefined }));
     });
   });
 

@@ -1,7 +1,8 @@
 const express = require('express');
+const { EVENT_TYPES } = require('../modules/jobEventLog/eventCatalog');
 const { createOverrideSettingsValidator } = require('./overrideSettingsValidator');
 
-function createPlaylistRoutes({ verifyToken, playlistModule, downloadModule, m3uGenerator, mediaServers, models, channelSettingsModule, ratingMapper, subfolderModule, playlistVideoFilters }) {
+function createPlaylistRoutes({ verifyToken, playlistModule, downloadModule, m3uGenerator, mediaServers, models, channelSettingsModule, ratingMapper, subfolderModule, playlistVideoFilters, jobEventLog = { record: () => {} }, primeVideosForEventLog = async () => {} }) {
   const router = express.Router();
   const { Playlist, PlaylistVideo, Video } = models;
 
@@ -805,6 +806,11 @@ function createPlaylistRoutes({ verifyToken, playlistModule, downloadModule, m3u
         { ignored: true, ignored_at: new Date() },
         { where: { playlist_id: req.params.playlistId, youtube_id: req.params.ytId } }
       );
+      await primeVideosForEventLog([req.params.ytId]);
+      jobEventLog.record(EVENT_TYPES.VIDEO_IGNORED, {
+        youtubeId: req.params.ytId,
+        detail: { playlistId: req.params.playlistId, playlistTitle: p.title },
+      });
       res.json({ success: true });
     } catch (err) {
       req.log.error({ err }, 'ignore failed');
@@ -847,6 +853,11 @@ function createPlaylistRoutes({ verifyToken, playlistModule, downloadModule, m3u
         { ignored: false, ignored_at: null },
         { where: { playlist_id: req.params.playlistId, youtube_id: req.params.ytId } }
       );
+      await primeVideosForEventLog([req.params.ytId]);
+      jobEventLog.record(EVENT_TYPES.VIDEO_UNIGNORED, {
+        youtubeId: req.params.ytId,
+        detail: { playlistId: req.params.playlistId, playlistTitle: p.title },
+      });
       res.json({ success: true });
     } catch (err) {
       req.log.error({ err }, 'unignore failed');

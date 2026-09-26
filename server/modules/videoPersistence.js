@@ -1,3 +1,5 @@
+const jobEventLog = require('./jobEventLog');
+const { EVENT_TYPES } = require('./jobEventLog/eventCatalog');
 const Job = require('../models/job');
 const Video = require('../models/video');
 const JobVideo = require('../models/jobvideo');
@@ -5,6 +7,7 @@ const ChannelVideo = require('../models/channelvideo');
 const channelVideoReanchor = require('./channelVideoReanchor');
 const { PUBLISHED_AT_SOURCE } = require('./constants/publishedAtSource');
 const VideoMetadataProcessor = require('./download/videoMetadataProcessor');
+const { parseAuxData } = require('./jobAuxData');
 const { STRM_CACHE_LABEL_PREFIX } = require('./strmCacheOnPlay');
 
 // Mirrors ytstreamTapFinalizer.js's own HLS_BUFFER_CACHE_LABEL_PREFIX -
@@ -128,7 +131,7 @@ class VideoPersistence {
       // so automatic removal can later revert to them instead of losing the
       // library entry entirely. See videoDeletionModule.deleteVideoById.
       if (previousStrmFilePath && updateData.is_strm === false) {
-        this._archiveStaleStrmSidecars(previousStrmFilePath);
+        this._archiveStaleStrmSidecars(previousStrmFilePath, videoInstance);
       }
     } else {
       try {
@@ -152,6 +155,18 @@ class VideoPersistence {
         }
       }
     }
+
+    // An 'untracked'-strategy NZB grab gets a real row here too (until
+    // Sonarr/Radarr's history-delete removes it) - marking it tracked in
+    // between would make every event in this job's log read as "tracked"
+    // even though its whole point is to end up untracked. Leave the state
+    // NZB_GRAB_REQUESTED already set (see server/routes/nzb.js) alone.
+    // A Job row read fresh from the DB has no `data`; its aux_data column holds the same fields.
+    // Marked explicitly either way: the post-processor subprocess has no library
+    // state of its own, so without this its events would record "unknown".
+    const nzb = jobInstance?.data?.nzb || parseAuxData(jobInstance?.aux_data).nzb;
+    jobEventLog.markTracked(videoInstance.youtubeId, nzb?.importStrategy !== 'untracked');
+    jobEventLog.rememberVideo(videoInstance.youtubeId, { title: videoInstance.youTubeVideoName, channelName: videoInstance.youTubeChannelName });
 
     // Create JobVideo relationship if needed
     const shouldCreateJobVideo = alwaysCreateJobVideo || !videoExisted;
@@ -188,7 +203,7 @@ class VideoPersistence {
    * @param {string} oldStrmFilePath
    * @private
    */
-  _archiveStaleStrmSidecars(oldStrmFilePath) {
+  _archiveStaleStrmSidecars(oldStrmFilePath, video = {}) {
     const fs = require('fs');
     const strmMediaInfoCache = require('./strmMediaInfoCache');
     const oldCachePath = strmMediaInfoCache.getMediaInfoCachePath(oldStrmFilePath);
@@ -197,6 +212,12 @@ class VideoPersistence {
         if (fs.existsSync(p)) {
           fs.renameSync(p, `${p}.cached`);
           logger.info({ path: p }, 'Archived STRM sidecar after real download completed');
+          jobEventLog.record(EVENT_TYPES.STRM_ARCHIVED, {
+            youtubeId: video.youtubeId,
+            videoTitle: video.youTubeVideoName,
+            channelName: video.youTubeChannelName,
+            detail: { path: p },
+          });
         }
       } catch (err) {
         logger.warn({ err, path: p }, 'Failed to archive STRM sidecar (non-fatal)');

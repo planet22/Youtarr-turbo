@@ -24,6 +24,7 @@ describe('cronJobs task registry', () => {
     }));
     jest.doMock('../notificationModule', () => ({ sendAutoRemovalNotification: jest.fn() }));
     jest.doMock('../ytdlpModule', () => ({ performUpdate: jest.fn() }));
+    jest.doMock('../videoThumbnailCache', () => ({ pruneUnused: jest.fn(() => Promise.resolve(0)) }));
     jest.doMock('../configModule', () => ({
       getConfig: jest.fn(() => ({})),
       updateConfig: jest.fn(),
@@ -43,7 +44,9 @@ describe('cronJobs task registry', () => {
       'session-cleanup',
       'stream-history-prune',
       'metadata-cache-prune',
+      'job-event-prune',
       'metadata-backfill',
+      'thumbnail-prune',
       'ytdlp-update'
     ]);
   });

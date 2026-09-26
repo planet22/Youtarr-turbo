@@ -551,6 +551,38 @@ describe('DownloadHistory', () => {
     expect(rows.length).toBe(2); // 1 header + the NZB job only
   });
 
+  describe('Untracked NZB grabs', () => {
+    const nzbJob = (nzb: NonNullable<Job['data']>['nzb']): Job => ({
+      id: 'nzb-job',
+      jobType: 'Sonarr/Radarr: TV [nzbvid123]',
+      status: 'Completed',
+      output: '',
+      timeCreated: Date.now(),
+      timeInitiated: Date.now(),
+      data: { videos: [], nzb: { categoryName: 'TV', youtubeId: 'nzbvid123', nzbName: 'Some Show S01E01', ...nzb } },
+    });
+
+    test('marks an untracked-strategy grab as untracked on desktop', () => {
+      render(<DownloadHistory {...defaultProps} jobs={[nzbJob({ importStrategy: 'untracked' })]} />);
+      expect(screen.getByTestId('untracked-badge')).toBeInTheDocument();
+    });
+
+    test('marks an untracked-strategy grab as untracked on mobile', () => {
+      render(<DownloadHistory {...defaultProps} jobs={[nzbJob({ importStrategy: 'untracked' })]} isMobile />);
+      expect(screen.getByTestId('untracked-badge')).toBeInTheDocument();
+    });
+
+    test('marks a grab already dropped after import as untracked', () => {
+      render(<DownloadHistory {...defaultProps} jobs={[nzbJob({ importStrategy: 'hardlink', untracked: true })]} />);
+      expect(screen.getByTestId('untracked-badge')).toBeInTheDocument();
+    });
+
+    test('does not mark a hardlink-strategy grab as untracked', () => {
+      render(<DownloadHistory {...defaultProps} jobs={[nzbJob({ importStrategy: 'hardlink' })]} />);
+      expect(screen.queryByTestId('untracked-badge')).not.toBeInTheDocument();
+    });
+  });
+
   test('Source filter narrows the list to jobs matching the selected source', async () => {
     const user = userEvent.setup();
     const jobs: Job[] = [

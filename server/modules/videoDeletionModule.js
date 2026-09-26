@@ -1,9 +1,13 @@
 const { Video } = require('../models');
+const { sequelize } = require('../db');
 const fs = require('fs').promises;
 const path = require('path');
 const logger = require('../logger');
 const { isVideoDirectory, cleanupEmptyChannelDirectory, cleanupEmptyParents, removeEmptyDescendants, isSubfolderDir, listSubdirectories, removeDirectoryResilient } = require('./filesystem');
 const m3uGenerator = require('./m3uGenerator');
+const videoThumbnailCache = require('./videoThumbnailCache');
+const jobEventLog = require('./jobEventLog');
+const { EVENT_TYPES } = require('./jobEventLog/eventCatalog');
 
 class VideoDeletionModule {
   constructor() {}
@@ -81,6 +85,21 @@ class VideoDeletionModule {
     }
   }
 
+  // Title/channel come from the row in hand, so the log entry stays readable
+  // even if the Video row is later purged. Who asked for the deletion (the
+  // nightly auto-removal, ...) arrives via jobEventLog.runWithContext.
+  recordVideoDeleted(video, detail = {}) {
+    jobEventLog.record(EVENT_TYPES.VIDEO_DELETED, {
+      youtubeId: video.youtubeId,
+      videoTitle: video.youTubeVideoName,
+      channelName: video.youTubeChannelName,
+      // A purge deletes the row itself, so the video is no longer in the library;
+      // an ordinary delete keeps the row (marked removed), so nothing is claimed.
+      isTracked: detail.purged ? false : undefined,
+      detail,
+    });
+  }
+
   /**
    * Delete a single video by ID
    * Deletes the video directory from disk and marks the video as removed in the database
@@ -113,6 +132,7 @@ class VideoDeletionModule {
       if (!video.filePath) {
         // No file path, just mark as removed in database
         await video.update({ removed: true });
+        this.recordVideoDeleted(video, { noFilePath: true });
         return {
           success: true,
           videoId,
@@ -197,6 +217,7 @@ class VideoDeletionModule {
 
       // Mark video as removed in database
       await video.update({ removed: true });
+      this.recordVideoDeleted(video, { filePath: video.filePath });
 
       // Best-effort cleanup of empty channel directory
       await this._tryCleanupChannelDirectory(video.filePath, flat);
@@ -232,6 +253,12 @@ class VideoDeletionModule {
    *   through to normal deletion.
    * @private
    */
+  _getStrmBackupPath(video) {
+    const dir = path.dirname(video.filePath);
+    const stem = path.basename(video.filePath, path.extname(video.filePath));
+    return path.join(dir, `${stem}.strm.cached`);
+  }
+
   async _tryRevertToStrm(video) {
     // Module-scope `fs` (top of file) is already fs.promises; only the sync
     // existsSync check below needs the callback-style module directly.
@@ -240,7 +267,7 @@ class VideoDeletionModule {
 
     const dir = path.dirname(video.filePath);
     const stem = path.basename(video.filePath, path.extname(video.filePath));
-    const strmBackupPath = path.join(dir, `${stem}.strm.cached`);
+    const strmBackupPath = this._getStrmBackupPath(video);
 
     if (!fsSync.existsSync(strmBackupPath)) {
       return null;
@@ -250,19 +277,26 @@ class VideoDeletionModule {
     const restoredCachePath = strmMediaInfoCache.getMediaInfoCachePath(restoredStrmPath);
     const cacheBackupPath = `${restoredCachePath}.cached`;
 
+    // Restore the STRM backups before deleting the media file, so a failed
+    // rename cannot leave the row pointing at a file that is already gone.
+    const renamed = [];
+    let mediaDeleted = false;
     try {
+      await fs.rename(strmBackupPath, restoredStrmPath);
+      renamed.push([restoredStrmPath, strmBackupPath]);
+      if (fsSync.existsSync(cacheBackupPath)) {
+        await fs.rename(cacheBackupPath, restoredCachePath);
+        renamed.push([restoredCachePath, cacheBackupPath]);
+      }
+
       await fs.unlink(video.filePath).catch((err) => {
         if (err.code !== 'ENOENT') throw err;
       });
+      mediaDeleted = true;
       if (video.audioFilePath) {
         await fs.unlink(video.audioFilePath).catch((err) => {
           if (err.code !== 'ENOENT') throw err;
         });
-      }
-
-      await fs.rename(strmBackupPath, restoredStrmPath);
-      if (fsSync.existsSync(cacheBackupPath)) {
-        await fs.rename(cacheBackupPath, restoredCachePath);
       }
 
       const strmFileSize = (await fs.stat(restoredStrmPath)).size;
@@ -306,6 +340,13 @@ class VideoDeletionModule {
         }
       }
 
+      jobEventLog.record(EVENT_TYPES.VIDEO_REVERTED_TO_STRM, {
+        youtubeId: video.youtubeId,
+        videoTitle: video.youTubeVideoName,
+        channelName: video.youTubeChannelName,
+        detail: { restoredStrmPath },
+      });
+
       return {
         success: true,
         videoId: video.id,
@@ -313,6 +354,13 @@ class VideoDeletionModule {
         message: 'Reverted to STRM playback (cached file removed)',
       };
     } catch (err) {
+      if (!mediaDeleted) {
+        // Nothing was lost yet: put the backups back so a later attempt can
+        // still find them.
+        for (const [from, to] of renamed.reverse()) {
+          await fs.rename(from, to).catch(() => {});
+        }
+      }
       logger.error({ err, videoId: video.id, filePath: video.filePath }, '[Auto-Removal] Revert-to-STRM failed, falling back to normal deletion');
       return null;
     }
@@ -382,6 +430,7 @@ class VideoDeletionModule {
    * @returns {Promise<{success:boolean, reverted:number, failed:number, thresholdHours:number}>}
    */
   async sweepExpiredCachedVideos() {
+    const fsSync = require('fs');
     const configModule = require('./configModule');
     const { Op } = require('sequelize');
     const config = configModule.getConfig();
@@ -402,7 +451,20 @@ class VideoDeletionModule {
 
     let reverted = 0;
     let failed = 0;
+    let skipped = 0;
     for (const video of candidates) {
+      // No archived STRM backup means this file was never cached from a STRM,
+      // so it can never be reverted: skip it quietly instead of failing and
+      // warning about it on every nightly sweep.
+      if (!fsSync.existsSync(this._getStrmBackupPath(video))) {
+        skipped += 1;
+        logger.debug(
+          { videoId: video.id, youtubeId: video.youtubeId },
+          '[Cache Expiry] Skipping expired cached video with no STRM backup'
+        );
+        continue;
+      }
+
       const result = await this._tryRevertToStrm(video);
       if (result && result.success) {
         reverted += 1;
@@ -419,7 +481,7 @@ class VideoDeletionModule {
       logger.info({ reverted, failed, thresholdHours }, '[Cache Expiry] Swept expired cache-on-play videos back to STRM');
     }
 
-    return { success: true, reverted, failed, thresholdHours };
+    return { success: true, reverted, failed, skipped, thresholdHours };
   }
 
   /**
@@ -553,9 +615,14 @@ class VideoDeletionModule {
       const channelId = video.channel_id;
       const youtubeId = video.youtubeId;
 
-      await JobVideo.destroy({ where: { video_id: videoId } });
-      await VideoWatchStatus.destroy({ where: { video_id: videoId } });
-      await video.destroy();
+      // One transaction, so a failure partway cannot leave a half-purged video.
+      await sequelize.transaction(async (transaction) => {
+        await JobVideo.destroy({ where: { video_id: videoId }, transaction });
+        await VideoWatchStatus.destroy({ where: { video_id: videoId }, transaction });
+        await video.destroy({ transaction });
+      });
+      this.recordVideoDeleted(video, { purged: true });
+      await videoThumbnailCache.removeThumbnail(youtubeId);
 
       // yt-dlp's download-archive otherwise still remembers this video, so a
       // later backfillFromCompleteList run (server startup, or the daily

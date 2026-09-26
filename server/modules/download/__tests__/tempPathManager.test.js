@@ -1,3 +1,7 @@
+// This suite's fixtures are POSIX paths, so run the code under test against POSIX
+// path semantics on every platform (a no-op on Linux).
+jest.mock('path', () => jest.requireActual('path').posix);
+
 const fs = require('fs-extra');
 
 // Mock configModule BEFORE requiring tempPathManager

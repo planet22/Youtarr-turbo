@@ -14,6 +14,8 @@ const logger = require('../../logger');
 const configModule = require('../configModule');
 const { HLS_UNTRACKED_BUFFER_CACHE_DIR } = require('./paths');
 const { streamDebug } = require('./streamDebug');
+const jobEventLog = require('../jobEventLog');
+const { EVENT_TYPES } = require('../jobEventLog/eventCatalog');
 const {
   listByteRangeCacheEntries,
   deleteByteRangeCacheForVideo,
@@ -80,6 +82,10 @@ async function sweepExpiredUntrackedBufferCache() {
         await fs.promises.unlink(filePath);
         deleted += 1;
         freedBytes += stat.size;
+        jobEventLog.record(EVENT_TYPES.CACHE_DELETED, {
+          youtubeId: path.basename(entry, path.extname(entry)),
+          detail: { filePath, freedBytes: stat.size, ageHours: Math.round((Date.now() - stat.mtimeMs) / 3600000), reason: 'expired hidden cache' },
+        });
       } catch (err) {
         logger.warn({ err, filePath }, 'ytstream: failed to expire one untracked buffer cache file');
       }
@@ -131,6 +137,10 @@ async function deleteUntrackedBufferCacheFile(youtubeId) {
   if (!filePath) return byteRangeResult.deletedFiles > 0;
   try {
     await fs.promises.unlink(filePath);
+    jobEventLog.record(EVENT_TYPES.CACHE_DELETED, {
+      youtubeId,
+      detail: { filePath, reason: 'deleted from the library' },
+    });
     return true;
   } catch (err) {
     if (err.code === 'ENOENT') return byteRangeResult.deletedFiles > 0;

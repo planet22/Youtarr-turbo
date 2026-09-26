@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
 import { useSwipeable } from 'react-swipeable';
@@ -34,6 +34,8 @@ import VideosListMobile from './components/VideosListMobile';
 import CacheDetailDialog from './components/CacheDetailDialog';
 import { useVideosData } from './hooks/useVideosData';
 import { useCacheActions } from './hooks/useCacheActions';
+import PipPlayerContext from '../../contexts/PipPlayerContext';
+import { videoThumbnailUrl } from '../../utils/videoThumbnail';
 import {
   INFINITE_SCROLL_FETCH_SIZE,
   VideoListContainer,
@@ -96,7 +98,7 @@ function videoDataToModalData(video: VideoData): VideoModalData {
     youtubeId: video.youtubeId,
     title: video.youTubeVideoName,
     channelName: video.youTubeChannelName,
-    thumbnailUrl: `/images/videothumb-${video.youtubeId}.jpg`,
+    thumbnailUrl: videoThumbnailUrl(video.youtubeId),
     duration: video.duration,
     publishedAt: video.originalDate || null,
     addedAt: video.timeCreated || null,
@@ -273,6 +275,9 @@ function VideosPage({ token }: VideosPageProps) {
   // branch). Mobile's List view is the main place this was visible, since
   // its compact rows make scrolling deep into hot-loaded pages routine.
   const refetchList = useCallback(() => {
+    // Give thumbnails that errored earlier (e.g. requested before the file
+    // landed) another chance instead of staying "No thumbnail" until reload.
+    setImageErrors({});
     if (useInfiniteScroll && page > 1) {
       setVideos([]);
       setPage(1);
@@ -442,11 +447,15 @@ function VideosPage({ token }: VideosPageProps) {
         .filter((m) => m.hasCachedMetadata)
         .map((m) => m.youtubeId);
 
-      await Promise.all([
+      const phaseOneResults = await Promise.all([
         trackedCachedVideoIds.length ? revertToStrm(trackedCachedVideoIds, token) : Promise.resolve(null),
         bufferCacheYoutubeIds.length ? cacheActions.bulkClearVideoCache(bufferCacheYoutubeIds) : Promise.resolve(null),
         cachedMetadataIds.length ? cacheActions.bulkClearMetadataCache(cachedMetadataIds) : Promise.resolve(null),
       ]);
+      const phaseOneFailedCount = phaseOneResults.reduce(
+        (count, result) => count + (result ? result.failed.length : 0),
+        0
+      );
 
       // Phase 2: delete every tracked, not-yet-removed video (files + mark removed).
       const toDeleteIds = metas
@@ -466,7 +475,7 @@ function VideosPage({ token }: VideosPageProps) {
         ? await purgeVideos(toPurgeIds, token)
         : { success: true, purged: [], failed: [] };
 
-      const failedCount = deleteResult.failed.length + purgeResult.failed.length;
+      const failedCount = phaseOneFailedCount + deleteResult.failed.length + purgeResult.failed.length;
       if (failedCount === 0) {
         setSuccessMessage(`Obliterated ${metas.length} video${metas.length !== 1 ? 's' : ''}`);
       } else {
@@ -914,8 +923,9 @@ function VideosPage({ token }: VideosPageProps) {
 
     const result = await cacheActions.bulkClearMetadataCache(eligibleIds);
     if (result.success) {
+      const clearedCount = eligibleIds.length - result.failed.length;
       setSuccessMessage(
-        `Cleared cached metadata for ${eligibleIds.length - result.failed.length} video${eligibleIds.length !== 1 ? 's' : ''}`
+        `Cleared cached metadata for ${clearedCount} video${clearedCount !== 1 ? 's' : ''}`
       );
       selection.clear();
       refetchList();
@@ -970,8 +980,9 @@ function VideosPage({ token }: VideosPageProps) {
     if (!cacheDetailTarget) return;
     setClearingCacheDetail(true);
     try {
+      let cleared: boolean;
       if (cacheDetailTarget.kind === 'metadata') {
-        await cacheActions.clearMetadataCache(cacheDetailTarget.youtubeId);
+        cleared = await cacheActions.clearMetadataCache(cacheDetailTarget.youtubeId);
       } else {
         const meta = videoMetaRef.current.get(cacheDetailTarget.youtubeId);
         // A materialized cache-on-play file (hasCachedVideo) reverts the
@@ -979,10 +990,17 @@ function VideosPage({ token }: VideosPageProps) {
         // genuinely untracked row just deletes the hidden buffer-cache file
         // directly - no is_strm flip to revert.
         if (meta && meta.isTracked && meta.hasCachedVideo && meta.id !== null) {
-          await revertToStrm([meta.id], token);
+          const revertResult = await revertToStrm([meta.id], token);
+          cleared = revertResult.failed.length === 0;
         } else {
-          await cacheActions.clearVideoCache(cacheDetailTarget.youtubeId);
+          cleared = await cacheActions.clearVideoCache(cacheDetailTarget.youtubeId);
         }
+      }
+      if (!cleared) {
+        setErrorMessage(
+          cacheDetailTarget.kind === 'metadata' ? 'Failed to clear cached metadata' : 'Failed to clear cached video'
+        );
+        return;
       }
       setCacheDetailTarget(null);
       refetchList();
@@ -1032,6 +1050,7 @@ function VideosPage({ token }: VideosPageProps) {
           allowRedownload: settings.allowRedownload,
           subfolder: settings.subfolder,
           audioFormat: settings.audioFormat,
+          mediaMode: settings.mediaMode,
           rating: settings.rating,
           skipVideoFolder: settings.skipVideoFolder,
         }
@@ -1066,6 +1085,9 @@ function VideosPage({ token }: VideosPageProps) {
   };
 
   const handleOpenModal = (video: VideoData) => setModalVideo(video);
+
+  const pipPlayerContext = useContext(PipPlayerContext);
+  const handlePipPlay = (video: VideoData) => pipPlayerContext?.play(video.youtubeId, video.youTubeVideoName);
 
   const handleOpenCacheDetail = (youtubeId: string, kind: 'metadata' | 'video') =>
     setCacheDetailTarget({ youtubeId, kind });
@@ -1205,6 +1227,7 @@ function VideosPage({ token }: VideosPageProps) {
                 deleteDisabled={deleteLoading}
                 onToggleSelect={handleToggleSelect}
                 onOpenModal={handleOpenModal}
+                onPipPlay={handlePipPlay}
                 onToggleProtection={handleToggleProtection}
                 onDeleteSingle={handleDeleteSingleVideo}
                 onImageError={handleImageError}
@@ -1228,6 +1251,7 @@ function VideosPage({ token }: VideosPageProps) {
           deleteDisabled={deleteLoading}
           onToggleSelect={handleToggleSelect}
           onOpenModal={handleOpenModal}
+          onPipPlay={handlePipPlay}
           onToggleProtection={handleToggleProtection}
           onDeleteSingle={handleDeleteSingleVideo}
           onImageError={handleImageError}
@@ -1251,6 +1275,7 @@ function VideosPage({ token }: VideosPageProps) {
         onToggleSelect={handleToggleSelect}
         onSortChange={handleSortChange}
         onOpenModal={handleOpenModal}
+        onPipPlay={handlePipPlay}
         onToggleProtection={handleToggleProtection}
         onDeleteSingle={handleDeleteSingleVideo}
         onStrmChipClick={handleStrmChipClick}

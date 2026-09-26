@@ -8,7 +8,7 @@ import {
   Clock as ScheduleIcon,
   AlarmCheck as AlarmOnIcon,
 } from 'lucide-react';
-import { Database as MetadataCacheIcon, ClearCache as ClearCacheIcon } from '../../../lib/icons';
+import { Database as MetadataCacheIcon, ClearCache as ClearCacheIcon, PipIcon } from '../../../lib/icons';
 import { formatDuration, formatYTDate } from '../../../utils';
 import { formatAddedDateTime, formatFileSize } from '../../../utils/formatters';
 import { getDisplayPath } from '../../../utils/paths';
@@ -19,6 +19,7 @@ import RatingBadge from '../../shared/RatingBadge';
 import DownloadFormatIndicator from '../../shared/DownloadFormatIndicator';
 import ProtectionShieldButton from '../../shared/ProtectionShieldButton';
 import ThumbnailClickOverlay from '../../shared/ThumbnailClickOverlay';
+import { videoThumbnailUrl } from '../../../utils/videoThumbnail';
 import AvailabilityChip from '../../shared/AvailabilityChip';
 import { SHARED_STATUS_CHIP_SMALL_STYLE } from '../../shared/chipStyles';
 import ChannelNameDisplay from './ChannelNameDisplay';
@@ -33,6 +34,7 @@ export interface VideoCardProps {
   deleteDisabled: boolean;
   onToggleSelect: (youtubeId: string) => void;
   onOpenModal: (video: VideoData) => void;
+  onPipPlay: (video: VideoData) => void;
   onToggleProtection: (videoId: number) => void;
   onDeleteSingle: (videoId: number) => void;
   onImageError: (youtubeId: string) => void;
@@ -55,6 +57,7 @@ function VideoCard({
   deleteDisabled,
   onToggleSelect,
   onOpenModal,
+  onPipPlay,
   onToggleProtection,
   onDeleteSingle,
   onImageError,
@@ -115,7 +118,7 @@ function VideoCard({
           </Box>
         ) : (
           <img
-            src={`/images/videothumb-${video.youtubeId}.jpg`}
+            src={videoThumbnailUrl(video.youtubeId)}
             alt="thumbnail"
             style={{
               position: 'absolute',
@@ -157,7 +160,7 @@ function VideoCard({
           </Box>
         )}
 
-        {video.youtube_removed && (
+        {Boolean(video.youtube_removed) && (
           <Box
             style={{
               position: 'absolute',
@@ -177,7 +180,7 @@ function VideoCard({
           </Box>
         )}
 
-        {video.removed && (
+        {Boolean(video.removed) && (
           <Box
             style={{
               position: 'absolute',
@@ -380,6 +383,17 @@ function VideoCard({
               }}
             />
           </Box>
+          <Tooltip title="Quick play (Picture-in-Picture)">
+            <span style={{ flexShrink: 0 }}>
+              <IconButton
+                size="small"
+                aria-label="Quick play in Picture-in-Picture"
+                onClick={() => onPipPlay(video)}
+              >
+                <PipIcon size={18} />
+              </IconButton>
+            </span>
+          </Tooltip>
           {isTracked && video.id !== null && !video.removed && (
             <Tooltip title="Delete video from disk">
               <span style={{ flexShrink: 0 }}>

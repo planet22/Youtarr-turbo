@@ -19,6 +19,9 @@ const mockStrmMaterializer = {
 };
 jest.mock('../../modules/strmMaterializer', () => mockStrmMaterializer);
 
+// The queue routes never touch NZB status; stubbing it keeps the real config/job modules (and their file watchers) from loading.
+jest.mock('../nzb', () => ({ computeNzbStatusDetail: jest.fn() }));
+
 describe('Job queue routes', () => {
   let app;
   let mockJobModule;

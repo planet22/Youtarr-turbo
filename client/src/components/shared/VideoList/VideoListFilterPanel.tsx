@@ -196,7 +196,12 @@ function InlinePanel({
     >
       <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', alignItems: 'flex-end' }}>
         {nonStatusFilters.map((filter, index) => (
-          <div key={filter.id + '-' + index}>{renderFilter(filter, false)}</div>
+          <React.Fragment key={filter.id + '-' + index}>
+            <div>{renderFilter(filter, false)}</div>
+            {filter.id === 'dateRangeString' && filter.breakAfter && (
+              <div style={{ flexBasis: '100%', height: 0 }} />
+            )}
+          </React.Fragment>
         ))}
         {(hasActiveFilters(filters) || hasSearch) && (
           <Button

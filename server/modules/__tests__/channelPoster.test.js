@@ -1,5 +1,9 @@
 /* eslint-env jest */
 
+// This suite's fixtures are POSIX paths, so run the code under test against POSIX
+// path semantics on every platform (a no-op on Linux).
+jest.mock('path', () => jest.requireActual('path').posix);
+
 // Mock fs-extra module before any imports
 jest.mock('fs-extra');
 jest.mock('../configModule');

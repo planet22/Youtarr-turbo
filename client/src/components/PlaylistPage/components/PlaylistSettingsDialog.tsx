@@ -62,6 +62,9 @@ const MP3_HELPER_TEXT = 'MP3 files are saved at 192kbps in the same folder as vi
 const MP3_ONLY_SYNC_HINT =
   ' MP3 Only playlists sync to media servers as music playlists: the server needs a music-type library that includes your Youtarr-Turbo output folder.';
 
+const STRM_ONLY_AUDIO_HINT =
+  'Not available in STRM only mode: no media is downloaded, so MP3 would be ignored.';
+
 const PlaylistSettingsDialog: React.FC<PlaylistSettingsDialogProps> = ({
   open,
   playlist,
@@ -97,6 +100,8 @@ const PlaylistSettingsDialog: React.FC<PlaylistSettingsDialogProps> = ({
   const wasAudio = playlist.audio_format === 'mp3_only';
   const willBeAudio = form.audio_format === 'mp3_only';
   const syncTypeChanges = wasAudio !== willBeAudio;
+
+  const isStrmOnly = (form.media_mode ?? config.mediaMode) === 'strm';
 
   // Saving a new order doesn't sync anything by itself.
   const sortOrderChanges = form.sort_order !== (playlist.sort_order ?? 'default');
@@ -172,8 +177,11 @@ const PlaylistSettingsDialog: React.FC<PlaylistSettingsDialogProps> = ({
             <AudioFormatSelect
               value={form.audio_format}
               onChange={(value) => update('audio_format', value)}
+              disabled={isStrmOnly}
               helperText={
-                form.audio_format
+                isStrmOnly
+                  ? STRM_ONLY_AUDIO_HINT
+                  : form.audio_format
                   ? form.audio_format === 'mp3_only'
                     ? MP3_HELPER_TEXT + MP3_ONLY_SYNC_HINT
                     : MP3_HELPER_TEXT
@@ -205,7 +213,15 @@ const PlaylistSettingsDialog: React.FC<PlaylistSettingsDialogProps> = ({
                 labelId={mediaModeLabelId}
                 size="small"
                 value={form.media_mode ?? 'default'}
-                onValueChange={(next) => update('media_mode', next === 'default' ? null : (next as string))}
+                onValueChange={(next) => {
+                  const mediaMode = next === 'default' ? null : (next as string);
+                  setForm((prev) => ({
+                    ...prev,
+                    media_mode: mediaMode,
+                    // MP3 is meaningless for STRM only - clear it rather than keep a hidden, ignored value.
+                    audio_format: (mediaMode ?? config.mediaMode) === 'strm' ? null : prev.audio_format,
+                  }));
+                }}
               >
                 <MenuItem value="default">
                   Use global setting ({MEDIA_MODE_LABEL[config.mediaMode || 'download']})

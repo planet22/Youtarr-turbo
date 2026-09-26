@@ -53,19 +53,9 @@ describe('VideoThumbnail', () => {
     expect(onClick).toHaveBeenCalledTimes(1);
   });
 
-  test('falls back to the YouTube CDN thumbnail on the first load failure without calling onError', () => {
+  test('calls onError when the thumbnail fails to load (the server already tried YouTube)', () => {
     const { onError } = renderThumbnail();
 
-    fireEvent.error(screen.getByRole('img', { name: 'Test Video' }));
-
-    expect(screen.getByRole('img', { name: 'Test Video' })).toHaveAttribute('src', 'https://i.ytimg.com/vi/abc123/hqdefault.jpg');
-    expect(onError).not.toHaveBeenCalled();
-  });
-
-  test('calls onError when the fallback image also fails to load', () => {
-    const { onError } = renderThumbnail();
-
-    fireEvent.error(screen.getByRole('img', { name: 'Test Video' }));
     fireEvent.error(screen.getByRole('img', { name: 'Test Video' }));
 
     expect(onError).toHaveBeenCalledTimes(1);
@@ -123,5 +113,15 @@ describe('VideoThumbnail', () => {
       />
     );
     expect(screen.getByRole('img', { name: 'Test Video' })).toHaveStyle({ objectFit: 'cover' });
+  });
+
+  test('shows the Untracked banner when untracked', () => {
+    renderThumbnail({ untracked: true });
+    expect(screen.getByTestId('untracked-badge')).toHaveTextContent('Untracked');
+  });
+
+  test('shows no Untracked banner by default', () => {
+    renderThumbnail();
+    expect(screen.queryByTestId('untracked-badge')).not.toBeInTheDocument();
   });
 });

@@ -6,6 +6,7 @@ import { isDownloadable, statusLabel, PublishedDate, toDownloadFileProps } from 
 import DownloadFormatIndicator from '../../shared/DownloadFormatIndicator';
 import WatchedChip from '../../shared/WatchedChip';
 import { SHARED_STATUS_CHIP_SMALL_STYLE, SHARED_COMPACT_CHIP_OVERRIDES } from '../../shared/chipStyles';
+import { videoThumbnailUrl } from '../../../utils/videoThumbnail';
 
 const THUMB_WIDTH = 120;
 const THUMB_HEIGHT = 68;
@@ -50,7 +51,7 @@ const PlaylistVideoCard: React.FC<PlaylistVideoCardProps> = ({
       >
         {video.thumbnail && (
           <img
-            src={video.thumbnail}
+            src={videoThumbnailUrl(video.youtube_id, { noCache: true })}
             alt=""
             className="block object-cover rounded-[var(--radius-thumb)]"
             style={{ width: THUMB_WIDTH, height: THUMB_HEIGHT }}

@@ -37,6 +37,7 @@ import { DownloadSettings } from './DownloadManager/ManualDownload/types';
 import SubscriptionsBackButton from './shared/SubscriptionsBackButton';
 import VideoModal from './shared/VideoModal';
 import { VideoModalData } from './shared/VideoModal/types';
+import { videoThumbnailUrl } from '../utils/videoThumbnail';
 
 interface PlaylistPageProps {
   token: string | null;
@@ -58,7 +59,7 @@ function toModalData(v: PlaylistVideo): VideoModalData {
     youtubeId: v.youtube_id,
     title: v.title || v.youtube_id,
     channelName: v.channel_name || '',
-    thumbnailUrl: v.thumbnail || `https://i.ytimg.com/vi/${v.youtube_id}/hqdefault.jpg`,
+    thumbnailUrl: v.thumbnail || videoThumbnailUrl(v.youtube_id, { noCache: true }),
     duration: v.duration,
     publishedAt: v.published_at,
     addedAt: v.added_at,
@@ -191,6 +192,7 @@ function PlaylistPage({ token }: PlaylistPageProps) {
             allowRedownload: settings.allowRedownload,
             subfolder: settings.subfolder,
             audioFormat: settings.audioFormat,
+            mediaMode: settings.mediaMode,
             rating: settings.rating,
             skipVideoFolder: settings.skipVideoFolder,
           }
@@ -383,7 +385,7 @@ function PlaylistPage({ token }: PlaylistPageProps) {
 
   const playlistThumbUrl =
     playlist.thumbnail ||
-    (videos[0]?.youtube_id ? `https://i.ytimg.com/vi/${videos[0].youtube_id}/hqdefault.jpg` : '');
+    (videos[0]?.youtube_id ? videoThumbnailUrl(videos[0].youtube_id, { noCache: true }) : '');
 
   return (
     <div>

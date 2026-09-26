@@ -168,6 +168,7 @@ export default function FindVideos({ token }: FindVideosProps) {
             allowRedownload: settings.allowRedownload,
             subfolder: settings.subfolder,
             audioFormat: settings.audioFormat,
+            mediaMode: settings.mediaMode,
             rating: settings.rating,
             skipVideoFolder: settings.skipVideoFolder,
           }

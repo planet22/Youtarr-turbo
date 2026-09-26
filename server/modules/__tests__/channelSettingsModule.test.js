@@ -624,6 +624,29 @@ describe('ChannelSettingsModule', () => {
       ).rejects.toThrow('Channel not found');
     });
 
+    test('reports an unknown channel with status 404', async () => {
+      Channel.findOne.mockResolvedValue(null);
+
+      await expect(
+        channelSettingsModule.updateChannelSettings('UC999999', {})
+      ).rejects.toMatchObject({ statusCode: 404 });
+    });
+
+    test('reports invalid input with status 400', async () => {
+      await expect(
+        channelSettingsModule.updateChannelSettings('UC123456', { video_quality: '999' })
+      ).rejects.toMatchObject({ statusCode: 400 });
+    });
+
+    test('reports a subfolder change during downloads with status 409', async () => {
+      const hasActive = jest.spyOn(channelSettingsModule, 'hasActiveDownloads').mockResolvedValue(true);
+
+      await expect(
+        channelSettingsModule.updateChannelSettings('UC123456', { sub_folder: 'NewFolder' })
+      ).rejects.toMatchObject({ statusCode: 409 });
+      hasActive.mockRestore();
+    });
+
     test('should allow subfolder change when no downloads are active', async () => {
       jobModule.getAllJobs.mockReturnValue({});
 
@@ -1112,6 +1135,8 @@ describe('ChannelSettingsModule', () => {
       ...mockChannel,
       uploader: 'TestChannel'
     };
+    // The module builds paths with path.join, so expectations need the platform separator too.
+    const outputPath = (...parts) => require('path').join('/test/output', ...parts);
 
     beforeEach(() => {
       Video.findAll.mockResolvedValue([]);
@@ -1129,8 +1154,8 @@ describe('ChannelSettingsModule', () => {
       );
 
       expect(fs.move).toHaveBeenCalledWith(
-        '/test/output/TestChannel',
-        '/test/output/__Music/TestChannel',
+        outputPath('TestChannel'),
+        outputPath('__Music/TestChannel'),
         { overwrite: true }
       );
       expect(result.success).toBe(true);
@@ -1148,8 +1173,8 @@ describe('ChannelSettingsModule', () => {
       );
 
       expect(fs.move).toHaveBeenCalledWith(
-        '/test/output/__Music/TestChannel',
-        '/test/output/TestChannel',
+        outputPath('__Music/TestChannel'),
+        outputPath('TestChannel'),
         { overwrite: true }
       );
       expect(result.success).toBe(true);
@@ -1167,8 +1192,8 @@ describe('ChannelSettingsModule', () => {
       );
 
       expect(fs.move).toHaveBeenCalledWith(
-        '/test/output/__Music/TestChannel',
-        '/test/output/__Gaming/TestChannel',
+        outputPath('__Music/TestChannel'),
+        outputPath('__Gaming/TestChannel'),
         { overwrite: true }
       );
       expect(result.success).toBe(true);
@@ -1205,7 +1230,7 @@ describe('ChannelSettingsModule', () => {
 
       await channelSettingsModule.moveChannelFolder(channel, null, 'Music');
 
-      expect(fs.ensureDir).toHaveBeenCalledWith('/test/output/__Music');
+      expect(fs.ensureDir).toHaveBeenCalledWith(outputPath('__Music'));
     });
 
     test('should update video file paths after move', async () => {
@@ -1215,11 +1240,11 @@ describe('ChannelSettingsModule', () => {
 
       const mockVideos = [
         {
-          filePath: '/test/output/TestChannel/video1.mp4',
+          filePath: outputPath('TestChannel/video1.mp4'),
           update: jest.fn()
         },
         {
-          filePath: '/test/output/TestChannel/video2.mp4',
+          filePath: outputPath('TestChannel/video2.mp4'),
           update: jest.fn()
         }
       ];
@@ -1228,10 +1253,10 @@ describe('ChannelSettingsModule', () => {
       await channelSettingsModule.moveChannelFolder(channel, null, 'Music');
 
       expect(mockVideos[0].update).toHaveBeenCalledWith({
-        filePath: '/test/output/__Music/TestChannel/video1.mp4'
+        filePath: outputPath('__Music/TestChannel/video1.mp4')
       });
       expect(mockVideos[1].update).toHaveBeenCalledWith({
-        filePath: '/test/output/__Music/TestChannel/video2.mp4'
+        filePath: outputPath('__Music/TestChannel/video2.mp4')
       });
     });
 
@@ -1515,6 +1540,60 @@ describe('ChannelSettingsModule', () => {
       expect(channelSettingsModule.validateAutoRemovalKeepRecentCount(2.5).valid).toBe(false);
       expect(channelSettingsModule.validateAutoRemovalKeepRecentCount(10001).valid).toBe(false);
       expect(channelSettingsModule.validateAutoRemovalKeepRecentCount('5').valid).toBe(false);
+    });
+  });
+
+  describe('updateVideoFilePaths video/events log', () => {
+    const video = (over = {}) => ({
+      youtubeId: 'abc123', youTubeVideoName: 'A Title', youTubeChannelName: 'A Channel',
+      filePath: '/old/path/TestChannel/video1.mp4', update: jest.fn(), ...over,
+    });
+
+    test('records video.moved with where the file was and where it is now', async () => {
+      Video.findAll.mockResolvedValue([video()]);
+
+      await channelSettingsModule.updateVideoFilePaths('UC1', '/old/path/TestChannel', '/new/path/TestChannel');
+
+      expect(require('../jobEventLog').record).toHaveBeenCalledWith('video.moved', {
+        youtubeId: 'abc123', videoTitle: 'A Title', channelName: 'A Channel',
+        detail: { from: '/old/path/TestChannel/video1.mp4', to: '/new/path/TestChannel/video1.mp4' },
+      });
+    });
+
+    test('records the old path as it was before the update, not after', async () => {
+      const row = video();
+      row.update.mockImplementation((values) => { row.filePath = values.filePath; });
+      Video.findAll.mockResolvedValue([row]);
+
+      await channelSettingsModule.updateVideoFilePaths('UC1', '/old/path/TestChannel', '/new/path/TestChannel');
+
+      expect(require('../jobEventLog').record.mock.calls[0][1].detail.from).toBe('/old/path/TestChannel/video1.mp4');
+    });
+
+    test('records one entry per video whose path changed', async () => {
+      Video.findAll.mockResolvedValue([video(), video({ filePath: '/old/path/TestChannel/video2.mp4' })]);
+
+      await channelSettingsModule.updateVideoFilePaths('UC1', '/old/path/TestChannel', '/new/path/TestChannel');
+
+      expect(require('../jobEventLog').record).toHaveBeenCalledTimes(2);
+    });
+
+    test('records nothing for a video outside the moved folder', async () => {
+      Video.findAll.mockResolvedValue([video({ filePath: '/elsewhere/video.mp4' })]);
+
+      await channelSettingsModule.updateVideoFilePaths('UC1', '/old/path/TestChannel', '/new/path/TestChannel');
+
+      expect(require('../jobEventLog').record).not.toHaveBeenCalled();
+    });
+
+    test('records nothing when saving the new path fails', async () => {
+      const failing = video();
+      failing.update.mockRejectedValue(new Error('db down'));
+      Video.findAll.mockResolvedValue([failing]);
+
+      await expect(channelSettingsModule.updateVideoFilePaths('UC1', '/old/path/TestChannel', '/new/path/TestChannel')).rejects.toThrow('db down');
+
+      expect(require('../jobEventLog').record).not.toHaveBeenCalled();
     });
   });
 });

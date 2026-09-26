@@ -7,7 +7,7 @@ const OWNER_CHANNEL_MAP_MAX_BYTES = 64 * 1024;
 
 // The YOUTARR_* variables are read by the post-processor script to route
 // files and set ratings.
-function buildYtdlpEnv({ jobId, tempBasePath, postProcessDirectives, baseEnv = process.env }) {
+function buildYtdlpEnv({ jobId, jobType = null, tempBasePath, postProcessDirectives, baseEnv = process.env }) {
   const {
     subfolderOverride = null,
     subfolderFallback = null,
@@ -30,6 +30,11 @@ function buildYtdlpEnv({ jobId, tempBasePath, postProcessDirectives, baseEnv = p
     YOUTARR_JOB_ID: jobId,
     TMPDIR: tempBasePath,
   };
+
+  // Lets the post-processor's event-log rows carry the job's source label.
+  if (jobType) {
+    env.YOUTARR_JOB_TYPE = jobType;
+  }
 
   if (subfolderOverride !== null && subfolderOverride !== undefined) {
     env.YOUTARR_SUBFOLDER_OVERRIDE = subfolderOverride;

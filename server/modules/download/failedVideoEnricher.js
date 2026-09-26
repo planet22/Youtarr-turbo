@@ -48,6 +48,7 @@ async function lookupKnownMetadata(youtubeIds) {
   ]);
 
   for (const row of videos) {
+    setIfMissing(row.youtubeId, 'inLibrary', true);
     setIfMissing(row.youtubeId, 'title', row.youTubeVideoName);
     if (row.youTubeChannelName !== UNKNOWN_CHANNEL_PLACEHOLDER) {
       setIfMissing(row.youtubeId, 'channel', row.youTubeChannelName);
@@ -100,4 +101,4 @@ async function enrichFailedVideos(failedVideos = []) {
   }
 }
 
-module.exports = { enrichFailedVideos };
+module.exports = { enrichFailedVideos, lookupKnownMetadata };

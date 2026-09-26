@@ -125,7 +125,7 @@ describe('VideoTableView Component', () => {
     test('renders video thumbnail', () => {
       renderWithProviders(<VideoTableView {...defaultProps} />);
       const img = screen.getByAltText('Test Video Title');
-      expect(img).toHaveAttribute('src', 'https://i.ytimg.com/vi/test123/mqdefault.jpg');
+      expect(img).toHaveAttribute('src', '/images/videothumb-test123.jpg?cache=0');
     });
 
     test('renders video title with HTML decoding', () => {

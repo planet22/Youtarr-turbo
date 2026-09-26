@@ -22,6 +22,7 @@ import ProtectionShieldButton from '../shared/ProtectionShieldButton';
 import RatingBadge from '../shared/RatingBadge';
 import ThumbnailClickOverlay from '../shared/ThumbnailClickOverlay';
 import WatchedChip from '../shared/WatchedChip';
+import { videoThumbnailUrl } from '../../utils/videoThumbnail';
 interface VideoListItemProps {
   video: ChannelVideo;
   checkedBoxes: string[];
@@ -99,7 +100,7 @@ function VideoListItem({
           }}
         >
           <img
-            src={video.thumbnail}
+            src={videoThumbnailUrl(video.youtube_id, { noCache: true })}
             alt={decodeHtml(video.title)}
             style={{
               width: '100%',

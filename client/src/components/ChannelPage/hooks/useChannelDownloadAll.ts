@@ -12,6 +12,7 @@ export interface DownloadAllOverrideSettings {
   allowRedownload?: boolean;
   subfolder?: string | null;
   audioFormat?: string | null;
+  mediaMode?: string;
   rating?: string | null;
   skipVideoFolder?: boolean;
 }

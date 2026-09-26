@@ -11,7 +11,7 @@ const Channel = require('../../../models/channel');
 const ChannelVideo = require('../../../models/channelvideo');
 const PlaylistVideo = require('../../../models/playlistvideo');
 const logger = require('../../../logger');
-const { enrichFailedVideos } = require('../failedVideoEnricher');
+const { enrichFailedVideos, lookupKnownMetadata } = require('../failedVideoEnricher');
 
 describe('enrichFailedVideos', () => {
   beforeEach(() => {
@@ -141,5 +141,31 @@ describe('enrichFailedVideos', () => {
     await expect(enrichFailedVideos(failed)).resolves.toBeUndefined();
     expect(logger.warn).toHaveBeenCalled();
     expect(failed[0].title).toBeUndefined();
+  });
+});
+
+describe('lookupKnownMetadata', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    Video.findAll.mockResolvedValue([]);
+    Channel.findAll.mockResolvedValue([]);
+    ChannelVideo.findAll.mockResolvedValue([]);
+    PlaylistVideo.findAll.mockResolvedValue([]);
+  });
+
+  test('flags a video that has a library row', async () => {
+    Video.findAll.mockResolvedValue([{ youtubeId: 'abc123def45', youTubeVideoName: 'T', youTubeChannelName: 'C' }]);
+
+    const meta = await lookupKnownMetadata(['abc123def45']);
+
+    expect(meta.get('abc123def45').inLibrary).toBe(true);
+  });
+
+  test('does not flag a video only known from a channel listing', async () => {
+    ChannelVideo.findAll.mockResolvedValue([{ youtube_id: 'abc123def45', title: 'T', channel_id: 'UCxx' }]);
+
+    const meta = await lookupKnownMetadata(['abc123def45']);
+
+    expect(meta.get('abc123def45').inLibrary).toBeUndefined();
   });
 });

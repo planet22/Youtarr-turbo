@@ -5,6 +5,7 @@ interface DownloadOverrideSettings {
   allowRedownload?: boolean;
   subfolder?: string | null;
   audioFormat?: string | null;
+  mediaMode?: string;
   rating?: string | null;
   skipVideoFolder?: boolean;
 }
@@ -45,6 +46,7 @@ export function useTriggerDownloads(token: string | null): UseTriggerDownloadsRe
             allowRedownload: overrideSettings.allowRedownload,
             subfolder: overrideSettings.subfolder,
             audioFormat: overrideSettings.audioFormat,
+            mediaMode: overrideSettings.mediaMode,
             rating: overrideSettings.rating,
             skipVideoFolder: overrideSettings.skipVideoFolder
           };

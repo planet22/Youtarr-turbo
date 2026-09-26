@@ -16,6 +16,7 @@ import { formatDurationClock } from '../../../utils';
 import { isDownloadable, statusLabel, PublishedDate, toDownloadFileProps } from './playlistVideoHelpers';
 import DownloadFormatIndicator from '../../shared/DownloadFormatIndicator';
 import WatchedChip from '../../shared/WatchedChip';
+import { videoThumbnailUrl } from '../../../utils/videoThumbnail';
 
 const THUMB_WIDTH = 120;
 const THUMB_HEIGHT = 67;
@@ -102,7 +103,7 @@ const PlaylistVideoTable: React.FC<PlaylistVideoTableProps> = ({
                 >
                   {v.thumbnail && (
                     <img
-                      src={v.thumbnail}
+                      src={videoThumbnailUrl(v.youtube_id, { noCache: true })}
                       alt=""
                       className="block object-cover rounded-[var(--radius-thumb)]"
                       style={{ width: THUMB_WIDTH, height: THUMB_HEIGHT }}

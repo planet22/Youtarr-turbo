@@ -85,7 +85,6 @@ describe('DownloadModule', () => {
   let mockDownloadExecutor;
   let fsPromises;
   let consoleLogSpy;
-  let consoleErrorSpy;
   let logger;
   let ChannelModelMock;
 
@@ -110,7 +109,6 @@ describe('DownloadModule', () => {
 
     // Setup console spies
     consoleLogSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
-    consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
 
     // Clear module cache and require fresh instance
     jest.resetModules();
@@ -174,7 +172,6 @@ describe('DownloadModule', () => {
 
   afterEach(() => {
     consoleLogSpy.mockRestore();
-    consoleErrorSpy.mockRestore();
   });
 
   describe('constructor', () => {
@@ -481,7 +478,7 @@ describe('DownloadModule', () => {
 
       await downloadModule.doChannelDownloads();
 
-      expect(consoleErrorSpy).toHaveBeenCalledWith('Error generating channel download groups, falling back to single job:', error);
+      expect(logger.error).toHaveBeenCalledWith({ err: error }, 'Error generating channel download groups, falling back to single job');
       expect(spy).toHaveBeenCalledWith({}, false);
     });
   });
@@ -1291,6 +1288,26 @@ describe('DownloadModule', () => {
       jobModuleMock.addOrUpdateJob.mockResolvedValue(mockJobId);
     });
 
+    it('primes the event log with the videos, headed for the library, before creating the job', async () => {
+      jobModuleMock.getJob.mockReturnValue({ status: 'Pending' });
+      const { primeVideosForEventLog } = require('../download/eventLogVideoPrimer');
+
+      await downloadModule.doSpecificDownloads({ body: { urls: ['https://www.youtube.com/watch?v=abc123DEF45'] } });
+
+      expect(primeVideosForEventLog).toHaveBeenCalledWith(['abc123DEF45'], { destinedTracked: true });
+    });
+
+    it('primes an untracked-strategy NZB grab as kept out of the library', async () => {
+      jobModuleMock.getJob.mockReturnValue({ status: 'Pending' });
+      const { primeVideosForEventLog } = require('../download/eventLogVideoPrimer');
+
+      await downloadModule.doSpecificDownloads({
+        body: { urls: ['https://www.youtube.com/watch?v=abc123DEF45'], nzb: { importStrategy: 'untracked' } },
+      });
+
+      expect(primeVideosForEventLog).toHaveBeenCalledWith(['abc123DEF45'], { destinedTracked: false });
+    });
+
     it('should handle request object with body', async () => {
       jobModuleMock.getJob.mockReturnValue({ status: 'In Progress' });
       const request = {
@@ -1426,6 +1443,19 @@ describe('DownloadModule', () => {
         attributes: ['video_quality', 'audio_format', 'skip_video_folder', 'media_mode', 'library_mode', 'sub_folder', 'season_episode_regex']
       });
       expect(YtdlpCommandBuilderMock.getBaseCommandArgsForManualDownload).toHaveBeenCalledWith('720', false, null, false, { rateLimitOverride: null });
+    });
+
+    it('logs and carries on with defaults when the channel lookup fails', async () => {
+      jobModuleMock.getJob.mockReturnValue({ status: 'In Progress' });
+      const lookupError = new Error('db down');
+      ChannelModelMock.findOne.mockRejectedValue(lookupError);
+
+      await downloadModule.doSpecificDownloads({
+        body: { urls: ['https://youtube.com/watch?v=test'], channelId: 'UC123456' }
+      });
+
+      expect(logger.error).toHaveBeenCalledWith({ err: lookupError }, '[DownloadModule] Error determining channel quality override');
+      expect(YtdlpCommandBuilderMock.getBaseCommandArgsForManualDownload).toHaveBeenCalled();
     });
 
     it('should respect channel-level audio_format when no override provided', async () => {

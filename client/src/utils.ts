@@ -3,6 +3,8 @@ export const formatDuration = (duration: number | null) => {
   const hours = Math.floor(duration / 3600);
   const minutes = Math.floor((duration % 3600) / 60);
 
+  // Sub-minute clips (trailers, shorts) would otherwise all read "0m".
+  if (hours === 0 && minutes === 0) return `${Math.floor(duration)}s`;
   return hours > 0 ? `${hours}h${minutes}m` : `${minutes}m`;
 };
 

@@ -2,6 +2,9 @@
 const express = require('express');
 const supertest = require('supertest');
 
+// The real logger starts a pino worker thread, which fails on some checkouts (e.g. UNC paths).
+jest.mock('../../logger', () => ({ info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() }));
+
 jest.mock('../../modules/download/ytdlpValidator', () => ({
   dryRun: jest.fn(),
 }));

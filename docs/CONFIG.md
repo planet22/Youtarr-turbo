@@ -720,7 +720,7 @@ The old `discordWebhookUrl` and `notificationService` fields are automatically r
 ### Queue Manager UI
 - **Config Key**: `downloadQueueManagerEnabled`
 - **Type**: `boolean`
-- **Default**: `false`
+- **Default**: `true`
 - **Description**: Replaces the simple queued-jobs chip list on the Download Activity page with a reorderable/deletable table plus a queue-pause button.
 - **Note**: Purely a client presentation choice; does not change download behavior.
 
@@ -929,6 +929,16 @@ Settings for API key authentication used by bookmarklets, mobile shortcuts, and 
 - **Note**: Helps prevent abuse from external integrations. Each API key is rate-limited independently.
 
 For detailed information on creating and using API keys, see [API Integration Guide](API_INTEGRATION.md).
+
+## Video/Events Log
+
+### Event Log Retention
+- **Config Key**: `jobEventLogRetentionDays`
+- **Type**: `number`
+- **Default**: `180`
+- **Description**: How many days of the append-only video/events log (`job_events` table, see [DATABASE.md](DATABASE.md)) to keep. A nightly task (3:25 AM, server local time) deletes rows older than this.
+- **Range**: `0`-`3650`. `0` keeps everything. A negative or non-numeric value falls back to `180`.
+- **Note**: Read live, no restart needed. This is independent of Compact History and of the 42-day in-memory Download History window.
 
 ## yt-dlp Auto-Update
 

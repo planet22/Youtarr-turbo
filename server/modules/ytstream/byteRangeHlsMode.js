@@ -79,6 +79,8 @@ const {
 } = require('./activeStreams');
 const { PERSISTENT_CACHE_DIR, PARTIAL_MARKER, removeOrphanPartials } = require('./byteRangeCacheIndex');
 const { YTSTREAM_CACHE_DIR } = require('./paths');
+const jobEventLog = require('../jobEventLog');
+const { EVENT_TYPES } = require('../jobEventLog/eventCatalog');
 
 // Debug-only escape hatch for live testing (e.g. inspecting a still-idle
 // session's temp files without the reaper deleting them out from under
@@ -269,6 +271,10 @@ async function installIntoCache(session, sourcePath, { cachePath, sourceSize, ex
     session.streamInCache = false;
   }
   session.persistedComplete = complete;
+  jobEventLog.record(EVENT_TYPES.CACHE_BYTE_RANGE_SAVED, {
+    youtubeId: session.youtubeId,
+    detail: { cachePath, complete, sizeBytes: sourceSize, durationSeconds },
+  });
   logger.info({ ...logContext, sourceSize, existingSize, complete, durationSeconds }, 'ytstream: hls-byterange persisted encode to the stealth cache');
 }
 
@@ -336,6 +342,10 @@ async function runStitchResumeIntoCache(session) {
       updatedAt: new Date().toISOString(),
     });
     session.persistedComplete = complete;
+    jobEventLog.record(EVENT_TYPES.CACHE_BYTE_RANGE_SAVED, {
+      youtubeId: session.youtubeId,
+      detail: { cachePath, complete, resumed: true, sizeBytes: statSize(cachePath), durationSeconds: result.durationSeconds },
+    });
     logger.info(
       { ...logContext, cachePath, complete, durationSeconds: result.durationSeconds },
       'ytstream: hls-byterange installed stitched resume into the stealth cache'

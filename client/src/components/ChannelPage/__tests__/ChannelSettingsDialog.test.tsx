@@ -1424,6 +1424,48 @@ describe('ChannelSettingsDialog', () => {
     });
   });
 
+  describe('Download Type with STRM only media mode', () => {
+    const renderLoaded = async (settings: { media_mode?: string; audio_format?: string } = {}) => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: jest.fn().mockResolvedValueOnce({ ...mockChannelSettings, ...settings }),
+      });
+      render(<ChannelSettingsDialog {...defaultProps} />);
+      await waitFor(() => {
+        expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+      });
+    };
+
+    test('disables Download Type when the channel is STRM only', async () => {
+      await renderLoaded({ media_mode: 'strm' });
+
+      expect(screen.getByLabelText('Download Type')).toBeDisabled();
+    });
+
+    test('disables Download Type when the channel inherits a STRM only global setting', async () => {
+      mockUseConfig.mockReturnValue(buildUseConfigResult({ mediaMode: 'strm' }));
+      await renderLoaded();
+
+      expect(screen.getByLabelText('Download Type')).toBeDisabled();
+    });
+
+    test('keeps Download Type enabled for download mode', async () => {
+      await renderLoaded({ media_mode: 'download' });
+
+      expect(screen.getByLabelText('Download Type')).toBeEnabled();
+    });
+
+    test('clears an MP3 download type when switching to STRM only', async () => {
+      const user = userEvent.setup();
+      await renderLoaded({ audio_format: 'mp3_only' });
+
+      await user.click(screen.getByLabelText('Media Mode'));
+      await user.click(screen.getByRole('option', { name: /STRM only/ }));
+
+      expect(screen.getByLabelText('Download Type')).toHaveTextContent('Video Only');
+    });
+  });
+
   describe('Edge Cases', () => {
     test('handles missing onSettingsSaved callback', async () => {
       const user = userEvent.setup();

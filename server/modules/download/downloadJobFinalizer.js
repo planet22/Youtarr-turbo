@@ -16,6 +16,8 @@ const downloadCleanup = require('./downloadCleanup');
 const transient403RetryPlanner = require('./transient403RetryPlanner');
 const failureAdvisor = require('./failureAdvisor');
 const failedVideoEnricher = require('./failedVideoEnricher');
+const jobEventLog = require('../jobEventLog');
+const { EVENT_TYPES } = require('../jobEventLog/eventCatalog');
 const { runCompletionSideEffects } = require('./downloadCompletionEffects');
 const {
   computeOutcomeFlags,
@@ -54,6 +56,71 @@ function stderrHasOnlyBenignWarnings(stderrBuffer = '') {
   return lines.every((line) =>
     BENIGN_STDERR_WARNING_PATTERNS.some((pattern) => pattern.test(line))
   );
+}
+
+// One log entry per failed video (and one more for those handed to an
+// auto-retry job), written once the failure is final and diagnosed.
+// libraryIds: which failed videos still have a library row (e.g. a failed
+// re-download), or null when unknown. Recorded explicitly because the job
+// marked every video as headed for the library when it was created.
+function recordFailedVideoEvents(jobId, failedVideosList, diagnoses = [], libraryIds = null) {
+  for (const failed of failedVideosList || []) {
+    // Same "likely cause" advice Download History shows for the failure.
+    const diagnosis = diagnoses.find((entry) => entry.key === failed.diagnosisKey);
+    jobEventLog.record(EVENT_TYPES.VIDEO_FAILED, {
+      jobId,
+      youtubeId: failed.youtubeId,
+      videoTitle: failed.title,
+      channelName: failed.channel,
+      isTracked: libraryIds && failed.youtubeId ? libraryIds.has(failed.youtubeId) : undefined,
+      detail: {
+        error: failed.error,
+        diagnosisKey: failed.diagnosisKey,
+        diagnosisTitle: diagnosis && diagnosis.title,
+        diagnosisMessage: diagnosis && diagnosis.message,
+        url: failed.url || undefined,
+        autoRetryQueued: Boolean(failed.autoRetryQueued),
+      },
+    });
+    if (failed.autoRetryQueued) {
+      jobEventLog.record(EVENT_TYPES.VIDEO_AUTO_RETRY_QUEUED, {
+        jobId,
+        youtubeId: failed.youtubeId,
+        videoTitle: failed.title,
+        channelName: failed.channel,
+      });
+    }
+  }
+}
+
+async function findFailedVideosInLibrary(failedVideosList) {
+  const ids = [...new Set((failedVideosList || []).map((failed) => failed && failed.youtubeId).filter(Boolean))];
+  if (ids.length === 0) return new Set();
+  try {
+    const metaById = await failedVideoEnricher.lookupKnownMetadata(ids);
+    return new Set(ids.filter((id) => metaById.get(id)?.inLibrary));
+  } catch (err) {
+    logger.warn({ err, videoCount: ids.length }, 'Failed to check library state of failed videos');
+    return null;
+  }
+}
+
+// One entry per video that downloaded, carrying its size, how long it took and
+// the average rate - the figures Download History shows in its Speed column.
+function recordDownloadedVideoEvents(jobId, videoData) {
+  for (const video of videoData || []) {
+    jobEventLog.record(EVENT_TYPES.VIDEO_DOWNLOADED, {
+      jobId,
+      youtubeId: video.youtubeId,
+      videoTitle: video.youTubeVideoName,
+      channelName: video.youTubeChannelName,
+      detail: {
+        fileSize: video.fileSize ? Number(video.fileSize) : undefined,
+        downloadDurationSeconds: video.downloadDurationSeconds,
+        avgDownloadMBps: video.avgDownloadMBps,
+      },
+    });
+  }
 }
 
 async function persistCompletedVideosBeforeTerminalUpdate(jobId, videoData, failedVideosList) {
@@ -253,6 +320,8 @@ async function finalizeDownloadJob({
     }
 
     logger.info({ jobType, jobId }, 'Job complete (with or without errors)');
+    recordDownloadedVideoEvents(jobId, videoData);
+    recordFailedVideoEvents(jobId, failedVideosList, diagnoses, await findFailedVideosInLibrary(failedVideosList));
 
     const flags = computeOutcomeFlags({
       code,

@@ -5,6 +5,8 @@ const configModule = require('./configModule');
 const plexModule = require('./plexModule');
 const { Op } = require('sequelize');
 const logger = require('../logger');
+const jobEventLog = require('./jobEventLog');
+const { EVENT_TYPES } = require('./jobEventLog/eventCatalog');
 const ratingMapper = require('./ratingMapper');
 
 const { MEDIA_TAB_TYPE_MAP, VALID_TAB_TYPES, parseTabCsv } = require('./tabsUtils');
@@ -20,6 +22,21 @@ const {
   ensureDir,
   moveWithRetries
 } = require('./filesystem');
+
+// How long a python3 regex check may run, including interpreter start-up.
+// A busy or slow host (e.g. a NAS) can take well over a second to start it.
+const PYTHON_REGEX_TIMEOUT_MS = 5000;
+const REGEX_CHECK_TIMEOUT_MESSAGE = 'Timed out while checking the regex. The server may be busy - please try again.';
+
+// Error carrying the HTTP status a caller-side problem (bad input, unknown
+// channel, conflicting state) should be reported with.
+class ChannelSettingsError extends Error {
+  constructor(message, statusCode) {
+    super(message);
+    this.name = 'ChannelSettingsError';
+    this.statusCode = statusCode;
+  }
+}
 
 /**
  * Module for managing channel-level configuration settings
@@ -164,7 +181,7 @@ class ChannelSettingsModule {
       // Use execFileSync with argument array to prevent shell injection
       const result = execFileSync('python3', [scriptPath, trimmed, 'test'], {
         encoding: 'utf8',
-        timeout: 1000,
+        timeout: PYTHON_REGEX_TIMEOUT_MS,
       });
 
       const parsed = JSON.parse(result);
@@ -172,6 +189,9 @@ class ChannelSettingsModule {
         return { valid: false, error: parsed.error };
       }
     } catch (err) {
+      if (err.code === 'ETIMEDOUT') {
+        return { valid: false, error: REGEX_CHECK_TIMEOUT_MESSAGE };
+      }
       return {
         valid: false,
         error: `Invalid Python regex pattern: ${err.message}`,
@@ -231,7 +251,7 @@ class ChannelSettingsModule {
     try {
       const result = execFileSync('python3', [scriptPath, pattern, title || ''], {
         encoding: 'utf8',
-        timeout: 1000,
+        timeout: PYTHON_REGEX_TIMEOUT_MS,
       });
       return JSON.parse(result);
     } catch (err) {
@@ -246,7 +266,8 @@ class ChannelSettingsModule {
           // fall through to the generic error below
         }
       }
-      return { matches: false, season: null, episode: null, error: err.message };
+      const error = err.code === 'ETIMEDOUT' ? REGEX_CHECK_TIMEOUT_MESSAGE : err.message;
+      return { matches: false, season: null, episode: null, error };
     }
   }
 
@@ -575,7 +596,21 @@ class ChannelSettingsModule {
               attributes: ['channel_id']
             });
 
-            if (video && video.channel_id === channelId) {
+            if (video) {
+              if (video.channel_id === channelId) {
+                return true;
+              }
+              continue;
+            }
+
+            // A first-time download has no Videos row until post-processing,
+            // so fall back to the channel's own video listing.
+            const ChannelVideo = require('../models/channelvideo');
+            const listed = await ChannelVideo.findOne({
+              where: { youtube_id: videoDownload.youtube_id, channel_id: channelId },
+              attributes: ['id']
+            });
+            if (listed) {
               return true;
             }
           }
@@ -735,7 +770,7 @@ class ChannelSettingsModule {
       const result = execFileSync('python3', [scriptPath], {
         input: payload,
         encoding: 'utf8',
-        timeout: 5000,
+        timeout: PYTHON_REGEX_TIMEOUT_MS,
         maxBuffer: 10 * 1024 * 1024,
       });
       const parsed = JSON.parse(result);
@@ -847,14 +882,14 @@ class ChannelSettingsModule {
     });
 
     if (!channel) {
-      throw new Error('Channel not found');
+      throw new ChannelSettingsError('Channel not found', 404);
     }
 
     // Check for active downloads
     if (settings.sub_folder !== undefined) {
       const hasActive = await this.hasActiveDownloads(channelId);
       if (hasActive) {
-        throw new Error('Cannot change subfolder while downloads are in progress for this channel');
+        throw new ChannelSettingsError('Cannot change subfolder while downloads are in progress for this channel', 409);
       }
     }
 
@@ -862,7 +897,7 @@ class ChannelSettingsModule {
     if (settings.sub_folder !== undefined) {
       const validation = this.validateSubFolder(settings.sub_folder);
       if (!validation.valid) {
-        throw new Error(validation.error);
+        throw new ChannelSettingsError(validation.error, 400);
       }
     }
 
@@ -870,7 +905,7 @@ class ChannelSettingsModule {
     if (settings.video_quality !== undefined) {
       const validation = this.validateVideoQuality(settings.video_quality);
       if (!validation.valid) {
-        throw new Error(validation.error);
+        throw new ChannelSettingsError(validation.error, 400);
       }
     }
 
@@ -892,7 +927,7 @@ class ChannelSettingsModule {
         maxDuration
       );
       if (!validation.valid) {
-        throw new Error(validation.error);
+        throw new ChannelSettingsError(validation.error, 400);
       }
     }
 
@@ -900,7 +935,7 @@ class ChannelSettingsModule {
     if (settings.title_filter_regex !== undefined) {
       const validation = this.validateTitleRegex(settings.title_filter_regex);
       if (!validation.valid) {
-        throw new Error(validation.error);
+        throw new ChannelSettingsError(validation.error, 400);
       }
     }
 
@@ -908,7 +943,7 @@ class ChannelSettingsModule {
     if (settings.season_episode_regex !== undefined) {
       const validation = this.validateSeasonEpisodeRegex(settings.season_episode_regex);
       if (!validation.valid) {
-        throw new Error(validation.error);
+        throw new ChannelSettingsError(validation.error, 400);
       }
     }
 
@@ -916,7 +951,7 @@ class ChannelSettingsModule {
     if (settings.audio_format !== undefined) {
       const validation = this.validateAudioFormat(settings.audio_format);
       if (!validation.valid) {
-        throw new Error(validation.error);
+        throw new ChannelSettingsError(validation.error, 400);
       }
     }
 
@@ -926,7 +961,7 @@ class ChannelSettingsModule {
     if (settings.default_rating !== undefined) {
       const validation = this.validateDefaultRating(settings.default_rating);
       if (!validation.valid) {
-        throw new Error(validation.error);
+        throw new ChannelSettingsError(validation.error, 400);
       }
       normalizedDefaultRating = validation.value;
     }
@@ -935,7 +970,7 @@ class ChannelSettingsModule {
     if (settings.skip_video_folder !== undefined) {
       const validation = this.validateSkipVideoFolder(settings.skip_video_folder);
       if (!validation.valid) {
-        throw new Error(validation.error);
+        throw new ChannelSettingsError(validation.error, 400);
       }
     }
 
@@ -943,7 +978,7 @@ class ChannelSettingsModule {
     if (settings.media_mode !== undefined) {
       const validation = this.validateMediaMode(settings.media_mode);
       if (!validation.valid) {
-        throw new Error(validation.error);
+        throw new ChannelSettingsError(validation.error, 400);
       }
     }
 
@@ -951,33 +986,33 @@ class ChannelSettingsModule {
     if (settings.library_mode !== undefined) {
       const validation = this.validateLibraryMode(settings.library_mode);
       if (!validation.valid) {
-        throw new Error(validation.error);
+        throw new ChannelSettingsError(validation.error, 400);
       }
     }
 
     if (settings.m3u_enabled !== undefined) {
       const validation = this.validateM3uEnabled(settings.m3u_enabled);
       if (!validation.valid) {
-        throw new Error(validation.error);
+        throw new ChannelSettingsError(validation.error, 400);
       }
     }
     if (settings.m3u_sort_order !== undefined) {
       const validation = this.validateM3uSortOrder(settings.m3u_sort_order);
       if (!validation.valid) {
-        throw new Error(validation.error);
+        throw new ChannelSettingsError(validation.error, 400);
       }
     }
 
     if (settings.auto_removal_protected !== undefined) {
       const validation = this.validateAutoRemovalProtected(settings.auto_removal_protected);
       if (!validation.valid) {
-        throw new Error(validation.error);
+        throw new ChannelSettingsError(validation.error, 400);
       }
     }
     if (settings.auto_removal_keep_recent_count !== undefined) {
       const validation = this.validateAutoRemovalKeepRecentCount(settings.auto_removal_keep_recent_count);
       if (!validation.valid) {
-        throw new Error(validation.error);
+        throw new ChannelSettingsError(validation.error, 400);
       }
     }
 
@@ -991,7 +1026,7 @@ class ChannelSettingsModule {
       settings.auto_removal_keep_recent_count !== undefined &&
       settings.auto_removal_keep_recent_count !== null
     ) {
-      throw new Error('auto_removal_keep_recent_count cannot be set while the channel is protected from auto-removal');
+      throw new ChannelSettingsError('auto_removal_keep_recent_count cannot be set while the channel is protected from auto-removal', 400);
     }
 
     // Validate hidden_tabs if provided
@@ -999,7 +1034,7 @@ class ChannelSettingsModule {
     if (settings.hidden_tabs !== undefined) {
       const validation = this.validateHiddenTabs(settings.hidden_tabs, channel.available_tabs);
       if (!validation.valid) {
-        throw new Error(validation.error);
+        throw new ChannelSettingsError(validation.error, 400);
       }
       normalizedHiddenTabs = validation.normalized;
     }
@@ -1017,7 +1052,7 @@ class ChannelSettingsModule {
         effectiveHiddenTabs
       );
       if (!validation.valid) {
-        throw new Error(validation.error);
+        throw new ChannelSettingsError(validation.error, 400);
       }
       normalizedAutoDownloadTabs = validation.normalized;
     }
@@ -1336,7 +1371,17 @@ class ChannelSettingsModule {
           continue;
         }
 
+        const previousPaths = { filePath: video.filePath, audioFilePath: video.audioFilePath };
         await video.update(update);
+        jobEventLog.record(EVENT_TYPES.VIDEO_MOVED, {
+          youtubeId: video.youtubeId,
+          videoTitle: video.youTubeVideoName,
+          channelName: video.youTubeChannelName,
+          detail: {
+            from: previousPaths.filePath || previousPaths.audioFilePath,
+            to: update.filePath || update.audioFilePath,
+          },
+        });
         logger.info({ videoId: video.id, update }, 'Updated video file paths');
         updateCount++;
       }

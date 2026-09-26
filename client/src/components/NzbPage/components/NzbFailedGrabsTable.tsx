@@ -10,13 +10,12 @@ import { NzbFailedGrab } from '../../../hooks/useNzbStats';
 import { formatRelativeTime } from '../utils';
 import { COMPACT_CHIP_STYLE } from './nzbMobileStyles';
 
-// Opens Download History narrowed to this grab's job (see DownloadHistory's
-// jobIdFilter). The job may have aged out of history, in which case that page
-// shows its normal empty state.
+// Opens the Event Log narrowed to this grab's job. Event Log rows outlive the
+// job itself, so the link still works after the job ages out of Download History.
 function GrabLink({ grab }: { grab: NzbFailedGrab }) {
   return (
     <RouterLink
-      to={`/downloads/history?job=${encodeURIComponent(grab.jobId)}`}
+      to={`/downloads/log?job=${encodeURIComponent(grab.jobId)}`}
       className="underline-offset-2 hover:underline"
     >
       {grab.nzbName || grab.youtubeId || grab.jobId}
@@ -39,8 +38,8 @@ function NzbFailedGrabsMobileList({ grabs }: { grabs: NzbFailedGrab[] }) {
   }
   return (
     <Box style={{ maxHeight: 420, overflowY: 'auto' }}>
-      {grabs.map((grab) => (
-        <Box key={grab.jobId} style={{ padding: '10px 16px', borderBottom: '1px solid var(--border)' }}>
+      {grabs.map((grab, index) => (
+        <Box key={`${grab.jobId}-${grab.youtubeId ?? grab.nzbName ?? 'x'}-${index}`} style={{ padding: '10px 16px', borderBottom: '1px solid var(--border)' }}>
           <Box style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
             <Typography
               variant="body2"
@@ -137,8 +136,8 @@ function NzbFailedGrabsTable({ grabs: unsortedGrabs, onDeleteAll }: NzbFailedGra
                 </TableCell>
               </TableRow>
             )}
-            {grabs.map((grab) => (
-              <TableRow hover key={grab.jobId}>
+            {grabs.map((grab, index) => (
+              <TableRow hover key={`${grab.jobId}-${grab.youtubeId ?? grab.nzbName ?? 'x'}-${index}`}>
                 <TableCell style={{ maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   <GrabLink grab={grab} />
                 </TableCell>

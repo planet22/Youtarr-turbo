@@ -127,7 +127,7 @@ export const CONFIG_FIELDS = {
   // Replaces the simple queued-jobs chip list on the Download Activity page
   // with a reorderable/deletable table plus a queue pause button. Purely a
   // client presentation choice - see JobQueueTable.tsx.
-  downloadQueueManagerEnabled: { default: false, trackChanges: true },
+  downloadQueueManagerEnabled: { default: true, trackChanges: true },
 
   // Advanced settings
   sleepRequests: { default: 1, trackChanges: true },
@@ -512,8 +512,8 @@ export const CONFIG_FIELDS = {
       } as { fixed: boolean; thumb: boolean; extract: boolean },
       // How many rows each of the three nzb_diagnostic_log-backed logs
       // (see server/modules/nzbDiagnosticLog.js) keeps before pruning the
-      // oldest on every write - server/routes/nzb.js's recordSearchTrace/
-      // recordFailedGrab and server/modules/videoSearchModule.js's
+      // oldest on every write - server/routes/nzb.js's recordSearchTrace,
+      // jobModule.recordNzbFailedGrab and server/modules/videoSearchModule.js's
       // recordNzbQuery. 1-100 each; these back the NZB diagnostics page's
       // Recent Queries, Search Detail/Debug, and Failed Grabs tables.
       diagnosticLogLimits: {
@@ -613,6 +613,9 @@ export const CONFIG_FIELDS = {
 
   // API Keys
   apiKeyRateLimit: { default: 10, trackChanges: true },
+
+  // Video/events log retention in days (server/modules/jobEventLog); 0 keeps everything
+  jobEventLogRetentionDays: { default: 180, trackChanges: true },
 
   // yt-dlp auto-update
   autoUpdateYtdlp: { default: false, trackChanges: true },

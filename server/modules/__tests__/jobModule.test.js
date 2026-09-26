@@ -1,5 +1,9 @@
 /* eslint-env jest */
 
+// This suite's fixtures are POSIX paths, so run the code under test against POSIX
+// path semantics on every platform (a no-op on Linux).
+jest.mock('path', () => jest.requireActual('path').posix);
+
 // Mock dependencies
 jest.mock('uuid', () => ({
   v4: jest.fn(() => 'generated-uuid')
@@ -1028,8 +1032,15 @@ describe('JobModule', () => {
         status: undefined,
         output: '',
         timeInitiated: expect.any(Number),
-        timeCreated: expect.any(Number)
+        timeCreated: expect.any(Number),
+        aux_data: null
       });
+    });
+
+    test('should save the job data to aux_data when the job is created', async () => {
+      await JobModule.addJob({ jobType: 'download', data: { nzb: { importStrategy: 'untracked' } } });
+
+      expect(JSON.parse(Job.create.mock.calls[0][0].aux_data)).toEqual({ nzb: { importStrategy: 'untracked' } });
     });
 
     test('should handle save errors', async () => {
@@ -2467,6 +2478,34 @@ describe('JobModule', () => {
         plexApiKey: 'test-key',
       }));
       JobModule = require('../jobModule');
+    });
+
+    test('records the video as re-added to the library when its row is recreated', async () => {
+      const jobEventLog = require('../jobEventLog');
+      fsPromises.readFile.mockImplementation(async (p) => {
+        if (p.includes('complete.list')) return 'youtube vid-recreated\n';
+        if (p.includes('vid-recreated.info.json')) {
+          return JSON.stringify({
+            id: 'vid-recreated', uploader: 'A Channel', title: 'A Title', duration: 10, upload_date: '20240101', channel_id: 'c1',
+          });
+        }
+        throw new Error('Unknown file');
+      });
+      fsPromises.stat.mockRejectedValue(new Error('ENOENT'));
+      Video.findAll.mockResolvedValue([]);
+      ChannelVideo.findAll.mockResolvedValue([]);
+      Video.findOne.mockResolvedValue(null);
+      Video.create.mockResolvedValueOnce({ id: 7 });
+
+      await JobModule.backfillFromCompleteList();
+
+      expect(jobEventLog.record).toHaveBeenCalledWith('video.recreated', expect.objectContaining({
+        youtubeId: 'vid-recreated',
+        videoTitle: 'A Title',
+        channelName: 'A Channel',
+        isTracked: true,
+        detail: expect.objectContaining({ videoId: 7, hasFile: false }),
+      }));
     });
 
     test('should skip when complete.list does not exist', async () => {

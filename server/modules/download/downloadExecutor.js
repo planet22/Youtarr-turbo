@@ -225,6 +225,7 @@ class DownloadExecutor {
       logger.info({ jobType, args, subfolderOverride }, 'Running yt-dlp');
       const procEnv = buildYtdlpEnv({
         jobId,
+        jobType,
         tempBasePath: tempPathManager.getTempBasePath(),
         postProcessDirectives,
       });
@@ -268,6 +269,7 @@ class DownloadExecutor {
         errorTracker,
         timeoutController,
         cookiesEnabled: Boolean(configModule.getCookiesPath()),
+        destinedTracked: ownerJob?.data?.nzb?.importStrategy !== 'untracked',
       });
 
       // Emit initial state so the UI reflects the job start immediately

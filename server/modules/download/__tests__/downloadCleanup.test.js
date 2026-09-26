@@ -1,5 +1,9 @@
 /* eslint-env jest */
 
+// This suite's fixtures are POSIX paths, so run the code under test against POSIX
+// path semantics on every platform (a no-op on Linux).
+jest.mock('path', () => jest.requireActual('path').posix);
+
 // Mock fs module - must define mockFsPromises before jest.mock
 const mockFsPromises = {
   access: jest.fn(),
@@ -40,6 +44,7 @@ const filesystem = require('../../filesystem');
 const tempPathManager = require('../tempPathManager');
 const { JobVideoDownload } = require('../../../models');
 const logger = require('../../../logger');
+const jobEventLog = require('../../jobEventLog');
 const { cleanupInProgressVideos, cleanupPartialFiles } = require('../downloadCleanup');
 
 describe('downloadCleanup', () => {
@@ -66,6 +71,50 @@ describe('downloadCleanup', () => {
       await cleanupInProgressVideos('job-123');
 
       expect(logger.info).toHaveBeenCalledWith('No in-progress videos to clean up');
+    });
+
+    it('records the interruption when it removes an in-progress video\'s files', async () => {
+      const mockVideoDownload = {
+        youtube_id: 'abc123XYZ_d',
+        file_path: '/output/Channel - Title - abc123XYZ_d',
+        destroy: jest.fn().mockResolvedValue()
+      };
+      JobVideoDownload.findAll.mockResolvedValue([mockVideoDownload]);
+      mockFsPromises.readdir.mockResolvedValue(['video.mp4.part']);
+
+      await cleanupInProgressVideos('job-123');
+
+      expect(jobEventLog.record).toHaveBeenCalledWith('video.download_interrupted', {
+        jobId: 'job-123',
+        youtubeId: 'abc123XYZ_d',
+        detail: { path: '/output/Channel - Title - abc123XYZ_d' },
+      });
+    });
+
+    it('records the interruption even when nothing was left on disk to remove', async () => {
+      const mockVideoDownload = {
+        youtube_id: 'abc123XYZ_d',
+        file_path: '/output/Channel - Title - abc123XYZ_d',
+        destroy: jest.fn().mockResolvedValue()
+      };
+      JobVideoDownload.findAll.mockResolvedValue([mockVideoDownload]);
+      mockFsPromises.access.mockRejectedValue(new Error('ENOENT'));
+
+      await cleanupInProgressVideos('job-123');
+
+      expect(jobEventLog.record).toHaveBeenCalledWith('video.download_interrupted', expect.objectContaining({
+        jobId: 'job-123',
+        youtubeId: 'abc123XYZ_d',
+        detail: expect.objectContaining({ alreadyRemoved: true }),
+      }));
+    });
+
+    it('records nothing when there are no in-progress videos', async () => {
+      JobVideoDownload.findAll.mockResolvedValue([]);
+
+      await cleanupInProgressVideos('job-123');
+
+      expect(jobEventLog.record).not.toHaveBeenCalled();
     });
 
     it('should cleanup video directory and database entry', async () => {

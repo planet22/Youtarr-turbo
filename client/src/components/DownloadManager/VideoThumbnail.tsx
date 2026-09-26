@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Box, Typography } from '../ui';
 import { AlertCircle as ErrorOutlineIcon } from 'lucide-react';
 import { VideoData } from '../../types/VideoData';
+import { videoThumbnailUrl } from '../../utils/videoThumbnail';
 
 const MISSING_OVERLAY_BG = 'color-mix(in srgb, var(--destructive) 30%, transparent)';
 
@@ -13,6 +14,8 @@ interface VideoThumbnailProps {
   hasError: boolean;
   onError: () => void;
   iconSize: number;
+  // Draws the same "Untracked" banner the Videos library and Event Log use.
+  untracked?: boolean;
 }
 
 function VideoThumbnail({
@@ -23,24 +26,19 @@ function VideoThumbnail({
   hasError,
   onError,
   iconSize,
+  untracked = false,
 }: VideoThumbnailProps) {
   const isMissing = Boolean(video.removed);
-  const localSrc = `/images/videothumb-${video.youtubeId}.jpg`;
-  // YouTube still as last-resort fallback (STRM items often lacked a local UI thumb)
-  const cdnSrc = `https://i.ytimg.com/vi/${video.youtubeId}/hqdefault.jpg`;
-  const [src, setSrc] = useState(localSrc);
+  // The server falls back to (and keeps) YouTube's still, so an error here
+  // means no thumbnail exists anywhere.
+  const src = videoThumbnailUrl(video.youtubeId);
   const [exhausted, setExhausted] = useState(false);
 
   useEffect(() => {
-    setSrc(localSrc);
     setExhausted(false);
-  }, [localSrc, video.youtubeId]);
+  }, [video.youtubeId]);
 
   const handleImgError = () => {
-    if (src === localSrc) {
-      setSrc(cdnSrc);
-      return;
-    }
     setExhausted(true);
     onError();
   };
@@ -95,6 +93,20 @@ function VideoThumbnail({
             className="text-destructive"
             style={{ filter: 'drop-shadow(0px 2px 4px rgba(0,0,0,0.5))' }}
           />
+        </Box>
+      )}
+      {untracked && (
+        <Box
+          data-testid="untracked-badge"
+          className="pointer-events-none absolute top-0 left-0 right-0 z-[2] text-center font-bold"
+          style={{
+            backgroundColor: 'var(--media-overlay-background, rgba(0,0,0,0.6))',
+            color: 'var(--media-overlay-foreground)',
+            padding: '2px 4px',
+            fontSize: '0.6rem',
+          }}
+        >
+          Untracked
         </Box>
       )}
     </Box>

@@ -7,6 +7,17 @@ const filesystem = require('../filesystem');
 const configModule = require('../configModule');
 const tempPathManager = require('./tempPathManager');
 const { JobVideoDownload } = require('../../models');
+const jobEventLog = require('../jobEventLog');
+const { EVENT_TYPES } = require('../jobEventLog/eventCatalog');
+
+// The video was mid-download when its job ended; what was left on disk is gone.
+function recordInterrupted(jobId, videoDownload, detail) {
+  jobEventLog.record(EVENT_TYPES.VIDEO_DOWNLOAD_INTERRUPTED, {
+    jobId,
+    youtubeId: videoDownload.youtube_id,
+    detail: { path: videoDownload.file_path, ...detail },
+  });
+}
 
 // Cleanup function for in-progress videos based on database tracking
 async function cleanupInProgressVideos(jobId) {
@@ -109,12 +120,14 @@ async function cleanupInProgressVideos(jobId) {
 
         if (!foundExistingPath) {
           logger.info({ youtubeId: videoDownload.youtube_id }, 'All candidate directories already removed');
+          recordInterrupted(jobId, videoDownload, { alreadyRemoved: true });
           await videoDownload.destroy();
           continue;
         }
 
         // Remove the tracking entry from database if we cleaned any paths
         if (cleanedAny) {
+          recordInterrupted(jobId, videoDownload, {});
           await videoDownload.destroy();
         }
       } catch (error) {

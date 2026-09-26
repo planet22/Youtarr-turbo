@@ -491,6 +491,8 @@ function ChannelSettingsDialog({
            tabsChanged;
   };
 
+  const isStrmOnly = (settings.media_mode ?? config.mediaMode) === 'strm';
+
   const allTabsHidden = detectedTabs.length > 0 &&
     detectedTabs.every((tab) => settings.hidden_tabs.includes(tab));
 
@@ -755,7 +757,10 @@ function ChannelSettingsDialog({
                 ...settings,
                 audio_format: value
               })}
-              helperText={settings.audio_format ? 'MP3 files are saved at 192kbps in the same folder as videos.' : undefined}
+              disabled={isStrmOnly}
+              helperText={isStrmOnly
+                ? 'Not available in STRM only mode: no media is downloaded, so MP3 would be ignored.'
+                : settings.audio_format ? 'MP3 files are saved at 192kbps in the same folder as videos.' : undefined}
             />
 
             <div className="mt-2">
@@ -788,10 +793,16 @@ function ChannelSettingsDialog({
                 <Select
                   labelId="media-mode-label"
                   value={settings.media_mode ?? 'default'}
-                  onChange={(e: SelectChangeEvent<string>) => setSettings({
-                    ...settings,
-                    media_mode: e.target.value === 'default' ? null : e.target.value
-                  })}
+                  onChange={(e: SelectChangeEvent<string>) => {
+                    const media_mode = e.target.value === 'default' ? null : e.target.value;
+                    const becomesStrmOnly = (media_mode ?? config.mediaMode) === 'strm';
+                    setSettings({
+                      ...settings,
+                      media_mode,
+                      // MP3 is meaningless for STRM only - clear it rather than keep a hidden, ignored value.
+                      audio_format: becomesStrmOnly ? null : settings.audio_format,
+                    });
+                  }}
                   label="Media Mode"
                 >
                   <MenuItem value="default">

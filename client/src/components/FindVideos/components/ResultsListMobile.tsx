@@ -18,6 +18,7 @@ import {
   THUMB_WIDTH,
   THUMB_HEIGHT,
 } from '../types';
+import { videoThumbnailUrl } from '../../../utils/videoThumbnail';
 
 function StatusChip({ status }: { status: VideoStatus }) {
   return (
@@ -92,7 +93,7 @@ export default function ResultsListMobile({ results, onResultClick, selection }:
             >
               {result.thumbnailUrl && (
                 <img
-                  src={result.thumbnailUrl}
+                  src={videoThumbnailUrl(result.youtubeId, { noCache: true })}
                   alt=""
                   className="block object-cover rounded-[var(--radius-thumb)]"
                   style={{ width: THUMB_WIDTH, height: THUMB_HEIGHT }}

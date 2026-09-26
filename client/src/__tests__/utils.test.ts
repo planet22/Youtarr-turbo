@@ -16,6 +16,10 @@ describe('formatDuration', () => {
   it('formats durations longer than an hour with hours and minutes', () => {
     expect(formatDuration(3723)).toBe('1h2m');
   });
+
+  it('formats sub-minute durations as seconds instead of 0m', () => {
+    expect(formatDuration(15)).toBe('15s');
+  });
 });
 
 describe('formatYTDate', () => {

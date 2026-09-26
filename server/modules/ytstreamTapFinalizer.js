@@ -5,6 +5,8 @@ const videoPersistence = require('./videoPersistence');
 const Job = require('../models/job');
 const jobModule = require('./jobModule');
 const { serializeAuxData } = require('./jobAuxData');
+const jobEventLog = require('./jobEventLog');
+const { EVENT_TYPES } = require('./jobEventLog/eventCatalog');
 
 // Distinct from strmCacheOnPlay.js's STRM_CACHE_LABEL_PREFIX - this finalizer
 // runs after ytstream.js's own independent hls-buffer fetch, not a real
@@ -154,6 +156,12 @@ async function finalizeTapOutput({ youtubeId, tempPath, finalPath, sourceLabel =
       data: { videos: [{ id: videoInstance.id }] },
     };
 
+    jobEventLog.record(EVENT_TYPES.CACHE_HLS_BUFFER_FINALIZED, {
+      jobId: jobInstance.id,
+      youtubeId,
+      detail: { filePath: finalPath, fileSize, downloadDurationSeconds, avgDownloadMBps, tracked: true },
+    });
+
     logger.info({ youtubeId, finalPath, sourceLabel, jobId: jobInstance.id, downloadDurationSeconds, avgDownloadMBps }, 'ytstream: finalized - live stream tap/buffer saved as permanent download');
     return finalPath;
   } catch (err) {
@@ -205,6 +213,12 @@ async function recordUntrackedDownloadHistory({ youtubeId, finalPath, fileSize, 
     ytdlpCommand: jobInstance.ytdlpCommand,
     data: { ...data, videos: [] },
   };
+
+  jobEventLog.record(EVENT_TYPES.CACHE_HLS_BUFFER_FINALIZED, {
+    jobId: jobInstance.id,
+    youtubeId,
+    detail: { filePath: finalPath, fileSize, downloadDurationSeconds, avgDownloadMBps, tracked: false },
+  });
 }
 
 /**
@@ -275,6 +289,12 @@ async function recordTsToMp4Finalize(youtubeId, oldFilePath, newFilePath, newFil
     timeCreated: jobInstance.timeCreated,
     data: { ...finalizeData, videos: [] },
   };
+
+  jobEventLog.record(EVENT_TYPES.CACHE_TS_TO_MP4, {
+    jobId: jobInstance.id,
+    youtubeId,
+    detail: { oldFilePath, newFilePath, newFileSize, finalizesJobId: match.id },
+  });
 
   match.data.finalizedByJobId = jobInstance.id;
   try {

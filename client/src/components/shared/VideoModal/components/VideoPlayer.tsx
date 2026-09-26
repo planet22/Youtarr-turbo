@@ -1,8 +1,7 @@
 import React, { useState, useCallback, useEffect } from 'react';
-import { Box, Typography, IconButton, Tooltip, Link } from '../../../ui';
+import { Box, Typography, IconButton, Tooltip } from '../../../ui';
 import {
   Play as PlayArrowIcon,
-  CloudOff as CloudOffIcon,
   Download as DownloadIcon,
   Block as BlockIcon,
   Info as InfoOutlinedIcon,
@@ -11,7 +10,8 @@ import {
   Lock as LockIcon,
 } from '../../../../lib/icons';
 import { VideoModalData } from '../types';
-import { YOUTUBE_URL_BASE } from '../constants';
+import { YOUTUBE_EMBED_URL_BASE } from '../constants';
+import { videoThumbnailUrl } from '../../../../utils/videoThumbnail';
 
 interface VideoPlayerProps {
   video: VideoModalData;
@@ -28,13 +28,10 @@ function VideoPlayer({ video, token, onDownloadClick, isMobile }: VideoPlayerPro
   const [streamError, setStreamError] = useState(false);
   const [infoTooltipOpen, setInfoTooltipOpen] = useState(false);
   const [streamAspectRatio, setStreamAspectRatio] = useState<number | null>(null);
-  // video.thumbnailUrl is always the LOCAL /images/videothumb-*.jpg path
-  // (see videoDataToModalData) - that file only exists once something has
-  // actually written it (a real download, channel sync, STRM
-  // materialization), so a video that's merely been previewed/cache-warmed
-  // (never downloaded) 404s there. Same local-then-YouTube-CDN fallback as
-  // DownloadManager/VideoThumbnail.tsx, so the popup shows a real thumbnail
-  // instead of the browser's broken-image icon.
+  // video.thumbnailUrl is whatever the opening page had (usually the shared
+  // videoThumbnailUrl, sometimes a listing's own URL); if it fails, retry via
+  // the shared no-cache URL (stored copy, else YouTube's) so the popup shows a
+  // real thumbnail instead of the browser's broken-image icon.
   const [thumbnailSrc, setThumbnailSrc] = useState(video.thumbnailUrl);
 
   useEffect(() => {
@@ -46,9 +43,9 @@ function VideoPlayer({ video, token, onDownloadClick, isMobile }: VideoPlayerPro
   }, [video.youtubeId, video.thumbnailUrl]);
 
   const handleThumbnailError = useCallback(() => {
-    const cdnThumbnailUrl = `https://i.ytimg.com/vi/${video.youtubeId}/hqdefault.jpg`;
-    if (thumbnailSrc !== cdnThumbnailUrl) {
-      setThumbnailSrc(cdnThumbnailUrl);
+    const fallbackUrl = videoThumbnailUrl(video.youtubeId, { noCache: true });
+    if (thumbnailSrc !== fallbackUrl) {
+      setThumbnailSrc(fallbackUrl);
     }
   }, [thumbnailSrc, video.youtubeId]);
 
@@ -108,7 +105,13 @@ function VideoPlayer({ video, token, onDownloadClick, isMobile }: VideoPlayerPro
     }
   }, []);
 
-  const youtubeUrl = `${YOUTUBE_URL_BASE}${video.youtubeId}`;
+  // Local streaming can fail for reasons the in-app player has no fallback
+  // for (e.g. Settings > Streaming forcing a playback mode - HLS, byterange,
+  // etc. - that this plain <video>/<audio> element, with no hls.js/MSE,
+  // can never play). Rather than dead-end on a "can't play" message, embed
+  // YouTube's own player so playback still works; its own controls let the
+  // viewer pick quality, so there is nothing for us to select here.
+  const youtubeEmbedUrl = `${YOUTUBE_EMBED_URL_BASE}${video.youtubeId}?autoplay=1`;
   const isPlaying = canStream && playbackStarted && streamUrl && !streamError;
   const isPlayingVideo = isPlaying && playbackType === 'video';
   const isPlayingAudio = isPlaying && playbackType === 'audio';
@@ -217,20 +220,41 @@ function VideoPlayer({ video, token, onDownloadClick, isMobile }: VideoPlayerPro
         >
           {streamError ? (
             <>
-              <CloudOffIcon size={48} color="white" />
-              <Typography variant="body2" sx={{ color: 'common.white' }}>
-                {playbackType === 'audio' ? 'Unable to stream audio' : 'Unable to stream video'}
-              </Typography>
-              <Link
-                href={youtubeUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                underline="hover"
-                variant="body2"
-                style={{ color: 'var(--video-modal-link-color, hsl(var(--primary)))' }}
+              <Box
+                component="iframe"
+                src={youtubeEmbedUrl}
+                title={video.title}
+                allow="autoplay; encrypted-media; picture-in-picture"
+                allowFullScreen
+                style={{
+                  position: 'absolute',
+                  inset: 0,
+                  width: '100%',
+                  height: '100%',
+                  border: 'none',
+                  borderRadius: 'inherit',
+                }}
+              />
+              <Box
+                style={{
+                  position: 'absolute',
+                  top: 8,
+                  left: 8,
+                  right: 8,
+                  zIndex: 2,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  padding: '6px 10px',
+                  borderRadius: 'var(--radius-ui)',
+                  backgroundColor: 'var(--media-overlay-background-strong)',
+                }}
               >
-                Open in YouTube
-              </Link>
+                <WarningAmberIcon size={16} color="var(--warning)" />
+                <Typography variant="caption" sx={{ color: 'common.white' }}>
+                  Local playback failed - playing directly from YouTube
+                </Typography>
+              </Box>
             </>
           ) : canStream ? (
             <IconButton

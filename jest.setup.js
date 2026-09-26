@@ -11,3 +11,33 @@ global.console = {
   info: console.info,
   debug: console.debug,
 };
+
+// The video/events log is fire-and-forget instrumentation sprinkled through
+// many modules; stub it globally so their tests never open a DB connection.
+// server/modules/jobEventLog's own tests load the real one via requireActual.
+jest.mock('./server/modules/jobEventLog', () => {
+  const { EVENT_TYPES, LEVELS } = jest.requireActual('./server/modules/jobEventLog/eventCatalog');
+  return {
+    record: jest.fn(),
+    flush: jest.fn(() => Promise.resolve()),
+    runWithContext: jest.fn((ctx, fn) => fn()),
+    rememberVideo: jest.fn(),
+    markTracked: jest.fn(),
+    isTracked: jest.fn(() => null),
+    warm: jest.fn(() => Promise.resolve()),
+    rememberJob: jest.fn(),
+    list: jest.fn(() => Promise.resolve({ events: [], total: 0 })),
+    facets: jest.fn(() => Promise.resolve({ eventTypes: [], actors: [], channels: [], sources: [] })),
+    prune: jest.fn(() => Promise.resolve(0)),
+    clear: jest.fn(() => Promise.resolve(0)),
+    getRetentionDays: jest.fn(() => 180),
+    EVENT_TYPES,
+    LEVELS,
+  };
+});
+
+// Feeds that log's memory from the DB before events are recorded; stubbed for
+// the same reason. Its own test loads the real one via requireActual.
+jest.mock('./server/modules/download/eventLogVideoPrimer', () => ({
+  primeVideosForEventLog: jest.fn(() => Promise.resolve(new Map())),
+}));

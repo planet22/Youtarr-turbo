@@ -61,6 +61,8 @@ function buildBaseArgs(config, opts = {}) {
   return args;
 }
 
+const HTTP_ONLY_PREFIX = '#HttpOnly_';
+
 /**
  * Parse a Netscape cookie file into a Cookie header value for YouTube/
  * googlevideo requests. yt-dlp -g URLs often 403 in ffmpeg without the
@@ -77,9 +79,16 @@ function loadYoutubeCookieHeader(cookiePath) {
     const pairs = [];
     for (const line of lines) {
       const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith('#')) continue;
+      if (!trimmed) continue;
+      // Netscape files mark HttpOnly cookies as "#HttpOnly_<domain>"; every
+      // other line starting with # is a comment.
+      const isHttpOnly = trimmed.startsWith(HTTP_ONLY_PREFIX);
+      if (trimmed.startsWith('#') && !isHttpOnly) continue;
       // Netscape: domain \t flag \t path \t secure \t expiry \t name \t value
-      const parts = trimmed.split('\t');
+      // Split the untrimmed line: an empty value leaves a trailing tab that
+      // trim() would strip, dropping the seventh column.
+      const parts = line.trimStart().split('\t');
+      if (isHttpOnly) parts[0] = parts[0].slice(HTTP_ONLY_PREFIX.length);
       if (parts.length < 7) continue;
       const domain = parts[0].replace(/^\./, '').toLowerCase();
       if (

@@ -75,6 +75,14 @@ describe('createOverrideSettingsValidator', () => {
     expect(validate({ audioFormat: null })).toEqual({ ok: true, value: { audioFormat: null } });
   });
 
+  test('accepts a download or strm mediaMode override', () => {
+    expect(validate({ mediaMode: 'strm' })).toEqual({ ok: true, value: { mediaMode: 'strm' } });
+  });
+
+  test('rejects mediaMode both, since it behaves exactly like download', () => {
+    expect(validate({ mediaMode: 'both' }).ok).toBe(false);
+  });
+
   test('rejects an invalid rating', () => {
     expect(validate({ rating: 'not-a-rating' }).ok).toBe(false);
   });

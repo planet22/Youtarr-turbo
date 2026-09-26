@@ -7,13 +7,19 @@ const logger = require('../../logger');
 const MessageEmitter = require('../messageEmitter');
 const filesystem = require('../filesystem');
 const { JobVideoDownload } = require('../../models');
+const jobEventLog = require('../jobEventLog');
+const { EVENT_TYPES } = require('../jobEventLog/eventCatalog');
 const { VIDEO_PERSISTED_MARKER, TRANSCODE_PROGRESS_MARKER } = require('../constants/outputMarkers');
+const { primeVideosForEventLog } = require('./eventLogVideoPrimer');
 
 const PROGRESS_THROTTLE_MS = 250;
 
 class YtdlpOutputRouter {
-  constructor({ jobId, config, monitor, errorTracker, timeoutController, cookiesEnabled = false }) {
+  constructor({ jobId, config, monitor, errorTracker, timeoutController, cookiesEnabled = false, destinedTracked = true }) {
     this.jobId = jobId;
+    // Whether this run's videos end up in the library (false only for an
+    // 'untracked'-strategy NZB grab) - see eventLogVideoPrimer.
+    this.destinedTracked = destinedTracked;
     this.config = config;
     this.monitor = monitor;
     this.errorTracker = errorTracker;
@@ -49,7 +55,11 @@ class YtdlpOutputRouter {
         // committed, so tell listing pages to refetch. Not yt-dlp output;
         // skip progress parsing for this line.
         if (line.startsWith(VIDEO_PERSISTED_MARKER)) {
-          const youtubeId = line.slice(VIDEO_PERSISTED_MARKER.length).trim();
+          // "<id>" or "<id> untracked": the post-processor's own library
+          // decision, applied here so this process's later events (e.g.
+          // video.downloaded) record it rather than a stale pre-download state.
+          const [youtubeId, trackedState] = line.slice(VIDEO_PERSISTED_MARKER.length).trim().split(/\s+/);
+          jobEventLog.markTracked(youtubeId, trackedState !== 'untracked');
           MessageEmitter.emitMessage('broadcast', null, 'download', 'videosUpdated', { youtubeId });
           return;
         }
@@ -112,6 +122,24 @@ class YtdlpOutputRouter {
                   youtube_id: youtubeId,
                   file_path: videoDir,
                   status: 'in_progress'
+                }
+              }).then((result) => {
+                // findOrCreate resolves [row, created]; log only the first
+                // sighting of this video's destination, not every later file
+                // (thumbnail, subtitles, fragments) for the same video.
+                if (result && result[1]) {
+                  // Channel sweeps first learn which video they're on here, so
+                  // its name/library state is primed now (URL jobs already did
+                  // this at job creation); the start time is captured first.
+                  const startedAt = new Date();
+                  return primeVideosForEventLog([youtubeId], { destinedTracked: this.destinedTracked }).then(() => {
+                    jobEventLog.record(EVENT_TYPES.VIDEO_DOWNLOAD_STARTED, {
+                      jobId: this.jobId,
+                      youtubeId,
+                      occurredAt: startedAt,
+                      detail: { destination: destPath },
+                    });
+                  });
                 }
               }).catch(err => {
                 logger.error({ err }, 'Error creating JobVideoDownload tracking entry');

@@ -9,6 +9,9 @@ const strmGenerator = require('./strmGenerator');
 const strmMediaInfoCache = require('./strmMediaInfoCache');
 const nfoGenerator = require('./nfoGenerator');
 const videoPersistence = require('./videoPersistence');
+const jobEventLog = require('./jobEventLog');
+const { EVENT_TYPES } = require('./jobEventLog/eventCatalog');
+const { videoIdFromUrl } = require('./jobEventLog/jobVideoRef');
 const youtubeMetadataCache = require('./youtubeMetadataCache');
 const ratingMapper = require('./ratingMapper');
 const downloadSettingsResolver = require('./download/downloadSettingsResolver');
@@ -467,6 +470,9 @@ class StrmMaterializer {
     if (strmCfg.writeThumbnail !== false) {
       thumbPath = await this._writeThumbnail(meta, paths, { skipMediaSidecarFiles });
     }
+    if (thumbPath) {
+      this._writeVideoArtCopies(thumbPath, paths, cfg);
+    }
 
     if (!skipMediaSidecarFiles) {
       // Optional channel poster if missing
@@ -511,12 +517,19 @@ class StrmMaterializer {
       const Job = require('../models/job');
       const jobInstance = await Job.findOne({ where: { id: options.jobId } });
       if (jobInstance) {
+        // The Jobs table has no `data` column (job.data only exists on
+        // jobModule's in-memory job objects), so this fresh-from-DB row has
+        // nowhere to carry options.nzbImportStrategy - attach it directly
+        // rather than rebuilding the object, so every other field
+        // upsertVideoForJob reads off jobInstance (.id, .jobType, ...)
+        // keeps flowing through untouched.
+        jobInstance.data = { nzb: { importStrategy: options.nzbImportStrategy || null } };
         await videoPersistence.upsertVideoForJob(videoRow, jobInstance, true);
       } else {
-        await this._upsertVideoOnly(videoRow);
+        await this._upsertVideoOnly(videoRow, options.nzbImportStrategy);
       }
     } else {
-      await this._upsertVideoOnly(videoRow);
+      await this._upsertVideoOnly(videoRow, options.nzbImportStrategy);
     }
 
     try {
@@ -534,6 +547,14 @@ class StrmMaterializer {
     } catch (err) {
       logger.error({ err, youtubeId: meta.id }, 'STRM: channelvideos upsert failed');
     }
+
+    jobEventLog.record(EVENT_TYPES.STRM_CREATED, {
+      jobId: options.jobId,
+      youtubeId: meta.id,
+      videoTitle: videoRow.youTubeVideoName,
+      channelName: videoRow.youTubeChannelName,
+      detail: { strmPath, fileSize },
+    });
 
     return {
       youtubeId: meta.id,
@@ -683,6 +704,16 @@ class StrmMaterializer {
           results.push({ ok: true, ...r });
         } catch (err) {
           logger.error({ err, url }, 'STRM materialize failed');
+          // No title here: lastVideoInfo may still describe the PREVIOUS video, and the log must not guess
+          // (the name primed at job creation fills it). Library state is recorded explicitly because the
+          // job marked this video as headed for the library when it was created.
+          const failedId = videoIdFromUrl(url) || undefined;
+          jobEventLog.record(EVENT_TYPES.VIDEO_FAILED, {
+            jobId,
+            youtubeId: failedId,
+            isTracked: failedId ? await this._hasLibraryRow(failedId) : undefined,
+            detail: { error: err.message, url },
+          });
           // If metadata resolved before the failure (e.g. an NFO/thumbnail
           // write error, not a metadata-fetch error), lastVideoInfo still
           // holds this video's title - carry it onto the failure record
@@ -737,14 +768,33 @@ class StrmMaterializer {
     return results;
   }
 
-  async _upsertVideoOnly(videoRow) {
+  // undefined (unknown) when the lookup itself fails, so the log keeps its
+  // in-memory state rather than recording a guess.
+  async _hasLibraryRow(youtubeId) {
+    try {
+      const Video = require('../models/video');
+      return Boolean(await Video.findOne({ where: { youtubeId }, attributes: ['id'] }));
+    } catch (err) {
+      return undefined;
+    }
+  }
+
+  // nzbImportStrategy: same tracked-state logging concern as
+  // videoPersistence.upsertVideoForJob - see the comment where this is
+  // called. Only reachable here (rather than that shared function) when the
+  // job's DB row wasn't found yet or there's no job context at all.
+  async _upsertVideoOnly(videoRow, nzbImportStrategy) {
     const Video = require('../models/video');
     const existing = await Video.findOne({ where: { youtubeId: videoRow.youtubeId } });
     if (existing) {
       await existing.update(videoRow);
       return existing;
     }
-    return Video.create(videoRow);
+    const created = await Video.create(videoRow);
+    if (nzbImportStrategy !== 'untracked') {
+      jobEventLog.markTracked(videoRow.youtubeId, true);
+    }
+    return created;
   }
 
   async _writeThumbnail(meta, paths, { skipMediaSidecarFiles = false } = {}) {
@@ -846,6 +896,28 @@ class StrmMaterializer {
         logger.warn({ err: cdnErr, youtubeId: meta.id }, 'STRM CDN thumbnail recovery failed');
       }
       return recoveredThumbPath;
+    }
+  }
+
+  // Same per-video -fanart.jpg / -backdrop.jpg copies of the thumbnail that a
+  // real download's post-processor writes (videoDownloadPostProcessFiles.js),
+  // gated by the same writeVideoFanart / writeBackdropImages settings.
+  _writeVideoArtCopies(thumbPath, paths, cfg) {
+    const copies = [
+      [cfg.writeVideoFanart === true, '-fanart.jpg'],
+      [cfg.writeBackdropImages === true, '-backdrop.jpg'],
+    ];
+    for (const [enabled, suffix] of copies) {
+      if (!enabled) continue;
+      const target = path.join(paths.videoDir, `${paths.fileStem}${suffix}`);
+      try {
+        if (!fs.existsSync(target)) {
+          copySyncWithFallback(thumbPath, target);
+          logger.info({ target }, 'STRM: video artwork copy written');
+        }
+      } catch (err) {
+        logger.warn({ err, target }, 'STRM: video artwork copy failed');
+      }
     }
   }
 

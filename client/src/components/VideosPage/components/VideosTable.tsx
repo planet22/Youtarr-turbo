@@ -20,7 +20,7 @@ import {
   AlertCircle as ErrorOutlineIcon,
   Trash2 as DeleteIcon,
 } from 'lucide-react';
-import { Database as MetadataCacheIcon, ClearCache as ClearCacheIcon, Shield as ProtectSpacerIcon } from '../../../lib/icons';
+import { Database as MetadataCacheIcon, ClearCache as ClearCacheIcon, Shield as ProtectSpacerIcon, PipIcon } from '../../../lib/icons';
 import { formatDuration, formatYTDate } from '../../../utils';
 import { formatAddedDateTime, formatExpiresIn } from '../../../utils/formatters';
 import { getDisplayPath } from '../../../utils/paths';
@@ -31,6 +31,7 @@ import RatingBadge from '../../shared/RatingBadge';
 import DownloadFormatIndicator from '../../shared/DownloadFormatIndicator';
 import ProtectionShieldButton from '../../shared/ProtectionShieldButton';
 import ThumbnailClickOverlay from '../../shared/ThumbnailClickOverlay';
+import { videoThumbnailUrl } from '../../../utils/videoThumbnail';
 import AvailabilityChip from '../../shared/AvailabilityChip';
 import { SHARED_STATUS_CHIP_SMALL_STYLE, SHARED_THEMED_CHIP_SMALL_STYLE } from '../../shared/chipStyles';
 import ChannelNameDisplay from './ChannelNameDisplay';
@@ -49,6 +50,7 @@ export interface VideosTableProps {
   onToggleSelect: (youtubeId: string) => void;
   onSortChange: (newOrderBy: 'published' | 'added') => void;
   onOpenModal: (video: VideoData) => void;
+  onPipPlay: (video: VideoData) => void;
   onToggleProtection: (videoId: number) => void;
   onDeleteSingle: (videoId: number) => void;
   onStrmChipClick: (video: VideoData) => void;
@@ -88,6 +90,7 @@ function VideosTable({
   onToggleSelect,
   onSortChange,
   onOpenModal,
+  onPipPlay,
   onToggleProtection,
   onDeleteSingle,
   onStrmChipClick,
@@ -215,7 +218,7 @@ function VideosTable({
                         </Typography>
                       ) : (
                         <img
-                          src={`/images/videothumb-${video.youtubeId}.jpg`}
+                          src={videoThumbnailUrl(video.youtubeId)}
                           alt="thumbnail"
                           style={{
                             width: '100%',
@@ -251,7 +254,7 @@ function VideosTable({
                           Untracked
                         </Box>
                       )}
-                      {video.youtube_removed && (
+                      {Boolean(video.youtube_removed) && (
                         <Box
                           style={{
                             position: 'absolute',
@@ -270,7 +273,7 @@ function VideosTable({
                           Removed
                         </Box>
                       )}
-                      {video.removed && (
+                      {Boolean(video.removed) && (
                         <Box
                           style={{
                             position: 'absolute',
@@ -427,6 +430,15 @@ function VideosTable({
                   </TableCell>
                   <TableCell onClick={(e) => e.stopPropagation()}>
                     <Box className="flex items-center gap-1">
+                      <Tooltip title="Quick play (Picture-in-Picture)">
+                        <IconButton
+                          size="small"
+                          aria-label="Quick play in Picture-in-Picture"
+                          onClick={() => onPipPlay(video)}
+                        >
+                          <PipIcon size={16} />
+                        </IconButton>
+                      </Tooltip>
                       {isTracked && video.id !== null && !video.removed ? (
                         <ProtectionShieldButton
                           isProtected={video.protected || false}

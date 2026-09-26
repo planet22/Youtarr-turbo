@@ -19,6 +19,8 @@ Youtarr-Turbo is a self-hosted YouTube downloader that automatically downloads v
 - **Family-Friendly**: Create curated, safe YouTube experiences with multi-library support
 - **Media Server Ready**: Downloads videos with proper organization and metadata for Plex, Kodi, Jellyfin, and Emby.
 
+> Offline Viewing, Archive Content, and SponsorBlock removal all depend on a real downloaded file. Youtarr-Turbo's optional STRM/live-streaming mode (see [TURBO.md](TURBO.md#streaming--strm-only-mode)) trades those three away for zero local storage — it plays videos on demand instead of keeping a copy, so there's nothing to watch offline, nothing preserved once YouTube removes it, and no local file for SponsorBlock to trim.
+
 ## Key Features
 
 - **Smart Downloads**: Pre-validate manually pasted URLs with metadata preview before downloading

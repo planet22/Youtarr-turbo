@@ -1,5 +1,29 @@
 # Changelog
 
+## [v0.7.0](https://github.com/planet22/Youtarr-turbo/releases/tag/v0.7.0) - 2026-09-26
+
+## [0.7.0](https://github.com/planet22/Youtarr-turbo/compare/vv0.6.0...v0.7.0) (2026-09-26)
+
+
+### Features
+
+* add a Settings UI to regenerate the ytstream stream key ([912cfa4](https://github.com/planet22/Youtarr-turbo/commit/912cfa404ee2c5c1e3dadfa9ff09be405787a972))
+
+
+### Bug Fixes
+
+* gate /api/ytstream behind a session or per-install key, and fix youtube-hls PiP preview CORS ([6bfc740](https://github.com/planet22/Youtarr-turbo/commit/6bfc740737bc8065a1c66cbf935fde9a63ca09fb))
+
+
+### Documentation
+
+* fix inaccurate claims about STRM mode, AMF support, and progressive quality ([f04f2ce](https://github.com/planet22/Youtarr-turbo/commit/f04f2cef326ce5484a1acbcbeb694026ba2fd78e))
+* update CHANGELOG for v0.6.0 [skip ci] ([f19f65d](https://github.com/planet22/Youtarr-turbo/commit/f19f65da0e64605e428478dc382f6f1015ea1c01))
+
+
+
+
+
 ## [v0.6.0](https://github.com/planet22/Youtarr-turbo/releases/tag/v0.6.0) - 2026-09-26
 
 ## [0.6.0](https://github.com/planet22/Youtarr-turbo/compare/v0.5.0...v0.6.0) (2026-09-26)

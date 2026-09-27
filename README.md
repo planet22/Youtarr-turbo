@@ -99,34 +99,6 @@ Interested in contributing to Youtarr-Turbo? We welcome contributions of all kin
 - [Development Guide](docs/DEVELOPMENT.md) - Technical setup and architecture details
 - [Contributors](CONTRIBUTORS.md) - People who have helped build Youtarr-Turbo
 
-## Screenshots
-
-<details>
-<summary>Click to view screenshots</summary>
-
-### Channel Management (using "Dark Modern" theme)
-<img width="1522" height="850" alt="image" src="https://github.com/user-attachments/assets/76a23a1a-2c8d-4c27-8ebc-4f430917a2e7" />
-
-### Video Browser (using "Playful (Classic)" theme)
-<img width="1507" height="1298" alt="image" src="https://github.com/user-attachments/assets/b7b50a72-942c-4653-930f-270ca27ac888" />
-
-### Settings (using "Bold Flat" theme)
-<img width="1524" height="1296" alt="image" src="https://github.com/user-attachments/assets/3d6c28a6-c564-4972-b275-71da11dc39e9" />
-
-### Download Manager (Dark Modern)
-<img width="1521" height="1297" alt="image" src="https://github.com/user-attachments/assets/3a13c822-af39-4498-8e2c-9dcc990b3cfb" />
-
-### Individual Video Modal (Playful Classic)
-<img width="1523" height="1117" alt="image" src="https://github.com/user-attachments/assets/6d08ac34-544b-4e8c-8bfe-5b8fd3f341fe" />
-
-### Search for videos on YouTube from in-app (Bold Flat)
-<img width="1507" height="1120" alt="image" src="https://github.com/user-attachments/assets/1c42f56e-57a3-41b5-b1c7-89f5552d3c99" />
-
-### Responsive for mobile (Bold Flat)
-<img width="340" height="757" alt="image" src="https://github.com/user-attachments/assets/79f153ef-01d0-4238-8f11-d04f5ea6aad8" />
-
-</details>
-
 ## Legal Disclaimer
 
 Youtarr-Turbo is not affiliated with YouTube or Plex. Users are responsible for ensuring their use complies with YouTube's Terms of Service and applicable copyright laws. This tool is intended for personal use with content you have the right to download.

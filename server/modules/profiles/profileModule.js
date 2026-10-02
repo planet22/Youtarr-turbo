@@ -189,6 +189,21 @@ class ProfileModule {
     return this.reconcile(profile.id);
   }
 
+  /**
+   * Follow more channels/playlists without touching existing ones (used when
+   * a channel or playlist is added while a profile is active), then link.
+   * @returns {Promise<{linked:number, unlinked:number, failed:number}>}
+   */
+  async addSubscriptions(id, { channels = [], playlists = [] }) {
+    const profile = await this._getProfileOr404(id);
+    const rows = [
+      ...[...new Set(channels)].map((sourceId) => ({ profile_id: profile.id, source_type: SOURCE_TYPES.CHANNEL, source_id: sourceId })),
+      ...[...new Set(playlists)].map((sourceId) => ({ profile_id: profile.id, source_type: SOURCE_TYPES.PLAYLIST, source_id: sourceId })),
+    ];
+    if (rows.length > 0) await ProfileSubscription.bulkCreate(rows, { ignoreDuplicates: true });
+    return this.reconcile(profile.id);
+  }
+
   async _desiredVideos(profileId) {
     const subs = await ProfileSubscription.findAll({ where: { profile_id: profileId }, raw: true });
     const channelIds = subs.filter((s) => s.source_type === SOURCE_TYPES.CHANNEL).map((s) => s.source_id);

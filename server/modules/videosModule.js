@@ -103,6 +103,7 @@ class VideosModule {
       cachedVideoFilter = 'off',
       metadataOnlyFilter = 'off',
       showUntracked = false,
+      profileId = null,
     } = options;
 
     // What "Downloaded" means everywhere it's used (this filter, the
@@ -127,6 +128,16 @@ class VideosModule {
       if (channelFilter) {
         whereConditions.push('Videos.youTubeChannelName = :channelFilter');
         replacements.channelFilter = channelFilter;
+      }
+
+      // A user profile's view: videos from the channels and playlists it follows.
+      if (profileId) {
+        whereConditions.push(`(EXISTS (SELECT 1 FROM profile_subscriptions ps
+            WHERE ps.profile_id = :profileId AND ps.source_type = 'channel' AND ps.source_id = Videos.channel_id)
+          OR EXISTS (SELECT 1 FROM profile_subscriptions ps
+            JOIN playlistvideos pv ON pv.playlist_id = ps.source_id
+            WHERE ps.profile_id = :profileId AND ps.source_type = 'playlist' AND pv.youtube_id = Videos.youtubeId))`);
+        replacements.profileId = profileId;
       }
 
       if (dateFrom) {

@@ -1,5 +1,6 @@
 const express = require('express');
 const { EVENT_TYPES } = require('../modules/jobEventLog/eventCatalog');
+const { parseProfileId } = require('./profileQuery');
 
 // Tri-state filter query params ('off' | 'only' | 'exclude'). Any other
 // value (missing, empty string, garbage) falls back to 'off'.
@@ -80,6 +81,11 @@ module.exports = function createChannelRoutes({ verifyToken, channelModule, arch
    *         schema:
    *           type: string
    *         description: Filter by subfolder
+   *       - in: query
+   *         name: profileId
+   *         schema:
+   *           type: integer
+   *         description: Only channels this user profile follows
    *     responses:
    *       200:
    *         description: List of channels
@@ -95,6 +101,7 @@ module.exports = function createChannelRoutes({ verifyToken, channelModule, arch
         sortBy: req.query.sortBy,
         sortOrder: req.query.sortOrder,
         subFolder: req.query.subFolder,
+        profileId: parseProfileId(req.query.profileId),
       });
       res.json(result);
     } catch (error) {

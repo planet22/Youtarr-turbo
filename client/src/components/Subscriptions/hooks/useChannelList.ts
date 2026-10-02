@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import axios from 'axios';
 import { Channel } from '../../../types/Channel';
 import { normalizeSubFolderKey } from '../../../utils/channelHelpers';
+import { useProfileContext } from '../../../contexts/ProfileContext';
 
 interface UseChannelListParams {
   token: string | null;
@@ -35,6 +36,7 @@ export const useChannelList = ({
   const [loading, setLoading] = useState(!!token);
   const [error, setError] = useState<string | null>(null);
   const [subFolders, setSubFolders] = useState<string[]>([]);
+  const { activeProfileId } = useProfileContext();
 
   const fetchChannels = useCallback(async () => {
     if (!token) {
@@ -59,6 +61,7 @@ export const useChannelList = ({
           search: searchTerm || undefined,
           sortOrder,
           subFolder: subFolder || undefined,
+          profileId: activeProfileId ?? undefined,
         },
       });
 
@@ -91,7 +94,7 @@ export const useChannelList = ({
     } finally {
       setLoading(false);
     }
-  }, [token, page, pageSize, searchTerm, sortOrder, subFolder, append]);
+  }, [token, page, pageSize, searchTerm, sortOrder, subFolder, append, activeProfileId]);
 
   useEffect(() => {
     fetchChannels();

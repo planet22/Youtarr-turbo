@@ -63,7 +63,15 @@ describe('channel routes: remaining endpoints', () => {
       const res = await makeApp().get('/getchannels').query({ page: '2', pageSize: '10', search: 'cats', sortBy: 'title', sortOrder: 'asc', subFolder: '__kids' });
 
       expect(res.body).toEqual({ channels: [], total: 0 });
-      expect(channelModule.getChannelsPaginated).toHaveBeenCalledWith({ page: '2', pageSize: '10', searchTerm: 'cats', sortBy: 'title', sortOrder: 'asc', subFolder: '__kids' });
+      expect(channelModule.getChannelsPaginated).toHaveBeenCalledWith({ page: '2', pageSize: '10', searchTerm: 'cats', sortBy: 'title', sortOrder: 'asc', subFolder: '__kids', profileId: null });
+    });
+
+    it('passes a valid profileId through as a number', async () => {
+      channelModule.getChannelsPaginated.mockResolvedValue({ channels: [], total: 0 });
+
+      await makeApp().get('/getchannels').query({ profileId: '4' });
+
+      expect(channelModule.getChannelsPaginated).toHaveBeenCalledWith(expect.objectContaining({ profileId: 4 }));
     });
 
     it('answers 500 with a generic message when listing fails', async () => {

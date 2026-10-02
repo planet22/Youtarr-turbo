@@ -1,6 +1,7 @@
 import { renderHook, waitFor, act } from '@testing-library/react';
 import { useChannelList } from '../useChannelList';
 import type { Channel } from '../../../../types/Channel';
+import { createActiveProfileWrapper } from '../../../../test-utils';
 
 // Mock axios
 jest.mock('axios', () => ({
@@ -137,6 +138,15 @@ describe('useChannelList', () => {
           subFolder: 'my-folder',
         },
       });
+    });
+
+    test('scopes the request to the active profile', async () => {
+      axios.get.mockResolvedValueOnce({ data: { channels: [], total: 0, totalPages: 0 } });
+
+      renderHook(() => useChannelList(defaultParams), { wrapper: createActiveProfileWrapper({ id: 3, name: 'Alice' }) });
+
+      await waitFor(() => expect(axios.get).toHaveBeenCalledTimes(1));
+      expect(axios.get.mock.calls[0][1].params.profileId).toBe(3);
     });
 
     test('handles multiple channels', async () => {

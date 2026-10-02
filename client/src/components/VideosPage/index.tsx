@@ -35,6 +35,7 @@ import CacheDetailDialog from './components/CacheDetailDialog';
 import { useVideosData } from './hooks/useVideosData';
 import { useCacheActions } from './hooks/useCacheActions';
 import PipPlayerContext from '../../contexts/PipPlayerContext';
+import { ActiveProfileNotice } from '../shared/ActiveProfileNotice';
 import { videoThumbnailUrl } from '../../utils/videoThumbnail';
 import {
   INFINITE_SCROLL_FETCH_SIZE,
@@ -1304,6 +1305,7 @@ function VideosPage({ token }: VideosPageProps) {
 
   return (
     <Box>
+      <ActiveProfileNotice subject="videos" />
       <VideoListContainer
         state={listState}
         selection={selection}

@@ -178,6 +178,23 @@ describe('profileModule', () => {
     });
   });
 
+  describe('addSubscriptions', () => {
+    test('adds new sources without removing existing ones', async () => {
+      models.Profile.findByPk.mockResolvedValue(makeProfile());
+      await profileModule.addSubscriptions(1, { channels: ['UC9'], playlists: [] });
+      expect(models.ProfileSubscription.destroy).not.toHaveBeenCalled();
+    });
+
+    test('ignores sources the profile already follows', async () => {
+      models.Profile.findByPk.mockResolvedValue(makeProfile());
+      await profileModule.addSubscriptions(1, { channels: ['UC9'] });
+      expect(models.ProfileSubscription.bulkCreate).toHaveBeenCalledWith(
+        [{ profile_id: 1, source_type: 'channel', source_id: 'UC9' }],
+        { ignoreDuplicates: true }
+      );
+    });
+  });
+
   describe('syncVideo', () => {
     test('links a video into a profile subscribed to one of its playlists', async () => {
       const profile = makeProfile();

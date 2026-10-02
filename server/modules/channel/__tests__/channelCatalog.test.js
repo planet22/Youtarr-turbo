@@ -7,6 +7,7 @@ jest.mock('fs');
 jest.mock('child_process');
 jest.mock('../../../logger');
 jest.mock('../../../models/channel', () => mockFactories.mockChannelModel());
+jest.mock('../../../models/profilesubscription', () => ({ findAll: jest.fn() }));
 jest.mock('../../configModule', () => mockFactories.mockConfigModule());
 jest.mock('../../filesystem', () => mockFactories.mockFilesystem());
 jest.mock('../../m3uGenerator', () => ({
@@ -225,6 +226,17 @@ describe('channelCatalog', () => {
         where: expect.objectContaining({
           sub_folder: expect.objectContaining({ [Op.or]: [null, ''] })
         })
+      }));
+    });
+
+    test('limits the list to channels a profile follows when profileId is given', async () => {
+      const ProfileSubscription = require('../../../models/profilesubscription');
+      ProfileSubscription.findAll.mockResolvedValue([{ source_id: 'UC111' }]);
+
+      await channelCatalog.getChannelsPaginated({ profileId: 4 });
+
+      expect(Channel.findAndCountAll).toHaveBeenCalledWith(expect.objectContaining({
+        where: expect.objectContaining({ channel_id: ['UC111'] })
       }));
     });
 

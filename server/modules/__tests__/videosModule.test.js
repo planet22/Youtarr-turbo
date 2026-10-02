@@ -539,6 +539,28 @@ describe('VideosModule', () => {
       expect(pageQuery).not.toContain('NOT EXISTS');
     });
 
+    test('should restrict to a profile\'s followed sources when profileId is set', async () => {
+      mockSequelize.query.mockResolvedValueOnce([{ total: 0 }]);
+      mockSequelize.query.mockResolvedValueOnce([]);
+      mockSequelize.query.mockResolvedValueOnce([]);
+
+      await VideosModule.getVideosPaginated({ profileId: 5 });
+
+      const [countQuery, countOptions] = mockSequelize.query.mock.calls[0];
+      expect(countQuery).toContain('FROM profile_subscriptions ps');
+      expect(countOptions.replacements.profileId).toBe(5);
+    });
+
+    test('should not mention profiles without a profileId', async () => {
+      mockSequelize.query.mockResolvedValueOnce([{ total: 0 }]);
+      mockSequelize.query.mockResolvedValueOnce([]);
+      mockSequelize.query.mockResolvedValueOnce([]);
+
+      await VideosModule.getVideosPaginated();
+
+      expect(mockSequelize.query.mock.calls[0][0]).not.toContain('profile_subscriptions');
+    });
+
     test('should apply watchedFilter=exclude as a NOT EXISTS clause', async () => {
       mockSequelize.query.mockResolvedValueOnce([{ total: 0 }]);
       mockSequelize.query.mockResolvedValueOnce([]);

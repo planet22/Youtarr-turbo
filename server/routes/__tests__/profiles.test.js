@@ -23,6 +23,7 @@ describe('Profile routes', () => {
       remove: jest.fn().mockResolvedValue(undefined),
       getSubscriptions: jest.fn().mockResolvedValue({ channels: [], playlists: [] }),
       setSubscriptions: jest.fn().mockResolvedValue({ linked: 2, unlinked: 0, failed: 0 }),
+      addSubscriptions: jest.fn().mockResolvedValue({ linked: 1, unlinked: 0, failed: 0 }),
       reconcile: jest.fn().mockResolvedValue({ linked: 0, unlinked: 1, failed: 0 }),
       listSources: jest.fn().mockResolvedValue({ channels: [], playlists: [] }),
       listJellyfinUsers: jest.fn().mockResolvedValue([{ id: 'u1', name: 'Alice' }]),
@@ -114,6 +115,16 @@ describe('Profile routes', () => {
 
   test('PUT /api/profiles/:id/subscriptions rejects non-string ids with 400', async () => {
     const res = await request(app).put('/api/profiles/1/subscriptions').send({ channels: [1, 2] });
+    expect(res.status).toBe(400);
+  });
+
+  test('POST /api/profiles/:id/subscriptions/add adds the given sources', async () => {
+    await request(app).post('/api/profiles/1/subscriptions/add').send({ channels: ['UC9'] });
+    expect(mockProfileModule.addSubscriptions).toHaveBeenCalledWith(1, { channels: ['UC9'], playlists: undefined });
+  });
+
+  test('POST /api/profiles/:id/subscriptions/add rejects a non-array with 400', async () => {
+    const res = await request(app).post('/api/profiles/1/subscriptions/add').send({ playlists: 'PL1' });
     expect(res.status).toBe(400);
   });
 

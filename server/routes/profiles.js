@@ -284,6 +284,44 @@ function createProfileRoutes({ verifyToken, profileModule }) {
 
   /**
    * @swagger
+   * /api/profiles/{id}/subscriptions/add:
+   *   post:
+   *     summary: Follow more channels/playlists, keeping existing ones, and link their videos
+   *     tags: [Profiles]
+   *     parameters:
+   *       - in: path
+   *         name: id
+   *         required: true
+   *         schema: { type: integer }
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             properties:
+   *               channels: { type: array, items: { type: string } }
+   *               playlists: { type: array, items: { type: string } }
+   *     responses:
+   *       200: { description: "{ linked, unlinked, failed } counts" }
+   *       400: { description: Invalid input }
+   *       404: { description: Not found }
+   */
+  router.post('/api/profiles/:id/subscriptions/add', verifyToken, async (req, res) => {
+    const id = parseId(req.params.id);
+    const body = req.body || {};
+    if (!id || !isIdList(body.channels) || !isIdList(body.playlists)) {
+      return res.status(400).json({ error: 'Invalid subscriptions' });
+    }
+    try {
+      return res.json(await profileModule.addSubscriptions(id, { channels: body.channels, playlists: body.playlists }));
+    } catch (error) {
+      return sendModuleError(res, error, 'Failed to add profile subscriptions', { id });
+    }
+  });
+
+  /**
+   * @swagger
    * /api/profiles/{id}/relink:
    *   post:
    *     summary: Re-check every link in a profile against its subscriptions

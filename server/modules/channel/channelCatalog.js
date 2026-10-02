@@ -1,6 +1,7 @@
 const { Op, fn, col, where } = require('sequelize');
 const logger = require('../../logger');
 const Channel = require('../../models/channel');
+const ProfileSubscription = require('../../models/profilesubscription');
 const channelMappers = require('./channelMappers');
 const channelThumbnails = require('./channelThumbnails');
 const channelProvisioning = require('./channelProvisioning');
@@ -114,6 +115,7 @@ class ChannelCatalog {
    * @param {string} [options.searchTerm=''] - Search term for uploader or URL
    * @param {string} [options.sortBy='name'] - Sort field ('name'|'uploader'|'createdAt')
    * @param {string} [options.sortOrder='asc'] - Sort direction ('asc'|'desc')
+   * @param {number|null} [options.profileId=null] - Only channels this user profile follows
    * @returns {Promise<{channels: Array, total: number, page: number, pageSize: number, totalPages: number}>}
    */
   async getChannelsPaginated({
@@ -123,6 +125,7 @@ class ChannelCatalog {
     sortBy = 'name',
     sortOrder = 'asc',
     subFolder = null,
+    profileId = null,
   } = {}) {
     const parsedPage = parseInt(page, 10);
     const parsedPageSize = parseInt(pageSize, 10);
@@ -164,6 +167,15 @@ class ChannelCatalog {
     const direction = typeof sortOrder === 'string' && sortOrder.toLowerCase() === 'desc' ? 'DESC' : 'ASC';
 
     try {
+      if (profileId) {
+        const subs = await ProfileSubscription.findAll({
+          where: { profile_id: profileId, source_type: 'channel' },
+          attributes: ['source_id'],
+          raw: true,
+        });
+        whereClause.channel_id = subs.map((s) => s.source_id);
+      }
+
       const { rows, count } = await Channel.findAndCountAll({
         where: whereClause,
         limit: safePageSize,

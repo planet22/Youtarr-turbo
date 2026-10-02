@@ -1,5 +1,5 @@
 const { Sequelize, sequelize } = require('../db.js');
-const { Video } = require('../models');
+const { Video, Profile } = require('../models');
 const fs = require('fs').promises;
 const path = require('path');
 const configModule = require('./configModule');
@@ -81,6 +81,18 @@ class VideosModule {
     this._resolutionTagBackfillRunning = false;
     this._imageRegenRunning = false;
     this._lastNzbUntrackedSweepAt = 0;
+  }
+
+  // In a user profile's view, "watched" means watched by that profile's
+  // Jellyfin user; otherwise (or with no Jellyfin user) the global rule.
+  async _watchedSqlFor(profileId) {
+    if (profileId) {
+      const profile = await Profile.findByPk(profileId, { attributes: ['jellyfin_user_id'] });
+      if (profile && profile.jellyfin_user_id) {
+        return watchStatusQueries.buildUserWatchedExistsSql('jellyfin', profile.jellyfin_user_id);
+      }
+    }
+    return watchStatusQueries.buildWatchedExistsSql();
   }
 
   async getVideosPaginated(options = {}) {
@@ -176,7 +188,7 @@ class VideosModule {
       }
 
       if (watchedFilter === 'only' || watchedFilter === 'exclude') {
-        const watched = watchStatusQueries.buildWatchedExistsSql();
+        const watched = await this._watchedSqlFor(profileId);
         whereConditions.push(watchedFilter === 'only' ? watched.sql : `NOT ${watched.sql}`);
         Object.assign(replacements, watched.replacements);
       }

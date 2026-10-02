@@ -16,6 +16,7 @@ const ALICE: Profile = {
   jellyfinUserId: 'u1',
   jellyfinUserName: 'alice',
   jellyfinLibraryId: 'lib1',
+  removeWatchedAfterDays: null,
   folderPath: '/data/__profiles__/Alice',
   channelCount: 0,
   playlistCount: 0,
@@ -46,13 +47,26 @@ describe('ProfileFormDialog', () => {
     const { onSubmit } = setup();
     await userEvent.type(screen.getByLabelText('Profile name'), '  Bob ');
     await userEvent.click(screen.getByRole('button', { name: 'Save' }));
-    expect(onSubmit).toHaveBeenCalledWith({ name: 'Bob', jellyfinUserId: null, jellyfinUserName: null, jellyfinLibraryId: null });
+    expect(onSubmit).toHaveBeenCalledWith({ name: 'Bob', jellyfinUserId: null, jellyfinUserName: null, jellyfinLibraryId: null, removeWatchedAfterDays: null });
   });
 
   test('keeps an existing profile\'s Jellyfin link when editing', async () => {
     const { onSubmit } = setup({ profile: ALICE });
     await userEvent.click(screen.getByRole('button', { name: 'Save' }));
-    expect(onSubmit).toHaveBeenCalledWith({ name: 'Alice', jellyfinUserId: 'u1', jellyfinUserName: 'alice', jellyfinLibraryId: 'lib1' });
+    expect(onSubmit).toHaveBeenCalledWith({ name: 'Alice', jellyfinUserId: 'u1', jellyfinUserName: 'alice', jellyfinLibraryId: 'lib1', removeWatchedAfterDays: null });
+  });
+
+  test('submits the remove-watched day count as a number', async () => {
+    const { onSubmit } = setup({ profile: ALICE });
+    await userEvent.type(screen.getByLabelText('Remove watched videos after (days)'), '14');
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ removeWatchedAfterDays: 14 }));
+  });
+
+  test('disables Save for a zero day count', async () => {
+    setup({ profile: ALICE });
+    await userEvent.type(screen.getByLabelText('Remove watched videos after (days)'), '0');
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
   });
 
   test('closes after a successful save', async () => {

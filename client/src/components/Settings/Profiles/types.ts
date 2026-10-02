@@ -4,6 +4,7 @@ export interface Profile {
   jellyfinUserId: string | null;
   jellyfinUserName: string | null;
   jellyfinLibraryId: string | null;
+  removeWatchedAfterDays: number | null;
   folderPath: string;
   channelCount: number;
   playlistCount: number;
@@ -15,6 +16,7 @@ export interface ProfileInput {
   jellyfinUserId: string | null;
   jellyfinUserName: string | null;
   jellyfinLibraryId: string | null;
+  removeWatchedAfterDays: number | null;
 }
 
 export interface ProfileSubscriptions {

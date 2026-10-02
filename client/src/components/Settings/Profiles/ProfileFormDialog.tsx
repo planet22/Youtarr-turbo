@@ -19,6 +19,7 @@ import { useJellyfinProfileOptions } from './useJellyfinProfileOptions';
 import { apiErrorMessage } from './apiError';
 
 const NONE = '__none__';
+const MAX_REMOVE_WATCHED_DAYS = 3650;
 
 interface ProfileFormDialogProps {
   open: boolean;
@@ -32,6 +33,7 @@ export function ProfileFormDialog({ open, token, profile, onClose, onSubmit }: P
   const [name, setName] = useState('');
   const [userId, setUserId] = useState(NONE);
   const [libraryId, setLibraryId] = useState(NONE);
+  const [removeWatchedDays, setRemoveWatchedDays] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const jellyfin = useJellyfinProfileOptions(token, open);
@@ -41,6 +43,7 @@ export function ProfileFormDialog({ open, token, profile, onClose, onSubmit }: P
     setName(profile?.name ?? '');
     setUserId(profile?.jellyfinUserId ?? NONE);
     setLibraryId(profile?.jellyfinLibraryId ?? NONE);
+    setRemoveWatchedDays(profile?.removeWatchedAfterDays ? String(profile.removeWatchedAfterDays) : '');
     setError(null);
   }, [open, profile]);
 
@@ -54,6 +57,7 @@ export function ProfileFormDialog({ open, token, profile, onClose, onSubmit }: P
         jellyfinUserId: userId === NONE ? null : userId,
         jellyfinUserName: userId === NONE ? null : user?.name ?? profile?.jellyfinUserName ?? null,
         jellyfinLibraryId: libraryId === NONE ? null : libraryId,
+        removeWatchedAfterDays: removeWatchedDays.trim() === '' ? null : Number(removeWatchedDays),
       });
       onClose();
     } catch (err: unknown) {
@@ -64,6 +68,9 @@ export function ProfileFormDialog({ open, token, profile, onClose, onSubmit }: P
   };
 
   const showJellyfin = !jellyfin.error;
+  const daysNumber = Number(removeWatchedDays);
+  const daysValid = removeWatchedDays.trim() === ''
+    || (Number.isInteger(daysNumber) && daysNumber >= 1 && daysNumber <= MAX_REMOVE_WATCHED_DAYS);
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
@@ -113,8 +120,21 @@ export function ProfileFormDialog({ open, token, profile, onClose, onSubmit }: P
               </FormControl>
               <Typography variant="body2" color="text.secondary">
                 The library is refreshed whenever new videos are linked into this profile. Point it
-                at this profile&apos;s folder in Jellyfin.
+                at this profile&apos;s folder in Jellyfin. Playlists this profile follows are also
+                created as this user&apos;s own Jellyfin playlists.
               </Typography>
+              <TextField
+                label="Remove watched videos after (days)"
+                type="number"
+                value={removeWatchedDays}
+                onChange={(e) => setRemoveWatchedDays(e.target.value)}
+                inputProps={{ min: 1, max: MAX_REMOVE_WATCHED_DAYS }}
+                error={!daysValid}
+                helperText={daysValid
+                  ? 'Leave empty to keep everything. Only this profile\'s links are removed; library files stay. Needs watch status sync.'
+                  : `Enter a whole number from 1 to ${MAX_REMOVE_WATCHED_DAYS}, or leave empty.`}
+                fullWidth
+              />
             </>
           ) : (
             <Typography variant="body2" color="text.secondary">
@@ -132,7 +152,7 @@ export function ProfileFormDialog({ open, token, profile, onClose, onSubmit }: P
           onClick={() => {
             void handleSubmit();
           }}
-          disabled={saving || name.trim() === ''}
+          disabled={saving || name.trim() === '' || !daysValid}
         >
           {saving ? 'Saving...' : 'Save'}
         </Button>

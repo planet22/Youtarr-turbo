@@ -264,6 +264,15 @@ class JellyfinAdapter extends BaseAdapter {
     return { id: res.data?.Id };
   }
 
+  /** A copy of this adapter acting as another Jellyfin user (owns created playlists, scopes item lookups). */
+  forUser(userId) {
+    return new JellyfinAdapter({ ...this.config, jellyfinUserId: userId });
+  }
+
+  async deletePlaylist(playlistId) {
+    await axios.delete(`${this.url}/Items/${encodeURIComponent(playlistId)}`, { headers: this._headers(), timeout: REQUEST_TIMEOUT_MS });
+  }
+
   async replacePlaylistItems(playlistId, itemIds, opts = {}) {
     if (!opts.name) {
       throw new Error('replacePlaylistItems requires opts.name to recreate the playlist');

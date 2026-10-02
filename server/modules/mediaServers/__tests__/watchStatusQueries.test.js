@@ -62,6 +62,19 @@ describe('watchStatusQueries', () => {
     });
   });
 
+  describe('buildUserWatchedExistsSql', () => {
+    test('binds the server type and user as replacements', () => {
+      const { replacements } = watchStatusQueries.buildUserWatchedExistsSql('jellyfin', 'u-alice');
+      expect(replacements).toEqual({ watchedServerType: 'jellyfin', watchedServerUserId: 'u-alice' });
+    });
+
+    test('ignores watchStatusWatchedRule', () => {
+      configModule.getConfig.mockReturnValue({ watchStatusWatchedRule: 'primary', jellyfinUserId: 'admin' });
+      const { sql } = watchStatusQueries.buildUserWatchedExistsSql('jellyfin', 'u-alice');
+      expect(sql).not.toContain('watchedJellyfinUserId');
+    });
+  });
+
   describe('buildWatchedExistsSql', () => {
     test('rule=any builds an EXISTS probe on played rows with no replacements', () => {
       const { sql, replacements } = watchStatusQueries.buildWatchedExistsSql();

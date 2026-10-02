@@ -45,6 +45,7 @@ function ProfileRow({ profile, busy, onEdit, onSubscriptions, onRelink, onDelete
         <Typography variant="body2" color="text.secondary">
           {profile.channelCount} channels, {profile.playlistCount} playlists, {profile.videoCount} videos linked
           {profile.jellyfinUserName ? ` · Jellyfin user: ${profile.jellyfinUserName}` : ''}
+          {profile.removeWatchedAfterDays ? ` · removes watched after ${profile.removeWatchedAfterDays} days` : ''}
         </Typography>
       </div>
       <div className="flex flex-wrap gap-2">

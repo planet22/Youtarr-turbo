@@ -194,6 +194,31 @@ function initialize(deps = {}) {
   });
 
   // ============================================================================
+  // PROFILE WATCHED-VIDEO REMOVAL - 2:20 AM Daily
+  // ============================================================================
+  // Per user profile (Settings -> User Profiles): unlinks videos that profile's
+  // Jellyfin user watched more than remove_watched_after_days ago. Only the
+  // profile's hardlinks are removed; library files stay. No-op when no profile
+  // has the option set.
+  const profileModule = require('./profiles/profileModule');
+  defineTask({
+    id: 'profile-watched-removal',
+    label: 'Profile watched-video removal',
+    description: 'Removes watched videos from user profiles that have "remove watched videos" set. Library files are kept.',
+    cron: '20 2 * * *',
+    confirm: false,
+  }, async () => {
+    try {
+      const result = await profileModule.removeWatchedLinks();
+      if (result.removed > 0 || result.failed > 0) {
+        logger.info(result, 'Profile watched-video removal completed');
+      }
+    } catch (error) {
+      logger.error({ err: error }, 'Error during profile watched-video removal');
+    }
+  });
+
+  // ============================================================================
   // SESSION CLEANUP - 3:00 AM Daily
   // ============================================================================
   defineTask({

@@ -14,6 +14,7 @@ const ALICE: Profile = {
   jellyfinUserId: null,
   jellyfinUserName: null,
   jellyfinLibraryId: null,
+  removeWatchedAfterDays: null,
   folderPath: '/data/__profiles__/Alice',
   channelCount: 1,
   playlistCount: 0,

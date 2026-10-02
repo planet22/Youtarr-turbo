@@ -34,11 +34,14 @@ function pickJellyfinFields(body) {
     jellyfinUserId: body.jellyfinUserId,
     jellyfinUserName: body.jellyfinUserName,
     jellyfinLibraryId: body.jellyfinLibraryId,
+    removeWatchedAfterDays: body.removeWatchedAfterDays,
   };
 }
 
 function jellyfinFieldsValid(body) {
-  return ['jellyfinUserId', 'jellyfinUserName', 'jellyfinLibraryId'].every((key) => isOptionalString(body[key]));
+  const days = body.removeWatchedAfterDays;
+  return ['jellyfinUserId', 'jellyfinUserName', 'jellyfinLibraryId'].every((key) => isOptionalString(body[key]))
+    && (days === undefined || days === null || Number.isInteger(days));
 }
 
 /**
@@ -141,6 +144,7 @@ function createProfileRoutes({ verifyToken, profileModule }) {
    *               jellyfinUserId: { type: string, nullable: true }
    *               jellyfinUserName: { type: string, nullable: true }
    *               jellyfinLibraryId: { type: string, nullable: true }
+   *               removeWatchedAfterDays: { type: integer, nullable: true, minimum: 1, maximum: 3650, description: "Unlink videos from this profile this many days after its Jellyfin user watched them" }
    *     responses:
    *       201: { description: Created }
    *       400: { description: Invalid input }

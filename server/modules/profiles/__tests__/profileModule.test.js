@@ -16,6 +16,11 @@ jest.mock('../../../models', () => ({
   PlaylistVideo: { findAll: jest.fn() },
   Channel: { findAll: jest.fn() },
   Playlist: { findAll: jest.fn() },
+  VideoWatchStatus: { findAll: jest.fn() },
+}));
+jest.mock('../../mediaServers/mediaServerSync', () => ({
+  syncPlaylist: jest.fn(),
+  removeProfileCopies: jest.fn(),
 }));
 jest.mock('../profileLinker', () => ({
   linkVideo: jest.fn(),
@@ -57,6 +62,14 @@ describe('profileModule', () => {
   let profileLinker;
   let configModule;
   let JellyfinAdapter;
+  let mediaServerSync;
+
+  // Fire-and-forget work (playlist syncs) settles on later ticks.
+  async function waitFor(condition) {
+    for (let i = 0; i < 20 && !condition(); i += 1) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+  }
 
   beforeEach(() => {
     jest.resetModules();
@@ -71,7 +84,89 @@ describe('profileModule', () => {
     models.ProfileVideoLink.findAll.mockResolvedValue([]);
     models.PlaylistVideo.findAll.mockResolvedValue([]);
     models.Profile.findAll.mockResolvedValue([]);
+    models.Playlist.findAll.mockResolvedValue([]);
     profileLinker.linkVideo.mockResolvedValue(['/data/__profiles__/Alice/Chan/v [abc123def45].mp4']);
+    mediaServerSync = require('../../mediaServers/mediaServerSync');
+    mediaServerSync.syncPlaylist.mockResolvedValue(undefined);
+    mediaServerSync.removeProfileCopies.mockResolvedValue(undefined);
+  });
+
+  describe('Jellyfin playlist copies', () => {
+    test('changing the Jellyfin user removes the old user\'s playlist copies', async () => {
+      models.Profile.findByPk.mockResolvedValue(makeProfile({ jellyfin_user_id: 'u-old' }));
+      await profileModule.update(1, { jellyfinUserId: 'u-new' });
+      expect(mediaServerSync.removeProfileCopies).toHaveBeenCalledWith(1);
+    });
+
+    test('keeping the same Jellyfin user leaves the copies alone', async () => {
+      models.Profile.findByPk.mockResolvedValue(makeProfile({ jellyfin_user_id: 'u1' }));
+      await profileModule.update(1, { jellyfinUserId: 'u1' });
+      expect(mediaServerSync.removeProfileCopies).not.toHaveBeenCalled();
+    });
+
+    test('deleting a profile removes its playlist copies', async () => {
+      models.Profile.findByPk.mockResolvedValue(makeProfile());
+      await profileModule.remove(1);
+      expect(mediaServerSync.removeProfileCopies).toHaveBeenCalledWith(1);
+    });
+
+    test('following a new playlist syncs it to the media servers', async () => {
+      models.Profile.findByPk.mockResolvedValue(makeProfile());
+      models.Playlist.findAll.mockResolvedValue([{ id: 42 }]);
+      await profileModule.setSubscriptions(1, { playlists: ['PL1'] });
+      await waitFor(() => mediaServerSync.syncPlaylist.mock.calls.length > 0);
+      expect(mediaServerSync.syncPlaylist).toHaveBeenCalledWith(42);
+    });
+  });
+
+  describe('remove watched after days', () => {
+    test('create rejects a zero day count with status 400', async () => {
+      await expect(profileModule.create({ name: 'Alice', removeWatchedAfterDays: 0 })).rejects.toMatchObject({ status: 400 });
+    });
+
+    test('update stores a valid day count', async () => {
+      const profile = makeProfile();
+      models.Profile.findByPk.mockResolvedValue(profile);
+      await profileModule.update(1, { removeWatchedAfterDays: 14 });
+      expect(profile.update).toHaveBeenCalledWith({ remove_watched_after_days: 14 });
+    });
+
+    test('removeWatchedLinks unlinks a watched video and marks it dismissed', async () => {
+      const row = makeLinkRow();
+      models.Profile.findAll.mockResolvedValue([makeProfile({ remove_watched_after_days: 7, jellyfin_user_id: 'u1' })]);
+      models.VideoWatchStatus.findAll.mockResolvedValue([{ video_id: 10 }]);
+      models.Video.findAll.mockResolvedValue([{ id: 10 }]);
+      models.ProfileVideoLink.findAll.mockResolvedValue([row]);
+
+      const result = await profileModule.removeWatchedLinks();
+
+      expect(result).toEqual({ profiles: 1, removed: 1, failed: 0 });
+      expect(row.update).toHaveBeenCalledWith({ link_paths: '[]', dismissed_at: expect.any(Date) });
+    });
+
+    test('removeWatchedLinks skips protected videos', async () => {
+      models.Profile.findAll.mockResolvedValue([makeProfile({ remove_watched_after_days: 7, jellyfin_user_id: 'u1' })]);
+      models.VideoWatchStatus.findAll.mockResolvedValue([{ video_id: 10 }]);
+      models.Video.findAll.mockResolvedValue([]);
+      models.ProfileVideoLink.findAll.mockResolvedValue([]);
+
+      await profileModule.removeWatchedLinks();
+
+      expect(models.ProfileVideoLink.findAll).toHaveBeenCalledWith(expect.objectContaining({
+        where: expect.objectContaining({ video_id: [] }),
+      }));
+    });
+
+    test('a dismissed video is not linked again by reconcile', async () => {
+      models.Profile.findByPk.mockResolvedValue(makeProfile());
+      models.ProfileSubscription.findAll.mockResolvedValue([{ profile_id: 1, source_type: 'channel', source_id: 'UC1' }]);
+      models.Video.findAll.mockResolvedValue([VIDEO]);
+      models.ProfileVideoLink.findAll.mockResolvedValue([makeLinkRow({ dismissed_at: new Date(), link_paths: '[]' })]);
+
+      await profileModule.reconcile(1);
+
+      expect(profileLinker.linkVideo).not.toHaveBeenCalled();
+    });
   });
 
   describe('create', () => {

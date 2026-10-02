@@ -8,12 +8,20 @@ const { sequelize } = require('../../db');
 const configModule = require('../configModule');
 const JellyfinAdapter = require('../mediaServers/adapters/jellyfinAdapter');
 const { validateSubFolderName } = require('../filesystem/subfolderValidation');
-const { Profile, ProfileSubscription, ProfileVideoLink, Video, PlaylistVideo, Channel, Playlist } = require('../../models');
+const mediaServerSync = require('../mediaServers/mediaServerSync');
+const { Profile, ProfileSubscription, ProfileVideoLink, Video, PlaylistVideo, Channel, Playlist, VideoWatchStatus } = require('../../models');
 const profileLinker = require('./profileLinker');
 const { profileRootPath } = require('./profilePaths');
 
 const SOURCE_TYPES = Object.freeze({ CHANNEL: 'channel', PLAYLIST: 'playlist' });
 const MAX_NAME_LENGTH = 100;
+const MAX_REMOVE_WATCHED_DAYS = 3650;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+function validateRemoveWatchedDays(value) {
+  if (value === null || value === undefined) return true;
+  return Number.isInteger(value) && value >= 1 && value <= MAX_REMOVE_WATCHED_DAYS;
+}
 
 function makeError(message, status) {
   const err = new Error(message);
@@ -61,6 +69,7 @@ class ProfileModule {
       jellyfinUserId: profile.jellyfin_user_id,
       jellyfinUserName: profile.jellyfin_user_name,
       jellyfinLibraryId: profile.jellyfin_library_id,
+      removeWatchedAfterDays: profile.remove_watched_after_days ?? null,
       folderPath: profileRootPath(this._baseDir(), profile.name),
       channelCount: counts.channels || 0,
       playlistCount: counts.playlists || 0,
@@ -85,7 +94,7 @@ class ProfileModule {
     const [profiles, subs, links] = await Promise.all([
       Profile.findAll({ order: [['name', 'ASC']] }),
       ProfileSubscription.findAll({ attributes: ['profile_id', 'source_type'], raw: true }),
-      ProfileVideoLink.findAll({ attributes: ['profile_id'], raw: true }),
+      ProfileVideoLink.findAll({ where: { dismissed_at: null }, attributes: ['profile_id'], raw: true }),
     ]);
     const counts = new Map(profiles.map((p) => [p.id, { channels: 0, playlists: 0, videos: 0 }]));
     for (const sub of subs) {
@@ -101,9 +110,12 @@ class ProfileModule {
     return profiles.map((p) => this._serialize(p, counts.get(p.id)));
   }
 
-  async create({ name, jellyfinUserId = null, jellyfinUserName = null, jellyfinLibraryId = null }) {
+  async create({ name, jellyfinUserId = null, jellyfinUserName = null, jellyfinLibraryId = null, removeWatchedAfterDays = null }) {
     const validation = validateName(name);
     if (!validation.valid) throw makeError(validation.error, 400);
+    if (!validateRemoveWatchedDays(removeWatchedAfterDays)) {
+      throw makeError(`Remove-watched days must be a whole number from 1 to ${MAX_REMOVE_WATCHED_DAYS}`, 400);
+    }
     const clean = name.trim();
     await this._assertNameAvailable(clean);
 
@@ -112,6 +124,7 @@ class ProfileModule {
       jellyfin_user_id: jellyfinUserId || null,
       jellyfin_user_name: jellyfinUserName || null,
       jellyfin_library_id: jellyfinLibraryId || null,
+      remove_watched_after_days: removeWatchedAfterDays ?? null,
     });
     await profileLinker.ensureProfileRoot(this._baseDir(), clean);
     return this._serialize(profile);
@@ -132,10 +145,44 @@ class ProfileModule {
     if (fields.jellyfinUserId !== undefined) updates.jellyfin_user_id = fields.jellyfinUserId || null;
     if (fields.jellyfinUserName !== undefined) updates.jellyfin_user_name = fields.jellyfinUserName || null;
     if (fields.jellyfinLibraryId !== undefined) updates.jellyfin_library_id = fields.jellyfinLibraryId || null;
+    if (fields.removeWatchedAfterDays !== undefined) {
+      if (!validateRemoveWatchedDays(fields.removeWatchedAfterDays)) {
+        throw makeError(`Remove-watched days must be a whole number from 1 to ${MAX_REMOVE_WATCHED_DAYS}`, 400);
+      }
+      updates.remove_watched_after_days = fields.removeWatchedAfterDays;
+    }
 
+    const userChanged = updates.jellyfin_user_id !== undefined && updates.jellyfin_user_id !== profile.jellyfin_user_id;
+    // The old user's playlist copies belong to someone else now; drop them first.
+    if (userChanged) await mediaServerSync.removeProfileCopies(profile.id);
     await profile.update(updates);
+    if (userChanged) this._syncFollowedPlaylists(profile.id);
+
     const [profileView] = (await this.list()).filter((p) => p.id === profile.id);
     return profileView;
+  }
+
+  async _followedPlaylistIds(profileId) {
+    const subs = await ProfileSubscription.findAll({
+      where: { profile_id: profileId, source_type: SOURCE_TYPES.PLAYLIST },
+      attributes: ['source_id'],
+      raw: true,
+    });
+    return subs.map((s) => s.source_id);
+  }
+
+  /** Fire-and-forget media-server sync of the given playlists (YouTube playlist ids). */
+  _syncPlaylists(playlistIds) {
+    if (playlistIds.length === 0) return;
+    Playlist.findAll({ where: { playlist_id: playlistIds }, attributes: ['id'], raw: true })
+      .then((rows) => Promise.all(rows.map((row) => mediaServerSync.syncPlaylist(row.id))))
+      .catch((err) => logger.error({ err }, 'profiles: playlist sync after profile change failed'));
+  }
+
+  _syncFollowedPlaylists(profileId) {
+    this._followedPlaylistIds(profileId)
+      .then((ids) => this._syncPlaylists(ids))
+      .catch((err) => logger.error({ err, profileId }, 'profiles: could not list followed playlists'));
   }
 
   async _renameFolder(profile, newName) {
@@ -155,6 +202,7 @@ class ProfileModule {
 
   async remove(id) {
     const profile = await this._getProfileOr404(id);
+    await mediaServerSync.removeProfileCopies(profile.id);
     await profileLinker.removeProfileRoot(this._baseDir(), profile.name);
     await sequelize.transaction(async (transaction) => {
       await ProfileVideoLink.destroy({ where: { profile_id: profile.id }, transaction });
@@ -182,11 +230,20 @@ class ProfileModule {
       ...[...new Set(channels)].map((sourceId) => ({ profile_id: profile.id, source_type: SOURCE_TYPES.CHANNEL, source_id: sourceId })),
       ...[...new Set(playlists)].map((sourceId) => ({ profile_id: profile.id, source_type: SOURCE_TYPES.PLAYLIST, source_id: sourceId })),
     ];
+    const previousPlaylists = await this._followedPlaylistIds(profile.id);
     await sequelize.transaction(async (transaction) => {
       await ProfileSubscription.destroy({ where: { profile_id: profile.id }, transaction });
       if (rows.length > 0) await ProfileSubscription.bulkCreate(rows, { transaction });
     });
-    return this.reconcile(profile.id);
+    const result = await this.reconcile(profile.id);
+
+    const next = new Set(playlists);
+    const before = new Set(previousPlaylists);
+    this._syncPlaylists([
+      ...[...next].filter((id) => !before.has(id)),
+      ...[...before].filter((id) => !next.has(id)),
+    ]);
+    return result;
   }
 
   /**
@@ -201,7 +258,9 @@ class ProfileModule {
       ...[...new Set(playlists)].map((sourceId) => ({ profile_id: profile.id, source_type: SOURCE_TYPES.PLAYLIST, source_id: sourceId })),
     ];
     if (rows.length > 0) await ProfileSubscription.bulkCreate(rows, { ignoreDuplicates: true });
-    return this.reconcile(profile.id);
+    const result = await this.reconcile(profile.id);
+    this._syncPlaylists([...new Set(playlists)]);
+    return result;
   }
 
   async _desiredVideos(profileId) {
@@ -272,6 +331,8 @@ class ProfileModule {
 
   /** @returns {Promise<boolean>} true when the video was newly linked */
   async _linkVideoToProfile(baseDir, profile, video, row) {
+    // Removed from this profile after being watched: stays out.
+    if (row && row.dismissed_at) return false;
     const paths = await profileLinker.linkVideo(baseDir, profile.name, video);
     const previous = row ? parsePaths(row) : [];
     const stale = previous.filter((p) => !paths.includes(p));
@@ -400,6 +461,64 @@ class ProfileModule {
         logger.warn({ err: err.message, libraryId }, 'profiles: Jellyfin library refresh failed');
       });
     }
+  }
+
+  /**
+   * Nightly: for profiles with remove_watched_after_days set, unlink videos
+   * the profile's Jellyfin user watched at least that many days ago. Only the
+   * profile's links go; library files and other profiles are untouched, and
+   * protected videos are kept. Removed videos are not linked in again.
+   * @returns {Promise<{profiles:number, removed:number, failed:number}>}
+   */
+  async removeWatchedLinks() {
+    const profiles = await Profile.findAll({
+      where: { remove_watched_after_days: { [Op.gte]: 1 }, jellyfin_user_id: { [Op.ne]: null } },
+    });
+    const result = { profiles: profiles.length, removed: 0, failed: 0 };
+    const baseDir = this._baseDir();
+
+    for (const profile of profiles) {
+      const cutoff = new Date(Date.now() - profile.remove_watched_after_days * DAY_MS);
+      const watched = await VideoWatchStatus.findAll({
+        where: {
+          server_type: 'jellyfin',
+          server_user_id: profile.jellyfin_user_id,
+          played: true,
+          last_watched_at: { [Op.lte]: cutoff },
+        },
+        attributes: ['video_id'],
+        raw: true,
+      });
+      if (watched.length === 0) continue;
+
+      const unprotected = await Video.findAll({
+        where: { id: watched.map((w) => w.video_id), protected: false },
+        attributes: ['id'],
+        raw: true,
+      });
+      const rows = await ProfileVideoLink.findAll({
+        where: { profile_id: profile.id, video_id: unprotected.map((v) => v.id), dismissed_at: null },
+      });
+
+      let removedHere = 0;
+      for (const row of rows) {
+        try {
+          await profileLinker.unlinkPaths(baseDir, profile.name, parsePaths(row));
+          await row.update({ link_paths: '[]', dismissed_at: new Date() });
+          removedHere += 1;
+        } catch (err) {
+          result.failed += 1;
+          logger.error({ err, profileId: profile.id, youtubeId: row.youtube_id }, 'profiles: failed to remove watched video');
+        }
+      }
+      if (removedHere > 0) {
+        result.removed += removedHere;
+        logger.info({ profileId: profile.id, removed: removedHere }, 'profiles: removed watched videos from profile');
+        this._refreshLibraries([profile]);
+        this._syncFollowedPlaylists(profile.id);
+      }
+    }
+    return result;
   }
 
   /** Every subscribed channel and playlist, for the profile subscription picker. */

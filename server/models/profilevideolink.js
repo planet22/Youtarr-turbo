@@ -11,6 +11,8 @@ ProfileVideoLink.init(
     youtube_id: { type: DataTypes.STRING, allowNull: false },
     // JSON array of absolute paths this video's files were linked to in the profile folder.
     link_paths: { type: DataTypes.TEXT, allowNull: false },
+    // Set when removed as watched; the video is not linked into this profile again.
+    dismissed_at: { type: DataTypes.DATE, allowNull: true },
   },
   { sequelize, modelName: 'ProfileVideoLink', tableName: 'profile_video_links', timestamps: true }
 );

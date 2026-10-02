@@ -62,7 +62,18 @@ describe('Profile routes', () => {
       jellyfinUserId: 'u1',
       jellyfinUserName: undefined,
       jellyfinLibraryId: 'l1',
+      removeWatchedAfterDays: undefined,
     });
+  });
+
+  test('POST /api/profiles rejects a non-integer removeWatchedAfterDays with 400', async () => {
+    const res = await request(app).post('/api/profiles').send({ name: 'Alice', removeWatchedAfterDays: '7' });
+    expect(res.status).toBe(400);
+  });
+
+  test('PUT /api/profiles/:id passes removeWatchedAfterDays to the module', async () => {
+    await request(app).put('/api/profiles/1').send({ removeWatchedAfterDays: 14 });
+    expect(mockProfileModule.update).toHaveBeenCalledWith(1, expect.objectContaining({ removeWatchedAfterDays: 14 }));
   });
 
   test('POST /api/profiles rejects a missing name with 400', async () => {

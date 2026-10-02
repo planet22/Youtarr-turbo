@@ -69,6 +69,16 @@ class WatchStatusQueries {
     };
   }
 
+  // Watched by one specific server user (a user profile's Jellyfin user),
+  // regardless of watchStatusWatchedRule.
+  buildUserWatchedExistsSql(serverType, serverUserId) {
+    return {
+      sql: 'EXISTS (SELECT 1 FROM video_watch_status vws WHERE vws.video_id = Videos.id AND vws.played = 1'
+        + ' AND vws.server_type = :watchedServerType AND vws.server_user_id = :watchedServerUserId)',
+      replacements: { watchedServerType: serverType, watchedServerUserId: serverUserId },
+    };
+  }
+
   // Auto-removal's "safe to delete as watched" predicate. With
   // minDaysSinceWatched set it also requires that NO qualifying watch is
   // newer than the cutoff. A played row with a NULL last_watched_at blocks

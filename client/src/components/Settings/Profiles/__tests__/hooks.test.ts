@@ -42,7 +42,7 @@ describe('useProfiles', () => {
     axios.post.mockResolvedValue({ data: {} });
     const { result } = renderHook(() => useProfiles('tok'));
     await waitFor(() => expect(result.current.loading).toBe(false));
-    const input = { name: 'Bob', jellyfinUserId: null, jellyfinUserName: null, jellyfinLibraryId: null };
+    const input = { name: 'Bob', jellyfinUserId: null, jellyfinUserName: null, jellyfinLibraryId: null, removeWatchedAfterDays: null };
     await act(() => result.current.createProfile(input));
     expect(axios.post).toHaveBeenCalledWith('/api/profiles', input, { headers: { 'x-access-token': 'tok' } });
   });

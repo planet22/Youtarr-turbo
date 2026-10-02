@@ -11,6 +11,7 @@ describe('VideosModule', () => {
   let mockSequelize;
   let mockVideo;
   let mockWatchStatusQueries;
+  let mockProfile;
   let mockFs;
   let mockConfigModule;
   let mockVideoValidationModule;
@@ -116,9 +117,16 @@ describe('VideosModule', () => {
     }));
 
     // Mock the models
+    mockProfile = { findByPk: jest.fn().mockResolvedValue(null) };
+    mockWatchStatusQueries.buildUserWatchedExistsSql = jest.fn().mockReturnValue({
+      sql: 'EXISTS (SELECT 1 FROM video_watch_status vws WHERE vws.server_user_id = :watchedServerUserId)',
+      replacements: { watchedServerType: 'jellyfin', watchedServerUserId: 'u-alice' }
+    });
+
     jest.doMock('../../models', () => ({
       Video: mockVideo,
-      Channel: mockChannel
+      Channel: mockChannel,
+      Profile: mockProfile
     }));
 
     // Mock the watch status query module (owns the watchedBy aggregation)
@@ -549,6 +557,28 @@ describe('VideosModule', () => {
       const [countQuery, countOptions] = mockSequelize.query.mock.calls[0];
       expect(countQuery).toContain('FROM profile_subscriptions ps');
       expect(countOptions.replacements.profileId).toBe(5);
+    });
+
+    test('should use the profile Jellyfin user for the watched filter', async () => {
+      mockProfile.findByPk.mockResolvedValue({ jellyfin_user_id: 'u-alice' });
+      mockSequelize.query.mockResolvedValueOnce([{ total: 0 }]);
+      mockSequelize.query.mockResolvedValueOnce([]);
+      mockSequelize.query.mockResolvedValueOnce([]);
+
+      await VideosModule.getVideosPaginated({ profileId: 5, watchedFilter: 'only' });
+
+      expect(mockWatchStatusQueries.buildUserWatchedExistsSql).toHaveBeenCalledWith('jellyfin', 'u-alice');
+    });
+
+    test('should fall back to the global watched rule for a profile without a Jellyfin user', async () => {
+      mockProfile.findByPk.mockResolvedValue({ jellyfin_user_id: null });
+      mockSequelize.query.mockResolvedValueOnce([{ total: 0 }]);
+      mockSequelize.query.mockResolvedValueOnce([]);
+      mockSequelize.query.mockResolvedValueOnce([]);
+
+      await VideosModule.getVideosPaginated({ profileId: 5, watchedFilter: 'only' });
+
+      expect(mockWatchStatusQueries.buildWatchedExistsSql).toHaveBeenCalled();
     });
 
     test('should not mention profiles without a profileId', async () => {

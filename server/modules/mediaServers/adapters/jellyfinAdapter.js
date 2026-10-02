@@ -115,6 +115,15 @@ class JellyfinAdapter extends BaseAdapter {
     }
   }
 
+  /** Refreshes one library (virtual folder ItemId), e.g. a user profile's library. */
+  async refreshLibraryById(libraryId) {
+    await axios.post(`${this.url}/Items/${encodeURIComponent(libraryId)}/Refresh`, null, {
+      headers: this._headers(),
+      params: { Recursive: true, ImageRefreshMode: 'Default', MetadataRefreshMode: 'Default' },
+      timeout: REQUEST_TIMEOUT_MS,
+    });
+  }
+
   async resolveItemIdByFilepath(filepath) {
     // Match by filename across different mount views (supports Windows paths
     // via extractBasename which splits on both / and \).

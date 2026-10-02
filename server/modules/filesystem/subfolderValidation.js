@@ -4,7 +4,8 @@
  */
 const { GLOBAL_DEFAULT_SENTINEL, ROOT_SENTINEL, SUBFOLDER_PREFIX } = require('./constants');
 
-const RESERVED_SUB_FOLDERS = ['playlists'];
+// 'profiles__' would map to the __profiles__ directory (PROFILES_DIR_NAME).
+const RESERVED_SUB_FOLDERS = ['playlists', 'profiles__'];
 const VALID_NAME_PATTERN = /^[a-zA-Z0-9\s\-_]+$/;
 const MAX_SUBFOLDER_LENGTH = 100;
 

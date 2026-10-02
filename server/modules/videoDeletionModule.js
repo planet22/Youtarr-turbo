@@ -3,10 +3,11 @@ const { sequelize } = require('../db');
 const fs = require('fs').promises;
 const path = require('path');
 const logger = require('../logger');
-const { isVideoDirectory, cleanupEmptyChannelDirectory, cleanupEmptyParents, removeEmptyDescendants, isSubfolderDir, listSubdirectories, removeDirectoryResilient } = require('./filesystem');
+const { isVideoDirectory, cleanupEmptyChannelDirectory, cleanupEmptyParents, removeEmptyDescendants, isSubfolderDir, listSubdirectories, removeDirectoryResilient, PROFILES_DIR_NAME } = require('./filesystem');
 const m3uGenerator = require('./m3uGenerator');
 const videoThumbnailCache = require('./videoThumbnailCache');
 const jobEventLog = require('./jobEventLog');
+const profileModule = require('./profiles/profileModule');
 const { EVENT_TYPES } = require('./jobEventLog/eventCatalog');
 
 class VideoDeletionModule {
@@ -168,6 +169,8 @@ class VideoDeletionModule {
       if (configModule.getConfig().autoRemovalPreserveStrmFallback !== false) {
         const reverted = await this._tryRevertToStrm(video);
         if (reverted) {
+          // Profiles drop the big file and pick up the restored .strm.
+          await profileModule.syncVideo(video.id);
           return reverted;
         }
       }
@@ -218,6 +221,9 @@ class VideoDeletionModule {
       // Mark video as removed in database
       await video.update({ removed: true });
       this.recordVideoDeleted(video, { filePath: video.filePath });
+
+      // A hardlink in a profile folder would otherwise keep the file's disk space.
+      await profileModule.syncVideo(video);
 
       // Best-effort cleanup of empty channel directory
       await this._tryCleanupChannelDirectory(video.filePath, flat);
@@ -615,6 +621,9 @@ class VideoDeletionModule {
       const channelId = video.channel_id;
       const youtubeId = video.youtubeId;
 
+      // Removed videos keep no profile links; this also clears the link rows.
+      await profileModule.syncVideo(video);
+
       // One transaction, so a failure partway cannot leave a half-purged video.
       await sequelize.transaction(async (transaction) => {
         await JobVideo.destroy({ where: { video_id: videoId }, transaction });
@@ -839,6 +848,10 @@ ${excludeClause}${minSizeClause}        ORDER BY timeCreated ASC
 
       for (const dir of topLevelDirs) {
         const dirName = path.basename(dir);
+
+        // Profile folders are managed by profileLinker; an empty one is still a
+        // media server library root.
+        if (dirName === PROFILES_DIR_NAME) continue;
 
         if (isSubfolderDir(dirName)) {
           // Subfolder directory (e.g., __Music) — check its children as channel dirs

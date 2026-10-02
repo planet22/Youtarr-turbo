@@ -18,6 +18,8 @@ const createYtdlpOptionsRoutes = require('./ytdlpOptions');
 const createMaintenanceRoutes = require('./maintenance');
 const createSubfolderRoutes = require('./subfolders');
 const createJobEventRoutes = require('./jobEvents');
+const createProfileRoutes = require('./profiles');
+const profileModule = require('../modules/profiles/profileModule');
 const videoMetadataModule = require('../modules/videoMetadataModule');
 const videoOembedEnricher = require('../modules/videoOembedEnricher');
 const playlistModule = require('../modules/playlistModule');
@@ -126,6 +128,9 @@ function registerRoutes(app, deps) {
 
   // Subfolder registry routes
   app.use(createSubfolderRoutes({ verifyToken, subfolderModule }));
+
+  // User profile routes (per-user hardlinked library folders)
+  app.use(createProfileRoutes({ verifyToken, profileModule }));
 
   /*
  * GET /api/ytstream/:youtubeId has no login wall (no verifyToken) so media

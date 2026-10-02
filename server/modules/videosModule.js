@@ -10,7 +10,7 @@ const jobEventLog = require('./jobEventLog');
 const { EVENT_TYPES } = require('./jobEventLog/eventCatalog');
 const messageEmitter = require('./messageEmitter');
 const m3uGenerator = require('./m3uGenerator');
-const { AUDIO_EXTENSIONS, MEDIA_EXTENSIONS } = require('./filesystem/constants');
+const { AUDIO_EXTENSIONS, MEDIA_EXTENSIONS, PROFILES_DIR_NAME } = require('./filesystem/constants');
 const { probeVideoDimensions } = require('./resolutionTier');
 const createLimiter = require('./subscriptionImport/concurrencyLimiter');
 const { formatRelativeTimeAgo } = require('./relativeTimeFormatter');
@@ -1005,6 +1005,7 @@ class VideosModule {
         const fullPath = path.join(dir, entry.name);
 
         if (entry.isDirectory()) {
+          if (entry.name === PROFILES_DIR_NAME) continue;
           await this.scanForVideoFiles(fullPath, fileMap, duplicates);
           continue;
         }

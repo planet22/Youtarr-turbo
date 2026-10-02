@@ -56,6 +56,7 @@ import { MetadataRegenSection } from './MetadataRegenSection';
 import { RegenerateStreamKeySection } from './RegenerateStreamKeySection';
 import { CompactHistorySection } from './CompactHistorySection';
 import { ClearEventLogSection } from './ClearEventLogSection';
+import { ProfilesSection } from './ProfilesSection';
 
 interface SettingsProps {
   token: string | null;
@@ -363,6 +364,7 @@ export function Settings({ token }: SettingsProps) {
               />
             }
           />
+          <Route path="profiles" element={<ProfilesSection token={token} />} />
           <Route
             path="watch-status"
             element={

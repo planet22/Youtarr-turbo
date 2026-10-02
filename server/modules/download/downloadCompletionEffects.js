@@ -10,6 +10,7 @@ const jobModule = require('../jobModule');
 const filesystem = require('../filesystem');
 const subfolderModule = require('../subfolderModule');
 const m3uGenerator = require('../m3uGenerator');
+const profileModule = require('../profiles/profileModule');
 const { JobVideoDownload } = require('../../models');
 const Channel = require('../../models/channel');
 
@@ -89,6 +90,16 @@ async function runCompletionSideEffects({
       require('../downloadModule').afterDownloadHook(downloadedIds).catch((err) => {
         logger.error({ err }, 'afterDownloadHook failed');
       });
+    }
+  }
+
+  // Hardlink new files into subscribing user profiles before the media-server
+  // scans below, so profile libraries pick them up in the same scan.
+  if (videoData && videoData.length > 0) {
+    try {
+      await profileModule.syncDownloadedVideos(videoData.map((v) => v.youtubeId).filter(Boolean));
+    } catch (err) {
+      logger.error({ err }, 'Failed to link downloaded videos into profiles');
     }
   }
 

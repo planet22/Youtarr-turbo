@@ -119,6 +119,27 @@ describe('profileModule', () => {
     });
   });
 
+  describe('reconcileAll', () => {
+    test('re-checks every profile and totals the results', async () => {
+      models.Profile.findAll.mockResolvedValue([{ id: 1 }, { id: 2 }]);
+      models.Profile.findByPk.mockImplementation((id) => Promise.resolve(makeProfile({ id })));
+      models.ProfileVideoLink.findAll.mockResolvedValue([makeLinkRow()]);
+
+      const result = await profileModule.reconcileAll();
+
+      expect(result).toEqual({ profiles: 2, linked: 0, unlinked: 2, failed: 0 });
+    });
+
+    test('counts a profile that fails without stopping the rest', async () => {
+      models.Profile.findAll.mockResolvedValue([{ id: 1 }, { id: 2 }]);
+      models.Profile.findByPk.mockResolvedValueOnce(null).mockResolvedValueOnce(makeProfile({ id: 2 }));
+
+      const result = await profileModule.reconcileAll();
+
+      expect(result.failed).toBe(1);
+    });
+  });
+
   describe('remove watched after days', () => {
     test('create rejects a zero day count with status 400', async () => {
       await expect(profileModule.create({ name: 'Alice', removeWatchedAfterDays: 0 })).rejects.toMatchObject({ status: 400 });

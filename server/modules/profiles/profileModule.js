@@ -464,6 +464,28 @@ class ProfileModule {
   }
 
   /**
+   * Nightly: re-check every profile against the library, which drops links of
+   * videos the rescan has since marked missing and picks up anything missed.
+   * @returns {Promise<{profiles:number, linked:number, unlinked:number, failed:number}>}
+   */
+  async reconcileAll() {
+    const profiles = await Profile.findAll({ attributes: ['id'] });
+    const totals = { profiles: profiles.length, linked: 0, unlinked: 0, failed: 0 };
+    for (const { id } of profiles) {
+      try {
+        const result = await this.reconcile(id);
+        totals.linked += result.linked;
+        totals.unlinked += result.unlinked;
+        totals.failed += result.failed;
+      } catch (err) {
+        totals.failed += 1;
+        logger.error({ err, profileId: id }, 'profiles: nightly reconcile failed');
+      }
+    }
+    return totals;
+  }
+
+  /**
    * Nightly: for profiles with remove_watched_after_days set, unlink videos
    * the profile's Jellyfin user watched at least that many days ago. Only the
    * profile's links go; library files and other profiles are untouched, and

@@ -107,11 +107,29 @@ describe('watchStatusQueries', () => {
   });
 
   describe('buildWatchedEligibilitySql', () => {
-    test('with no minimum days builds the same probe as buildWatchedExistsSql', () => {
+    test('with no minimum days wraps the buildWatchedExistsSql probe', () => {
       const { sql, replacements } = watchStatusQueries.buildWatchedEligibilitySql();
 
-      expect(sql).toBe(watchStatusQueries.buildWatchedExistsSql().sql);
+      expect(sql).toContain(watchStatusQueries.buildWatchedExistsSql().sql);
       expect(replacements).toEqual({});
+    });
+
+    test('keeps videos a user profile is still waiting to watch', () => {
+      const { sql } = watchStatusQueries.buildWatchedEligibilitySql();
+
+      expect(sql).toContain('NOT EXISTS (SELECT 1 FROM profile_video_links pvl');
+    });
+
+    test('applies the profile guard with a minimum days setting too', () => {
+      const { sql } = watchStatusQueries.buildWatchedEligibilitySql({ minDaysSinceWatched: 7 });
+
+      expect(sql).toContain('pw.server_user_id = p.jellyfin_user_id');
+    });
+
+    test('ignores links already removed from a profile as watched', () => {
+      const { sql } = watchStatusQueries.buildWatchedEligibilitySql();
+
+      expect(sql).toContain('pvl.dismissed_at IS NULL');
     });
 
     test('minDaysSinceWatched adds a NOT EXISTS probe for recent or undated watches', () => {

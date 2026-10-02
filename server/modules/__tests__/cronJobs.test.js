@@ -72,7 +72,7 @@ describe('CronJobs', () => {
     };
     jest.doMock('../ytdlpModule', () => mockYtdlpModule);
     jest.doMock('../videoThumbnailCache', () => ({ pruneUnused: jest.fn(() => Promise.resolve(0)) }));
-    jest.doMock('../profiles/profileModule', () => ({ removeWatchedLinks: jest.fn().mockResolvedValue({ profiles: 0, removed: 0, failed: 0 }) }));
+    jest.doMock('../profiles/profileModule', () => ({ reconcileAll: jest.fn().mockResolvedValue({ profiles: 0, linked: 0, unlinked: 0, failed: 0 }), removeWatchedLinks: jest.fn().mockResolvedValue({ profiles: 0, removed: 0, failed: 0 }) }));
 
     // Mock configModule with a tiny in-memory store so the auto-update job can read/write
     mockConfigStore = { autoUpdateYtdlp: false };

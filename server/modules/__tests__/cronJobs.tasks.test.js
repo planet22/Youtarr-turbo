@@ -38,7 +38,7 @@ describe('cronJobs nightly maintenance tasks', () => {
     jest.doMock('../notificationModule', () => ({ sendAutoRemovalNotification: jest.fn() }));
     jest.doMock('../ytdlpModule', () => ({ performUpdate: jest.fn() }));
     jest.doMock('../videoThumbnailCache', () => ({ pruneUnused: jest.fn(() => Promise.resolve(0)) }));
-    jest.doMock('../profiles/profileModule', () => ({ removeWatchedLinks: jest.fn().mockResolvedValue({ profiles: 0, removed: 0, failed: 0 }) }));
+    jest.doMock('../profiles/profileModule', () => ({ reconcileAll: jest.fn().mockResolvedValue({ profiles: 0, linked: 0, unlinked: 0, failed: 0 }), removeWatchedLinks: jest.fn().mockResolvedValue({ profiles: 0, removed: 0, failed: 0 }) }));
     jest.doMock('../configModule', () => ({ getConfig: jest.fn(() => configStore), isElfhostedPlatform: jest.fn(() => false) }));
     jest.doMock('../youtubeMetadataCache', () => ({ YOUTUBE_METADATA_CACHE_RETENTION_DAYS: 365 }));
     jest.doMock('../../routes/ytstream', () => ytstreamRoutes);
@@ -101,9 +101,23 @@ describe('cronJobs nightly maintenance tasks', () => {
     });
   });
 
-  describe('profile watched-video removal (2:20 AM)', () => {
+  describe('profile maintenance (2:20 AM)', () => {
     it('is registered as its own task', () => {
-      expect(task('profile-watched-removal')).toMatchObject({ cron: '20 2 * * *', confirm: false });
+      expect(task('profile-maintenance')).toMatchObject({ cron: '20 2 * * *', confirm: false });
+    });
+
+    it('re-checks every profile against the library', async () => {
+      await run('20 2 * * *');
+
+      expect(require('../profiles/profileModule').reconcileAll).toHaveBeenCalled();
+    });
+
+    it('still removes watched videos when the re-check fails', async () => {
+      require('../profiles/profileModule').reconcileAll.mockRejectedValueOnce(new Error('db down'));
+
+      await run('20 2 * * *');
+
+      expect(require('../profiles/profileModule').removeWatchedLinks).toHaveBeenCalled();
     });
 
     it('runs the profile module removal', async () => {

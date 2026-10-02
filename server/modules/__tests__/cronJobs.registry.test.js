@@ -25,7 +25,7 @@ describe('cronJobs task registry', () => {
     jest.doMock('../notificationModule', () => ({ sendAutoRemovalNotification: jest.fn() }));
     jest.doMock('../ytdlpModule', () => ({ performUpdate: jest.fn() }));
     jest.doMock('../videoThumbnailCache', () => ({ pruneUnused: jest.fn(() => Promise.resolve(0)) }));
-    jest.doMock('../profiles/profileModule', () => ({ removeWatchedLinks: jest.fn().mockResolvedValue({ profiles: 0, removed: 0, failed: 0 }) }));
+    jest.doMock('../profiles/profileModule', () => ({ reconcileAll: jest.fn().mockResolvedValue({ profiles: 0, linked: 0, unlinked: 0, failed: 0 }), removeWatchedLinks: jest.fn().mockResolvedValue({ profiles: 0, removed: 0, failed: 0 }) }));
     jest.doMock('../configModule', () => ({
       getConfig: jest.fn(() => ({})),
       updateConfig: jest.fn(),
@@ -42,7 +42,7 @@ describe('cronJobs task registry', () => {
     expect(cronJobs.getTasks().map((t) => t.id)).toEqual([
       'auto-removal',
       'strm-cache-expiry',
-      'profile-watched-removal',
+      'profile-maintenance',
       'session-cleanup',
       'stream-history-prune',
       'metadata-cache-prune',

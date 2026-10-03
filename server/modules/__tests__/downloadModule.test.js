@@ -1319,6 +1319,37 @@ describe('DownloadModule', () => {
       expect(profileModule.syncDownloadedVideos).toHaveBeenCalledWith(['abc123DEF45']);
     });
 
+    async function strmOptionsFor(body) {
+      jobModuleMock.getJob.mockReturnValue({ status: 'In Progress' });
+      jobModuleMock.startNextJob = jest.fn();
+      const strmMaterializer = require('../strmMaterializer');
+      const modeSpy = jest.spyOn(strmMaterializer, 'resolveMediaMode').mockReturnValue('strm');
+      const materializeSpy = jest.spyOn(strmMaterializer, 'materializeMany').mockResolvedValue([]);
+      try {
+        await downloadModule.doSpecificDownloads({ body });
+        return materializeSpy.mock.calls[0][1];
+      } finally {
+        modeSpy.mockRestore();
+        materializeSpy.mockRestore();
+      }
+    }
+
+    it('lets each manual STRM resolve its own channel subfolder, mode and structure', async () => {
+      const options = await strmOptionsFor({ urls: ['https://www.youtube.com/watch?v=abc123DEF45'], structurePerVideo: true });
+
+      expect(options).toMatchObject({ subFolder: undefined, libraryMode: undefined, skipVideoFolder: undefined });
+    });
+
+    it('keeps a hard subfolder override for a manual STRM download', async () => {
+      const options = await strmOptionsFor({
+        urls: ['https://www.youtube.com/watch?v=abc123DEF45'],
+        structurePerVideo: true,
+        overrideSettings: { subfolder: 'Kids' },
+      });
+
+      expect(options.subFolder).toBe('Kids');
+    });
+
     it('primes an untracked-strategy NZB grab as kept out of the library', async () => {
       jobModuleMock.getJob.mockReturnValue({ status: 'Pending' });
       const { primeVideosForEventLog } = require('../download/eventLogVideoPrimer');

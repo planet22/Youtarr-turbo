@@ -456,11 +456,24 @@ class ProfileModule {
     if (libraryIds.length === 0) return;
     const adapter = this._jellyfinAdapter();
     if (!adapter) return;
+    this._refreshJellyfinLibraries(adapter, libraryIds).catch((err) => {
+      logger.warn({ err: err.message, libraryIds }, 'profiles: Jellyfin library refresh failed');
+    });
+  }
+
+  // Jellyfin skips a library folder that was empty at its last full scan
+  // ("inaccessible or empty") and then ignores per-library refreshes of it,
+  // so a profile library with nothing indexed yet needs one full scan.
+  async _refreshJellyfinLibraries(adapter, libraryIds) {
+    let needsFullScan = false;
     for (const libraryId of libraryIds) {
-      adapter.refreshLibraryById(libraryId).catch((err) => {
-        logger.warn({ err: err.message, libraryId }, 'profiles: Jellyfin library refresh failed');
-      });
+      if (await adapter.countLibraryItems(libraryId) === 0) {
+        needsFullScan = true;
+      } else {
+        await adapter.refreshLibraryById(libraryId);
+      }
     }
+    if (needsFullScan) await adapter.refreshAllLibraries();
   }
 
   /**

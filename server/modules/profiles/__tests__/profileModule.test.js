@@ -340,15 +340,32 @@ describe('profileModule', () => {
       expect(models.Video.findAll).not.toHaveBeenCalled();
     });
 
-    test('refreshes the Jellyfin library of a profile that received a link', async () => {
-      const refreshLibraryById = jest.fn().mockResolvedValue(undefined);
-      JellyfinAdapter.mockImplementation(() => ({ refreshLibraryById }));
+    function setupJellyfin(indexedItems) {
+      const adapter = {
+        countLibraryItems: jest.fn().mockResolvedValue(indexedItems),
+        refreshLibraryById: jest.fn().mockResolvedValue(undefined),
+        refreshAllLibraries: jest.fn().mockResolvedValue(undefined),
+      };
+      JellyfinAdapter.mockImplementation(() => adapter);
       configModule.getConfig.mockReturnValue({ jellyfinEnabled: true, jellyfinUrl: 'http://jf', jellyfinApiKey: 'k' });
       models.Profile.findAll.mockResolvedValue([makeProfile({ jellyfin_library_id: 'lib1' })]);
       models.ProfileSubscription.findAll.mockResolvedValue([{ profile_id: 1, source_type: 'channel', source_id: 'UC1' }]);
       models.Video.findAll.mockResolvedValue([VIDEO]);
+      return adapter;
+    }
+
+    test('refreshes the Jellyfin library of a profile that received a link', async () => {
+      const adapter = setupJellyfin(4);
       await profileModule.syncDownloadedVideos(['abc123def45']);
-      expect(refreshLibraryById).toHaveBeenCalledWith('lib1');
+      await waitFor(() => adapter.refreshLibraryById.mock.calls.length > 0);
+      expect(adapter.refreshLibraryById).toHaveBeenCalledWith('lib1');
+    });
+
+    test('runs a full scan when Jellyfin has nothing indexed in the profile library yet', async () => {
+      const adapter = setupJellyfin(0);
+      await profileModule.syncDownloadedVideos(['abc123def45']);
+      await waitFor(() => adapter.refreshAllLibraries.mock.calls.length > 0);
+      expect(adapter.refreshAllLibraries).toHaveBeenCalled();
     });
   });
 

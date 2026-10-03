@@ -27,6 +27,29 @@ describe('JellyfinAdapter', () => {
     expect(adapter.userId).toBeUndefined();
   });
 
+  test('countLibraryItems returns the indexed item total for a library', async () => {
+    axios.get.mockResolvedValueOnce({ data: { TotalRecordCount: 5, Items: [] } });
+    await expect(new JellyfinAdapter(cfg).countLibraryItems('lib1')).resolves.toBe(5);
+  });
+
+  test('countLibraryItems asks only for the count of that library', async () => {
+    axios.get.mockResolvedValueOnce({ data: { TotalRecordCount: 0 } });
+    await new JellyfinAdapter(cfg).countLibraryItems('lib1');
+    expect(axios.get).toHaveBeenCalledWith('http://jf:8096/Items', expect.objectContaining({
+      params: { ParentId: 'lib1', Recursive: true, Limit: 0 },
+    }));
+  });
+
+  test('refreshAllLibraries starts a full library scan', async () => {
+    axios.post.mockResolvedValueOnce({});
+    await new JellyfinAdapter(cfg).refreshAllLibraries();
+    expect(axios.post).toHaveBeenCalledWith('http://jf:8096/Library/Refresh', null, expect.any(Object));
+  });
+
+  test('forUser returns an adapter acting as the given user', () => {
+    expect(new JellyfinAdapter(cfg).forUser('other').userId).toBe('other');
+  });
+
   test('exposes the serverType contract used by orchestration', () => {
     expect(new JellyfinAdapter(cfg).serverType).toBe('jellyfin');
   });

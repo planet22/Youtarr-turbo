@@ -43,7 +43,7 @@ const respond = (events: JobEvent[], total = events.length) => {
 
 // Facets (dropdown options) are fetched too; these helpers look only at the list requests.
 const listCalls = () => mockedGet.mock.calls.filter(([url]) => url === '/api/job-events');
-const lastParams = () => listCalls()[listCalls().length - 1][1]?.params;
+const lastParams = () => (listCalls()[listCalls().length - 1][1]?.params ?? {}) as Record<string, any>;
 
 jest.mock('../../../shared/VideoModal', () => ({
   __esModule: true,

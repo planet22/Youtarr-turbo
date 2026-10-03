@@ -116,6 +116,47 @@ describe('getUsage', () => {
   });
 });
 
+describe('pruneUnused', () => {
+  beforeEach(() => {
+    Channel.findAll.mockResolvedValue([]);
+    Playlist.findAll.mockResolvedValue([]);
+    Channel.count.mockResolvedValue(0);
+    Playlist.count.mockResolvedValue(0);
+    filesystem.directoryHasFiles.mockResolvedValue(false);
+    Subfolder.count.mockResolvedValue(1);
+    Subfolder.destroy.mockResolvedValue(1);
+  });
+
+  test('deletes unused, empty subfolders and reports their names', async () => {
+    Subfolder.findAll.mockResolvedValue([{ name: 'Spare' }]);
+
+    const removed = await subfolderModule.pruneUnused();
+
+    expect(removed).toEqual(['Spare']);
+    expect(Subfolder.destroy).toHaveBeenCalledWith({ where: { name: 'Spare' } });
+  });
+
+  test('leaves referenced, default, plex-mapped, and non-empty subfolders alone', async () => {
+    Subfolder.findAll.mockResolvedValue([{ name: 'Used' }]);
+    Channel.findAll.mockResolvedValue([{ sub_folder: 'Used' }]);
+
+    const removed = await subfolderModule.pruneUnused();
+
+    expect(removed).toEqual([]);
+    expect(Subfolder.destroy).not.toHaveBeenCalled();
+  });
+
+  test('logs and continues when deleting one name fails', async () => {
+    Subfolder.findAll.mockResolvedValue([{ name: 'Spare' }]);
+    Subfolder.destroy.mockRejectedValueOnce(new Error('db down'));
+
+    const removed = await subfolderModule.pruneUnused();
+
+    expect(removed).toEqual([]);
+    expect(require('../../logger').warn).toHaveBeenCalled();
+  });
+});
+
 describe('register', () => {
   test('upserts a real name', async () => {
     Subfolder.findOrCreate.mockResolvedValue([{ name: 'Sports' }, true]);

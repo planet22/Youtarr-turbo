@@ -96,6 +96,7 @@ function initialize(deps = {}) {
   const configModule = require('./configModule');
   const jobEventLog = require('./jobEventLog');
   const videoThumbnailCache = require('./videoThumbnailCache');
+  const subfolderModule = require('./subfolderModule');
   const { refreshYtDlpVersionCache } = deps;
 
   logger.info('Initializing scheduled cron jobs');
@@ -418,6 +419,30 @@ function initialize(deps = {}) {
       if (deleted > 0) logger.info({ deleted }, 'Pruned unused video thumbnails');
     } catch (error) {
       logger.error({ err: error }, 'Error pruning unused video thumbnails');
+    }
+  });
+
+  // ============================================================================
+  // UNUSED SUBFOLDER PRUNE - 3:40 AM Daily
+  // ============================================================================
+  // Subfolder names are registered permanently (channel/playlist settings,
+  // download completion, subscription import) and nothing deregisters them
+  // when a channel/playlist moves off a name or is deleted, so the folder
+  // dropdowns accumulate stale entries. This removes any that are unused,
+  // not the default, not Plex-mapped, and empty on disk - the same criteria
+  // the manual "Manage Subfolders" delete already enforces.
+  defineTask({
+    id: 'subfolder-prune',
+    label: 'Unused subfolder prune',
+    description: 'Removes subfolder registry entries no longer referenced by any channel or playlist and empty on disk.',
+    cron: '40 3 * * *',
+    confirm: false,
+  }, async () => {
+    try {
+      const removed = await subfolderModule.pruneUnused();
+      if (removed.length > 0) logger.info({ removed }, 'Pruned unused subfolders');
+    } catch (error) {
+      logger.error({ err: error }, 'Error pruning unused subfolders');
     }
   });
 

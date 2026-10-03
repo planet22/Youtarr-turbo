@@ -185,6 +185,30 @@ class SubfolderModule {
   }
 
   /**
+   * Auto-cleanup: delete every registered subfolder that's no longer referenced
+   * by a channel or playlist, isn't the default or Plex-mapped, and has no
+   * files on disk. Reuses getUsage()'s deletable flag so the criteria can
+   * never drift from the manual delete path. Scheduled nightly so dropdowns
+   * stop accumulating names from channels/playlists that moved on or were
+   * deleted.
+   * @returns {Promise<string[]>} names removed
+   */
+  async pruneUnused() {
+    const usage = await this.getUsage();
+    const removed = [];
+    for (const item of usage) {
+      if (!item.deletable) continue;
+      try {
+        await this.delete(item.name);
+        removed.push(item.name);
+      } catch (err) {
+        logger.warn({ err, name: item.name }, 'Failed to prune unused subfolder');
+      }
+    }
+    return removed;
+  }
+
+  /**
    * Delete a subfolder from the registry, only when empty on disk and unused.
    * @param {string} name
    * @returns {Promise<void>}

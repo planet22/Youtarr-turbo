@@ -197,7 +197,9 @@ class MediaServerSync {
     let mismatched = 0;
     for (const pv of videos) {
       const v = byYoutubeId.get(pv.youtube_id);
-      if (!v) continue;
+      // A deleted video keeps its last filePath; resolving it would only
+      // burn the full lookup backoff on a file the server can't have.
+      if (!v || v.removed) continue;
       const mediaPath = mediaType === 'audio' ? v.audioFilePath : v.filePath;
       if (mediaPath) {
         entries.push({ youtube_id: pv.youtube_id, filePath: mediaPath });

@@ -43,7 +43,7 @@ const NUMBERS: Array<{ key: NumberKey; label: string; help: string; min: number;
     label: 'Refresh delay (ms)',
     help: 'Wait after each refresh to avoid overwhelming the remote server.',
     min: 0,
-    max: 10000,
+    max: 60000,
   },
   {
     key: 'maxConcurrentExtract',

@@ -104,7 +104,7 @@ describe('strmToolTurboModule.saveConfiguration', () => {
   test.each([
     ['maxConcurrentExtract', 0],
     ['maxConcurrentExtract', 51],
-    ['refreshDelayMs', 10001],
+    ['refreshDelayMs', 60001],
     ['refreshDelayMs', -1],
     ['metadataRestoreTimeoutMinutes', 31],
     ['refreshDelayMs', 1.5],

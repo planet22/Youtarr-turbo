@@ -18,7 +18,7 @@ const CONFIG_FIELDS = [
   { key: 'importExistingCacheWhenMissing', jellyfinKey: 'ImportExistingCacheWhenMissing', type: 'boolean' },
   { key: 'forceRefreshIgnoreExisting', jellyfinKey: 'ForceRefreshIgnoreExisting', type: 'boolean' },
   { key: 'forceRefreshIgnoreCache', jellyfinKey: 'ForceRefreshIgnoreCache', type: 'boolean' },
-  { key: 'refreshDelayMs', jellyfinKey: 'RefreshDelayMs', type: 'integer', min: 0, max: 10000 },
+  { key: 'refreshDelayMs', jellyfinKey: 'RefreshDelayMs', type: 'integer', min: 0, max: 60000 },
   { key: 'metadataRestoreTimeoutMinutes', jellyfinKey: 'MetadataRestoreTimeoutMinutes', type: 'integer', min: 1, max: 30 },
   { key: 'maxConcurrentExtract', jellyfinKey: 'MaxConcurrentExtract', type: 'integer', min: 1, max: 50 },
 ];

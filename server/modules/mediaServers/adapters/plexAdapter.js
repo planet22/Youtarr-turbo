@@ -33,6 +33,17 @@ const PLEX_OWNER_ACCOUNT_ID = '1';
 const HISTORY_PAGE_SIZE = 1000;
 const MAX_HISTORY_PAGES = 50;
 
+// Attribute extraction for plex.tv's legacy XML-only endpoints (see
+// listHomeUsers/forUser). Good enough for Plex's flat, self-closing-tag
+// attribute XML; deliberately not a general parser.
+function xmlAttr(xml, attr) {
+  const match = new RegExp(`${attr}="([^"]*)"`).exec(xml || '');
+  return match ? match[1] : null;
+}
+function xmlTags(xml, tagName) {
+  return (xml || '').match(new RegExp(`<${tagName}\\b[^>]*/?>`, 'g')) || [];
+}
+
 class PlexAdapter extends BaseAdapter {
   constructor(config) {
     super(config);
@@ -140,6 +151,79 @@ class PlexAdapter extends BaseAdapter {
   }
 
   async listUsers() { return []; }
+
+  // plex.tv client headers required by the Home-user endpoints below (bare
+  // X-Plex-Token is rejected with "Plex client headers are required").
+  _plexTvHeaders(extra = {}) {
+    return {
+      'X-Plex-Client-Identifier': this.config.uuid,
+      'X-Plex-Product': 'Youtarr-Turbo',
+      ...extra,
+    };
+  }
+
+  /**
+   * Plex Home/managed users under the admin's own plex.tv account (the
+   * profile picker's "Plex user" dropdown) - distinct from `_fetchAccounts()`,
+   * which lists server-local play-history accounts instead.
+   */
+  async listHomeUsers() {
+    const res = await axios.get('https://plex.tv/api/home/users', {
+      headers: { 'X-Plex-Token': this.token, ...this._plexTvHeaders() },
+      timeout: REQUEST_TIMEOUT_MS,
+    });
+    // Unlike the PMS's own endpoints (and plex.tv's newer /api/v2/*), this
+    // legacy endpoint always returns XML regardless of Accept - confirmed
+    // against a real server. xmlTags/xmlAttr below do just enough parsing for
+    // its flat, self-closing-tag shape; not a general XML parser.
+    return xmlTags(res.data, 'User').map((tag) => ({
+      id: xmlAttr(tag, 'id'),
+      name: xmlAttr(tag, 'title') || xmlAttr(tag, 'username') || null,
+    }));
+  }
+
+  /**
+   * A copy of this adapter acting as another Plex Home user, so playlists it
+   * creates are owned by that user (mirrors JellyfinAdapter.forUser). Plex has
+   * no per-request "as this user" param, so this does a two-step plex.tv
+   * exchange: switch to the Home user's own account token, then trade that
+   * for THIS server's resource-scoped access token (the switch token alone is
+   * rejected by the Plex Media Server itself - confirmed against a real
+   * server: /library/sections 401s with the switched token but 200s with the
+   * resource token). The result overrides only `plexPlaylistToken`, so every
+   * existing playlist-scoped call (createPlaylist, replacePlaylistItems,
+   * deletePlaylist) needs no changes.
+   */
+  async forUser(homeUserId) {
+    const switchRes = await axios.post(`https://plex.tv/api/home/users/${encodeURIComponent(homeUserId)}/switch`, null, {
+      headers: { 'X-Plex-Token': this.token, ...this._plexTvHeaders() },
+      timeout: REQUEST_TIMEOUT_MS,
+    });
+    // Also XML-only, same as listHomeUsers above; the response root is a
+    // single <user .../> tag (not wrapped in MediaContainer).
+    const userToken = xmlAttr(switchRes.data, 'authenticationToken');
+    if (!userToken) throw new Error(`plex: switching to home user ${homeUserId} returned no token`);
+
+    const machineId = await this._getMachineId();
+    const resourcesRes = await axios.get('https://plex.tv/api/v2/resources', {
+      // Unlike the legacy /api/home/users endpoints, this one does return
+      // JSON - but only when Accept is explicitly application/json; axios's
+      // default Accept (a multi-value "application/json, text/plain, */*"
+      // list) makes plex.tv fall back to XML, confirmed against a real
+      // server (TypeError: resourcesRes.data.find is not a function, because
+      // .data was an XML string).
+      headers: { 'X-Plex-Token': userToken, Accept: 'application/json', ...this._plexTvHeaders() },
+      params: { includeHttps: 1 },
+      timeout: REQUEST_TIMEOUT_MS,
+    });
+    const resources = Array.isArray(resourcesRes.data) ? resourcesRes.data : [];
+    const resource = resources.find((r) => r.clientIdentifier === machineId);
+    if (!resource?.accessToken) {
+      throw new Error(`plex: home user ${homeUserId} has no access to this server (grant library access in Plex first)`);
+    }
+
+    return new PlexAdapter({ ...this.config, plexPlaylistToken: resource.accessToken });
+  }
 
   async triggerLibraryScan(subfolder, opts = {}) {
     // Video sections are already scanned by the post-download refresh (see
@@ -281,6 +365,11 @@ class PlexAdapter extends BaseAdapter {
     }
     logger.warn({ playlistId }, 'plex: could not delete stranded playlist in any known scope; leaving orphan');
     return false;
+  }
+
+  /** Public delete entry point (mirrors JellyfinAdapter.deletePlaylist), for mediaServerSync's profile-copy removal. */
+  async deletePlaylist(playlistId) {
+    await this._deleteStrandedPlaylist(playlistId);
   }
 
   // In-place item replace (delete items + PUT items). If the id is unreachable

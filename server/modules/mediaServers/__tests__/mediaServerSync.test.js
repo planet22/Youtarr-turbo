@@ -940,5 +940,116 @@ describe('mediaServerSync', () => {
       await expect(mediaServerSync.syncPlaylist(1)).resolves.toBeUndefined();
     });
   });
+
+  describe('user profile copies (Plex)', () => {
+    let models;
+    const PLAYLIST = {
+      id: 1, playlist_id: 'PL1', title: 'Kids',
+      sync_to_plex: true, sync_to_jellyfin: false, sync_to_emby: false, public_on_servers: true,
+    };
+
+    // Plex's forUser is async (a plex.tv token exchange), unlike Jellyfin's
+    // sync copy-constructor - the mock reflects that to catch a missing await.
+    function makePlex(created = { id: 'shared' }) {
+      const userAdapter = makeAdapter('PlexAdapter', {
+        resolveItemIdByFilepath: jest.fn().mockResolvedValue('item1'),
+        createPlaylist: jest.fn().mockResolvedValue({ id: 'kid-copy' }),
+      });
+      const plex = makeAdapter('PlexAdapter', {
+        resolveItemIdByFilepath: jest.fn().mockResolvedValue('item1'),
+        createPlaylist: jest.fn().mockResolvedValue(created),
+        forUser: jest.fn().mockResolvedValue(userAdapter),
+        deletePlaylist: jest.fn().mockResolvedValue(undefined),
+      });
+      return { plex, userAdapter };
+    }
+
+    beforeEach(() => {
+      models = require('../../../models');
+      Playlist.findByPk.mockResolvedValue(PLAYLIST);
+      PlaylistVideo.findAll.mockResolvedValue([{ youtube_id: 'v1', position: 1, ignored: false }]);
+      Video.findAll.mockResolvedValue([{ youtubeId: 'v1', filePath: '/youtube/A/v1 [v1].mp4' }]);
+      PlaylistSyncState.findOne.mockResolvedValue(null);
+      PlaylistSyncState.create.mockResolvedValue({});
+      models.ProfileSubscription.findAll.mockResolvedValue([{ profile_id: 8 }]);
+      models.Profile.findAll.mockResolvedValue([{ id: 8, name: 'Kid', plex_user_id: 'p-kid' }]);
+    });
+
+    test('creates a private copy owned by the profile Plex (Home) user', async () => {
+      const { plex, userAdapter } = makePlex();
+      serverRegistry.getEnabledAdapters.mockReturnValue([plex]);
+
+      await mediaServerSync.syncPlaylist(1);
+
+      expect(plex.forUser).toHaveBeenCalledWith('p-kid');
+      expect(userAdapter.createPlaylist).toHaveBeenCalledWith('YT: Kids', ['item1'], { public: false, mediaType: 'video' });
+    });
+
+    test('deletes the copy of a profile that no longer follows the playlist', async () => {
+      const { plex } = makePlex();
+      serverRegistry.getEnabledAdapters.mockReturnValue([plex]);
+      models.ProfileSubscription.findAll.mockResolvedValue([]);
+      const copy = { profile_id: 9, server_type: 'plex', server_playlist_id: 'old-copy', destroy: jest.fn() };
+      PlaylistSyncState.findAll.mockResolvedValue([copy]);
+
+      await mediaServerSync.syncPlaylist(1);
+
+      expect(plex.deletePlaylist).toHaveBeenCalledWith('old-copy');
+    });
+
+    test('a profile with a Jellyfin identity but no Plex identity gets no Plex copy', async () => {
+      const { plex, userAdapter } = makePlex();
+      serverRegistry.getEnabledAdapters.mockReturnValue([plex]);
+      // The real query's `plex_user_id: { [Op.ne]: null }` filter excludes a
+      // profile with no Plex identity, so the mock reflects that directly.
+      models.Profile.findAll.mockResolvedValue([]);
+
+      await mediaServerSync.syncPlaylist(1);
+
+      expect(plex.forUser).not.toHaveBeenCalled();
+      expect(userAdapter.createPlaylist).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('removeProfileCopies: mixed server types', () => {
+    test('dispatches each copy to the adapter matching its own server_type, and can be scoped to one type', async () => {
+      const jellyfin = makeAdapter('JellyfinAdapter', { deletePlaylist: jest.fn().mockResolvedValue(undefined) });
+      const plex = makeAdapter('PlexAdapter', { deletePlaylist: jest.fn().mockResolvedValue(undefined) });
+      serverRegistry.getEnabledAdapters.mockReturnValue([jellyfin, plex]);
+
+      const jellyfinCopy = { profile_id: 7, server_type: 'jellyfin', server_playlist_id: 'jf-copy', destroy: jest.fn() };
+      const plexCopy = { profile_id: 7, server_type: 'plex', server_playlist_id: 'px-copy', destroy: jest.fn() };
+      const allCopies = [jellyfinCopy, plexCopy];
+      // Mirrors the real query's server_type filter, which the other mocks in
+      // this file don't bother simulating (nothing else here depends on it).
+      PlaylistSyncState.findAll.mockImplementation(async ({ where }) =>
+        allCopies.filter((c) => !where.server_type || c.server_type === where.server_type));
+
+      await mediaServerSync.removeProfileCopies(7, { serverType: 'plex' });
+
+      expect(PlaylistSyncState.findAll).toHaveBeenCalledWith({ where: { profile_id: 7, server_type: 'plex' } });
+      expect(plex.deletePlaylist).toHaveBeenCalledWith('px-copy');
+      expect(plexCopy.destroy).toHaveBeenCalled();
+      // The jellyfin copy was never fetched (scoped query), so it's untouched.
+      expect(jellyfin.deletePlaylist).not.toHaveBeenCalled();
+      expect(jellyfinCopy.destroy).not.toHaveBeenCalled();
+    });
+
+    test('with no scope, every copy is removed via its own adapter', async () => {
+      const jellyfin = makeAdapter('JellyfinAdapter', { deletePlaylist: jest.fn().mockResolvedValue(undefined) });
+      const plex = makeAdapter('PlexAdapter', { deletePlaylist: jest.fn().mockResolvedValue(undefined) });
+      serverRegistry.getEnabledAdapters.mockReturnValue([jellyfin, plex]);
+
+      const jellyfinCopy = { profile_id: 7, server_type: 'jellyfin', server_playlist_id: 'jf-copy', destroy: jest.fn() };
+      const plexCopy = { profile_id: 7, server_type: 'plex', server_playlist_id: 'px-copy', destroy: jest.fn() };
+      PlaylistSyncState.findAll.mockResolvedValue([jellyfinCopy, plexCopy]);
+
+      await mediaServerSync.removeProfileCopies(7);
+
+      expect(PlaylistSyncState.findAll).toHaveBeenCalledWith({ where: { profile_id: 7 } });
+      expect(jellyfin.deletePlaylist).toHaveBeenCalledWith('jf-copy');
+      expect(plex.deletePlaylist).toHaveBeenCalledWith('px-copy');
+    });
+  });
 });
 

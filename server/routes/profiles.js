@@ -44,6 +44,18 @@ function jellyfinFieldsValid(body) {
     && (days === undefined || days === null || Number.isInteger(days));
 }
 
+function pickPlexFields(body) {
+  return {
+    plexUserId: body.plexUserId,
+    plexUserName: body.plexUserName,
+    plexLibraryId: body.plexLibraryId,
+  };
+}
+
+function plexFieldsValid(body) {
+  return ['plexUserId', 'plexUserName', 'plexLibraryId'].every((key) => isOptionalString(body[key]));
+}
+
 /**
  * User profile routes (session-auth only).
  * @param {Object} deps
@@ -129,6 +141,44 @@ function createProfileRoutes({ verifyToken, profileModule }) {
 
   /**
    * @swagger
+   * /api/profiles/plex/users:
+   *   get:
+   *     summary: List Plex Home users for profile linking
+   *     tags: [Profiles]
+   *     responses:
+   *       200: { description: Home users under the configured Plex account }
+   *       409: { description: Plex is not configured }
+   */
+  router.get('/api/profiles/plex/users', verifyToken, async (req, res) => {
+    try {
+      return res.json({ users: await profileModule.listPlexUsers() });
+    } catch (error) {
+      if (error.isAxiosError) return res.status(502).json({ error: 'Could not reach Plex' });
+      return sendModuleError(res, error, 'Failed to list Plex users');
+    }
+  });
+
+  /**
+   * @swagger
+   * /api/profiles/plex/libraries:
+   *   get:
+   *     summary: List Plex libraries for profile linking
+   *     tags: [Profiles]
+   *     responses:
+   *       200: { description: Libraries from the configured Plex server }
+   *       409: { description: Plex is not configured }
+   */
+  router.get('/api/profiles/plex/libraries', verifyToken, async (req, res) => {
+    try {
+      return res.json({ libraries: await profileModule.listPlexLibraries() });
+    } catch (error) {
+      if (error.isAxiosError) return res.status(502).json({ error: 'Could not reach Plex' });
+      return sendModuleError(res, error, 'Failed to list Plex libraries');
+    }
+  });
+
+  /**
+   * @swagger
    * /api/profiles:
    *   post:
    *     summary: Create a user profile
@@ -144,7 +194,10 @@ function createProfileRoutes({ verifyToken, profileModule }) {
    *               jellyfinUserId: { type: string, nullable: true }
    *               jellyfinUserName: { type: string, nullable: true }
    *               jellyfinLibraryId: { type: string, nullable: true }
-   *               removeWatchedAfterDays: { type: integer, nullable: true, minimum: 1, maximum: 3650, description: "Unlink videos from this profile this many days after its Jellyfin user watched them" }
+   *               plexUserId: { type: string, nullable: true }
+   *               plexUserName: { type: string, nullable: true }
+   *               plexLibraryId: { type: string, nullable: true }
+   *               removeWatchedAfterDays: { type: integer, nullable: true, minimum: 1, maximum: 3650, description: "Unlink videos from this profile this many days after every one of its linked identities (Jellyfin and/or Plex) watched them" }
    *     responses:
    *       201: { description: Created }
    *       400: { description: Invalid input }
@@ -152,11 +205,11 @@ function createProfileRoutes({ verifyToken, profileModule }) {
    */
   router.post('/api/profiles', verifyToken, async (req, res) => {
     const body = req.body || {};
-    if (typeof body.name !== 'string' || !jellyfinFieldsValid(body)) {
+    if (typeof body.name !== 'string' || !jellyfinFieldsValid(body) || !plexFieldsValid(body)) {
       return res.status(400).json({ error: 'Invalid profile data' });
     }
     try {
-      const profile = await profileModule.create({ name: body.name, ...pickJellyfinFields(body) });
+      const profile = await profileModule.create({ name: body.name, ...pickJellyfinFields(body), ...pickPlexFields(body) });
       return res.status(201).json({ profile });
     } catch (error) {
       return sendModuleError(res, error, 'Failed to create profile');
@@ -184,11 +237,11 @@ function createProfileRoutes({ verifyToken, profileModule }) {
   router.put('/api/profiles/:id', verifyToken, async (req, res) => {
     const id = parseId(req.params.id);
     const body = req.body || {};
-    if (!id || (body.name !== undefined && typeof body.name !== 'string') || !jellyfinFieldsValid(body)) {
+    if (!id || (body.name !== undefined && typeof body.name !== 'string') || !jellyfinFieldsValid(body) || !plexFieldsValid(body)) {
       return res.status(400).json({ error: 'Invalid profile data' });
     }
     try {
-      const profile = await profileModule.update(id, { name: body.name, ...pickJellyfinFields(body) });
+      const profile = await profileModule.update(id, { name: body.name, ...pickJellyfinFields(body), ...pickPlexFields(body) });
       return res.json({ profile });
     } catch (error) {
       return sendModuleError(res, error, 'Failed to update profile', { id });

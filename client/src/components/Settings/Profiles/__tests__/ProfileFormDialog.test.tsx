@@ -5,9 +5,13 @@ import { ProfileFormDialog } from '../ProfileFormDialog';
 import { Profile } from '../types';
 
 jest.mock('../useJellyfinProfileOptions', () => ({ useJellyfinProfileOptions: jest.fn() }));
+jest.mock('../useProfilePlexOptions', () => ({ useProfilePlexOptions: jest.fn() }));
 
 const { useJellyfinProfileOptions } = require('../useJellyfinProfileOptions') as {
   useJellyfinProfileOptions: jest.Mock;
+};
+const { useProfilePlexOptions } = require('../useProfilePlexOptions') as {
+  useProfilePlexOptions: jest.Mock;
 };
 
 const ALICE: Profile = {
@@ -16,6 +20,9 @@ const ALICE: Profile = {
   jellyfinUserId: 'u1',
   jellyfinUserName: 'alice',
   jellyfinLibraryId: 'lib1',
+  plexUserId: null,
+  plexUserName: null,
+  plexLibraryId: null,
   removeWatchedAfterDays: null,
   folderPath: '/data/__profiles__/Alice',
   channelCount: 0,
@@ -23,12 +30,23 @@ const ALICE: Profile = {
   videoCount: 0,
 };
 
-function setup({ profile = null as Profile | null, jellyfinError = null as string | null, onSubmit = jest.fn().mockResolvedValue(undefined) } = {}) {
+function setup({
+  profile = null as Profile | null,
+  jellyfinError = null as string | null,
+  plexError = null as string | null,
+  onSubmit = jest.fn().mockResolvedValue(undefined),
+} = {}) {
   useJellyfinProfileOptions.mockReturnValue({
     users: [{ id: 'u1', name: 'alice' }],
     libraries: [{ id: 'lib1', title: 'Alice TV' }],
     loading: false,
     error: jellyfinError,
+  });
+  useProfilePlexOptions.mockReturnValue({
+    users: [{ id: 'p1', name: 'Kid' }],
+    libraries: [{ id: 'pl1', title: 'Youtube Channels' }],
+    loading: false,
+    error: plexError,
   });
   const onClose = jest.fn();
   render(<ProfileFormDialog open token="tok" profile={profile} onClose={onClose} onSubmit={onSubmit} />);
@@ -43,17 +61,44 @@ describe('ProfileFormDialog', () => {
     expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
   });
 
-  test('submits a trimmed name with no Jellyfin link by default', async () => {
+  test('submits a trimmed name with no Jellyfin or Plex link by default', async () => {
     const { onSubmit } = setup();
     await userEvent.type(screen.getByLabelText('Profile name'), '  Bob ');
     await userEvent.click(screen.getByRole('button', { name: 'Save' }));
-    expect(onSubmit).toHaveBeenCalledWith({ name: 'Bob', jellyfinUserId: null, jellyfinUserName: null, jellyfinLibraryId: null, removeWatchedAfterDays: null });
+    expect(onSubmit).toHaveBeenCalledWith({
+      name: 'Bob',
+      jellyfinUserId: null, jellyfinUserName: null, jellyfinLibraryId: null,
+      plexUserId: null, plexUserName: null, plexLibraryId: null,
+      removeWatchedAfterDays: null,
+    });
   });
 
   test('keeps an existing profile\'s Jellyfin link when editing', async () => {
     const { onSubmit } = setup({ profile: ALICE });
     await userEvent.click(screen.getByRole('button', { name: 'Save' }));
-    expect(onSubmit).toHaveBeenCalledWith({ name: 'Alice', jellyfinUserId: 'u1', jellyfinUserName: 'alice', jellyfinLibraryId: 'lib1', removeWatchedAfterDays: null });
+    expect(onSubmit).toHaveBeenCalledWith({
+      name: 'Alice',
+      jellyfinUserId: 'u1', jellyfinUserName: 'alice', jellyfinLibraryId: 'lib1',
+      plexUserId: null, plexUserName: null, plexLibraryId: null,
+      removeWatchedAfterDays: null,
+    });
+  });
+
+  test('submits a Plex link alongside an existing Jellyfin link', async () => {
+    const { onSubmit } = setup({ profile: ALICE });
+    await userEvent.click(screen.getByRole('button', { name: /Plex user/i }));
+    await userEvent.click(await screen.findByRole('option', { name: 'Kid' }));
+    await userEvent.click(screen.getByRole('button', { name: /Plex library/i }));
+    await userEvent.click(await screen.findByRole('option', { name: 'Youtube Channels' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
+      plexUserId: 'p1', plexUserName: 'Kid', plexLibraryId: 'pl1',
+    }));
+  });
+
+  test('explains why Plex linking is unavailable', () => {
+    setup({ plexError: 'Plex is not configured' });
+    expect(screen.getByText(/Plex is not configured/)).toBeInTheDocument();
   });
 
   test('submits the remove-watched day count as a number', async () => {

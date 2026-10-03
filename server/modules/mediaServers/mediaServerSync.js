@@ -17,6 +17,14 @@ const ADAPTER_TYPE_TAG = {
   EmbyAdapter: 'emby',
 };
 
+// Server types a user profile can get its own private playlist copy on (its
+// identity is which column on Profile holds that server's user id). Emby has
+// no per-user adapter ("forUser") and never has - not added here.
+const PROFILE_IDENTITY_FIELD = {
+  jellyfin: 'jellyfin_user_id',
+  plex: 'plex_user_id',
+};
+
 const SERVER_DISPLAY_NAME = {
   plex: 'Plex',
   jellyfin: 'Jellyfin',
@@ -88,41 +96,45 @@ class MediaServerSync {
       }
     }
 
-    const jellyfin = adapters.find((adapter) => ADAPTER_TYPE_TAG[adapter.constructor.name] === 'jellyfin');
-    if (!jellyfin) return;
-    try {
-      await this._syncProfileCopies(playlist, videos, jellyfin);
-    } catch (err) {
-      logger.error({ err, playlist_id: playlist.playlist_id }, 'Failed to sync profile copies of playlist');
-    }
-  }
-
-  // Each user profile that follows this playlist and has a Jellyfin user gets
-  // its own copy of the playlist, owned by that user. Copies of profiles that
-  // stopped following it (or lost their Jellyfin user) are deleted.
-  async _syncProfileCopies(playlist, videos, jellyfin) {
-    const followers = this._shouldSync(playlist, 'jellyfin') ? await this._profileFollowers(playlist) : [];
-    const followerIds = new Set(followers.map((profile) => profile.id));
-
-    const copies = await PlaylistSyncState.findAll({
-      where: { playlist_id: playlist.id, server_type: 'jellyfin', profile_id: { [Op.ne]: null } },
-    });
-    for (const copy of copies) {
-      if (!followerIds.has(copy.profile_id)) await this._removeProfileCopy(copy, jellyfin);
-    }
-
-    for (const profile of followers) {
-      const dismissed = await this._dismissedYoutubeIds(profile.id);
-      const ownVideos = dismissed.size > 0 ? videos.filter((pv) => !dismissed.has(pv.youtube_id)) : videos;
+    for (const serverType of Object.keys(PROFILE_IDENTITY_FIELD)) {
+      const adapter = adapters.find((a) => ADAPTER_TYPE_TAG[a.constructor.name] === serverType);
+      if (!adapter) continue;
       try {
-        await this._syncToOne(playlist, ownVideos, jellyfin.forUser(profile.jellyfin_user_id), 'jellyfin', profile);
+        await this._syncProfileCopies(playlist, videos, adapter, serverType);
       } catch (err) {
-        await this._handleSyncError(err, playlist, 'jellyfin', profile.id);
+        logger.error({ err, playlist_id: playlist.playlist_id, serverType }, 'Failed to sync profile copies of playlist');
       }
     }
   }
 
-  async _profileFollowers(playlist) {
+  // Each user profile that follows this playlist and has an identity on this
+  // server type gets its own copy of the playlist, owned by that user. Copies
+  // of profiles that stopped following it (or lost that identity) are deleted.
+  async _syncProfileCopies(playlist, videos, adapter, serverType) {
+    const followers = this._shouldSync(playlist, serverType) ? await this._profileFollowers(playlist, serverType) : [];
+    const followerIds = new Set(followers.map((profile) => profile.id));
+
+    const copies = await PlaylistSyncState.findAll({
+      where: { playlist_id: playlist.id, server_type: serverType, profile_id: { [Op.ne]: null } },
+    });
+    for (const copy of copies) {
+      if (!followerIds.has(copy.profile_id)) await this._removeProfileCopy(copy, adapter);
+    }
+
+    const userIdField = PROFILE_IDENTITY_FIELD[serverType];
+    for (const profile of followers) {
+      const dismissed = await this._dismissedYoutubeIds(profile.id);
+      const ownVideos = dismissed.size > 0 ? videos.filter((pv) => !dismissed.has(pv.youtube_id)) : videos;
+      try {
+        const userAdapter = await adapter.forUser(profile[userIdField]);
+        await this._syncToOne(playlist, ownVideos, userAdapter, serverType, profile);
+      } catch (err) {
+        await this._handleSyncError(err, playlist, serverType, profile.id);
+      }
+    }
+  }
+
+  async _profileFollowers(playlist, serverType) {
     const subs = await ProfileSubscription.findAll({
       where: { source_type: 'playlist', source_id: playlist.playlist_id },
       attributes: ['profile_id'],
@@ -130,7 +142,7 @@ class MediaServerSync {
     });
     if (subs.length === 0) return [];
     return Profile.findAll({
-      where: { id: subs.map((s) => s.profile_id), jellyfin_user_id: { [Op.ne]: null } },
+      where: { id: subs.map((s) => s.profile_id), [PROFILE_IDENTITY_FIELD[serverType]]: { [Op.ne]: null } },
     });
   }
 
@@ -145,12 +157,16 @@ class MediaServerSync {
 
   // Never throws: a playlist that can't be deleted on the server is logged and
   // its row dropped, so the profile's state doesn't keep pointing at it.
-  async _removeProfileCopy(copy, jellyfin) {
-    if (jellyfin && copy.server_playlist_id) {
+  // `adapter` must match copy.server_type - callers resolve it per row.
+  async _removeProfileCopy(copy, adapter) {
+    if (adapter && copy.server_playlist_id) {
       try {
-        await jellyfin.deletePlaylist(copy.server_playlist_id);
+        await adapter.deletePlaylist(copy.server_playlist_id);
       } catch (err) {
-        logger.warn({ ...describeHttpError(err), serverPlaylistId: copy.server_playlist_id }, 'Could not delete a profile\'s Jellyfin playlist copy');
+        logger.warn(
+          { ...describeHttpError(err), serverPlaylistId: copy.server_playlist_id, serverType: copy.server_type },
+          `Could not delete a profile's ${SERVER_DISPLAY_NAME[copy.server_type] || copy.server_type} playlist copy`
+        );
       }
     }
     try {
@@ -160,14 +176,21 @@ class MediaServerSync {
     }
   }
 
-  /** Delete every Jellyfin playlist copy owned by a profile (profile deleted or its Jellyfin user changed). */
-  async removeProfileCopies(profileId) {
-    const copies = await PlaylistSyncState.findAll({ where: { profile_id: profileId } });
+  /**
+   * Delete a profile's playlist copies (profile deleted, or one of its server
+   * identities changed/cleared). With `serverType` set, only that server's
+   * copies go - e.g. changing just the profile's Plex user must not disturb
+   * its working Jellyfin copies. Omitted (profile deletion) removes all of them.
+   */
+  async removeProfileCopies(profileId, { serverType } = {}) {
+    const copies = await PlaylistSyncState.findAll({
+      where: { profile_id: profileId, ...(serverType ? { server_type: serverType } : {}) },
+    });
     if (copies.length === 0) return;
-    const jellyfin = serverRegistry.getEnabledAdapters(configModule.getConfig())
-      .find((adapter) => ADAPTER_TYPE_TAG[adapter.constructor.name] === 'jellyfin');
+    const adapters = serverRegistry.getEnabledAdapters(configModule.getConfig());
     for (const copy of copies) {
-      await this._removeProfileCopy(copy, jellyfin);
+      const adapter = adapters.find((a) => ADAPTER_TYPE_TAG[a.constructor.name] === copy.server_type);
+      await this._removeProfileCopy(copy, adapter);
     }
   }
 

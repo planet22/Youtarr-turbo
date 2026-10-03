@@ -8,6 +8,11 @@ jest.mock('../../configModule', () => ({
   getConfig: jest.fn(() => ({})),
 }));
 jest.mock('../../mediaServers/adapters/jellyfinAdapter', () => jest.fn());
+jest.mock('../../mediaServers/adapters/plexAdapter', () => jest.fn());
+jest.mock('../../plexModule', () => ({
+  getLibraries: jest.fn(),
+  refreshLibrary: jest.fn(),
+}));
 jest.mock('../../../models', () => ({
   Profile: { findAll: jest.fn(), findByPk: jest.fn(), findOne: jest.fn(), create: jest.fn() },
   ProfileSubscription: { findAll: jest.fn(), destroy: jest.fn(), bulkCreate: jest.fn() },
@@ -62,6 +67,8 @@ describe('profileModule', () => {
   let profileLinker;
   let configModule;
   let JellyfinAdapter;
+  let PlexAdapter;
+  let plexModule;
   let mediaServerSync;
 
   // Fire-and-forget work (playlist syncs) settles on later ticks.
@@ -78,6 +85,8 @@ describe('profileModule', () => {
     profileLinker = require('../profileLinker');
     configModule = require('../../configModule');
     JellyfinAdapter = require('../../mediaServers/adapters/jellyfinAdapter');
+    PlexAdapter = require('../../mediaServers/adapters/plexAdapter');
+    plexModule = require('../../plexModule');
     profileModule = require('../profileModule');
 
     models.ProfileSubscription.findAll.mockResolvedValue([]);
@@ -92,10 +101,11 @@ describe('profileModule', () => {
   });
 
   describe('Jellyfin playlist copies', () => {
-    test('changing the Jellyfin user removes the old user\'s playlist copies', async () => {
+    test('changing the Jellyfin user removes the old user\'s Jellyfin playlist copies only', async () => {
       models.Profile.findByPk.mockResolvedValue(makeProfile({ jellyfin_user_id: 'u-old' }));
       await profileModule.update(1, { jellyfinUserId: 'u-new' });
-      expect(mediaServerSync.removeProfileCopies).toHaveBeenCalledWith(1);
+      expect(mediaServerSync.removeProfileCopies).toHaveBeenCalledWith(1, { serverType: 'jellyfin' });
+      expect(mediaServerSync.removeProfileCopies).toHaveBeenCalledTimes(1);
     });
 
     test('keeping the same Jellyfin user leaves the copies alone', async () => {
@@ -108,6 +118,21 @@ describe('profileModule', () => {
       models.Profile.findByPk.mockResolvedValue(makeProfile());
       await profileModule.remove(1);
       expect(mediaServerSync.removeProfileCopies).toHaveBeenCalledWith(1);
+    });
+
+    test('changing the Plex user removes only the Plex copies, leaving Jellyfin copies untouched', async () => {
+      models.Profile.findByPk.mockResolvedValue(makeProfile({ jellyfin_user_id: 'u1', plex_user_id: 'p-old' }));
+      await profileModule.update(1, { plexUserId: 'p-new' });
+      expect(mediaServerSync.removeProfileCopies).toHaveBeenCalledWith(1, { serverType: 'plex' });
+      expect(mediaServerSync.removeProfileCopies).toHaveBeenCalledTimes(1);
+    });
+
+    test('changing both identities at once removes both servers\' copies independently', async () => {
+      models.Profile.findByPk.mockResolvedValue(makeProfile({ jellyfin_user_id: 'u-old', plex_user_id: 'p-old' }));
+      await profileModule.update(1, { jellyfinUserId: 'u-new', plexUserId: 'p-new' });
+      expect(mediaServerSync.removeProfileCopies).toHaveBeenCalledWith(1, { serverType: 'jellyfin' });
+      expect(mediaServerSync.removeProfileCopies).toHaveBeenCalledWith(1, { serverType: 'plex' });
+      expect(mediaServerSync.removeProfileCopies).toHaveBeenCalledTimes(2);
     });
 
     test('following a new playlist syncs it to the media servers', async () => {
@@ -176,6 +201,32 @@ describe('profileModule', () => {
       expect(models.ProfileVideoLink.findAll).toHaveBeenCalledWith(expect.objectContaining({
         where: expect.objectContaining({ video_id: [] }),
       }));
+    });
+
+    test('removeWatchedLinks requires every linked identity to have watched (AND)', async () => {
+      const row = makeLinkRow();
+      models.Profile.findAll.mockResolvedValue([
+        makeProfile({ remove_watched_after_days: 7, jellyfin_user_id: 'u1', plex_user_id: 'p1' }),
+      ]);
+      // Jellyfin has watched video 10; Plex has watched a different video (11).
+      models.VideoWatchStatus.findAll.mockImplementation(({ where }) =>
+        Promise.resolve(where.server_type === 'jellyfin' ? [{ video_id: 10 }] : [{ video_id: 11 }]));
+      models.Video.findAll.mockResolvedValue([]);
+      models.ProfileVideoLink.findAll.mockResolvedValue([]);
+
+      const result = await profileModule.removeWatchedLinks();
+
+      // Intersection of {10} and {11} is empty - neither video is eligible.
+      expect(result).toEqual({ profiles: 1, removed: 0, failed: 0 });
+      expect(models.Video.findAll).not.toHaveBeenCalled();
+
+      models.Video.findAll.mockClear();
+      models.VideoWatchStatus.findAll.mockImplementation(() => Promise.resolve([{ video_id: 10 }]));
+      models.ProfileVideoLink.findAll.mockResolvedValue([row]);
+      models.Video.findAll.mockResolvedValue([{ id: 10 }]);
+
+      const bothWatched = await profileModule.removeWatchedLinks();
+      expect(bothWatched).toEqual({ profiles: 1, removed: 1, failed: 0 });
     });
 
     test('a dismissed video is not linked again by reconcile', async () => {
@@ -367,6 +418,17 @@ describe('profileModule', () => {
       await waitFor(() => adapter.refreshAllLibraries.mock.calls.length > 0);
       expect(adapter.refreshAllLibraries).toHaveBeenCalled();
     });
+
+    test('refreshes the Plex library of a profile that received a link', async () => {
+      models.Profile.findAll.mockResolvedValue([makeProfile({ plex_library_id: 'px-lib' })]);
+      models.ProfileSubscription.findAll.mockResolvedValue([{ profile_id: 1, source_type: 'channel', source_id: 'UC1' }]);
+      models.Video.findAll.mockResolvedValue([VIDEO]);
+
+      await profileModule.syncDownloadedVideos(['abc123def45']);
+      await waitFor(() => plexModule.refreshLibrary.mock.calls.length > 0);
+
+      expect(plexModule.refreshLibrary).toHaveBeenCalledWith('px-lib');
+    });
   });
 
   describe('listSources', () => {
@@ -388,6 +450,37 @@ describe('profileModule', () => {
   describe('listJellyfinUsers', () => {
     test('rejects with 409 when Jellyfin is not configured', async () => {
       await expect(profileModule.listJellyfinUsers()).rejects.toMatchObject({ status: 409 });
+    });
+  });
+
+  describe('listPlexUsers', () => {
+    test('rejects with 409 when Plex is not configured', async () => {
+      await expect(profileModule.listPlexUsers()).rejects.toMatchObject({ status: 409 });
+    });
+
+    test('lists Home users from the configured Plex server', async () => {
+      const adapter = { listHomeUsers: jest.fn().mockResolvedValue([{ id: '2', name: 'Kid' }]) };
+      PlexAdapter.mockImplementation(() => adapter);
+      configModule.getConfig.mockReturnValue({ plexApiKey: 'tok', plexUrl: 'http://plex:32400' });
+
+      const users = await profileModule.listPlexUsers();
+
+      expect(users).toEqual([{ id: '2', name: 'Kid' }]);
+    });
+  });
+
+  describe('listPlexLibraries', () => {
+    test('rejects with 409 when Plex is not configured', async () => {
+      await expect(profileModule.listPlexLibraries()).rejects.toMatchObject({ status: 409 });
+    });
+
+    test('lists libraries from the configured Plex server', async () => {
+      configModule.getConfig.mockReturnValue({ plexApiKey: 'tok', plexUrl: 'http://plex:32400' });
+      plexModule.getLibraries.mockResolvedValue([{ id: '1', title: 'Movies' }]);
+
+      const libraries = await profileModule.listPlexLibraries();
+
+      expect(libraries).toEqual([{ id: '1', title: 'Movies' }]);
     });
   });
 });

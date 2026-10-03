@@ -50,6 +50,8 @@ Two things to know:
 
 **Visibility**: when a Youtarr-Turbo playlist is marked **Public**, the underlying Jellyfin playlist sets the `IsPublic` flag, making it visible to all users on the server. Marking it **Private** restricts visibility to the configured user account.
 
+**Per-user copies (user profiles)**: every [user profile](GETTING_STARTED_USER_PROFILES.md) that follows a playlist and has a Jellyfin user also gets its own **private** copy of that playlist, owned by that user and built from the profile's own (hardlinked) files. Videos removed from the profile as watched are left out of its copy. Copies are synced alongside the shared playlist and are deleted when the profile stops following the playlist, switches Jellyfin user, or is deleted. Their sync state is kept per profile (`playlist_sync_state.profile_id`). Per-user copies are Jellyfin-only.
+
 ### Emby
 
 The Emby flow mirrors Jellyfin. The two API surfaces share lineage but differ enough that Youtarr-Turbo ships a separate adapter.
@@ -94,7 +96,7 @@ Existing downloads are never converted or re-downloaded when the setting changes
 
 ## Replace semantics
 
-When a playlist's video list changes (new videos downloaded, ignored videos removed), Youtarr-Turbo re-syncs:
+When a playlist's video list changes (new videos downloaded, ignored videos removed), Youtarr-Turbo re-syncs. Deleted videos are left out before anything is looked up on the server, so a deleted file never holds up a sync:
 
 - **Plex**: deletes existing items in place and PUTs the new URI list. Same playlist ID retained.
 - **Jellyfin / Emby**: deletes the entire playlist and recreates it. The `playlist_sync_state.server_playlist_id` is updated to point at the new ID. This is required because both servers' `DELETE /Playlists/{id}/Items` returns errors on current versions; full replace is the only reliable path.

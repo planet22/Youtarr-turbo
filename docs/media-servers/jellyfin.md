@@ -163,6 +163,16 @@ Organize content by type:
 - **Performance**: Faster scanning of specific content
 - **Customization**: Different metadata settings per type
 
+### One Library per Person (User Profiles)
+
+Subfolders split content by *type*. To give each **person** their own library instead — e.g. a kids' account that only sees the kids' channels, or each family member's own picks — use [User Profiles](../GETTING_STARTED_USER_PROFILES.md):
+
+1. Create a profile in Youtarr-Turbo (Settings → User Profiles) and pick its channels/playlists.
+2. Create a Jellyfin library pointing at `<youtube path>/__profiles__/<profile name>` and give the person's Jellyfin user access to it.
+3. Edit the profile and select that Jellyfin user and library.
+
+Videos are hardlinked into each profile folder, so nothing is downloaded or stored twice. The person also gets private copies of the profile's playlists and a watched filter based on their own account. When a profile's library has nothing indexed yet, Youtarr-Turbo triggers one full library scan (Jellyfin ignores refreshes of a library folder that was empty at its last scan); after that it refreshes just that library.
+
 ### Initial Setup
 
 1. **Start Small**: Test with one channel first

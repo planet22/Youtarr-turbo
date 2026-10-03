@@ -100,6 +100,29 @@ The `.m3u` files use relative paths, so they keep working if you move your libra
 
 `playlists` is a reserved subfolder name, so Youtarr-Turbo won't let you assign a channel to a subfolder called `playlists`. Channel subfolders also can't start with `__`, so they never collide with the `__playlists__` folder itself. See [Media Server Playlists](MEDIA_SERVER_PLAYLISTS.md) for how playlists download and sync.
 
+## The `__profiles__` Folder
+
+If you create [user profiles](GETTING_STARTED_USER_PROFILES.md), Youtarr-Turbo creates a `__profiles__` folder at the top of your download directory with one folder per profile. Each holds **hardlinks** (not copies) of the videos from the channels and playlists that profile follows, plus their `.nfo`, thumbnails and channel/season artwork:
+
+```
+<YOUTUBE_OUTPUT_DIR>/
+├── __Kids/
+│   └── Channel Name/
+│       └── Channel Name - Video Title - abc123/
+│           └── Channel Name - Video Title [abc123].mp4      # the real file
+├── __profiles__/
+│   ├── Emma/
+│   │   └── Channel Name/                                    # no __Kids level
+│   │       └── Channel Name - Video Title - abc123/
+│   │           └── Channel Name - Video Title [abc123].mp4  # hardlink, same file
+│   └── Dad/
+│       └── ...
+```
+
+Inside a profile the `__subfolder` level is dropped, so each profile is one flat set of channel folders; everything below the channel folder (video folders, `Season YYYY` folders, flat files) mirrors the library. Point each person's media server library at their profile folder.
+
+Youtarr-Turbo manages this folder itself: the filesystem rescan, the post-download file search and the empty-folder cleanup all skip `__profiles__`, so a link is never mistaken for the real file. Deleting a profile removes only its folder; library files are never touched. A subfolder named `profiles__` is reserved (it would map onto this folder).
+
 ## Supported File Extensions (Reads vs. Writes)
 
 Youtarr-Turbo **writes** downloaded media as `.mp4` for video and `.mp3` for audio-only downloads.

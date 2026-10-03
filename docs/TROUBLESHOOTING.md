@@ -118,7 +118,7 @@ See [Authentication - Cannot Find the Setup Token](AUTHENTICATION.md#cannot-find
 
 **Solution**:
 - Verify Automatic Video Removal is enabled on **Settings -> Auto Removal** and at least one rule is configured: an age threshold, a free-space threshold, or watched-based removal. Note that watched-based removal only runs while watch status sync is enabled.
-- Remember the exclusions. Videos you've marked as Protected, videos of channels with auto-removal protection enabled, and the newest downloads kept by "Keep this many newest downloads" (the global setting plus any per-channel keep counts) are never removed, so a run can legitimately delete nothing.
+- Remember the exclusions. Videos you've marked as Protected, videos of channels with auto-removal protection enabled, and the newest downloads kept by "Keep this many newest downloads" (the global setting plus any per-channel keep counts) are never removed, so a run can legitimately delete nothing. With [user profiles](GETTING_STARTED_USER_PROFILES.md), watched-based removal also waits until every profile still holding a video has had its Jellyfin user watch it, and never removes videos held by a profile with no Jellyfin user.
 - Run the dry-run preview to see how many videos currently match the rules - it also shows how many videos the protection settings are keeping. Adjust values if needed (for example, lower the free-space threshold or reduce the age requirement).
 - Check server logs around 2:00 AM for `[Auto-Removal]` messages to confirm the job is executing (`docker compose logs -f youtarr`).
 - If errors appear in the logs (e.g., permission issues deleting files), resolve those first - the cron job will skip files it cannot delete.
@@ -676,6 +676,28 @@ Related gotchas when sharing playlists with other users:
 3. All three servers only mark a video played once playback passes a configurable percentage threshold (90% by default), so a video you stopped partway through may genuinely not count as watched yet. See [What determines if a video is "watched"](USAGE_GUIDE.md#what-determines-if-a-video-is-watched) for where to change the threshold on each server.
 4. Check for a path mismatch. Youtarr-Turbo matches watch state to videos by filename, so if the server is indexing files from a different copy of your library (or files renamed to drop the `[<youtube-id>]` segment), nothing will match. Run a [rescan](USAGE_GUIDE.md#rescan-files-on-disk) if you've moved or renamed files.
 5. For non-owner Plex users specifically: their state comes from the server's play history, and that pull is incremental. If a path mismatch prevented matching for a while, plays from that period may have been scanned already and won't be picked up on later syncs. After fixing the mismatch, delete the `plex` row from the `watch_status_sync_cursors` table to force a full history re-scan on the next sync (see the [Configuration Reference](CONFIG.md#watch-status-sync)).
+
+## User Profile Issues
+
+See [Multiple Users § Troubleshooting](GETTING_STARTED_USER_PROFILES.md#troubleshooting) for the full list. The common ones:
+
+### Profile's Jellyfin Library Is Empty
+
+**Problem**: Videos are linked into `__profiles__/<name>`, but the person's Jellyfin library shows nothing.
+
+**Solution**: Jellyfin skips a library folder that was empty at its last full scan and ignores per-library refreshes of it afterwards. Youtarr-Turbo runs one full scan when a profile library has nothing indexed, but only if the profile has that library selected: Settings -> User Profiles -> **Edit** -> **Jellyfin library**. Otherwise run **Scan All Libraries** in Jellyfin once. Also check the Jellyfin user has access to the library (Dashboard -> Users -> Access).
+
+### "Falling back to a real copy" in the Logs
+
+**Problem**: Logs show `profiles: profile folder is on a different filesystem than the library - falling back to a real copy`.
+
+**Solution**: Hardlinks only work within one filesystem. Profile folders always live inside the download directory, so this means that directory spans more than one mount, or the mount (often SMB/CIFS) doesn't support hardlinks. Keep the whole download directory on one Docker volume or bind mount. Copies still work but use extra disk space.
+
+### Profile Watched Filter Shows Nothing
+
+**Problem**: With a profile selected, **Watched** never matches anything even though the person has watched videos.
+
+**Solution**: The filter uses the profile's own Jellyfin user, so the profile needs a Jellyfin user (Edit), and watch status sync must include all Jellyfin users (Settings -> Watch Status). Click **Sync Now** to refresh.
 
 ## Channel Import Issues
 

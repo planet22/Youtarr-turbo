@@ -4,6 +4,7 @@ jest.mock('../../logger');
 jest.mock('../videoPersistence', () => ({ upsertVideoForJob: jest.fn() }));
 jest.mock('../../models/job', () => ({ create: jest.fn(), update: jest.fn() }));
 jest.mock('../jobModule', () => ({ jobs: {} }));
+jest.mock('../profiles/profileModule', () => ({ syncVideo: jest.fn() }));
 
 const fs = require('fs');
 const os = require('os');

@@ -11,6 +11,7 @@ const ChannelVideo = require('../models/channelvideo');
 const logger = require('../logger');
 const { primeVideosForEventLog } = require('./download/eventLogVideoPrimer');
 const { videoIdFromUrl } = require('./jobEventLog/jobVideoRef');
+const profileModule = require('./profiles/profileModule');
 
 const DEFAULT_FILES_TO_DOWNLOAD = 5;
 
@@ -848,7 +849,13 @@ class DownloadModule {
           // downloadJobFinalizer/runCompletionSideEffects (the real-download
           // completion path that normally does this), so it needs its own
           // trigger here - same calls, same fire-and-forget error handling.
+          // User profiles are linked first, so the scans below pick them up.
           if (ok > 0) {
+            try {
+              await profileModule.syncDownloadedVideos(results.filter((r) => r.ok && r.youtubeId).map((r) => r.youtubeId));
+            } catch (err) {
+              logger.error({ err }, 'Failed to link STRM videos into profiles');
+            }
             plexModule.refreshLibrariesForSubfolders([strmSubFolder ?? null]).catch(err => {
               logger.error({ err }, 'Failed to refresh Plex libraries after STRM materialize');
             });

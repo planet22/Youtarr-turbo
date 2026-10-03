@@ -49,6 +49,7 @@ jest.mock('../mediaServers', () => ({
   serverRegistry: { triggerLibraryScansForNonPlexServers: jest.fn().mockResolvedValue(undefined) },
 }));
 jest.mock('../videoValidationModule', () => ({ getCachedChannelId: jest.fn(() => null) }));
+jest.mock('../profiles/profileModule', () => ({ syncDownloadedVideos: jest.fn().mockResolvedValue(undefined) }));
 jest.mock('../channelDownloadGrouper', () => ({
   generateDownloadGroups: jest.fn(),
   getStrmModeChannels: jest.fn().mockResolvedValue([])
@@ -1295,6 +1296,27 @@ describe('DownloadModule', () => {
       await downloadModule.doSpecificDownloads({ body: { urls: ['https://www.youtube.com/watch?v=abc123DEF45'] } });
 
       expect(primeVideosForEventLog).toHaveBeenCalledWith(['abc123DEF45'], { destinedTracked: true });
+    });
+
+    it('links materialized STRM videos into user profiles', async () => {
+      jobModuleMock.getJob.mockReturnValue({ status: 'In Progress' });
+      jobModuleMock.startNextJob = jest.fn();
+      const strmMaterializer = require('../strmMaterializer');
+      const modeSpy = jest.spyOn(strmMaterializer, 'resolveMediaMode').mockReturnValue('strm');
+      const materializeSpy = jest.spyOn(strmMaterializer, 'materializeMany').mockResolvedValue([
+        { ok: true, youtubeId: 'abc123DEF45' },
+        { ok: false, url: 'https://www.youtube.com/watch?v=zzz', error: 'boom' },
+      ]);
+      const profileModule = require('../profiles/profileModule');
+
+      try {
+        await downloadModule.doSpecificDownloads({ body: { urls: ['https://www.youtube.com/watch?v=abc123DEF45'] } });
+      } finally {
+        modeSpy.mockRestore();
+        materializeSpy.mockRestore();
+      }
+
+      expect(profileModule.syncDownloadedVideos).toHaveBeenCalledWith(['abc123DEF45']);
     });
 
     it('primes an untracked-strategy NZB grab as kept out of the library', async () => {

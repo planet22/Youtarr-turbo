@@ -169,8 +169,6 @@ class VideoDeletionModule {
       if (configModule.getConfig().autoRemovalPreserveStrmFallback !== false) {
         const reverted = await this._tryRevertToStrm(video);
         if (reverted) {
-          // Profiles drop the big file and pick up the restored .strm.
-          await profileModule.syncVideo(video.id);
           return reverted;
         }
       }
@@ -352,6 +350,10 @@ class VideoDeletionModule {
         channelName: video.youTubeChannelName,
         detail: { restoredStrmPath },
       });
+
+      // Profiles drop their link to the deleted media file (which would keep
+      // its disk space) and pick up the restored .strm. Never throws.
+      await profileModule.syncVideo(video);
 
       return {
         success: true,

@@ -24,6 +24,7 @@ import { Database as MetadataCacheIcon, ClearCache as ClearCacheIcon, Shield as 
 import { formatDuration, formatYTDate } from '../../../utils';
 import { formatAddedDateTime, formatExpiresIn } from '../../../utils/formatters';
 import { getDisplayPath } from '../../../utils/paths';
+import { displayedFilePaths } from '../displayedFilePaths';
 import { getMediaTypeInfo } from '../../../utils/videoStatus';
 import { getEnabledChannelId } from '../../../utils/enabledChannels';
 import { VideoData, EnabledChannel } from '../../../types/VideoData';
@@ -165,8 +166,7 @@ function VideosTable({
               );
               const mediaTypeInfo = getMediaTypeInfo(video.media_type);
               const downloadedTooltip = videoCacheExpiryText(video);
-              const pathText = [video.filePath, video.audioFilePath]
-                .filter((p): p is string => Boolean(p))
+              const pathText = displayedFilePaths(video)
                 .map(getDisplayPath)
                 .join('  •  ');
 

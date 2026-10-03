@@ -7,7 +7,9 @@ const logger = require('../../logger');
 const { MEDIA_EXTENSIONS, M3U_FILE_PATTERN, YOUTUBE_ID_BRACKET_PATTERN, PROFILES_DIR_NAME } = require('../filesystem/constants');
 const { splitLibraryPath, mapToProfilePath, profileRootPath, isInside } = require('./profilePaths');
 
-const TEMP_FILE_PATTERN = /\.(part|ytdl|tmp)$/i;
+// .cached = archived STRM sidecars kept next to a cache-on-play download so it
+// can be reverted; they're Youtarr bookkeeping, not library content.
+const TEMP_FILE_PATTERN = /\.(part|ytdl|tmp|cached)$/i;
 
 function isOwnVideoFolder(dir, youtubeId) {
   const name = path.basename(dir);

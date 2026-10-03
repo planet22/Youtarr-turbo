@@ -4,6 +4,7 @@ jest.mock('../../logger');
 jest.mock('../videoPersistence', () => ({ upsertVideoForJob: jest.fn() }));
 jest.mock('../../models/job', () => ({ create: jest.fn(), update: jest.fn() }));
 jest.mock('../jobModule', () => ({ jobs: {} }));
+jest.mock('../profiles/profileModule', () => ({ syncVideo: jest.fn() }));
 
 const fs = require('fs');
 const os = require('os');
@@ -67,6 +68,14 @@ describe('ytstreamTapFinalizer', () => {
     describe('tracked video', () => {
       it('returns the final path', async () => {
         await expect(finalizeTapOutput({ youtubeId: YT_ID, tempPath, finalPath })).resolves.toBe(finalPath);
+      });
+
+      it('re-syncs user profile links for the finalized video', async () => {
+        const profileModule = require('../profiles/profileModule');
+
+        await finalizeTapOutput({ youtubeId: YT_ID, tempPath, finalPath });
+
+        expect(profileModule.syncVideo).toHaveBeenCalledWith({ id: 55 });
       });
 
       it('moves the file into the library location, creating parent directories', async () => {

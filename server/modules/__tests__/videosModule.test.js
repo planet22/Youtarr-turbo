@@ -12,6 +12,7 @@ describe('VideosModule', () => {
   let mockVideo;
   let mockWatchStatusQueries;
   let mockProfile;
+  let mockProfileVideoLink;
   let mockFs;
   let mockConfigModule;
   let mockVideoValidationModule;
@@ -118,6 +119,7 @@ describe('VideosModule', () => {
 
     // Mock the models
     mockProfile = { findByPk: jest.fn().mockResolvedValue(null) };
+    mockProfileVideoLink = { findAll: jest.fn().mockResolvedValue([]) };
     mockWatchStatusQueries.buildUserWatchedExistsSql = jest.fn().mockReturnValue({
       sql: 'EXISTS (SELECT 1 FROM video_watch_status vws WHERE vws.server_user_id = :watchedServerUserId)',
       replacements: { watchedServerType: 'jellyfin', watchedServerUserId: 'u-alice' }
@@ -126,7 +128,8 @@ describe('VideosModule', () => {
     jest.doMock('../../models', () => ({
       Video: mockVideo,
       Channel: mockChannel,
-      Profile: mockProfile
+      Profile: mockProfile,
+      ProfileVideoLink: mockProfileVideoLink
     }));
 
     // Mock the watch status query module (owns the watchedBy aggregation)
@@ -557,6 +560,25 @@ describe('VideosModule', () => {
       const [countQuery, countOptions] = mockSequelize.query.mock.calls[0];
       expect(countQuery).toContain('FROM profile_subscriptions ps');
       expect(countOptions.replacements.profileId).toBe(5);
+    });
+
+    test('_attachProfilePaths adds the profile link matching each library file', async () => {
+      mockProfileVideoLink.findAll.mockResolvedValue([
+        { video_id: 1, link_paths: JSON.stringify(['/data/__profiles__/Test/Chan/v [abc].nfo', '/data/__profiles__/Test/Chan/v [abc].strm']) },
+      ]);
+      const videos = [{ id: 1, filePath: '/data/__Movies/Chan/v [abc].strm', audioFilePath: null }];
+
+      await VideosModule._attachProfilePaths(videos, 7);
+
+      expect(videos[0]).toMatchObject({ profileFilePath: '/data/__profiles__/Test/Chan/v [abc].strm', profileAudioFilePath: null });
+    });
+
+    test('_attachProfilePaths leaves an unlinked video without profile paths', async () => {
+      const videos = [{ id: 2, filePath: '/data/Chan/x [def].mp4', audioFilePath: null }];
+
+      await VideosModule._attachProfilePaths(videos, 7);
+
+      expect(videos[0].profileFilePath).toBeNull();
     });
 
     test('should use the profile Jellyfin user for the watched filter', async () => {

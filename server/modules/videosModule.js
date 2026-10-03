@@ -1,5 +1,5 @@
 const { Sequelize, sequelize } = require('../db.js');
-const { Video, Profile } = require('../models');
+const { Video, Profile, ProfileVideoLink } = require('../models');
 const fs = require('fs').promises;
 const path = require('path');
 const configModule = require('./configModule');
@@ -81,6 +81,34 @@ class VideosModule {
     this._resolutionTagBackfillRunning = false;
     this._imageRegenRunning = false;
     this._lastNzbUntrackedSweepAt = 0;
+  }
+
+  // In a user profile's view, show where each video lives in that profile's
+  // folder (its hardlink). filePath/audioFilePath stay the library originals,
+  // which every action uses. A link has the same file name as its original.
+  async _attachProfilePaths(videos, profileId) {
+    if (videos.length === 0) return;
+    const rows = await ProfileVideoLink.findAll({
+      where: { profile_id: profileId, video_id: videos.map((v) => v.id), dismissed_at: null },
+      attributes: ['video_id', 'link_paths'],
+      raw: true,
+    });
+    const linksByVideo = new Map();
+    for (const row of rows) {
+      try {
+        linksByVideo.set(row.video_id, JSON.parse(row.link_paths));
+      } catch {
+        linksByVideo.set(row.video_id, []);
+      }
+    }
+    const linkFor = (links, original) => (original
+      ? links.find((p) => path.basename(p) === path.basename(original)) || null
+      : null);
+    for (const video of videos) {
+      const links = linksByVideo.get(video.id) || [];
+      video.profileFilePath = linkFor(links, video.filePath);
+      video.profileAudioFilePath = linkFor(links, video.audioFilePath);
+    }
   }
 
   // In a user profile's view, "watched" means watched by that profile's
@@ -570,6 +598,8 @@ class VideosModule {
       for (const video of videos) {
         video.watchedBy = watchedByVideoId.get(video.id) || [];
       }
+
+      if (profileId) await this._attachProfilePaths(videos, profileId);
 
       // Cache-state fields for the Library page's "Cached Metadata"/"Cached
       // Video" icons and Downloaded-column expiry tooltip. hasCachedVideo

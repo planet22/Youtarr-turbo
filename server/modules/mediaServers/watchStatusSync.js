@@ -166,8 +166,9 @@ class WatchStatusSync {
   // (ids are globally unique), so files moved or renamed on the server side
   // still match; basename is the fallback. Ties go to the path closest to
   // the stored filePath (mount views differ between Youtarr and the
-  // servers). A video matches ALL user entries of its best-scoring path,
-  // not just one.
+  // servers). Each user is matched from THEIR best-scoring path: a video can
+  // sit at several paths (the library file plus user-profile hardlinks), and
+  // a user who can only see a profile library's copy must still count.
   _matchVideos(videos, entries) {
     const entriesByPath = new Map();
     for (const entry of entries) {
@@ -194,12 +195,15 @@ class WatchStatusSync {
         || candidatesByBasename.get(extractBasename(video.filePath));
       if (!candidates) continue;
       const targetSegments = pathSegments(video.filePath);
-      let best = null;
+      const bestByUser = new Map(); // serverUserId -> { score, entry }
       for (const candidate of candidates) {
         const score = trailingSegmentMatch(targetSegments, candidate.segments);
-        if (!best || score > best.score) best = { path: candidate.path, score };
+        for (const entry of entriesByPath.get(candidate.path)) {
+          const previous = bestByUser.get(entry.serverUserId);
+          if (!previous || score > previous.score) bestByUser.set(entry.serverUserId, { score, entry });
+        }
       }
-      for (const entry of entriesByPath.get(best.path)) {
+      for (const { entry } of bestByUser.values()) {
         matches.push({ video, entry });
       }
     }

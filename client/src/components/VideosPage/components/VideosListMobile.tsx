@@ -5,6 +5,7 @@ import { Database as MetadataCacheIcon, ClearCache as ClearCacheIcon, PipIcon } 
 import { formatDuration, formatYTDate } from '../../../utils';
 import { formatAddedDateTime, formatFileSize } from '../../../utils/formatters';
 import { getDisplayPath } from '../../../utils/paths';
+import { displayedFilePaths } from '../displayedFilePaths';
 import { getMediaTypeInfo } from '../../../utils/videoStatus';
 import { getEnabledChannelId } from '../../../utils/enabledChannels';
 import { VideoData, EnabledChannel } from '../../../types/VideoData';
@@ -91,8 +92,7 @@ function VideosListMobile({
           : null;
 
         const showPathLine = showFilePath && Boolean(video.filePath || video.audioFilePath);
-        const pathText = [video.filePath, video.audioFilePath]
-          .filter((p): p is string => Boolean(p))
+        const pathText = displayedFilePaths(video)
           .map(getDisplayPath)
           .join('  •  ');
 

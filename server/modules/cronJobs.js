@@ -194,6 +194,61 @@ function initialize(deps = {}) {
   });
 
   // ============================================================================
+  // USER PROFILE MAINTENANCE - 2:20 AM Daily
+  // ============================================================================
+  // Per user profile (Settings -> User Profiles): first re-checks every
+  // profile's hardlinks against the library (drops links of videos the rescan
+  // marked missing), then unlinks videos the profile's Jellyfin user watched
+  // more than remove_watched_after_days ago. Only profile hardlinks are ever
+  // removed; library files stay. No-op when there are no profiles.
+  const profileModule = require('./profiles/profileModule');
+  defineTask({
+    id: 'profile-maintenance',
+    label: 'Profile maintenance',
+    description: 'Re-checks user profile links against the library and removes watched videos from profiles that have "remove watched videos" set. Library files are kept.',
+    cron: '20 2 * * *',
+    confirm: false,
+  }, async () => {
+    try {
+      const result = await profileModule.reconcileAll();
+      if (result.linked > 0 || result.unlinked > 0 || result.failed > 0) {
+        logger.info(result, 'Profile link re-check completed');
+      }
+    } catch (error) {
+      logger.error({ err: error }, 'Error during profile link re-check');
+    }
+    try {
+      const result = await profileModule.removeWatchedLinks();
+      if (result.removed > 0 || result.failed > 0) {
+        logger.info(result, 'Profile watched-video removal completed');
+      }
+    } catch (error) {
+      logger.error({ err: error }, 'Error during profile watched-video removal');
+    }
+  });
+
+  // ============================================================================
+  // COMPLETE.LIST BACKFILL - 2:20 AM Daily
+  // ============================================================================
+  // Recovers Videos/ChannelVideos rows from yt-dlp's complete.list + .info.json
+  // files for anything the DB is missing (e.g. after an out-of-band restore).
+  // Also runs once at server startup; see jobModule's constructor.
+  const jobModule = require('./jobModule');
+  defineTask({
+    id: 'complete-list-backfill',
+    label: 'Complete.list backfill',
+    description: 'Recovers missing video/channel-video rows from yt-dlp\'s complete.list and .info.json files.',
+    cron: '20 2 * * *',
+    confirm: false,
+  }, async () => {
+    try {
+      await jobModule.backfillFromCompleteList();
+    } catch (error) {
+      logger.error({ err: error }, 'Scheduled complete.list backfill failed');
+    }
+  });
+
+  // ============================================================================
   // SESSION CLEANUP - 3:00 AM Daily
   // ============================================================================
   defineTask({

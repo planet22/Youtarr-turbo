@@ -213,7 +213,7 @@ const EVENT_CATALOG = {
   },
   [EVENT_TYPES.VIDEO_MOVED]: {
     actor: 'library',
-    message: ({ detail = {} }) => `Video file moved${suffix(detail.to, 'to %s')}${suffix(detail.from, '(from %s)')}`,
+    message: ({ detail = {} }) => `Video file moved${suffix(libraryPath(detail.to), 'to %s')}${suffix(libraryPath(detail.from), '(from %s)')}`,
   },
 
   [EVENT_TYPES.PLAYLIST_SYNCED]: {

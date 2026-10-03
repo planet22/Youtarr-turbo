@@ -10,8 +10,11 @@ describe('mediaServerSync', () => {
     jest.doMock('../../../models', () => ({
       Playlist: { findByPk: jest.fn() },
       PlaylistVideo: { findAll: jest.fn() },
-      PlaylistSyncState: { findOne: jest.fn(), create: jest.fn() },
+      PlaylistSyncState: { findOne: jest.fn(), create: jest.fn(), findAll: jest.fn().mockResolvedValue([]) },
       Video: { findAll: jest.fn() },
+      Profile: { findAll: jest.fn().mockResolvedValue([]) },
+      ProfileSubscription: { findAll: jest.fn().mockResolvedValue([]) },
+      ProfileVideoLink: { findAll: jest.fn().mockResolvedValue([]) },
     }));
     jest.doMock('../../configModule', () => ({ getConfig: () => ({}) }));
     jest.doMock('../../../logger', () => ({
@@ -123,6 +126,33 @@ describe('mediaServerSync', () => {
     expect(batchResolve).toHaveBeenNthCalledWith(1, ['/youtube/A/v1.mp4', '/youtube/B/v2.mp4']);
     expect(batchResolve).toHaveBeenNthCalledWith(2, ['/youtube/B/v2.mp4']);
     expect(plexAdapter.createPlaylist).toHaveBeenCalledWith('YT: PL', ['rk1', 'rk2'], { public: false, mediaType: 'video' });
+  });
+
+  test('does not try to resolve a deleted video', async () => {
+    Playlist.findByPk.mockResolvedValue({
+      id: 1, playlist_id: 'PL1', title: 'PL',
+      sync_to_plex: true, sync_to_jellyfin: false, sync_to_emby: false,
+      public_on_servers: false,
+    });
+    PlaylistVideo.findAll.mockResolvedValue([
+      { youtube_id: 'v1', position: 1, ignored: false },
+      { youtube_id: 'v2', position: 2, ignored: false },
+    ]);
+    Video.findAll.mockResolvedValue([
+      { youtubeId: 'v1', filePath: '/youtube/A/v1.mp4' },
+      { youtubeId: 'v2', filePath: '/youtube/B/v2.mp4', removed: true },
+    ]);
+    PlaylistSyncState.findOne.mockResolvedValue(null);
+    PlaylistSyncState.create.mockResolvedValue({ id: 1 });
+    const plexAdapter = makeAdapter('PlexAdapter', {
+      resolveItemIdByFilepath: jest.fn().mockResolvedValue('rk1'),
+      createPlaylist: jest.fn().mockResolvedValue({ id: 'pid' }),
+    });
+    serverRegistry.getEnabledAdapters.mockReturnValue([plexAdapter]);
+
+    await mediaServerSync.syncPlaylist(1);
+
+    expect(plexAdapter.resolveItemIdByFilepath).not.toHaveBeenCalledWith('/youtube/B/v2.mp4');
   });
 
   test('replaces items when sync state already exists', async () => {
@@ -809,4 +839,106 @@ describe('mediaServerSync', () => {
       expect(recorded()).toHaveLength(0);
     });
   });
+  describe('user profile copies (Jellyfin)', () => {
+    let models;
+    const PLAYLIST = {
+      id: 1, playlist_id: 'PL1', title: 'Kids',
+      sync_to_plex: false, sync_to_jellyfin: true, sync_to_emby: false, public_on_servers: true,
+    };
+
+    function makeJellyfin(created = { id: 'shared' }) {
+      const userAdapter = makeAdapter('JellyfinAdapter', {
+        resolveItemIdByFilepath: jest.fn().mockResolvedValue('item1'),
+        createPlaylist: jest.fn().mockResolvedValue({ id: 'alice-copy' }),
+      });
+      const jellyfin = makeAdapter('JellyfinAdapter', {
+        resolveItemIdByFilepath: jest.fn().mockResolvedValue('item1'),
+        createPlaylist: jest.fn().mockResolvedValue(created),
+        forUser: jest.fn(() => userAdapter),
+        deletePlaylist: jest.fn().mockResolvedValue(undefined),
+      });
+      return { jellyfin, userAdapter };
+    }
+
+    beforeEach(() => {
+      models = require('../../../models');
+      Playlist.findByPk.mockResolvedValue(PLAYLIST);
+      PlaylistVideo.findAll.mockResolvedValue([{ youtube_id: 'v1', position: 1, ignored: false }]);
+      Video.findAll.mockResolvedValue([{ youtubeId: 'v1', filePath: '/youtube/A/v1 [v1].mp4' }]);
+      PlaylistSyncState.findOne.mockResolvedValue(null);
+      PlaylistSyncState.create.mockResolvedValue({});
+      models.ProfileSubscription.findAll.mockResolvedValue([{ profile_id: 7 }]);
+      models.Profile.findAll.mockResolvedValue([{ id: 7, name: 'Alice', jellyfin_user_id: 'u-alice' }]);
+    });
+
+    test('creates a private copy owned by the profile Jellyfin user', async () => {
+      const { jellyfin, userAdapter } = makeJellyfin();
+      serverRegistry.getEnabledAdapters.mockReturnValue([jellyfin]);
+
+      await mediaServerSync.syncPlaylist(1);
+
+      expect(jellyfin.forUser).toHaveBeenCalledWith('u-alice');
+      expect(userAdapter.createPlaylist).toHaveBeenCalledWith('YT: Kids', ['item1'], { public: false, mediaType: 'video' });
+    });
+
+    test('records the copy sync state against the profile', async () => {
+      const { jellyfin } = makeJellyfin();
+      serverRegistry.getEnabledAdapters.mockReturnValue([jellyfin]);
+
+      await mediaServerSync.syncPlaylist(1);
+
+      expect(PlaylistSyncState.create).toHaveBeenCalledWith(expect.objectContaining({ profile_id: 7, server_playlist_id: 'alice-copy' }));
+    });
+
+    test('does not trigger a second library scan for the copy', async () => {
+      const { jellyfin, userAdapter } = makeJellyfin();
+      serverRegistry.getEnabledAdapters.mockReturnValue([jellyfin]);
+
+      await mediaServerSync.syncPlaylist(1);
+
+      expect(userAdapter.triggerLibraryScan).not.toHaveBeenCalled();
+    });
+
+    test('leaves out videos removed from the profile as watched', async () => {
+      const { jellyfin, userAdapter } = makeJellyfin();
+      serverRegistry.getEnabledAdapters.mockReturnValue([jellyfin]);
+      models.ProfileVideoLink.findAll.mockResolvedValue([{ youtube_id: 'v1' }]);
+
+      await mediaServerSync.syncPlaylist(1);
+
+      expect(userAdapter.createPlaylist).not.toHaveBeenCalled();
+    });
+
+    test('deletes the copy of a profile that no longer follows the playlist', async () => {
+      const { jellyfin } = makeJellyfin();
+      serverRegistry.getEnabledAdapters.mockReturnValue([jellyfin]);
+      models.ProfileSubscription.findAll.mockResolvedValue([]);
+      const copy = { profile_id: 9, server_playlist_id: 'old-copy', destroy: jest.fn() };
+      PlaylistSyncState.findAll.mockResolvedValue([copy]);
+
+      await mediaServerSync.syncPlaylist(1);
+
+      expect(jellyfin.deletePlaylist).toHaveBeenCalledWith('old-copy');
+    });
+
+    test('removeProfileCopies deletes every copy a profile owns', async () => {
+      const { jellyfin } = makeJellyfin();
+      serverRegistry.getEnabledAdapters.mockReturnValue([jellyfin]);
+      const copy = { profile_id: 7, server_playlist_id: 'alice-copy', destroy: jest.fn() };
+      PlaylistSyncState.findAll.mockResolvedValue([copy]);
+
+      await mediaServerSync.removeProfileCopies(7);
+
+      expect(copy.destroy).toHaveBeenCalled();
+    });
+
+    test('a failing profile copy does not reject the sync', async () => {
+      const { jellyfin } = makeJellyfin();
+      serverRegistry.getEnabledAdapters.mockReturnValue([jellyfin]);
+      models.Profile.findAll.mockRejectedValue(new Error('db down'));
+
+      await expect(mediaServerSync.syncPlaylist(1)).resolves.toBeUndefined();
+    });
+  });
 });
+

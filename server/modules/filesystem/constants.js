@@ -251,7 +251,16 @@ function composeEpisodeFileTemplate(prefix, values) {
   return `${base} [${values.id}].${values.ext}`;
 }
 
+/**
+ * Top-level directory (directly under the output directory) holding one
+ * folder per user profile, filled with hardlinks of library files. Scanners
+ * that map files on disk to Videos rows must skip it, or a link could be
+ * mistaken for the video's real location.
+ */
+const PROFILES_DIR_NAME = '__profiles__';
+
 module.exports = {
+  PROFILES_DIR_NAME,
   SUBFOLDER_PREFIX,
   GLOBAL_DEFAULT_SENTINEL,
   ROOT_SENTINEL,

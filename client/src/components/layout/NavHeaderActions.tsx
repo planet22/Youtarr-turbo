@@ -9,6 +9,7 @@ import { ThemeLayoutPolicy } from '../../themes';
 import { StorageHeaderWidget } from './StorageHeaderWidget';
 import { DownloadActivityIndicator } from './DownloadActivityIndicator';
 import { ColorModeToggle } from './ColorModeToggle';
+import { ProfileSwitcher } from './ProfileSwitcher';
 
 interface NavHeaderActionsProps {
   layoutPolicy: ThemeLayoutPolicy;
@@ -142,6 +143,8 @@ export const NavHeaderActions: React.FC<NavHeaderActionsProps> = ({
           </Box>
         </Tooltip>
       )}
+
+      {token && <ProfileSwitcher compact={isMobile} />}
 
       {!isMobile && <ColorModeToggle />}
 

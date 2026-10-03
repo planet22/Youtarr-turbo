@@ -148,6 +148,34 @@ describe('GET /api/playlists', () => {
     );
   });
 
+  test('limits the list to playlists a profile follows when profileId is given', async () => {
+    const deps = buildDeps({
+      models: {
+        ProfileSubscription: { findAll: jest.fn().mockResolvedValue([{ source_id: 'PL1' }, { source_id: 'PL2' }]) },
+      },
+    });
+    deps.models.Playlist.findAndCountAll.mockResolvedValue({ count: 0, rows: [] });
+
+    const handler = getHandler('get', '/api/playlists', deps);
+    await handler({ query: { profileId: '3' }, log: loggerMock }, createResponse());
+
+    expect(deps.models.Playlist.findAndCountAll).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { enabled: true, playlist_id: ['PL1', 'PL2'] } })
+    );
+  });
+
+  test('ignores an invalid profileId', async () => {
+    const deps = buildDeps();
+    deps.models.Playlist.findAndCountAll.mockResolvedValue({ count: 0, rows: [] });
+
+    const handler = getHandler('get', '/api/playlists', deps);
+    await handler({ query: { profileId: 'abc' }, log: loggerMock }, createResponse());
+
+    expect(deps.models.Playlist.findAndCountAll).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { enabled: true } })
+    );
+  });
+
   test('returns 500 on db error', async () => {
     const deps = buildDeps();
     deps.models.Playlist.findAndCountAll.mockRejectedValue(new Error('db down'));

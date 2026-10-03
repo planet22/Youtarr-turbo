@@ -1,5 +1,5 @@
 const { Sequelize, sequelize } = require('../db.js');
-const { Video } = require('../models');
+const { Video, Profile, ProfileVideoLink } = require('../models');
 const fs = require('fs').promises;
 const path = require('path');
 const configModule = require('./configModule');
@@ -10,7 +10,7 @@ const jobEventLog = require('./jobEventLog');
 const { EVENT_TYPES } = require('./jobEventLog/eventCatalog');
 const messageEmitter = require('./messageEmitter');
 const m3uGenerator = require('./m3uGenerator');
-const { AUDIO_EXTENSIONS, MEDIA_EXTENSIONS } = require('./filesystem/constants');
+const { AUDIO_EXTENSIONS, MEDIA_EXTENSIONS, PROFILES_DIR_NAME } = require('./filesystem/constants');
 const { probeVideoDimensions } = require('./resolutionTier');
 const createLimiter = require('./subscriptionImport/concurrencyLimiter');
 const { formatRelativeTimeAgo } = require('./relativeTimeFormatter');
@@ -83,6 +83,46 @@ class VideosModule {
     this._lastNzbUntrackedSweepAt = 0;
   }
 
+  // In a user profile's view, show where each video lives in that profile's
+  // folder (its hardlink). filePath/audioFilePath stay the library originals,
+  // which every action uses. A link has the same file name as its original.
+  async _attachProfilePaths(videos, profileId) {
+    if (videos.length === 0) return;
+    const rows = await ProfileVideoLink.findAll({
+      where: { profile_id: profileId, video_id: videos.map((v) => v.id), dismissed_at: null },
+      attributes: ['video_id', 'link_paths'],
+      raw: true,
+    });
+    const linksByVideo = new Map();
+    for (const row of rows) {
+      try {
+        linksByVideo.set(row.video_id, JSON.parse(row.link_paths));
+      } catch {
+        linksByVideo.set(row.video_id, []);
+      }
+    }
+    const linkFor = (links, original) => (original
+      ? links.find((p) => path.basename(p) === path.basename(original)) || null
+      : null);
+    for (const video of videos) {
+      const links = linksByVideo.get(video.id) || [];
+      video.profileFilePath = linkFor(links, video.filePath);
+      video.profileAudioFilePath = linkFor(links, video.audioFilePath);
+    }
+  }
+
+  // In a user profile's view, "watched" means watched by that profile's
+  // Jellyfin user; otherwise (or with no Jellyfin user) the global rule.
+  async _watchedSqlFor(profileId) {
+    if (profileId) {
+      const profile = await Profile.findByPk(profileId, { attributes: ['jellyfin_user_id'] });
+      if (profile && profile.jellyfin_user_id) {
+        return watchStatusQueries.buildUserWatchedExistsSql('jellyfin', profile.jellyfin_user_id);
+      }
+    }
+    return watchStatusQueries.buildWatchedExistsSql();
+  }
+
   async getVideosPaginated(options = {}) {
     const {
       page = 1,
@@ -103,6 +143,7 @@ class VideosModule {
       cachedVideoFilter = 'off',
       metadataOnlyFilter = 'off',
       showUntracked = false,
+      profileId = null,
     } = options;
 
     // What "Downloaded" means everywhere it's used (this filter, the
@@ -127,6 +168,16 @@ class VideosModule {
       if (channelFilter) {
         whereConditions.push('Videos.youTubeChannelName = :channelFilter');
         replacements.channelFilter = channelFilter;
+      }
+
+      // A user profile's view: videos from the channels and playlists it follows.
+      if (profileId) {
+        whereConditions.push(`(EXISTS (SELECT 1 FROM profile_subscriptions ps
+            WHERE ps.profile_id = :profileId AND ps.source_type = 'channel' AND ps.source_id = Videos.channel_id)
+          OR EXISTS (SELECT 1 FROM profile_subscriptions ps
+            JOIN playlistvideos pv ON pv.playlist_id = ps.source_id
+            WHERE ps.profile_id = :profileId AND ps.source_type = 'playlist' AND pv.youtube_id = Videos.youtubeId))`);
+        replacements.profileId = profileId;
       }
 
       if (dateFrom) {
@@ -165,7 +216,7 @@ class VideosModule {
       }
 
       if (watchedFilter === 'only' || watchedFilter === 'exclude') {
-        const watched = watchStatusQueries.buildWatchedExistsSql();
+        const watched = await this._watchedSqlFor(profileId);
         whereConditions.push(watchedFilter === 'only' ? watched.sql : `NOT ${watched.sql}`);
         Object.assign(replacements, watched.replacements);
       }
@@ -384,13 +435,17 @@ class VideosModule {
         const query = `SELECT ${videoColumnsSql} ${videoJoinsSql} ${whereClause} ${orderByClause} LIMIT :limit OFFSET :offset`;
         replacements.limit = limit;
         replacements.offset = offset;
-        videos = await sequelize.query(query, {
+        const rawRows = await sequelize.query(query, {
           replacements,
           type: Sequelize.QueryTypes.SELECT,
           model: Video,
           mapToModel: true,
           raw: true
         });
+        // Same JobVideos fan-out dedupe as the showUntracked path above (a
+        // video in several jobs - re-download, cache-on-play, stream capture -
+        // comes back once per job). Profile views always take this path.
+        videos = Array.from(new Map(rawRows.map((v) => [v.id, v])).values());
       }
 
       // Real-time file check for videos that have a known file path
@@ -547,6 +602,8 @@ class VideosModule {
       for (const video of videos) {
         video.watchedBy = watchedByVideoId.get(video.id) || [];
       }
+
+      if (profileId) await this._attachProfilePaths(videos, profileId);
 
       // Cache-state fields for the Library page's "Cached Metadata"/"Cached
       // Video" icons and Downloaded-column expiry tooltip. hasCachedVideo
@@ -1005,6 +1062,7 @@ class VideosModule {
         const fullPath = path.join(dir, entry.name);
 
         if (entry.isDirectory()) {
+          if (entry.name === PROFILES_DIR_NAME) continue;
           await this.scanForVideoFiles(fullPath, fileMap, duplicates);
           continue;
         }

@@ -1456,6 +1456,7 @@ describe('server routes - videos', () => {
         cachedVideoFilter: 'off',
         metadataOnlyFilter: 'off',
         showUntracked: false,
+        profileId: null,
         strmFilter: 'off'
       });
       expect(res.statusCode).toBe(200);
@@ -1514,6 +1515,7 @@ describe('server routes - videos', () => {
         cachedVideoFilter: 'off',
         metadataOnlyFilter: 'off',
         showUntracked: false,
+        profileId: null,
         strmFilter: 'off'
       });
       expect(res.statusCode).toBe(200);

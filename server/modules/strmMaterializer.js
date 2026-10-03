@@ -304,12 +304,12 @@ class StrmMaterializer {
     // ignoring the channel's own sub_folder/library_mode settings.
     let libraryMode = options.libraryMode;
     let channelRecord = null;
-    if ((!libraryMode || options.subFolder === undefined) && meta.channel_id) {
+    if ((!libraryMode || options.subFolder === undefined || options.skipVideoFolder === undefined) && meta.channel_id) {
       try {
         const { Channel } = require('../models');
         channelRecord = await Channel.findOne({
           where: { channel_id: meta.channel_id, enabled: true },
-          attributes: ['title', 'library_mode', 'sub_folder', 'season_episode_regex', 'description'],
+          attributes: ['title', 'library_mode', 'sub_folder', 'skip_video_folder', 'season_episode_regex', 'description'],
         });
       } catch (err) {
         logger.debug({ err }, 'STRM: channel lookup failed');
@@ -404,8 +404,15 @@ class StrmMaterializer {
     const subFolder = resolvedSubFolder
       || (libraryMode === 'series' ? (cfg.seriesOutputSubfolder || '').trim() || null : null);
 
+    // Flat-vs-folder-per-video, same per-channel rule the real-download
+    // post-processor applies at finalize when the caller didn't decide it.
+    const skipVideoFolder = options.skipVideoFolder !== undefined
+      ? options.skipVideoFolder
+      : downloadSettingsResolver.resolveSkipVideoFolder({ channel: channelRecord, config: cfg });
+
     const paths = this.buildOutputPaths(meta, {
       ...options,
+      skipVideoFolder,
       subFolder,
       libraryMode,
       season: seriesSeason,

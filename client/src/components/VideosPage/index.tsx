@@ -35,6 +35,8 @@ import CacheDetailDialog from './components/CacheDetailDialog';
 import { useVideosData } from './hooks/useVideosData';
 import { useCacheActions } from './hooks/useCacheActions';
 import PipPlayerContext from '../../contexts/PipPlayerContext';
+import { ActiveProfileNotice } from '../shared/ActiveProfileNotice';
+import { useProfileContext } from '../../contexts/ProfileContext';
 import { videoThumbnailUrl } from '../../utils/videoThumbnail';
 import {
   INFINITE_SCROLL_FETCH_SIZE,
@@ -151,6 +153,11 @@ function VideosPage({ token }: VideosPageProps) {
   // downloaded) are part of what this page is for surfacing, not an
   // edge case someone has to opt into seeing.
   const [showUntracked, setShowUntracked] = usePersistedFilterState('youtarr:videosPage:filter:showUntracked', true);
+  // Untracked rows belong to no user profile, so the toggle is hidden (and off)
+  // while one is selected; the saved preference returns with "All profiles".
+  const { activeProfile } = useProfileContext();
+  const untrackedAvailable = activeProfile === null;
+  const effectiveShowUntracked = showUntracked && untrackedAvailable;
   const [showFilePaths, setShowFilePaths] = useState(false);
 
   const [imageErrors, setImageErrors] = useState<Record<string, boolean>>({});
@@ -240,7 +247,7 @@ function VideosPage({ token }: VideosPageProps) {
     metadataCacheFilter,
     cachedVideoFilter,
     metadataOnlyFilter,
-    showUntracked,
+    showUntracked: effectiveShowUntracked,
     useInfiniteScroll,
   });
 
@@ -1141,10 +1148,12 @@ function VideosPage({ token }: VideosPageProps) {
         options: uniqueChannels,
         onChange: withPageReset(setChannelFilter),
       },
-      { id: 'showUntracked', value: showUntracked, onChange: withPageReset(setShowUntracked) },
+      ...(untrackedAvailable
+        ? [{ id: 'showUntracked' as const, value: showUntracked, onChange: withPageReset(setShowUntracked) }]
+        : []),
     ];
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dateFrom, dateTo, addedDateFrom, addedDateTo, maxRatingFilter, protectedFilter, missingFilter, watchedFilter, strmFilter, metadataCacheFilter, cachedVideoFilter, metadataOnlyFilter, channelFilter, uniqueChannels, showUntracked]);
+  }, [dateFrom, dateTo, addedDateFrom, addedDateTo, maxRatingFilter, protectedFilter, missingFilter, watchedFilter, strmFilter, metadataCacheFilter, cachedVideoFilter, metadataOnlyFilter, channelFilter, uniqueChannels, showUntracked, untrackedAvailable]);
 
   const sortConfig: SortConfig = useMemo(
     () => ({
@@ -1304,6 +1313,7 @@ function VideosPage({ token }: VideosPageProps) {
 
   return (
     <Box>
+      <ActiveProfileNotice subject="videos" />
       <VideoListContainer
         state={listState}
         selection={selection}

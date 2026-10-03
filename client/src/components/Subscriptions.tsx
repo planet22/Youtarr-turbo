@@ -69,6 +69,7 @@ import { useActiveImport } from '../hooks/useActiveImport';
 import { usePlaylistList } from '../hooks/usePlaylistList';
 import { usePlaylistMutations } from '../hooks/usePlaylistMutations';
 import { Playlist } from '../types/playlist';
+import { ActiveProfileNotice } from './shared/ActiveProfileNotice';
 
 type ViewMode = 'list' | 'grid';
 type SortOrder = 'asc' | 'desc';
@@ -469,6 +470,10 @@ const Subscriptions: React.FC<SubscriptionsProps> = ({ token }) => {
             </div>
           }
           className="px-0 pt-0"
+        />
+        <ActiveProfileNotice
+          subject="channels and playlists"
+          detail="Channels and playlists you add here are added to this profile."
         />
         <Divider />
         <div

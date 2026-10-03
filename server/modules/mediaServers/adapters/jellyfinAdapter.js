@@ -115,6 +115,15 @@ class JellyfinAdapter extends BaseAdapter {
     }
   }
 
+  /** Refreshes one library (virtual folder ItemId), e.g. a user profile's library. */
+  async refreshLibraryById(libraryId) {
+    await axios.post(`${this.url}/Items/${encodeURIComponent(libraryId)}/Refresh`, null, {
+      headers: this._headers(),
+      params: { Recursive: true, ImageRefreshMode: 'Default', MetadataRefreshMode: 'Default' },
+      timeout: REQUEST_TIMEOUT_MS,
+    });
+  }
+
   async resolveItemIdByFilepath(filepath) {
     // Match by filename across different mount views (supports Windows paths
     // via extractBasename which splits on both / and \).
@@ -253,6 +262,30 @@ class JellyfinAdapter extends BaseAdapter {
     };
     const res = await axios.post(`${this.url}/Playlists`, body, { headers: this._headers(), timeout: REQUEST_TIMEOUT_MS });
     return { id: res.data?.Id };
+  }
+
+  /** Number of items Jellyfin has indexed under a library (virtual folder ItemId). */
+  async countLibraryItems(libraryId) {
+    const res = await axios.get(`${this.url}/Items`, {
+      headers: this._headers(),
+      params: { ParentId: libraryId, Recursive: true, Limit: 0 },
+      timeout: REQUEST_TIMEOUT_MS,
+    });
+    return Number(res.data?.TotalRecordCount) || 0;
+  }
+
+  /** Full scan of every library (POST /Library/Refresh). */
+  async refreshAllLibraries() {
+    await axios.post(`${this.url}/Library/Refresh`, null, { headers: this._headers(), timeout: REQUEST_TIMEOUT_MS });
+  }
+
+  /** A copy of this adapter acting as another Jellyfin user (owns created playlists, scopes item lookups). */
+  forUser(userId) {
+    return new JellyfinAdapter({ ...this.config, jellyfinUserId: userId });
+  }
+
+  async deletePlaylist(playlistId) {
+    await axios.delete(`${this.url}/Items/${encodeURIComponent(playlistId)}`, { headers: this._headers(), timeout: REQUEST_TIMEOUT_MS });
   }
 
   async replacePlaylistItems(playlistId, itemIds, opts = {}) {

@@ -32,6 +32,7 @@ jest.mock('../ratingMapper', () => ({ normalizeFromYtdlp: jest.fn() }));
 jest.mock('../download/downloadSettingsResolver', () => ({
   resolveFinalLibraryMode: jest.fn(),
   resolveFinalSubfolder: jest.fn(),
+  resolveSkipVideoFolder: jest.fn(() => false),
 }));
 jest.mock('../seriesEpisodeResolver', () => ({ deriveSeasonYear: jest.fn(), resolveEpisodeNumber: jest.fn() }));
 jest.mock('../messageEmitter', () => ({ emitMessage: jest.fn() }));
@@ -521,10 +522,27 @@ describe('strmMaterializer', () => {
         expect(Channel.findOne).toHaveBeenCalledWith(expect.objectContaining({ where: { channel_id: 'UC123', enabled: true } }));
       });
 
-      it('does not look the channel up when the caller resolved both', async () => {
-        await strmMaterializer.materializeOne('abc123DEF45', { libraryMode: 'movie', subFolder: null });
+      it('does not look the channel up when the caller resolved mode, subfolder and structure', async () => {
+        await strmMaterializer.materializeOne('abc123DEF45', { libraryMode: 'movie', subFolder: null, skipVideoFolder: false });
 
         expect(Channel.findOne).not.toHaveBeenCalled();
+      });
+
+      it('looks the channel up when only the folder structure is undecided', async () => {
+        await strmMaterializer.materializeOne('abc123DEF45', { libraryMode: 'movie', subFolder: null });
+
+        expect(Channel.findOne).toHaveBeenCalled();
+      });
+
+      it('takes the folder structure from the channel when the caller left it undecided', async () => {
+        const channelRecord = { skip_video_folder: true };
+        Channel.findOne.mockResolvedValue(channelRecord);
+        downloadSettingsResolver.resolveSkipVideoFolder.mockReturnValue(true);
+
+        const result = await strmMaterializer.materializeOne('abc123DEF45', { libraryMode: 'movie', subFolder: null });
+
+        expect(downloadSettingsResolver.resolveSkipVideoFolder).toHaveBeenCalledWith(expect.objectContaining({ channel: channelRecord }));
+        expect(path.basename(path.dirname(result.strmPath))).not.toMatch(/abc123DEF45/);
       });
 
       it('does not look the channel up for a video with no channel id', async () => {

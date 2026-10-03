@@ -19,6 +19,7 @@ import {
 } from './components/ui';
 import { AlertTriangle as WarningAmberIcon } from 'lucide-react';
 import { AppShell } from './components/layout/AppShell';
+import { ProfileProvider } from './providers/ProfileProvider';
 import { Settings } from './components/Settings/Settings';
 import Subscriptions from './components/Subscriptions';
 import DownloadManager from './components/DownloadManager';
@@ -509,50 +510,52 @@ function AppContent() {
               path="*"
               element={
                 token ? (
-                  <AppShell
-                    token={token}
-                    isPlatformManaged={isPlatformManaged}
-                    appName="Youtarr-Turbo"
-                    versionLabel={ytDlpLabel ? `${clientVersion} • ${ytDlpLabel}` : clientVersion}
-                    updateAvailable={updateAvailable}
-                    updateTooltip={updateTooltip}
-                    serverVersion={serverVersion}
-                    ytDlpUpdateAvailable={ytDlpUpdateAvailable}
-                    ytDlpUpdateTooltip={ytDlpUpdateTooltip}
-                    onLogout={handleLogout}
-                  >
-                    <Container
-                      maxWidth={false}
-                      className={location.pathname.startsWith('/subscriptions') ? 'w-full flex flex-col' : 'w-full'}
-                      style={location.pathname.startsWith('/subscriptions') ? { minHeight: 'calc(100vh - 140px)' } : undefined}
+                  <ProfileProvider token={token}>
+                    <AppShell
+                      token={token}
+                      isPlatformManaged={isPlatformManaged}
+                      appName="Youtarr-Turbo"
+                      versionLabel={ytDlpLabel ? `${clientVersion} • ${ytDlpLabel}` : clientVersion}
+                      updateAvailable={updateAvailable}
+                      updateTooltip={updateTooltip}
+                      serverVersion={serverVersion}
+                      ytDlpUpdateAvailable={ytDlpUpdateAvailable}
+                      ytDlpUpdateTooltip={ytDlpUpdateTooltip}
+                      onLogout={handleLogout}
                     >
-                      <ErrorBoundary fallbackMessage="An unexpected error occurred. Please refresh the page to continue.">
-                        <Routes>
-                          <Route
-                            path="/changelog"
-                            element={<ChangelogPage updateAvailable={updateAvailable} serverVersion={serverVersion} />}
-                          />
-                          <Route path="/settings/*" element={<Settings token={token} />} />
-                          <Route path="/configuration" element={<Navigate to="/settings" replace />} />
-                          <Route path="/subscriptions" element={<Subscriptions token={token} />} />
-                          <Route path="/subscriptions/imports" element={<ImportSubscriptionsPage token={token} />} />
-                          <Route path="/subscriptions/find" element={<FindChannels token={token} />} />
-                          <Route path="/channels" element={<Navigate to="/subscriptions" replace />} />
-                          <Route path="/channels/imports" element={<Navigate to="/subscriptions/imports" replace />} />
-                          <Route path="/downloads/*" element={<DownloadManager token={token} />} />
-                          <Route path="/videos" element={<VideosPage token={token} />} />
-                          <Route path="/videos/find" element={<FindVideos token={token} />} />
-                          <Route path="/streaming" element={<StreamingPage token={token} />} />
-                          <Route path="/streaming/history" element={<StreamHistoryPage token={token} />} />
-                          <Route path="/nzb" element={<NzbPage token={token} />} />
-                          <Route path="/channel/:channel_id" element={<ChannelPage token={token} />} />
-                          <Route path="/playlist/:id" element={<PlaylistPage token={token} />} />
-                          <Route path="/" element={<Navigate to="/subscriptions" replace />} />
-                          <Route path="/*" element={<Navigate to="/subscriptions" replace />} />
-                        </Routes>
-                      </ErrorBoundary>
-                    </Container>
-                  </AppShell>
+                      <Container
+                        maxWidth={false}
+                        className={location.pathname.startsWith('/subscriptions') ? 'w-full flex flex-col' : 'w-full'}
+                        style={location.pathname.startsWith('/subscriptions') ? { minHeight: 'calc(100vh - 140px)' } : undefined}
+                      >
+                        <ErrorBoundary fallbackMessage="An unexpected error occurred. Please refresh the page to continue.">
+                          <Routes>
+                            <Route
+                              path="/changelog"
+                              element={<ChangelogPage updateAvailable={updateAvailable} serverVersion={serverVersion} />}
+                            />
+                            <Route path="/settings/*" element={<Settings token={token} />} />
+                            <Route path="/configuration" element={<Navigate to="/settings" replace />} />
+                            <Route path="/subscriptions" element={<Subscriptions token={token} />} />
+                            <Route path="/subscriptions/imports" element={<ImportSubscriptionsPage token={token} />} />
+                            <Route path="/subscriptions/find" element={<FindChannels token={token} />} />
+                            <Route path="/channels" element={<Navigate to="/subscriptions" replace />} />
+                            <Route path="/channels/imports" element={<Navigate to="/subscriptions/imports" replace />} />
+                            <Route path="/downloads/*" element={<DownloadManager token={token} />} />
+                            <Route path="/videos" element={<VideosPage token={token} />} />
+                            <Route path="/videos/find" element={<FindVideos token={token} />} />
+                            <Route path="/streaming" element={<StreamingPage token={token} />} />
+                            <Route path="/streaming/history" element={<StreamHistoryPage token={token} />} />
+                            <Route path="/nzb" element={<NzbPage token={token} />} />
+                            <Route path="/channel/:channel_id" element={<ChannelPage token={token} />} />
+                            <Route path="/playlist/:id" element={<PlaylistPage token={token} />} />
+                            <Route path="/" element={<Navigate to="/subscriptions" replace />} />
+                            <Route path="/*" element={<Navigate to="/subscriptions" replace />} />
+                          </Routes>
+                        </ErrorBoundary>
+                      </Container>
+                    </AppShell>
+                  </ProfileProvider>
                 ) : (
                   <Navigate to={requiresSetup ? '/setup' : '/login'} replace />
                 )

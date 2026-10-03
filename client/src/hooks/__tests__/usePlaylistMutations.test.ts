@@ -1,5 +1,6 @@
 import { renderHook, act } from '@testing-library/react';
 import { usePlaylistMutations, PlaylistSubscribeResult } from '../usePlaylistMutations';
+import { createActiveProfileWrapper } from '../../test-utils';
 
 jest.mock('axios', () => ({
   post: jest.fn(),
@@ -33,6 +34,23 @@ describe('usePlaylistMutations.subscribe', () => {
       { headers: { 'x-access-token': 't' } }
     );
     expect(res).toEqual({ playlist, restored: true });
+  });
+
+  test('adds the playlist to the active profile after subscribing', async () => {
+    axios.post.mockResolvedValue({ data: { playlist: { playlist_id: 'PL1', title: 'New' } } });
+
+    const { result } = renderHook(() => usePlaylistMutations({ token: 't' }), {
+      wrapper: createActiveProfileWrapper({ id: 6, name: 'Bob' }),
+    });
+    await act(async () => {
+      await result.current.subscribe('https://youtube.com/playlist?list=PL1');
+    });
+
+    expect(axios.post).toHaveBeenCalledWith(
+      '/api/profiles/6/subscriptions/add',
+      { playlists: ['PL1'] },
+      { headers: { 'x-access-token': 't' } }
+    );
   });
 
   test('defaults restored to false when the API omits it', async () => {

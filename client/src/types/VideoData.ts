@@ -21,6 +21,10 @@ export interface VideoData {
   fileSize?: string | null;
   audioFilePath?: string | null;
   audioFileSize?: string | null;
+  // Only while a user profile is selected: the profile's hardlinks of
+  // filePath/audioFilePath (null when not linked). Display only.
+  profileFilePath?: string | null;
+  profileAudioFilePath?: string | null;
   // Wall-clock time from download start to file-verified-on-disk (includes
   // yt-dlp post-processing), and the resulting average MB/s - see
   // server/modules/download/videoMetadataProcessor.js. null for rows that

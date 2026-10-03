@@ -12,6 +12,7 @@ import { Database as MetadataCacheIcon, ClearCache as ClearCacheIcon, PipIcon } 
 import { formatDuration, formatYTDate } from '../../../utils';
 import { formatAddedDateTime, formatFileSize } from '../../../utils/formatters';
 import { getDisplayPath } from '../../../utils/paths';
+import { displayedFilePaths } from '../displayedFilePaths';
 import { getMediaTypeInfo } from '../../../utils/videoStatus';
 import { getEnabledChannelId } from '../../../utils/enabledChannels';
 import { VideoData, EnabledChannel } from '../../../types/VideoData';
@@ -431,8 +432,7 @@ function VideoCard({
             color="text.secondary"
             style={{ wordBreak: 'break-all', display: 'block' }}
           >
-            {[video.filePath, video.audioFilePath]
-              .filter((p): p is string => Boolean(p))
+            {displayedFilePaths(video)
               .map(getDisplayPath)
               .join('  •  ')}
           </Typography>

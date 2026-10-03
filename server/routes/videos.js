@@ -3,6 +3,7 @@ const rateLimit = require('express-rate-limit');
 const { ROOT_SENTINEL, GLOBAL_DEFAULT_SENTINEL } = require('../modules/filesystem/constants');
 const youtubeUrlParser = require('../modules/youtubeUrlParser');
 const { ALLOWED_MEDIA_MODES } = require('./overrideSettingsValidator');
+const { parseProfileId } = require('./profileQuery');
 
 // Upper bound on how many videoIds a single /api/videos/strm/download or
 // /api/videos/strm/revert request may process, to avoid an unbounded batch of
@@ -85,6 +86,11 @@ module.exports = function createVideoRoutes({ verifyToken, videosModule, downloa
    *     description: Retrieve a paginated list of downloaded videos.
    *     tags: [Videos]
    *     parameters:
+   *       - in: query
+   *         name: profileId
+   *         schema:
+   *           type: integer
+   *         description: Only videos from the channels and playlists this user profile follows (untracked rows are excluded)
    *       - in: query
    *         name: page
    *         schema:
@@ -213,6 +219,7 @@ module.exports = function createVideoRoutes({ verifyToken, videosModule, downloa
       const { page, limit, search, dateFrom, dateTo, addedDateFrom, addedDateTo, sortBy, sortOrder, channelFilter, protectedFilter, missingFilter, watchedFilter, strmFilter, metadataCacheFilter, cachedVideoFilter, metadataOnlyFilter, showUntracked } = req.query;
 
       const parseFilterMode = (value) => (value === 'only' || value === 'exclude' ? value : 'off');
+      const profileId = parseProfileId(req.query.profileId);
 
       const options = {
         page: parseInt(page) || 1,
@@ -232,7 +239,9 @@ module.exports = function createVideoRoutes({ verifyToken, videosModule, downloa
         metadataCacheFilter: parseFilterMode(metadataCacheFilter),
         cachedVideoFilter: parseFilterMode(cachedVideoFilter),
         metadataOnlyFilter: parseFilterMode(metadataOnlyFilter),
-        showUntracked: showUntracked === 'true',
+        // Untracked rows (metadata/buffer cache only) belong to no profile.
+        showUntracked: showUntracked === 'true' && !profileId,
+        profileId,
       };
 
       const result = await videosModule.getVideosPaginated(options);

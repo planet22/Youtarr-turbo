@@ -46,13 +46,13 @@ describe('VideoListPaginationBar', () => {
       <VideoListPaginationBar {...defaultProps()} page={1} totalPages={1} />
     );
     expect(screen.queryByRole('navigation', { name: /pagination/i })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '16' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'videos per page' })).toHaveTextContent('16');
   });
 
   test('hides the "Per page:" label on mobile but keeps the selector', () => {
     renderWithProviders(<VideoListPaginationBar {...defaultProps()} isMobile />);
     expect(screen.queryByText('Per page:')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '16' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'videos per page' })).toHaveTextContent('16');
   });
 
   test('applies top border when placement is top', () => {
@@ -79,6 +79,6 @@ describe('VideoListPaginationBar', () => {
 
   test('reflects the current pageSize value in the selector', () => {
     renderWithProviders(<VideoListPaginationBar {...defaultProps()} pageSize={32} />);
-    expect(screen.getByRole('button', { name: '32' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'videos per page' })).toHaveTextContent('32');
   });
 });

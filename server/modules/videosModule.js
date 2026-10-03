@@ -435,13 +435,17 @@ class VideosModule {
         const query = `SELECT ${videoColumnsSql} ${videoJoinsSql} ${whereClause} ${orderByClause} LIMIT :limit OFFSET :offset`;
         replacements.limit = limit;
         replacements.offset = offset;
-        videos = await sequelize.query(query, {
+        const rawRows = await sequelize.query(query, {
           replacements,
           type: Sequelize.QueryTypes.SELECT,
           model: Video,
           mapToModel: true,
           raw: true
         });
+        // Same JobVideos fan-out dedupe as the showUntracked path above (a
+        // video in several jobs - re-download, cache-on-play, stream capture -
+        // comes back once per job). Profile views always take this path.
+        videos = Array.from(new Map(rawRows.map((v) => [v.id, v])).values());
       }
 
       // Real-time file check for videos that have a known file path

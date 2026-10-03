@@ -603,6 +603,19 @@ describe('VideosModule', () => {
       expect(mockWatchStatusQueries.buildWatchedExistsSql).toHaveBeenCalled();
     });
 
+    test('should return a video once even when it belongs to several jobs', async () => {
+      mockSequelize.query.mockResolvedValueOnce([{ total: 1 }]);
+      mockSequelize.query.mockResolvedValueOnce([
+        { id: 5, youtubeId: 'dup', filePath: null },
+        { id: 5, youtubeId: 'dup', filePath: null },
+      ]);
+      mockSequelize.query.mockResolvedValueOnce([]);
+
+      const result = await VideosModule.getVideosPaginated();
+
+      expect(result.videos.filter((v) => v.id === 5)).toHaveLength(1);
+    });
+
     test('should not mention profiles without a profileId', async () => {
       mockSequelize.query.mockResolvedValueOnce([{ total: 0 }]);
       mockSequelize.query.mockResolvedValueOnce([]);

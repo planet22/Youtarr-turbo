@@ -228,6 +228,27 @@ function initialize(deps = {}) {
   });
 
   // ============================================================================
+  // COMPLETE.LIST BACKFILL - 2:20 AM Daily
+  // ============================================================================
+  // Recovers Videos/ChannelVideos rows from yt-dlp's complete.list + .info.json
+  // files for anything the DB is missing (e.g. after an out-of-band restore).
+  // Also runs once at server startup; see jobModule's constructor.
+  const jobModule = require('./jobModule');
+  defineTask({
+    id: 'complete-list-backfill',
+    label: 'Complete.list backfill',
+    description: 'Recovers missing video/channel-video rows from yt-dlp\'s complete.list and .info.json files.',
+    cron: '20 2 * * *',
+    confirm: false,
+  }, async () => {
+    try {
+      await jobModule.backfillFromCompleteList();
+    } catch (error) {
+      logger.error({ err: error }, 'Scheduled complete.list backfill failed');
+    }
+  });
+
+  // ============================================================================
   // SESSION CLEANUP - 3:00 AM Daily
   // ============================================================================
   defineTask({

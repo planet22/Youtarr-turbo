@@ -73,6 +73,7 @@ describe('CronJobs', () => {
     jest.doMock('../ytdlpModule', () => mockYtdlpModule);
     jest.doMock('../videoThumbnailCache', () => ({ pruneUnused: jest.fn(() => Promise.resolve(0)) }));
     jest.doMock('../profiles/profileModule', () => ({ reconcileAll: jest.fn().mockResolvedValue({ profiles: 0, linked: 0, unlinked: 0, failed: 0 }), removeWatchedLinks: jest.fn().mockResolvedValue({ profiles: 0, removed: 0, failed: 0 }) }));
+    jest.doMock('../jobModule', () => ({ backfillFromCompleteList: jest.fn().mockResolvedValue(undefined) }));
 
     // Mock configModule with a tiny in-memory store so the auto-update job can read/write
     mockConfigStore = { autoUpdateYtdlp: false };
@@ -103,10 +104,10 @@ describe('CronJobs', () => {
   });
 
   describe('initialize', () => {
-    test('should register all ten cron jobs', () => {
+    test('should register all eleven cron jobs', () => {
       cronJobs.initialize();
 
-      expect(mockSchedule.schedule).toHaveBeenCalledTimes(10);
+      expect(mockSchedule.schedule).toHaveBeenCalledTimes(11);
       ['0 2 * * *', '10 2 * * *', '20 2 * * *', '0 3 * * *', '15 3 * * *', '20 3 * * *', '25 3 * * *', '30 3 * * *', '35 3 * * *', '0 4 * * *'].forEach((expression) => {
         expect(mockSchedule.schedule).toHaveBeenCalledWith(expression, expect.any(Function));
       });

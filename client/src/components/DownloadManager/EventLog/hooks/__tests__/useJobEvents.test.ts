@@ -45,7 +45,7 @@ const routeRequests = (url: string) => {
   return (next || listDefault)();
 };
 const listCalls = () => mockedGet.mock.calls.filter(([url]) => url === '/api/job-events');
-const lastParams = () => listCalls()[listCalls().length - 1][1]?.params;
+const lastParams = () => (listCalls()[listCalls().length - 1][1]?.params ?? {}) as Record<string, any>;
 const ids = (events: JobEvent[]) => events.map((e) => e.id);
 
 interface Props {

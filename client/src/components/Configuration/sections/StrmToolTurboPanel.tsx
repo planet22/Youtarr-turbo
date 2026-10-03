@@ -64,10 +64,10 @@ export const StrmToolTurboPanel: React.FC<StrmToolTurboPanelProps> = ({ token })
   return (
     <Accordion style={{ border: 'var(--border-weight) solid var(--border)', borderRadius: 'var(--radius-ui)', marginBottom: 24 }}>
       <AccordionSummary>
-        <Typography component="h3" variant="h6" style={{ flexGrow: 1 }}>
+        <Typography component="h3" variant="h6" style={{ flexGrow: 1, textAlign: 'left' }}>
           StrmToolTurbo Plugin
         </Typography>
-        <Chip label={chip.label} color={chip.color} size="small" />
+        <Chip label={chip.label} color={chip.color} size="small" className="mr-3" />
       </AccordionSummary>
       <AccordionDetails>
         <Typography variant="body2" color="text.secondary" className="mb-4">

@@ -1,5 +1,55 @@
 # Changelog
 
+## [v0.8.0](https://github.com/planet22/Youtarr-turbo/releases/tag/v0.8.0) - 2026-10-09
+
+## [0.8.0](https://github.com/planet22/Youtarr-turbo/compare/vv0.7.0...v0.8.0) (2026-10-09)
+
+
+### Features
+
+* align Plex settings layout with Jellyfin and add plexEnabled switch ([4f80e59](https://github.com/planet22/Youtarr-turbo/commit/4f80e59fca549f8e4fbf62f0b99b57a42de9242c))
+* extend user profiles to support Plex alongside Jellyfin ([f05e844](https://github.com/planet22/Youtarr-turbo/commit/f05e84458b4791fe314752b4126ee90e85a46713))
+* per-profile Jellyfin playlists, watched filter and watched removal ([9a68855](https://github.com/planet22/Youtarr-turbo/commit/9a68855850143465074282662cbc72fd0c9e6839))
+* profile switcher scopes channel, playlist and video lists ([2a9d20b](https://github.com/planet22/Youtarr-turbo/commit/2a9d20bd814ab51a9922d61c2de4125491296bca))
+* show allocated users on channels, playlists and videos in the all-profiles view ([930b957](https://github.com/planet22/Youtarr-turbo/commit/930b95797a1cf49df0af4939def22927753217ac))
+* user profiles with hardlinked per-user library folders ([4331b6e](https://github.com/planet22/Youtarr-turbo/commit/4331b6e843d9e5bb108cba57c0c44e7c05a5d11d))
+
+
+### Bug Fixes
+
+* auto-prune unused subfolder registry entries nightly ([a99fbec](https://github.com/planet22/Youtarr-turbo/commit/a99fbec5599d0d620f6947ac67d8cef9db868b3b))
+* bump axios to 1.20 and apply npm audit fixes for CI security audit ([ef8bd3d](https://github.com/planet22/Youtarr-turbo/commit/ef8bd3d3981261ad473dea929d2a98f0aca292c3))
+* full Jellyfin scan when a profile library has nothing indexed yet ([f34ef44](https://github.com/planet22/Youtarr-turbo/commit/f34ef44c9c7f022870328f42b64c28e20262bb4d))
+* left-align StrmToolTurbo accordion title, space chip from arrow ([1bd7ee3](https://github.com/planet22/Youtarr-turbo/commit/1bd7ee39ab077c21776a8c772fa76e5ed4df5da0))
+* link STRM videos into profiles and show profile paths ([faad8d1](https://github.com/planet22/Youtarr-turbo/commit/faad8d15aca9f963f73edf5581c1c3db4c5a33b5))
+* manual STRM downloads use the video's own channel subfolder and layout ([a5a4361](https://github.com/planet22/Youtarr-turbo/commit/a5a436174ec9dd830f9ab0c3d37ad1d1d1f3a0ad))
+* playlist sync skips deleted videos instead of retrying them ([289368e](https://github.com/planet22/Youtarr-turbo/commit/289368ef1326c49362df0953d926b143d6d8041c))
+* profile-aware watched auto-removal, untracked toggle, log redaction ([a040c08](https://github.com/planet22/Youtarr-turbo/commit/a040c08379f2c41a2a4c0d76c5941ab1d39fa4a2))
+* raise StrmToolTurbo refresh delay limit, collapse its settings panel ([74c9989](https://github.com/planet22/Youtarr-turbo/commit/74c998982d3213e137b83afd69fb466e82f362f4))
+* register the complete.list backfill in the Scheduled Tasks registry ([4f91847](https://github.com/planet22/Youtarr-turbo/commit/4f91847b2a42ae26aa90a6dc19b08158a2b3b703))
+* remove stray character in mobile channel list row ([885ffa7](https://github.com/planet22/Youtarr-turbo/commit/885ffa77d0302ec895361d3060a72f58c1014993))
+* strip library root from video.moved event log paths ([303e246](https://github.com/planet22/Youtarr-turbo/commit/303e24608f40ca272f4625bdc12dfbde26452317))
+* update cronJobs tests for subfolder prune task and patch proxy-addr advisory ([daebffb](https://github.com/planet22/Youtarr-turbo/commit/daebffb67461b5d098bcb2a054b05c74f635da8e))
+* Videos listing no longer repeats a video that belongs to several jobs ([14abc3e](https://github.com/planet22/Youtarr-turbo/commit/14abc3e18f35c928cf0eb3817f3b968930ae290c))
+* watch status sync matches each user from their own copy of a video ([17ceb09](https://github.com/planet22/Youtarr-turbo/commit/17ceb095a05033bc3d39799be459cfb8cfc29f56))
+
+
+### Tests
+
+* expect profiles list in getchannelinfo responses ([b57ede8](https://github.com/planet22/Youtarr-turbo/commit/b57ede8c66ea64c8a629da041c77a3f153522211))
+
+
+### Documentation
+
+* document user profile Users column and Plex profile support ([610413b](https://github.com/planet22/Youtarr-turbo/commit/610413b57babb0bf1eb1f558ed37d4463b0182ad))
+* getting started guide for multiple users (user profiles) ([8510763](https://github.com/planet22/Youtarr-turbo/commit/8510763cf6d6f1905ea0dd5cf63f8a124272338e))
+* remove outdated screenshots section from README [skip ci] ([c2c60c9](https://github.com/planet22/Youtarr-turbo/commit/c2c60c937cacb7be94fc896b7e3b75ce724fe286))
+* update CHANGELOG for v0.7.0 [skip ci] ([5522050](https://github.com/planet22/Youtarr-turbo/commit/5522050aa9df03ba1d2ad61a7fc7aab4a7c33a73))
+
+
+
+
+
 ## [v0.7.0](https://github.com/planet22/Youtarr-turbo/releases/tag/v0.7.0) - 2026-09-26
 
 ## [0.7.0](https://github.com/planet22/Youtarr-turbo/compare/vv0.6.0...v0.7.0) (2026-09-26)

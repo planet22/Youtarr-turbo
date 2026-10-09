@@ -18,6 +18,9 @@ const createYtdlpOptionsRoutes = require('./ytdlpOptions');
 const createMaintenanceRoutes = require('./maintenance');
 const createSubfolderRoutes = require('./subfolders');
 const createJobEventRoutes = require('./jobEvents');
+const createProfileRoutes = require('./profiles');
+const profileModule = require('../modules/profiles/profileModule');
+const createProfileFollowers = require('../modules/profiles/profileFollowers');
 const videoMetadataModule = require('../modules/videoMetadataModule');
 const videoOembedEnricher = require('../modules/videoOembedEnricher');
 const playlistModule = require('../modules/playlistModule');
@@ -32,6 +35,7 @@ const jobEventLog = require('../modules/jobEventLog');
 const { primeVideosForEventLog } = require('../modules/download/eventLogVideoPrimer');
 const playlistVideoFilters = require('../modules/playlistVideoFilters');
 const models = require('../models');
+const profileFollowers = createProfileFollowers(models);
 const createYtStreamRoutes = require('./ytstream');
 const createNzbRoutes = require('./nzb');
 
@@ -80,7 +84,7 @@ function registerRoutes(app, deps) {
   app.use(createConfigRoutes({ verifyToken, configModule, validateEnvAuthCredentials, isWslEnvironment, filenamePreviewRateLimiter }));
 
   // Channel routes
-  app.use(createChannelRoutes({ verifyToken, channelModule, archiveModule, channelDownloadAllModule, ratingMapper, jobEventLog, primeVideosForEventLog }));
+  app.use(createChannelRoutes({ verifyToken, channelModule, archiveModule, channelDownloadAllModule, ratingMapper, profileFollowers, jobEventLog, primeVideosForEventLog }));
 
   // Video routes
   app.use(createVideoRoutes({ verifyToken, videosModule, downloadModule, videoOembedEnricher }));
@@ -116,7 +120,7 @@ function registerRoutes(app, deps) {
   app.use(createVideoDetailRoutes({ verifyToken, videoMetadataModule, mediaServers }));
 
   // Playlist routes
-  app.use(createPlaylistRoutes({ verifyToken, playlistModule, downloadModule, m3uGenerator, mediaServers, models, channelSettingsModule, ratingMapper, subfolderModule, playlistVideoFilters, jobEventLog, primeVideosForEventLog }));
+  app.use(createPlaylistRoutes({ verifyToken, playlistModule, downloadModule, m3uGenerator, mediaServers, models, channelSettingsModule, ratingMapper, subfolderModule, playlistVideoFilters, profileFollowers, jobEventLog, primeVideosForEventLog }));
 
   // Media server routes
   app.use(createMediaServerRoutes({ verifyToken, configModule, mediaServers }));
@@ -126,6 +130,9 @@ function registerRoutes(app, deps) {
 
   // Subfolder registry routes
   app.use(createSubfolderRoutes({ verifyToken, subfolderModule }));
+
+  // User profile routes (per-user hardlinked library folders)
+  app.use(createProfileRoutes({ verifyToken, profileModule }));
 
   /*
  * GET /api/ytstream/:youtubeId has no login wall (no verifyToken) so media

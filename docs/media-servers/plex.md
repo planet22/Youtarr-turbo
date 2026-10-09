@@ -138,6 +138,10 @@ Heads up: shared playlists do not appear in the recipient's **Playlists** sectio
 
 For how syncing, ordering, and playlist updates work across all servers, see [Media Server Playlists](../MEDIA_SERVER_PLAYLISTS.md).
 
+### One Library per Person (User Profiles)
+
+To give each person their own selection of channels and playlists, use [User Profiles](../GETTING_STARTED_USER_PROFILES.md): create a Plex library pointing at `<youtube path>/__profiles__/<profile name>`, share it with the person's **Plex Home/managed user** (a separately-shared Friend account can't be used), then choose that Plex user and library on the profile (Settings -> User Profiles -> Edit). Each person then gets their own private copies of the profile's playlists, owned by their Plex account.
+
 ## Watch Status Sync
 
 The same Plex connection you set up above also enables watch status sync: on a schedule (every 4 hours by default), Youtarr-Turbo pulls per-video watch state from Plex and shows it as Watched chips and filters on its listing pages. The sync is one-way; Youtarr-Turbo never marks anything watched on Plex.

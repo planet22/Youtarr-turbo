@@ -4,7 +4,8 @@ const { EVENT_TYPES } = require('../jobEventLog/eventCatalog');
 const configModule = require('../configModule');
 const serverRegistry = require('./serverRegistry');
 const { MediaServerUnavailableError, describeHttpError } = require('./adapters/baseAdapter');
-const { Playlist, PlaylistVideo, PlaylistSyncState, Video } = require('../../models');
+const { Op } = require('sequelize');
+const { Playlist, PlaylistVideo, PlaylistSyncState, Video, Profile, ProfileSubscription, ProfileVideoLink } = require('../../models');
 
 // Backoff retry for resolving items after library scan. Tuned for typical Plex/Jellyfin
 // scan completion times — short initial delays, then longer as more time passes.
@@ -14,6 +15,14 @@ const ADAPTER_TYPE_TAG = {
   PlexAdapter: 'plex',
   JellyfinAdapter: 'jellyfin',
   EmbyAdapter: 'emby',
+};
+
+// Server types a user profile can get its own private playlist copy on (its
+// identity is which column on Profile holds that server's user id). Emby has
+// no per-user adapter ("forUser") and never has - not added here.
+const PROFILE_IDENTITY_FIELD = {
+  jellyfin: 'jellyfin_user_id',
+  plex: 'plex_user_id',
 };
 
 const SERVER_DISPLAY_NAME = {
@@ -86,6 +95,103 @@ class MediaServerSync {
         await this._handleSyncError(err, playlist, serverType);
       }
     }
+
+    for (const serverType of Object.keys(PROFILE_IDENTITY_FIELD)) {
+      const adapter = adapters.find((a) => ADAPTER_TYPE_TAG[a.constructor.name] === serverType);
+      if (!adapter) continue;
+      try {
+        await this._syncProfileCopies(playlist, videos, adapter, serverType);
+      } catch (err) {
+        logger.error({ err, playlist_id: playlist.playlist_id, serverType }, 'Failed to sync profile copies of playlist');
+      }
+    }
+  }
+
+  // Each user profile that follows this playlist and has an identity on this
+  // server type gets its own copy of the playlist, owned by that user. Copies
+  // of profiles that stopped following it (or lost that identity) are deleted.
+  async _syncProfileCopies(playlist, videos, adapter, serverType) {
+    const followers = this._shouldSync(playlist, serverType) ? await this._profileFollowers(playlist, serverType) : [];
+    const followerIds = new Set(followers.map((profile) => profile.id));
+
+    const copies = await PlaylistSyncState.findAll({
+      where: { playlist_id: playlist.id, server_type: serverType, profile_id: { [Op.ne]: null } },
+    });
+    for (const copy of copies) {
+      if (!followerIds.has(copy.profile_id)) await this._removeProfileCopy(copy, adapter);
+    }
+
+    const userIdField = PROFILE_IDENTITY_FIELD[serverType];
+    for (const profile of followers) {
+      const dismissed = await this._dismissedYoutubeIds(profile.id);
+      const ownVideos = dismissed.size > 0 ? videos.filter((pv) => !dismissed.has(pv.youtube_id)) : videos;
+      try {
+        const userAdapter = await adapter.forUser(profile[userIdField]);
+        await this._syncToOne(playlist, ownVideos, userAdapter, serverType, profile);
+      } catch (err) {
+        await this._handleSyncError(err, playlist, serverType, profile.id);
+      }
+    }
+  }
+
+  async _profileFollowers(playlist, serverType) {
+    const subs = await ProfileSubscription.findAll({
+      where: { source_type: 'playlist', source_id: playlist.playlist_id },
+      attributes: ['profile_id'],
+      raw: true,
+    });
+    if (subs.length === 0) return [];
+    return Profile.findAll({
+      where: { id: subs.map((s) => s.profile_id), [PROFILE_IDENTITY_FIELD[serverType]]: { [Op.ne]: null } },
+    });
+  }
+
+  async _dismissedYoutubeIds(profileId) {
+    const rows = await ProfileVideoLink.findAll({
+      where: { profile_id: profileId, dismissed_at: { [Op.ne]: null } },
+      attributes: ['youtube_id'],
+      raw: true,
+    });
+    return new Set(rows.map((r) => r.youtube_id));
+  }
+
+  // Never throws: a playlist that can't be deleted on the server is logged and
+  // its row dropped, so the profile's state doesn't keep pointing at it.
+  // `adapter` must match copy.server_type - callers resolve it per row.
+  async _removeProfileCopy(copy, adapter) {
+    if (adapter && copy.server_playlist_id) {
+      try {
+        await adapter.deletePlaylist(copy.server_playlist_id);
+      } catch (err) {
+        logger.warn(
+          { ...describeHttpError(err), serverPlaylistId: copy.server_playlist_id, serverType: copy.server_type },
+          `Could not delete a profile's ${SERVER_DISPLAY_NAME[copy.server_type] || copy.server_type} playlist copy`
+        );
+      }
+    }
+    try {
+      await copy.destroy();
+    } catch (err) {
+      logger.error({ err, profileId: copy.profile_id }, 'failed to remove profile playlist sync state');
+    }
+  }
+
+  /**
+   * Delete a profile's playlist copies (profile deleted, or one of its server
+   * identities changed/cleared). With `serverType` set, only that server's
+   * copies go - e.g. changing just the profile's Plex user must not disturb
+   * its working Jellyfin copies. Omitted (profile deletion) removes all of them.
+   */
+  async removeProfileCopies(profileId, { serverType } = {}) {
+    const copies = await PlaylistSyncState.findAll({
+      where: { profile_id: profileId, ...(serverType ? { server_type: serverType } : {}) },
+    });
+    if (copies.length === 0) return;
+    const adapters = serverRegistry.getEnabledAdapters(configModule.getConfig());
+    for (const copy of copies) {
+      const adapter = adapters.find((a) => ADAPTER_TYPE_TAG[a.constructor.name] === copy.server_type);
+      await this._removeProfileCopy(copy, adapter);
+    }
   }
 
   _shouldSync(playlist, serverType) {
@@ -95,7 +201,10 @@ class MediaServerSync {
     return false;
   }
 
-  async _syncToOne(playlist, videos, adapter, serverType) {
+  // `profile` set = a user profile's own copy (separate sync state, private,
+  // no library scan - the shared sync and profile linking already trigger those).
+  async _syncToOne(playlist, videos, adapter, serverType, profile = null) {
+    const profileId = profile ? profile.id : null;
     const youtubeIds = videos.map((pv) => pv.youtube_id);
     const downloaded = youtubeIds.length
       ? await Video.findAll({ where: { youtubeId: youtubeIds } })
@@ -111,7 +220,9 @@ class MediaServerSync {
     let mismatched = 0;
     for (const pv of videos) {
       const v = byYoutubeId.get(pv.youtube_id);
-      if (!v) continue;
+      // A deleted video keeps its last filePath; resolving it would only
+      // burn the full lookup backoff on a file the server can't have.
+      if (!v || v.removed) continue;
       const mediaPath = mediaType === 'audio' ? v.audioFilePath : v.filePath;
       if (mediaPath) {
         entries.push({ youtube_id: pv.youtube_id, filePath: mediaPath });
@@ -129,7 +240,7 @@ class MediaServerSync {
     // The media type tells Plex whether music sections need a scan; audio
     // files have no other scan trigger anywhere in Youtarr. Jellyfin/Emby
     // ignore the hint (their refresh already covers every library).
-    await adapter.triggerLibraryScan(null, { mediaType });
+    if (!profile) await adapter.triggerLibraryScan(null, { mediaType });
 
     const resolvedByPath = await this._resolveAllWithBackoff(
       adapter,
@@ -150,8 +261,10 @@ class MediaServerSync {
 
     const name = `YT: ${playlist.title}`;
     const state = await PlaylistSyncState.findOne({
-      where: { playlist_id: playlist.id, server_type: serverType },
+      where: { playlist_id: playlist.id, server_type: serverType, profile_id: profileId },
     });
+    const isPublic = profile ? false : !!playlist.public_on_servers;
+    const serverLabel = SERVER_DISPLAY_NAME[serverType] || serverType;
 
     // With zero resolved items, the only case that proceeds is a deliberately
     // emptied playlist (every video ignored/removed) with an existing server
@@ -168,8 +281,8 @@ class MediaServerSync {
           ? 'downloaded audio files were not found on the server. Audio playlists need a music-type library that includes the Youtarr Turbo output folder'
           : 'downloaded files were not found on the server yet';
       logger.info(
-        { playlist_id: playlist.playlist_id, serverType },
-        `Deferring ${SERVER_DISPLAY_NAME[serverType] || serverType} sync of playlist "${playlist.title}": ${reason}`
+        { playlist_id: playlist.playlist_id, serverType, profileId },
+        `Deferring ${serverLabel}${profile ? ` (${profile.name})` : ''} sync of playlist "${playlist.title}": ${reason}`
       );
       return;
     }
@@ -181,7 +294,7 @@ class MediaServerSync {
       // and ignores opts. Capture the returned id in case the adapter recreated
       // — the sync-state row must track the new id.
       const replaced = await adapter.replacePlaylistItems(state.server_playlist_id, itemIds, {
-        name, public: !!playlist.public_on_servers, mediaType,
+        name, public: isPublic, mediaType,
       });
       const effectiveId = replaced?.id || state.server_playlist_id;
       if (state.update) await state.update({
@@ -190,7 +303,7 @@ class MediaServerSync {
         last_error: null,
       });
     } else {
-      const created = await adapter.createPlaylist(name, itemIds, { public: !!playlist.public_on_servers, mediaType });
+      const created = await adapter.createPlaylist(name, itemIds, { public: isPublic, mediaType });
       if (state) {
         // State row exists from a prior failure (last_error set, server_playlist_id null).
         // Update it in place rather than creating a duplicate — the unique constraint
@@ -204,27 +317,29 @@ class MediaServerSync {
         await PlaylistSyncState.create({
           playlist_id: playlist.id,
           server_type: serverType,
+          profile_id: profileId,
           server_playlist_id: created.id,
           last_synced_at: new Date(),
         });
       }
     }
 
-    this._recordSyncEvents(playlist, serverType, syncedYoutubeIds, createdOnServer, byYoutubeId);
+    this._recordSyncEvents(playlist, serverType, syncedYoutubeIds, createdOnServer, byYoutubeId, profile);
   }
 
   // What each playlist last sent to each server, in this process only. The
   // servers are told the whole list every time, so "added"/"removed" can only
   // be known relative to the previous sync we made; after a restart there is
   // no previous list and only the summary is logged (never every video as new).
-  _recordSyncEvents(playlist, serverType, youtubeIds, created, videoRows) {
-    const server = SERVER_DISPLAY_NAME[serverType] || serverType;
+  _recordSyncEvents(playlist, serverType, youtubeIds, created, videoRows, profile = null) {
+    const serverName = SERVER_DISPLAY_NAME[serverType] || serverType;
+    const server = profile ? `${serverName} (${profile.name})` : serverName;
     const base = { playlistTitle: playlist.title, server };
     jobEventLog.record(EVENT_TYPES.PLAYLIST_SYNCED, {
       detail: { ...base, created, itemCount: youtubeIds.length, playlistId: playlist.playlist_id },
     });
 
-    const key = `${playlist.id}:${serverType}`;
+    const key = `${playlist.id}:${serverType}:${profile ? profile.id : ''}`;
     const previous = this.lastSyncedIds.get(key);
     this.lastSyncedIds.set(key, new Set(youtubeIds));
     if (!previous) return;
@@ -276,34 +391,34 @@ class MediaServerSync {
   // recorded last_error. An unreachable/unresponsive server gets a friendly
   // "not reachable" message; anything else logs a compact reason. Never the raw
   // axios error, which would dump the API token into the logs.
-  async _handleSyncError(err, playlist, serverType) {
+  async _handleSyncError(err, playlist, serverType, profileId = null) {
     const serverName = SERVER_DISPLAY_NAME[serverType] || serverType;
     if (err instanceof MediaServerUnavailableError) {
       logger.warn(
-        { playlist_id: playlist.playlist_id, serverType },
+        { playlist_id: playlist.playlist_id, serverType, profileId },
         `Unable to sync playlist "${playlist.title}" to ${serverName}: server not reachable or not responding. Please ensure that your media server is up and reachable.`
       );
-      await this._recordError(playlist.id, serverType, `${serverName} not reachable or not responding`);
+      await this._recordError(playlist.id, serverType, `${serverName} not reachable or not responding`, profileId);
       return;
     }
-    const logData = { playlist_id: playlist.playlist_id, serverType };
+    const logData = { playlist_id: playlist.playlist_id, serverType, profileId };
     if (err && err.isAxiosError) logData.reason = describeHttpError(err);
     else logData.err = err;
     logger.error(logData, `Unable to sync playlist "${playlist.title}" to ${serverName}`);
-    await this._recordError(playlist.id, serverType, err && err.message ? err.message : String(err));
+    await this._recordError(playlist.id, serverType, err && err.message ? err.message : String(err), profileId);
   }
 
   // Never throws: this runs inside _doSync's per-adapter catch, and a
   // failure here must not abort the sync of the remaining adapters.
-  async _recordError(playlistId, serverType, message) {
+  async _recordError(playlistId, serverType, message, profileId = null) {
     try {
       const state = await PlaylistSyncState.findOne({
-        where: { playlist_id: playlistId, server_type: serverType },
+        where: { playlist_id: playlistId, server_type: serverType, profile_id: profileId },
       });
       if (state) {
         if (state.update) await state.update({ last_error: message });
       } else {
-        await PlaylistSyncState.create({ playlist_id: playlistId, server_type: serverType, last_error: message });
+        await PlaylistSyncState.create({ playlist_id: playlistId, server_type: serverType, profile_id: profileId, last_error: message });
       }
     } catch (err) {
       logger.error({ err, playlist_db_id: playlistId, serverType }, 'failed to record playlist sync error');

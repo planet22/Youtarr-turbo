@@ -552,6 +552,7 @@ describe('server initialization', () => {
       cachedVideoFilter: 'off',
       metadataOnlyFilter: 'off',
       showUntracked: false,
+      profileId: null,
       strmFilter: 'off'
     });
 
@@ -603,6 +604,7 @@ describe('server initialization', () => {
       sortBy: 'name',
       sortOrder: 'desc',
       subFolder: undefined,
+      profileId: null,
     });
     expect(res.statusCode).toBe(200);
   });
@@ -656,6 +658,7 @@ describe('server initialization', () => {
       cachedVideoFilter: 'off',
       metadataOnlyFilter: 'off',
       showUntracked: false,
+      profileId: null,
       strmFilter: 'off'
     });
 

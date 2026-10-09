@@ -62,6 +62,19 @@ describe('watchStatusQueries', () => {
     });
   });
 
+  describe('buildUserWatchedExistsSql', () => {
+    test('binds the server type and user as replacements', () => {
+      const { replacements } = watchStatusQueries.buildUserWatchedExistsSql('jellyfin', 'u-alice');
+      expect(replacements).toEqual({ watchedServerType: 'jellyfin', watchedServerUserId: 'u-alice' });
+    });
+
+    test('ignores watchStatusWatchedRule', () => {
+      configModule.getConfig.mockReturnValue({ watchStatusWatchedRule: 'primary', jellyfinUserId: 'admin' });
+      const { sql } = watchStatusQueries.buildUserWatchedExistsSql('jellyfin', 'u-alice');
+      expect(sql).not.toContain('watchedJellyfinUserId');
+    });
+  });
+
   describe('buildWatchedExistsSql', () => {
     test('rule=any builds an EXISTS probe on played rows with no replacements', () => {
       const { sql, replacements } = watchStatusQueries.buildWatchedExistsSql();
@@ -94,11 +107,44 @@ describe('watchStatusQueries', () => {
   });
 
   describe('buildWatchedEligibilitySql', () => {
-    test('with no minimum days builds the same probe as buildWatchedExistsSql', () => {
+    test('with no minimum days wraps the buildWatchedExistsSql probe', () => {
       const { sql, replacements } = watchStatusQueries.buildWatchedEligibilitySql();
 
-      expect(sql).toBe(watchStatusQueries.buildWatchedExistsSql().sql);
+      expect(sql).toContain(watchStatusQueries.buildWatchedExistsSql().sql);
       expect(replacements).toEqual({});
+    });
+
+    test('keeps videos a user profile is still waiting to watch', () => {
+      const { sql } = watchStatusQueries.buildWatchedEligibilitySql();
+
+      expect(sql).toContain('NOT EXISTS (SELECT 1 FROM profile_video_links pvl');
+    });
+
+    test('applies the profile guard with a minimum days setting too', () => {
+      const { sql } = watchStatusQueries.buildWatchedEligibilitySql({ minDaysSinceWatched: 7 });
+
+      expect(sql).toContain('pw.server_user_id = p.jellyfin_user_id');
+    });
+
+    test('also guards on a profile\'s Plex identity', () => {
+      const { sql } = watchStatusQueries.buildWatchedEligibilitySql();
+
+      expect(sql).toContain('pw.server_type = \'plex\'');
+      expect(sql).toContain('pw.server_user_id = p.plex_user_id');
+    });
+
+    test('requires both identities (AND) when a profile has both set', () => {
+      const { sql } = watchStatusQueries.buildWatchedEligibilitySql();
+      // The jellyfin clause and the plex clause are ANDed together inside the
+      // guard, not ORed - a profile with both identities set needs both to
+      // have watched before the guard clears for it.
+      expect(sql).toContain(')) AND (p.plex_user_id IS NULL OR');
+    });
+
+    test('ignores links already removed from a profile as watched', () => {
+      const { sql } = watchStatusQueries.buildWatchedEligibilitySql();
+
+      expect(sql).toContain('pvl.dismissed_at IS NULL');
     });
 
     test('minDaysSinceWatched adds a NOT EXISTS probe for recent or undated watches', () => {

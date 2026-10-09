@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import axios from 'axios';
 import { Playlist } from '../types/playlist';
+import { useProfileContext } from '../contexts/ProfileContext';
 
 interface UsePlaylistListParams {
   token: string | null;
@@ -22,6 +23,7 @@ export const usePlaylistList = ({
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(!!token);
   const [error, setError] = useState<string | null>(null);
+  const { activeProfileId } = useProfileContext();
 
   const fetchPlaylists = useCallback(async () => {
     if (!token) {
@@ -37,7 +39,7 @@ export const usePlaylistList = ({
     try {
       const response = await axios.get<PlaylistListResponse>('/api/playlists', {
         headers: { 'x-access-token': token },
-        params: { page, pageSize },
+        params: { page, pageSize, profileId: activeProfileId ?? undefined },
       });
       setPlaylists(response.data.playlists || []);
       setTotal(response.data.total || 0);
@@ -49,7 +51,7 @@ export const usePlaylistList = ({
     } finally {
       setLoading(false);
     }
-  }, [token, page, pageSize]);
+  }, [token, page, pageSize, activeProfileId]);
 
   useEffect(() => {
     fetchPlaylists();

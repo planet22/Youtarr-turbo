@@ -8,7 +8,7 @@
 
 Youtarr-Turbo is a self-hosted YouTube downloader that automatically downloads videos from your favorite channels and playlists. It provides metadata for multiple media servers, mirrors your subscribed YouTube playlists into Plex, Jellyfin, and Emby as native playlists, pulls watch status back from those servers so you can filter your library by what's been watched, and offers optional Plex integration for automatic library refreshes.
 
-> **Quick guides:** [Streaming (STRM + ytstream)](docs/GETTING_STARTED_STREAMING.md) · [Sonarr/Radarr via NZB](docs/GETTING_STARTED_NZB.md) · [Channel & Playlist Settings](docs/GETTING_STARTED_CHANNELS_PLAYLISTS.md)
+> **Quick guides:** [Streaming (STRM + ytstream)](docs/GETTING_STARTED_STREAMING.md) · [Sonarr/Radarr via NZB](docs/GETTING_STARTED_NZB.md) · [Channel & Playlist Settings](docs/GETTING_STARTED_CHANNELS_PLAYLISTS.md) · [Multiple Users (User Profiles)](docs/GETTING_STARTED_USER_PROFILES.md)
 
 ## Why Youtarr-Turbo?
 
@@ -30,6 +30,7 @@ Youtarr-Turbo is a self-hosted YouTube downloader that automatically downloads v
 - **Find on YouTube**: Search YouTube from inside Youtarr-Turbo on the Find Channels on YouTube and Find Videos on YouTube pages; video results show which ones are already downloaded or missing, and a click subscribes to a channel or queues a download
 - **In-App Playback**: Click any thumbnail to open a detail modal with extended metadata and in-browser streaming of downloaded videos; no media server required
 - **Channel Grouping & Multi-Library Support**: Organize channels into custom subfolders (e.g., `__kids`, `__music`, `__news`) to create separate media server libraries
+- **User Profiles**: Give each person (each Jellyfin and/or Plex user) their own library of channels and playlists from one Youtarr-Turbo login; videos download once and are hardlinked into each profile's folder, with per-user Jellyfin and Plex playlists, per-user watched filters, and optional "remove after watched". See [Multiple Users](docs/GETTING_STARTED_USER_PROFILES.md)
 - **Smart Organization**: Videos organized by channel with metadata and thumbnails
 - **SponsorBlock Integration**: Remove sponsored segments automatically
 - **Quality Control**: Global and per-channel resolution settings (360p to 4K)
@@ -74,6 +75,7 @@ You'll need Docker, Docker Compose, Git, and a Bash shell (Git Bash on Windows).
 - [Jellyfin Setup](docs/media-servers/jellyfin.md) - Jellyfin integration
 - [Emby Setup](docs/media-servers/emby.md) - Emby configuration
 - [Media Server Playlists](docs/MEDIA_SERVER_PLAYLISTS.md) - Sync subscribed playlists to Plex, Jellyfin, and Emby
+- [Multiple Users (User Profiles)](docs/GETTING_STARTED_USER_PROFILES.md) - Per-person libraries, playlists and watched state from one install
 
 ### Platform Guides
 - [Synology NAS](docs/platforms/synology.md) - DSM 7+ optimized setup

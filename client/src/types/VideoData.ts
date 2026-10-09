@@ -5,7 +5,11 @@
   duration: number;
 }*/
 
+import { ProfileFollower } from './ProfileFollower';
+
 export interface VideoData {
+  // Profiles this video belongs to; only sent in the all-profiles view.
+  profiles?: ProfileFollower[];
   // null for a "Show untracked" row - a video with no Videos table row at
   // all, surfaced only via youtube_metadata_cache and/or the untracked
   // buffer cache directory. See isTracked.
@@ -21,6 +25,10 @@ export interface VideoData {
   fileSize?: string | null;
   audioFilePath?: string | null;
   audioFileSize?: string | null;
+  // Only while a user profile is selected: the profile's hardlinks of
+  // filePath/audioFilePath (null when not linked). Display only.
+  profileFilePath?: string | null;
+  profileAudioFilePath?: string | null;
   // Wall-clock time from download start to file-verified-on-disk (includes
   // yt-dlp post-processing), and the resulting average MB/s - see
   // server/modules/download/videoMetadataProcessor.js. null for rows that

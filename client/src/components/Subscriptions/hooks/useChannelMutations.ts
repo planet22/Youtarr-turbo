@@ -2,6 +2,8 @@ import { useCallback, useMemo, useState } from 'react';
 import axios from 'axios';
 import { Channel } from '../../../types/Channel';
 import { normalizeChannelUrl } from '../../../utils/channelHelpers';
+import { useProfileContext } from '../../../contexts/ProfileContext';
+import { followInProfile } from '../../../utils/profileFollow';
 
 interface UseChannelMutationsOptions {
   token: string | null;
@@ -31,6 +33,7 @@ export const useChannelMutations = ({ token, onRefresh }: UseChannelMutationsOpt
   const [isSaving, setIsSaving] = useState(false);
 
   const deletedSet = useMemo(() => new Set(deletedChannels), [deletedChannels]);
+  const { activeProfile } = useProfileContext();
 
   const addChannel = useCallback(async (input: string): Promise<OperationResult> => {
     if (!token) {
@@ -72,6 +75,15 @@ export const useChannelMutations = ({ token, onRefresh }: UseChannelMutationsOpt
 
       // Server-reported state, so URL and case variants of an active subscription are caught.
       if (channelInfo.enabled) {
+        // Already subscribed globally: with a profile active, "adding" it means following it.
+        const existingId = channelInfo.channel_id || channelInfo.id;
+        if (activeProfile && existingId) {
+          const followed = await followInProfile(token, activeProfile.id, { channels: [existingId] });
+          if (followed) {
+            await onRefresh();
+            return { success: true, message: `Channel added to ${activeProfile.name}` };
+          }
+        }
         return { success: false, message: 'Channel already exists' };
       }
       const formattedChannel: Channel = {
@@ -123,7 +135,7 @@ export const useChannelMutations = ({ token, onRefresh }: UseChannelMutationsOpt
     } finally {
       setIsAddingChannel(false);
     }
-  }, [token, pendingAdditions, deletedSet]);
+  }, [token, pendingAdditions, deletedSet, activeProfile, onRefresh]);
 
   const queueChannelForDeletion = useCallback((channel: Channel) => {
     const isPendingAddition = pendingAdditions.some((item) => item.url === channel.url);
@@ -167,6 +179,11 @@ export const useChannelMutations = ({ token, onRefresh }: UseChannelMutationsOpt
         headers: { 'x-access-token': token },
       });
 
+      const addedIds = pendingAdditions.map((channel) => channel.channel_id).filter((id): id is string => !!id);
+      if (activeProfile && addedIds.length > 0) {
+        await followInProfile(token, activeProfile.id, { channels: addedIds });
+      }
+
       setPendingAdditions([]);
       setDeletedChannels([]);
       if (onRefresh) {
@@ -180,7 +197,7 @@ export const useChannelMutations = ({ token, onRefresh }: UseChannelMutationsOpt
     } finally {
       setIsSaving(false);
     }
-  }, [token, pendingAdditions, deletedChannels, onRefresh]);
+  }, [token, pendingAdditions, deletedChannels, onRefresh, activeProfile]);
 
   return {
     pendingAdditions,

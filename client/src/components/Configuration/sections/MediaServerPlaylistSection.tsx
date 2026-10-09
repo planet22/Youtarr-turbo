@@ -192,6 +192,17 @@ export const MediaServerPlaylistSection: React.FC<MediaServerPlaylistSectionProp
 
   const hasCredentials = Boolean(url.trim() && apiKey.trim() && token);
 
+  // Run one connection test when saved credentials first become available so
+  // the status chip survives a page reload (Plex does the same on load).
+  const didAutoTest = useRef(false);
+  useEffect(() => {
+    if (didAutoTest.current) return;
+    if (enabled && hasCredentials) {
+      didAutoTest.current = true;
+      handleTest();
+    }
+  }, [enabled, hasCredentials, handleTest]);
+
   // Refetch the user list each time the dropdown opens so newly added server
   // accounts show up without re-entering credentials.
   const handleSelectOpen = useCallback(() => {

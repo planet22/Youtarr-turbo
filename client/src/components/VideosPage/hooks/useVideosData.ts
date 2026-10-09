@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import axios from 'axios';
 import { EnabledChannel, PaginatedVideosResponse, VideoData } from '../../../types/VideoData';
 import { ChipFilterMode } from '../../shared/VideoList/types';
+import { useProfileContext } from '../../../contexts/ProfileContext';
 
 export interface UseVideosDataParams {
   token: string | null;
@@ -82,6 +83,7 @@ export function useVideosData({
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const latestRequestId = useRef(0);
+  const { activeProfileId } = useProfileContext();
 
   const fetchVideos = useCallback(async () => {
     if (!token) return;
@@ -110,6 +112,7 @@ export function useVideosData({
     if (cachedVideoFilter !== 'off') params.append('cachedVideoFilter', cachedVideoFilter);
     if (metadataOnlyFilter !== 'off') params.append('metadataOnlyFilter', metadataOnlyFilter);
     if (showUntracked) params.append('showUntracked', 'true');
+    if (activeProfileId !== null) params.append('profileId', String(activeProfileId));
 
     try {
       const response = await axios.get<PaginatedVideosResponse>(
@@ -171,6 +174,7 @@ export function useVideosData({
     metadataOnlyFilter,
     showUntracked,
     useInfiniteScroll,
+    activeProfileId,
   ]);
 
   useEffect(() => {

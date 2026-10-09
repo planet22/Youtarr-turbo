@@ -6,6 +6,7 @@ describe('cronJobs nightly maintenance tasks', () => {
   let logger;
   let db;
   let videoDeletionModule;
+  let jobModule;
   let ytstreamRoutes;
   let configStore;
   const DAY_MS = 24 * 60 * 60 * 1000;
@@ -27,6 +28,7 @@ describe('cronJobs nightly maintenance tasks', () => {
       cleanupOrphanDirectories: jest.fn().mockResolvedValue({}),
       sweepExpiredCachedVideos: jest.fn().mockResolvedValue({ reverted: 0, failed: 0 }),
     };
+    jobModule = { backfillFromCompleteList: jest.fn().mockResolvedValue(undefined) };
     ytstreamRoutes = { sweepExpiredUntrackedBufferCache: jest.fn().mockResolvedValue({ deleted: 0 }) };
     configStore = {};
 
@@ -38,6 +40,9 @@ describe('cronJobs nightly maintenance tasks', () => {
     jest.doMock('../notificationModule', () => ({ sendAutoRemovalNotification: jest.fn() }));
     jest.doMock('../ytdlpModule', () => ({ performUpdate: jest.fn() }));
     jest.doMock('../videoThumbnailCache', () => ({ pruneUnused: jest.fn(() => Promise.resolve(0)) }));
+    jest.doMock('../subfolderModule', () => ({ pruneUnused: jest.fn().mockResolvedValue([]) }));
+    jest.doMock('../profiles/profileModule', () => ({ reconcileAll: jest.fn().mockResolvedValue({ profiles: 0, linked: 0, unlinked: 0, failed: 0 }), removeWatchedLinks: jest.fn().mockResolvedValue({ profiles: 0, removed: 0, failed: 0 }) }));
+    jest.doMock('../jobModule', () => jobModule);
     jest.doMock('../configModule', () => ({ getConfig: jest.fn(() => configStore), isElfhostedPlatform: jest.fn(() => false) }));
     jest.doMock('../youtubeMetadataCache', () => ({ YOUTUBE_METADATA_CACHE_RETENTION_DAYS: 365 }));
     jest.doMock('../../routes/ytstream', () => ytstreamRoutes);
@@ -97,6 +102,65 @@ describe('cronJobs nightly maintenance tasks', () => {
       await run('25 3 * * *');
 
       expect(logger.error).toHaveBeenCalledWith({ err: expect.any(Error) }, 'Error pruning the video/events log');
+    });
+  });
+
+  describe('profile maintenance (2:20 AM)', () => {
+    it('is registered as its own task', () => {
+      expect(task('profile-maintenance')).toMatchObject({ cron: '20 2 * * *', confirm: false });
+    });
+
+    it('re-checks every profile against the library', async () => {
+      await run('20 2 * * *');
+
+      expect(require('../profiles/profileModule').reconcileAll).toHaveBeenCalled();
+    });
+
+    it('still removes watched videos when the re-check fails', async () => {
+      require('../profiles/profileModule').reconcileAll.mockRejectedValueOnce(new Error('db down'));
+
+      await run('20 2 * * *');
+
+      expect(require('../profiles/profileModule').removeWatchedLinks).toHaveBeenCalled();
+    });
+
+    it('runs the profile module removal', async () => {
+      await run('20 2 * * *');
+
+      expect(require('../profiles/profileModule').removeWatchedLinks).toHaveBeenCalled();
+    });
+
+    it('logs instead of throwing when the removal fails', async () => {
+      require('../profiles/profileModule').removeWatchedLinks.mockRejectedValueOnce(new Error('db down'));
+
+      await run('20 2 * * *');
+
+      expect(logger.error).toHaveBeenCalledWith({ err: expect.any(Error) }, 'Error during profile watched-video removal');
+    });
+  });
+
+  describe('complete.list backfill (2:20 AM)', () => {
+    it('is registered as its own task', () => {
+      expect(task('complete-list-backfill')).toMatchObject({ cron: '20 2 * * *', confirm: false });
+    });
+
+    it('runs the backfill through jobModule', async () => {
+      const result = cronJobs.runTaskNow('complete-list-backfill');
+      expect(result).toEqual({ started: true });
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(jobModule.backfillFromCompleteList).toHaveBeenCalled();
+    });
+
+    it('logs instead of throwing when the backfill fails', async () => {
+      jobModule.backfillFromCompleteList.mockRejectedValueOnce(new Error('db down'));
+
+      cronJobs.runTaskNow('complete-list-backfill');
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(logger.error).toHaveBeenCalledWith({ err: expect.any(Error) }, 'Scheduled complete.list backfill failed');
     });
   });
 

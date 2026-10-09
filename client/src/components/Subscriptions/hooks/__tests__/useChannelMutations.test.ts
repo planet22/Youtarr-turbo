@@ -2,6 +2,7 @@ import { renderHook, act } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { useChannelMutations } from '../useChannelMutations';
 import { Channel } from '../../../../types/Channel';
+import { createActiveProfileWrapper } from '../../../../test-utils';
 
 jest.mock('axios', () => ({
   post: jest.fn(),
@@ -108,6 +109,45 @@ describe('useChannelMutations', () => {
     expect(response).toEqual({ success: true, message: 'Channel restored from pending removal' });
     expect(result.current.deletedChannels).toHaveLength(0);
     expect(result.current.hasPendingChanges).toBe(false);
+  });
+
+  test('adds an already-subscribed channel to the active profile instead of rejecting it', async () => {
+    mockedAxios.post
+      .mockResolvedValueOnce({ data: { status: 'success', channelInfo: { ...mockChannelInfo, enabled: true } } })
+      .mockResolvedValueOnce({ data: {} });
+    const onRefresh = jest.fn();
+    const { result } = renderHook(() => useChannelMutations({ token, onRefresh }), {
+      wrapper: createActiveProfileWrapper({ id: 4, name: 'Alice' }),
+    });
+
+    let response;
+    await act(async () => {
+      response = await result.current.addChannel(validUrl);
+    });
+
+    expect(response).toEqual({ success: true, message: 'Channel added to Alice' });
+  });
+
+  test('saving new channels with a profile active adds them to that profile', async () => {
+    mockedAxios.post
+      .mockResolvedValueOnce({ data: { status: 'success', channelInfo: mockChannelInfo } })
+      .mockResolvedValue({ data: {} });
+    const { result } = renderHook(() => useChannelMutations({ token, onRefresh: jest.fn() }), {
+      wrapper: createActiveProfileWrapper({ id: 4, name: 'Alice' }),
+    });
+
+    await act(async () => {
+      await result.current.addChannel(validUrl);
+    });
+    await act(async () => {
+      await result.current.saveChanges();
+    });
+
+    expect(mockedAxios.post).toHaveBeenCalledWith(
+      '/api/profiles/4/subscriptions/add',
+      { channels: ['chan-123'] },
+      { headers: { 'x-access-token': token } }
+    );
   });
 
   test('skips adding when the channel is already an active subscription', async () => {

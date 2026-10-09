@@ -97,7 +97,24 @@ describe('videos routes: remaining endpoints', () => {
         cachedVideoFilter: 'off',
         metadataOnlyFilter: 'off',
         showUntracked: false,
+        profileId: null,
       });
+    });
+
+    it('passes a valid profileId through as a number', async () => {
+      const { app, videosModule } = makeApp();
+
+      await supertest(app).get('/getVideos').query({ profileId: '7' });
+
+      expect(videosModule.getVideosPaginated).toHaveBeenCalledWith(expect.objectContaining({ profileId: 7 }));
+    });
+
+    it('turns showUntracked off while a profile is selected', async () => {
+      const { app, videosModule } = makeApp();
+
+      await supertest(app).get('/getVideos').query({ profileId: '7', showUntracked: 'true' });
+
+      expect(videosModule.getVideosPaginated).toHaveBeenCalledWith(expect.objectContaining({ showUntracked: false }));
     });
 
     it('passes the query parameters through', async () => {

@@ -11,6 +11,8 @@ PlaylistSyncState.init(
     server_playlist_id: { type: DataTypes.STRING, allowNull: true },
     last_synced_at: { type: DataTypes.DATE, allowNull: true },
     last_error: { type: DataTypes.TEXT, allowNull: true },
+    // NULL = the shared server playlist; set = a user profile's own copy.
+    profile_id: { type: DataTypes.INTEGER, allowNull: true },
   },
   { sequelize, modelName: 'PlaylistSyncState', tableName: 'playlist_sync_state', timestamps: true }
 );

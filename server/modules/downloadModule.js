@@ -11,6 +11,7 @@ const ChannelVideo = require('../models/channelvideo');
 const logger = require('../logger');
 const { primeVideosForEventLog } = require('./download/eventLogVideoPrimer');
 const { videoIdFromUrl } = require('./jobEventLog/jobVideoRef');
+const profileModule = require('./profiles/profileModule');
 
 const DEFAULT_FILES_TO_DOWNLOAD = 5;
 
@@ -794,12 +795,19 @@ class DownloadModule {
           // fetches metadata one video at a time in a plain Node loop, so it
           // can genuinely be paused/reordered between videos.
           await jobModule.updateJob(jobId, { data: { isStrmBatch: true } });
+          // Manual downloads carry no channel: leave subfolder/library mode/
+          // structure undecided so each video resolves them from its own
+          // channel, as the real-download post-processor does at finalize.
+          // A hard subfolder override still wins.
+          const perVideoChannel = !channelRecord && structurePerVideo;
           const results = await strmMaterializer.materializeMany(urls, {
             jobId,
             jobType,
-            subFolder: strmSubFolder,
-            skipVideoFolder,
-            libraryMode,
+            subFolder: perVideoChannel && subfolderOverride === null ? undefined : strmSubFolder,
+            subFolderFallback: subfolderFallback,
+            libraryModeFallback,
+            skipVideoFolder: perVideoChannel ? undefined : skipVideoFolder,
+            libraryMode: perVideoChannel ? undefined : libraryMode,
             // Threaded through to videoPersistence.upsertVideoForJob's
             // tracked-state logging: strmMaterializer's own Job.findOne
             // lookup there gets a Sequelize row with no `data` column (that
@@ -810,7 +818,7 @@ class DownloadModule {
             // here - strmMaterializer's own channelRecord lookup is skipped
             // whenever a caller (like this one) already resolved
             // libraryMode/subFolder, so it can't discover this itself.
-            seriesEpisodeRegex: (channelRecord && channelRecord.season_episode_regex) || null,
+            seriesEpisodeRegex: perVideoChannel ? undefined : (channelRecord && channelRecord.season_episode_regex) || null,
             // Real season/episode from an NZB grab's tvsearch - see the same
             // override in the real-download postProcessDirectives below.
             seriesSeasonOverride: overrideSettings.seriesSeasonOverride ?? null,
@@ -848,12 +856,25 @@ class DownloadModule {
           // downloadJobFinalizer/runCompletionSideEffects (the real-download
           // completion path that normally does this), so it needs its own
           // trigger here - same calls, same fire-and-forget error handling.
+          // User profiles are linked first, so the scans below pick them up.
           if (ok > 0) {
-            plexModule.refreshLibrariesForSubfolders([strmSubFolder ?? null]).catch(err => {
+            try {
+              await profileModule.syncDownloadedVideos(results.filter((r) => r.ok && r.youtubeId).map((r) => r.youtubeId));
+            } catch (err) {
+              logger.error({ err }, 'Failed to link STRM videos into profiles');
+            }
+            // Where the files actually landed (per-video resolution can put
+            // them in different subfolders than the job-level guess).
+            const { extractSubfolderFromAbsPath } = require('./filesystem');
+            const landedSubfolders = [...new Set(results
+              .filter((r) => r.ok && r.strmPath)
+              .map((r) => extractSubfolderFromAbsPath(r.strmPath, configModule.directoryPath)))];
+            const scanSubfolders = landedSubfolders.length > 0 ? landedSubfolders : [strmSubFolder ?? null];
+            plexModule.refreshLibrariesForSubfolders(scanSubfolders).catch(err => {
               logger.error({ err }, 'Failed to refresh Plex libraries after STRM materialize');
             });
             require('./mediaServers').serverRegistry
-              .triggerLibraryScansForNonPlexServers(configModule.config, [strmSubFolder ?? null])
+              .triggerLibraryScansForNonPlexServers(configModule.config, scanSubfolders)
               .catch(err => {
                 logger.error({ err }, 'Failed to trigger Jellyfin/Emby library scan after STRM materialize');
               });

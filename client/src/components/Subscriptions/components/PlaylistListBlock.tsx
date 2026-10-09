@@ -9,14 +9,31 @@ import {
 import { Download as DownloadIcon, Delete as DeleteIcon } from '../../../lib/icons';
 import { Playlist } from '../../../types/playlist';
 import { DownloadFormatConfigIndicator } from './chips';
+import ProfileFollowControl from './ProfileFollowControl';
+import { useMediaQuery } from '../../../hooks/useMediaQuery';
 
 interface PlaylistListBlockProps {
   playlists: Playlist[];
   loading: boolean;
   onDelete: (playlist: Playlist) => void;
+  token?: string | null;
+  onProfilesChanged?: () => void;
 }
 
-const PlaylistListBlock: React.FC<PlaylistListBlockProps> = ({ playlists, loading, onDelete }) => {
+const PlaylistListBlock: React.FC<PlaylistListBlockProps> = ({ playlists, loading, onDelete, token = null, onProfilesChanged }) => {
+  const isMobile = useMediaQuery('(max-width: 767px)');
+  const renderUsers = (p: Playlist) => (
+    <ProfileFollowControl
+      token={token}
+      sourceType="playlist"
+      sourceId={p.playlist_id}
+      sourceName={p.title}
+      profiles={p.profiles}
+      compact
+      onChanged={onProfilesChanged}
+    />
+  );
+
   if (loading && playlists.length === 0) {
     return (
       <div className="flex justify-center items-center py-6">
@@ -71,7 +88,13 @@ const PlaylistListBlock: React.FC<PlaylistListBlockProps> = ({ playlists, loadin
                 <Typography variant="caption" color="text.secondary" className="line-clamp-1">
                   {p.uploader || '-'} • {p.video_count} videos
                 </Typography>
+                {isMobile && (
+                  <div style={{ marginTop: 2 }}>
+                    {renderUsers(p)}
+                  </div>
+                )}
               </div>
+              {!isMobile && <div className="flex-shrink-0 min-w-0">{renderUsers(p)}</div>}
               <DownloadFormatConfigIndicator audioFormat={p.audio_format} />
               <Tooltip
                 title={

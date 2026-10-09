@@ -11,6 +11,8 @@ describe('VideosModule', () => {
   let mockSequelize;
   let mockVideo;
   let mockWatchStatusQueries;
+  let mockProfile;
+  let mockProfileVideoLink;
   let mockFs;
   let mockConfigModule;
   let mockVideoValidationModule;
@@ -116,9 +118,18 @@ describe('VideosModule', () => {
     }));
 
     // Mock the models
+    mockProfile = { findByPk: jest.fn().mockResolvedValue(null) };
+    mockProfileVideoLink = { findAll: jest.fn().mockResolvedValue([]) };
+    mockWatchStatusQueries.buildUserWatchedExistsSql = jest.fn().mockReturnValue({
+      sql: 'EXISTS (SELECT 1 FROM video_watch_status vws WHERE vws.server_user_id = :watchedServerUserId)',
+      replacements: { watchedServerType: 'jellyfin', watchedServerUserId: 'u-alice' }
+    });
+
     jest.doMock('../../models', () => ({
       Video: mockVideo,
-      Channel: mockChannel
+      Channel: mockChannel,
+      Profile: mockProfile,
+      ProfileVideoLink: mockProfileVideoLink
     }));
 
     // Mock the watch status query module (owns the watchedBy aggregation)
@@ -537,6 +548,82 @@ describe('VideosModule', () => {
       expect(countQuery).not.toContain('NOT EXISTS');
       expect(pageQuery).toContain('EXISTS (SELECT 1 FROM video_watch_status');
       expect(pageQuery).not.toContain('NOT EXISTS');
+    });
+
+    test('should restrict to a profile\'s followed sources when profileId is set', async () => {
+      mockSequelize.query.mockResolvedValueOnce([{ total: 0 }]);
+      mockSequelize.query.mockResolvedValueOnce([]);
+      mockSequelize.query.mockResolvedValueOnce([]);
+
+      await VideosModule.getVideosPaginated({ profileId: 5 });
+
+      const [countQuery, countOptions] = mockSequelize.query.mock.calls[0];
+      expect(countQuery).toContain('FROM profile_subscriptions ps');
+      expect(countOptions.replacements.profileId).toBe(5);
+    });
+
+    test('_attachProfilePaths adds the profile link matching each library file', async () => {
+      mockProfileVideoLink.findAll.mockResolvedValue([
+        { video_id: 1, link_paths: JSON.stringify(['/data/__profiles__/Test/Chan/v [abc].nfo', '/data/__profiles__/Test/Chan/v [abc].strm']) },
+      ]);
+      const videos = [{ id: 1, filePath: '/data/__Movies/Chan/v [abc].strm', audioFilePath: null }];
+
+      await VideosModule._attachProfilePaths(videos, 7);
+
+      expect(videos[0]).toMatchObject({ profileFilePath: '/data/__profiles__/Test/Chan/v [abc].strm', profileAudioFilePath: null });
+    });
+
+    test('_attachProfilePaths leaves an unlinked video without profile paths', async () => {
+      const videos = [{ id: 2, filePath: '/data/Chan/x [def].mp4', audioFilePath: null }];
+
+      await VideosModule._attachProfilePaths(videos, 7);
+
+      expect(videos[0].profileFilePath).toBeNull();
+    });
+
+    test('should use the profile Jellyfin user for the watched filter', async () => {
+      mockProfile.findByPk.mockResolvedValue({ jellyfin_user_id: 'u-alice' });
+      mockSequelize.query.mockResolvedValueOnce([{ total: 0 }]);
+      mockSequelize.query.mockResolvedValueOnce([]);
+      mockSequelize.query.mockResolvedValueOnce([]);
+
+      await VideosModule.getVideosPaginated({ profileId: 5, watchedFilter: 'only' });
+
+      expect(mockWatchStatusQueries.buildUserWatchedExistsSql).toHaveBeenCalledWith('jellyfin', 'u-alice');
+    });
+
+    test('should fall back to the global watched rule for a profile without a Jellyfin user', async () => {
+      mockProfile.findByPk.mockResolvedValue({ jellyfin_user_id: null });
+      mockSequelize.query.mockResolvedValueOnce([{ total: 0 }]);
+      mockSequelize.query.mockResolvedValueOnce([]);
+      mockSequelize.query.mockResolvedValueOnce([]);
+
+      await VideosModule.getVideosPaginated({ profileId: 5, watchedFilter: 'only' });
+
+      expect(mockWatchStatusQueries.buildWatchedExistsSql).toHaveBeenCalled();
+    });
+
+    test('should return a video once even when it belongs to several jobs', async () => {
+      mockSequelize.query.mockResolvedValueOnce([{ total: 1 }]);
+      mockSequelize.query.mockResolvedValueOnce([
+        { id: 5, youtubeId: 'dup', filePath: null },
+        { id: 5, youtubeId: 'dup', filePath: null },
+      ]);
+      mockSequelize.query.mockResolvedValueOnce([]);
+
+      const result = await VideosModule.getVideosPaginated();
+
+      expect(result.videos.filter((v) => v.id === 5)).toHaveLength(1);
+    });
+
+    test('should not mention profiles without a profileId', async () => {
+      mockSequelize.query.mockResolvedValueOnce([{ total: 0 }]);
+      mockSequelize.query.mockResolvedValueOnce([]);
+      mockSequelize.query.mockResolvedValueOnce([]);
+
+      await VideosModule.getVideosPaginated();
+
+      expect(mockSequelize.query.mock.calls[0][0]).not.toContain('profile_subscriptions');
     });
 
     test('should apply watchedFilter=exclude as a NOT EXISTS clause', async () => {

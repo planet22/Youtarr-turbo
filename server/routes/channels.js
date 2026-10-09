@@ -1,5 +1,6 @@
 const express = require('express');
 const { EVENT_TYPES } = require('../modules/jobEventLog/eventCatalog');
+const { parseProfileId } = require('./profileQuery');
 
 // Tri-state filter query params ('off' | 'only' | 'exclude'). Any other
 // value (missing, empty string, garbage) falls back to 'off'.
@@ -20,7 +21,7 @@ const MAX_BULK_IGNORE_YOUTUBE_IDS = 500;
  * @param {Object} deps.ratingMapper - Rating validation/normalization module
  * @returns {express.Router}
  */
-module.exports = function createChannelRoutes({ verifyToken, channelModule, archiveModule, channelDownloadAllModule, ratingMapper, jobEventLog = { record: () => {} }, primeVideosForEventLog = async () => {} }) {
+module.exports = function createChannelRoutes({ verifyToken, channelModule, archiveModule, channelDownloadAllModule, ratingMapper, profileFollowers = { forChannel: async () => [] }, jobEventLog = { record: () => {} }, primeVideosForEventLog = async () => {} }) {
   const router = express.Router();
   const logger = require('../logger');
   const channelSettingsModule = require('../modules/channelSettingsModule');
@@ -80,6 +81,11 @@ module.exports = function createChannelRoutes({ verifyToken, channelModule, arch
    *         schema:
    *           type: string
    *         description: Filter by subfolder
+   *       - in: query
+   *         name: profileId
+   *         schema:
+   *           type: integer
+   *         description: Only channels this user profile follows
    *     responses:
    *       200:
    *         description: List of channels
@@ -95,6 +101,7 @@ module.exports = function createChannelRoutes({ verifyToken, channelModule, arch
         sortBy: req.query.sortBy,
         sortOrder: req.query.sortOrder,
         subFolder: req.query.subFolder,
+        profileId: parseProfileId(req.query.profileId),
       });
       res.json(result);
     } catch (error) {
@@ -314,7 +321,8 @@ module.exports = function createChannelRoutes({ verifyToken, channelModule, arch
     const channelId = req.params.channelId;
     try {
       const channelInfo = await channelModule.getChannelInfo(channelId, true);
-      res.json(channelInfo);
+      const profiles = await profileFollowers.forChannel(channelId);
+      res.json({ ...channelInfo, profiles });
     } catch (error) {
       logger.error({ err: error, channelId }, 'Error getting channel info');
       res.status(500).json({ error: error.message });

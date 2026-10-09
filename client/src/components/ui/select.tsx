@@ -60,6 +60,10 @@ export interface SelectProps {
   inputProps?: React.ButtonHTMLAttributes<HTMLButtonElement> & Record<`data-${string}`, string | number | boolean | undefined>;
   /** Override the ARIA role on the trigger. Use "combobox" for autocomplete-style selects. */
   triggerRole?: 'button' | 'combobox';
+  /** Accessible name for the trigger (forwarded; inputProps wins if both are set). */
+  'aria-label'?: string;
+  /** Forwarded to the trigger (inputProps wins if both are set). */
+  'data-testid'?: string;
 }
 
 const Select = React.forwardRef<HTMLButtonElement, SelectProps>(
@@ -90,6 +94,8 @@ const Select = React.forwardRef<HTMLButtonElement, SelectProps>(
     onOpen,
     onClose,
     style,
+    'aria-label': ariaLabel,
+    'data-testid': dataTestId,
   }, ref) => {
     // Manage open state internally so that onMouseDown (used by some tests)
     // can open the dropdown directly without relying on PointerEvent.
@@ -139,6 +145,8 @@ const Select = React.forwardRef<HTMLButtonElement, SelectProps>(
           role={triggerRole}
           aria-disabled={disabled ? 'true' : undefined}
           aria-labelledby={labelId}
+          aria-label={ariaLabel}
+          data-testid={dataTestId}
           // Tests use fireEvent.mouseDown to open the Select.
           // Radix only responds to pointerdown, so we open directly here.
           // We only open (not toggle) — Radix's own handler handles closing.

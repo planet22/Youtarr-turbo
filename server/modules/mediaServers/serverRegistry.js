@@ -12,7 +12,7 @@ class ServerRegistry {
     // — plexModule.getBaseUrl encapsulates that precedence. Pass the resolved URL into the adapter
     // via a cloned config so the adapter doesn't need to repeat the resolution.
     const plexUrl = plexModule.getBaseUrl(null, config);
-    if (plexUrl && config.plexApiKey) {
+    if (plexModule.isEnabled(config) && plexUrl && config.plexApiKey) {
       adapters.push(new PlexAdapter({ ...config, plexUrl }));
     }
     if (config.jellyfinEnabled && config.jellyfinUrl && config.jellyfinApiKey && config.jellyfinUserId) {

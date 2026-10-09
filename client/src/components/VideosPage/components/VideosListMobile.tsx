@@ -5,6 +5,7 @@ import { Database as MetadataCacheIcon, ClearCache as ClearCacheIcon, PipIcon } 
 import { formatDuration, formatYTDate } from '../../../utils';
 import { formatAddedDateTime, formatFileSize } from '../../../utils/formatters';
 import { getDisplayPath } from '../../../utils/paths';
+import { displayedFilePaths } from '../displayedFilePaths';
 import { getMediaTypeInfo } from '../../../utils/videoStatus';
 import { getEnabledChannelId } from '../../../utils/enabledChannels';
 import { VideoData, EnabledChannel } from '../../../types/VideoData';
@@ -17,6 +18,7 @@ import AvailabilityChip from '../../shared/AvailabilityChip';
 import WatchedChip from '../../shared/WatchedChip';
 import { SHARED_STATUS_CHIP_SMALL_STYLE } from '../../shared/chipStyles';
 import ChannelNameDisplay from './ChannelNameDisplay';
+import ProfileChips from '../../shared/ProfileChips';
 import CacheStatusChip from './CacheStatusChip';
 
 export interface VideosListMobileProps {
@@ -91,8 +93,7 @@ function VideosListMobile({
           : null;
 
         const showPathLine = showFilePath && Boolean(video.filePath || video.audioFilePath);
-        const pathText = [video.filePath, video.audioFilePath]
-          .filter((p): p is string => Boolean(p))
+        const pathText = displayedFilePaths(video)
           .map(getDisplayPath)
           .join('  •  ');
 
@@ -317,6 +318,9 @@ function VideosListMobile({
                 style={{ fontSize: '0.7rem' }}
                 onAddChannel={onAddChannel}
               />
+              {video.profiles && video.profiles.length > 0 && (
+                <ProfileChips profiles={video.profiles} compact />
+              )}
               <Stack direction="row" spacing={0.5} className="flex-wrap gap-1">
                 {!video.removed && (video.filePath || video.audioFilePath) && (
                   <DownloadFormatIndicator

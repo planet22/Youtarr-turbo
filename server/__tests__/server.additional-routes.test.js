@@ -553,7 +553,8 @@ describe('server routes - channel operations', () => {
       expect(res.body).toEqual({
         id: 'channel-1',
         title: 'Test Channel',
-        channel_id: 'UC123456'
+        channel_id: 'UC123456',
+        profiles: []
       });
     });
   });

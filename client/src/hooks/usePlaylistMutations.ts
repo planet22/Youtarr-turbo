@@ -6,6 +6,8 @@ import {
   PlaylistPreview,
   PlaylistSubscribeSettings,
 } from '../types/playlist';
+import { useProfileContext } from '../contexts/ProfileContext';
+import { followInProfile } from '../utils/profileFollow';
 
 interface UsePlaylistMutationsParams {
   token: string | null;
@@ -46,6 +48,7 @@ function authHeaders(token: string | null): Record<string, string> | undefined {
 export const usePlaylistMutations = ({ token }: UsePlaylistMutationsParams) => {
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const { activeProfileId } = useProfileContext();
 
   const fetchPlaylistInfo = useCallback(
     async (url: string): Promise<PlaylistPreview | null> => {
@@ -83,6 +86,9 @@ export const usePlaylistMutations = ({ token }: UsePlaylistMutationsParams) => {
           { url, settings },
           { headers: authHeaders(token) }
         );
+        if (activeProfileId !== null && res.data.playlist?.playlist_id) {
+          await followInProfile(token, activeProfileId, { playlists: [res.data.playlist.playlist_id] });
+        }
         return { playlist: res.data.playlist, restored: Boolean(res.data.restored) };
       } catch (err: unknown) {
         setError(extractMessage(err, 'Failed to subscribe to playlist'));
@@ -91,7 +97,7 @@ export const usePlaylistMutations = ({ token }: UsePlaylistMutationsParams) => {
         setPending(false);
       }
     },
-    [token]
+    [token, activeProfileId]
   );
 
   const unsubscribe = useCallback(

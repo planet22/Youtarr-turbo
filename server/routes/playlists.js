@@ -1,10 +1,11 @@
 const express = require('express');
 const { EVENT_TYPES } = require('../modules/jobEventLog/eventCatalog');
 const { createOverrideSettingsValidator } = require('./overrideSettingsValidator');
+const { parseProfileId } = require('./profileQuery');
 
-function createPlaylistRoutes({ verifyToken, playlistModule, downloadModule, m3uGenerator, mediaServers, models, channelSettingsModule, ratingMapper, subfolderModule, playlistVideoFilters, jobEventLog = { record: () => {} }, primeVideosForEventLog = async () => {} }) {
+function createPlaylistRoutes({ verifyToken, playlistModule, downloadModule, m3uGenerator, mediaServers, models, channelSettingsModule, ratingMapper, subfolderModule, playlistVideoFilters, profileFollowers = { attachToPlaylists: async (playlists) => playlists, forPlaylist: async () => [] }, jobEventLog = { record: () => {} }, primeVideosForEventLog = async () => {} }) {
   const router = express.Router();
-  const { Playlist, PlaylistVideo, Video } = models;
+  const { Playlist, PlaylistVideo, Video, ProfileSubscription } = models;
 
   // Keep the subfolder registry in sync when a playlist persists a real
   // default subfolder. register() ignores null/empty/sentinels and never throws.
@@ -63,6 +64,11 @@ function createPlaylistRoutes({ verifyToken, playlistModule, downloadModule, m3u
    *           type: integer
    *           default: 25
    *           maximum: 100
+   *       - in: query
+   *         name: profileId
+   *         schema:
+   *           type: integer
+   *         description: Only playlists this user profile follows
    *     responses:
    *       200:
    *         description: Paginated playlists
@@ -73,13 +79,27 @@ function createPlaylistRoutes({ verifyToken, playlistModule, downloadModule, m3u
     try {
       const page = parseInt(req.query.page || '1', 10);
       const pageSize = Math.min(parseInt(req.query.pageSize || '25', 10), 100);
+      const where = { enabled: true };
+      const profileId = parseProfileId(req.query.profileId);
+      if (profileId) {
+        const subs = await ProfileSubscription.findAll({
+          where: { profile_id: profileId, source_type: 'playlist' },
+          attributes: ['source_id'],
+          raw: true,
+        });
+        where.playlist_id = subs.map((s) => s.source_id);
+      }
       const { count, rows } = await Playlist.findAndCountAll({
-        where: { enabled: true },
+        where,
         limit: pageSize,
         offset: (page - 1) * pageSize,
         order: [['updatedAt', 'DESC']],
       });
-      res.json({ total: count, playlists: rows });
+      // "All profiles" view: show which profiles follow each playlist.
+      const playlists = profileId
+        ? rows
+        : await profileFollowers.attachToPlaylists(rows.map((r) => (r.toJSON ? r.toJSON() : r)));
+      res.json({ total: count, playlists });
     } catch (err) {
       req.log.error({ err }, 'GET /api/playlists failed');
       res.status(500).json({ error: 'Failed to list playlists' });
@@ -140,7 +160,8 @@ function createPlaylistRoutes({ verifyToken, playlistModule, downloadModule, m3u
       }
       const not_downloaded_count = candidateIds.length - downloadedExisting;
 
-      res.json({ playlist: p, not_downloaded_count, unsyncable_count });
+      const profiles = await profileFollowers.forPlaylist(req.params.playlistId);
+      res.json({ playlist: { ...(p.toJSON ? p.toJSON() : p), profiles }, not_downloaded_count, unsyncable_count });
     } catch (err) {
       req.log.error({ err }, 'GET /api/playlists/:playlistId failed');
       res.status(500).json({ error: 'Failed to fetch playlist' });

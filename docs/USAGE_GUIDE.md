@@ -426,6 +426,10 @@ Create separate media server libraries for different content types (e.g., kids c
    - Set age ratings and content restrictions per library
    - Share specific libraries with specific users
 
+> **Subfolders or user profiles?** Subfolders split content by *type*, and each channel lives in exactly one. If you want each *person* to have their own selection of channels and playlists, where one channel can appear in several people's libraries without being downloaded twice, use [User Profiles](GETTING_STARTED_USER_PROFILES.md) instead (or as well).
+
+Manually pasted downloads (Download Individual Videos) follow the same rules: real downloads and STRMs both land in the subfolder of the video's own channel if you're subscribed to it, otherwise the global default subfolder, unless you pick a subfolder override when downloading.
+
 ## Browse and Filter Channel Videos
 
 Explore all videos available from your subscribed channels, even if you haven't downloaded them yet. This feature uses yt-dlp to fetch channel information directly from YouTube - no API key required.
@@ -574,7 +578,7 @@ Open **Settings -> Watch Status** to:
 
 - A **Watched** chip appears on videos in the Videos page, channel pages, and playlist pages. Hover it to see which servers reported the watch.
 - The video detail modal lists per-user detail: who watched it, on which server, how far through, and when.
-- On the Videos page and channel pages, the **Watched** filter chip cycles through three states: off, show only watched, or hide watched.
+- On the Videos page and channel pages, the **Watched** filter chip cycles through three states: off, show only watched, or hide watched. With a [user profile](GETTING_STARTED_USER_PROFILES.md) selected in the header, the Videos page's Watched filter means watched by that profile's linked Jellyfin and/or Plex user.
 - On a playlist page, use the **Watched** dropdown (All / Watched / Not watched) next to the **Show** control.
 
 When you filter for unwatched videos, the results include videos that have never been synced. Youtarr-Turbo can't tell "not watched" apart from "no data yet", so it errs on the side of showing them.
@@ -694,6 +698,7 @@ Now that you know how to use Youtarr-Turbo's features, check out these guides fo
 - [API Integration Guide](API_INTEGRATION.md) - Bookmarklets, mobile shortcuts, and automation
 - [Media Server Setup](MEDIA_SERVERS.md) - Configure Plex, Kodi, Jellyfin, or Emby
 - [Media Server Playlists](MEDIA_SERVER_PLAYLISTS.md) - Sync subscribed playlists to Plex, Jellyfin, and Emby
+- [Multiple Users (User Profiles)](GETTING_STARTED_USER_PROFILES.md) - Per-person libraries, playlists and watched state
 - [Troubleshooting Guide](TROUBLESHOOTING.md) - Solutions to common issues
 - [Database Management](DATABASE.md) - Advanced database operations
 

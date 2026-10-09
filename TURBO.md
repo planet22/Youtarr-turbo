@@ -2,7 +2,7 @@
 
 Youtarr-Turbo is a fork of [DialmasterOrg/Youtarr](https://github.com/DialmasterOrg/Youtarr) — the self-hosted YouTube downloader — built on top of upstream **v1.80.0**. Everything upstream does, it still does (see the main [README.md](README.md) for the base feature set, install instructions, and Docker deployment). This document covers only what Turbo adds or changes on top of that baseline: new subsystems, every new/changed setting, and the reasoning behind each.
 
-> **Quick guides:** [Streaming (STRM + ytstream)](docs/GETTING_STARTED_STREAMING.md) · [Sonarr/Radarr via NZB](docs/GETTING_STARTED_NZB.md) · [Channel & Playlist Settings](docs/GETTING_STARTED_CHANNELS_PLAYLISTS.md)
+> **Quick guides:** [Streaming (STRM + ytstream)](docs/GETTING_STARTED_STREAMING.md) · [Sonarr/Radarr via NZB](docs/GETTING_STARTED_NZB.md) · [Channel & Playlist Settings](docs/GETTING_STARTED_CHANNELS_PLAYLISTS.md) · [Multiple Users (User Profiles)](docs/GETTING_STARTED_USER_PROFILES.md)
 
 ## Features (at a glance)
 
@@ -18,6 +18,7 @@ Youtarr-Turbo is a fork of [DialmasterOrg/Youtarr](https://github.com/Dialmaster
 - **Sonarr/Radarr/Prowlarr integration** — Youtarr-Turbo can impersonate a Newznab indexer and a SABnzbd download client simultaneously, so YouTube videos can be searched for and "grabbed" through your existing *arr stack, with a dedicated NZB diagnostics page for search/cache/grab activity.
 - **yt-dlp metadata caching** — every yt-dlp metadata extraction, regardless of which feature triggered it (streaming, downloading, STRM generation), is written to one persistent cache keyed by video ID, so any later feature that needs the same video's duration/fps/resolution/etc. reuses it instead of re-querying YouTube; the Library page can browse cached-but-untracked videos, and Settings lets you inspect or clear the cache.
 - **Obliterate** — a one-step, irreversible bulk action on the Videos page that deletes a video's file(s), erases its database record entirely (not just marks it removed), and clears any cached metadata/video, regardless of the video's current state.
+- **User profiles (multiple users)** — one login, several people: each profile follows its own channels and playlists and gets a folder of hardlinks (`__profiles__/<name>/`) to point a Jellyfin library at, so nothing is downloaded twice. A header picker scopes the channel, playlist and video lists to a profile; each profile with a Jellyfin user gets its own private copy of its playlists, a watched filter based on that user, optional "remove watched videos after N days", and global watched auto-removal waits for every profile still holding a video. See [Multiple Users](docs/GETTING_STARTED_USER_PROFILES.md).
 - **Maintenance extras** — resolution-tag backfill for videos downloaded before that feature existed, on top of the existing filesystem rescan.
 
 Everything below goes into detail on each of these, plus a full settings-page reference.

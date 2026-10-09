@@ -199,6 +199,12 @@ Not a global `config.json` field — set per-channel via the channel's `season_e
 
 ## Plex Integration
 
+### Enable Plex
+- **Config Key**: `plexEnabled`
+- **Type**: `boolean`
+- **Default**: `true`
+- **Description**: Master switch for the Plex integration (library refresh, playlist sync, profile libraries). Only an explicit `false` disables it, so installs created before this field existed keep working. Test Connection and Get Key still work while disabled.
+
 ### Plex API Key
 - **Config Key**: `plexApiKey`
 - **Type**: `string`
@@ -881,7 +887,7 @@ volumes:
 - **Config Key**: `autoRemovalWatchedEnabled`
 - **Type**: `boolean`
 - **Default**: `false`
-- **Description**: Delete videos after they have been watched on a connected media server (Plex/Jellyfin/Emby). What counts as watched follows `watchStatusWatchedRule`. Videos with no synced watch data are treated as unwatched and never removed by this rule. Requires watch status sync to be enabled (`watchStatusSyncEnabled`); when sync is disabled this strategy is skipped.
+- **Description**: Delete videos after they have been watched on a connected media server (Plex/Jellyfin/Emby). What counts as watched follows `watchStatusWatchedRule`. Videos with no synced watch data are treated as unwatched and never removed by this rule. A video that is still linked into a user profile (Settings > User Profiles) is only removed once that profile's Jellyfin user has watched it too; videos linked into a profile with no Jellyfin user are never removed by this rule. Requires watch status sync to be enabled (`watchStatusSyncEnabled`); when sync is disabled this strategy is skipped.
 
 ### Watched Removal: Days Since Watched
 - **Config Key**: `autoRemovalWatchedMinDaysSinceWatched`

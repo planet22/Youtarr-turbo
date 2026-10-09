@@ -24,6 +24,7 @@ import { Database as MetadataCacheIcon, ClearCache as ClearCacheIcon, Shield as 
 import { formatDuration, formatYTDate } from '../../../utils';
 import { formatAddedDateTime, formatExpiresIn } from '../../../utils/formatters';
 import { getDisplayPath } from '../../../utils/paths';
+import { displayedFilePaths } from '../displayedFilePaths';
 import { getMediaTypeInfo } from '../../../utils/videoStatus';
 import { getEnabledChannelId } from '../../../utils/enabledChannels';
 import { VideoData, EnabledChannel } from '../../../types/VideoData';
@@ -35,6 +36,7 @@ import { videoThumbnailUrl } from '../../../utils/videoThumbnail';
 import AvailabilityChip from '../../shared/AvailabilityChip';
 import { SHARED_STATUS_CHIP_SMALL_STYLE, SHARED_THEMED_CHIP_SMALL_STYLE } from '../../shared/chipStyles';
 import ChannelNameDisplay from './ChannelNameDisplay';
+import ProfileChips from '../../shared/ProfileChips';
 import CacheStatusChip from './CacheStatusChip';
 import WatchedChip from '../../shared/WatchedChip';
 
@@ -165,8 +167,7 @@ function VideosTable({
               );
               const mediaTypeInfo = getMediaTypeInfo(video.media_type);
               const downloadedTooltip = videoCacheExpiryText(video);
-              const pathText = [video.filePath, video.audioFilePath]
-                .filter((p): p is string => Boolean(p))
+              const pathText = displayedFilePaths(video)
                 .map(getDisplayPath)
                 .join('  •  ');
 
@@ -329,6 +330,11 @@ function VideosTable({
                       variant="body2"
                       onAddChannel={onAddChannel}
                     />
+                    {video.profiles && video.profiles.length > 0 && (
+                      <div style={{ marginTop: 4 }}>
+                        <ProfileChips profiles={video.profiles} compact />
+                      </div>
+                    )}
                   </TableCell>
                   <TableCell style={{ whiteSpace: 'nowrap' }}>
                     {formatYTDate(video.originalDate)}

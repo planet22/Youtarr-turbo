@@ -3,6 +3,22 @@ const configModule = require('../configModule');
 const { PLEX_OWNER_ACCOUNT_ID } = require('./adapters/plexAdapter');
 const { Video, VideoWatchStatus, MediaServerUser } = require('../../models');
 
+// True when no user profile still holding a link to the video is waiting on
+// one of its linked users to watch it (see buildWatchedEligibilitySql). A
+// profile may have a Jellyfin identity, a Plex identity, both, or neither;
+// when both are set, BOTH must show watched before the guard clears for that
+// profile (the cautious choice - a video stays linked until everyone it's
+// linked for has actually seen it).
+const PROFILE_WATCHED_GUARD_SQL = 'NOT EXISTS (SELECT 1 FROM profile_video_links pvl'
+  + ' JOIN profiles p ON p.id = pvl.profile_id'
+  + ' WHERE pvl.video_id = Videos.id AND pvl.dismissed_at IS NULL'
+  + ' AND (p.jellyfin_user_id IS NULL OR NOT EXISTS (SELECT 1 FROM video_watch_status pw'
+  + ' WHERE pw.video_id = Videos.id AND pw.played = 1 AND pw.server_type = \'jellyfin\''
+  + ' AND pw.server_user_id = p.jellyfin_user_id))'
+  + ' AND (p.plex_user_id IS NULL OR NOT EXISTS (SELECT 1 FROM video_watch_status pw'
+  + ' WHERE pw.video_id = Videos.id AND pw.played = 1 AND pw.server_type = \'plex\''
+  + ' AND pw.server_user_id = p.plex_user_id)))';
+
 // Read-side companion to watchStatusSync: stateless queries over the rows the
 // sync writes. Kept separate so the orchestrator stays write-only and the
 // listing pages / video API don't depend on sync internals.
@@ -69,22 +85,39 @@ class WatchStatusQueries {
     };
   }
 
+  // Watched by one specific server user (a user profile's Jellyfin user),
+  // regardless of watchStatusWatchedRule.
+  buildUserWatchedExistsSql(serverType, serverUserId) {
+    return {
+      sql: 'EXISTS (SELECT 1 FROM video_watch_status vws WHERE vws.video_id = Videos.id AND vws.played = 1'
+        + ' AND vws.server_type = :watchedServerType AND vws.server_user_id = :watchedServerUserId)',
+      replacements: { watchedServerType: serverType, watchedServerUserId: serverUserId },
+    };
+  }
+
   // Auto-removal's "safe to delete as watched" predicate. With
   // minDaysSinceWatched set it also requires that NO qualifying watch is
   // newer than the cutoff. A played row with a NULL last_watched_at blocks
   // deletion (we can't prove when it was watched), so unknown watch dates
   // always err on the side of keeping files.
+  //
+  // A video still linked into a user profile is only eligible once every
+  // linked identity on that profile (Jellyfin and/or Plex) has watched it too
+  // - deleting it removes it from every profile. A profile with neither
+  // identity set can't report watches, so its linked videos are never
+  // eligible.
   buildWatchedEligibilitySql({ minDaysSinceWatched = 0 } = {}) {
     const watched = this.buildWatchedExistsSql();
     if (!minDaysSinceWatched || minDaysSinceWatched <= 0) {
-      return watched;
+      return { sql: `(${watched.sql} AND ${PROFILE_WATCHED_GUARD_SQL})`, replacements: watched.replacements };
     }
     const { conditions, replacements } = this._watchedRuleConditions();
     const recentConditions = conditions.concat(
       '(vws.last_watched_at IS NULL OR vws.last_watched_at > DATE_SUB(NOW(), INTERVAL :watchedMinDaysSinceWatched DAY))'
     );
     return {
-      sql: `(${watched.sql} AND NOT EXISTS (SELECT 1 FROM video_watch_status vws WHERE ${recentConditions.join(' AND ')}))`,
+      sql: `(${watched.sql} AND NOT EXISTS (SELECT 1 FROM video_watch_status vws WHERE ${recentConditions.join(' AND ')})`
+        + ` AND ${PROFILE_WATCHED_GUARD_SQL})`,
       replacements: {
         ...watched.replacements,
         ...replacements,

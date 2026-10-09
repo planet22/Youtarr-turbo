@@ -23,6 +23,7 @@ describe('VideoDeletionModule STRM revert, cache expiry and purge', () => {
   let VideoWatchStatus;
   let archiveModule;
   let m3uGenerator;
+  let profileModule;
   let configValues;
   let sequelize;
   const TRANSACTION = { id: 'tx' };
@@ -69,6 +70,8 @@ describe('VideoDeletionModule STRM revert, cache expiry and purge', () => {
     jest.doMock('../configModule', () => ({ directoryPath: dir, getConfig: jest.fn(() => configValues) }));
     jest.doMock('../archiveModule', () => archiveModule);
     jest.doMock('../m3uGenerator', () => m3uGenerator);
+    profileModule = { syncVideo: jest.fn().mockResolvedValue([]) };
+    jest.doMock('../profiles/profileModule', () => profileModule);
 
     logger = require('../../logger');
     videoDeletionModule = require('../videoDeletionModule');
@@ -211,6 +214,15 @@ describe('VideoDeletionModule STRM revert, cache expiry and purge', () => {
 
       expect(result.success).toBe(true);
       expect(exists(strmPath)).toBe(true);
+    });
+
+    it('re-syncs user profile links after reverting', async () => {
+      const video = makeVideo();
+      Video.findByPk.mockResolvedValue(video);
+
+      await videoDeletionModule.revertToStrm(1);
+
+      expect(profileModule.syncVideo).toHaveBeenCalledWith(video);
     });
 
     it('ignores the auto-removal fallback setting', async () => {

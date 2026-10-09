@@ -8,7 +8,6 @@ jest.mock('path', () => jest.requireActual('path').posix);
 jest.mock('uuid', () => ({
   v4: jest.fn(() => 'generated-uuid')
 }));
-jest.mock('node-cron');
 jest.mock('../messageEmitter.js');
 jest.mock('../configModule');
 jest.mock('../../models/job');
@@ -40,7 +39,6 @@ describe('JobModule', () => {
   let JobModule;
   let fs;
   let fsPromises;
-  let cron;
   let MessageEmitter;
   let Job;
   let Video;
@@ -101,10 +99,6 @@ describe('JobModule', () => {
     }));
     fs = require('fs');
     fsPromises = fs.promises;
-
-    // Mock node-cron
-    cron = require('node-cron');
-    cron.schedule = jest.fn();
 
     // Mock MessageEmitter
     MessageEmitter = require('../messageEmitter.js');
@@ -227,17 +221,6 @@ describe('JobModule', () => {
 
       expect(Job.findAll).toHaveBeenCalled();
       expect(JobModule.jobs['db-job-1']).toBeDefined();
-    });
-
-    test('should schedule daily backfill', () => {
-      fs.existsSync.mockReturnValue(false);
-      fs.readFileSync.mockReturnValue(JSON.stringify({
-        plexApiKey: 'test-key',
-      }));
-
-      JobModule = require('../jobModule');
-
-      expect(cron.schedule).toHaveBeenCalledWith('20 2 * * *', expect.any(Function));
     });
 
     test('should attempt initial backfill after timeout', async () => {
@@ -2814,36 +2797,6 @@ describe('JobModule', () => {
           removed: false
         })
       );
-
-    });
-  });
-
-  describe('scheduleDailyBackfill', () => {
-    beforeEach(() => {
-      fs.existsSync.mockReturnValue(false);
-      fs.readFileSync.mockReturnValue(JSON.stringify({
-        plexApiKey: 'test-key',
-      }));
-      JobModule = require('../jobModule');
-    });
-
-    test('should schedule cron job for daily backfill', () => {
-
-      JobModule.scheduleDailyBackfill();
-
-      expect(cron.schedule).toHaveBeenCalledWith('20 2 * * *', expect.any(Function));
-      expect(logger.info).toHaveBeenCalled();
-
-    });
-
-    test('should handle cron scheduling errors', () => {
-      cron.schedule.mockImplementation(() => {
-        throw new Error('Cron error');
-      });
-
-      JobModule.scheduleDailyBackfill();
-
-      expect(logger.error).toHaveBeenCalled();
 
     });
   });

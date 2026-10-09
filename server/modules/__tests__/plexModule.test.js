@@ -167,6 +167,15 @@ describe('plexModule', () => {
       );
     });
 
+    test('skips refresh when plexEnabled is false', async () => {
+      config.plexEnabled = false;
+
+      const result = await plexModule.refreshLibrary();
+
+      expect(result).toBeNull();
+      expect(axios.get).not.toHaveBeenCalled();
+    });
+
     test('uses explicit libraryId argument when provided', async () => {
       axios.get.mockResolvedValue({ status: 200 });
 

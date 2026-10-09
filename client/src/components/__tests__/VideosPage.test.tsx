@@ -4,6 +4,7 @@ import '@testing-library/jest-dom';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import VideosPage from '../VideosPage';
 import { VideoData } from '../../types/VideoData';
+import { createActiveProfileWrapper } from '../../test-utils';
 
 jest.mock('axios', () => ({
   get: jest.fn()
@@ -452,6 +453,24 @@ describe('VideosPage Component', () => {
       await waitFor(() => {
         expect(axios.get).toHaveBeenCalled();
       });
+    });
+
+    test('requests untracked rows when no profile is selected', async () => {
+      axios.get.mockResolvedValueOnce({ data: mockPaginatedResponse([]) });
+
+      render(<VideosPage token={mockToken} />);
+
+      await waitFor(() => expect(axios.get).toHaveBeenCalled());
+      expect(axios.get.mock.calls[0][0]).toContain('showUntracked=true');
+    });
+
+    test('stops requesting untracked rows while a profile is selected', async () => {
+      axios.get.mockResolvedValueOnce({ data: mockPaginatedResponse([]) });
+
+      render(<VideosPage token={mockToken} />, { wrapper: createActiveProfileWrapper({ id: 3, name: 'Kid' }) });
+
+      await waitFor(() => expect(axios.get).toHaveBeenCalled());
+      expect(axios.get.mock.calls[0][0]).not.toContain('showUntracked');
     });
 
     test('fetches and displays videos when token is provided', async () => {

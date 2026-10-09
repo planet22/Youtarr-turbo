@@ -96,6 +96,7 @@ function initialize(deps = {}) {
   const configModule = require('./configModule');
   const jobEventLog = require('./jobEventLog');
   const videoThumbnailCache = require('./videoThumbnailCache');
+  const subfolderModule = require('./subfolderModule');
   const { refreshYtDlpVersionCache } = deps;
 
   logger.info('Initializing scheduled cron jobs');
@@ -190,6 +191,61 @@ function initialize(deps = {}) {
       }
     } catch (error) {
       logger.error({ err: error }, 'Error during untracked hls-buffer cache expiry sweep');
+    }
+  });
+
+  // ============================================================================
+  // USER PROFILE MAINTENANCE - 2:20 AM Daily
+  // ============================================================================
+  // Per user profile (Settings -> User Profiles): first re-checks every
+  // profile's hardlinks against the library (drops links of videos the rescan
+  // marked missing), then unlinks videos the profile's Jellyfin user watched
+  // more than remove_watched_after_days ago. Only profile hardlinks are ever
+  // removed; library files stay. No-op when there are no profiles.
+  const profileModule = require('./profiles/profileModule');
+  defineTask({
+    id: 'profile-maintenance',
+    label: 'Profile maintenance',
+    description: 'Re-checks user profile links against the library and removes watched videos from profiles that have "remove watched videos" set. Library files are kept.',
+    cron: '20 2 * * *',
+    confirm: false,
+  }, async () => {
+    try {
+      const result = await profileModule.reconcileAll();
+      if (result.linked > 0 || result.unlinked > 0 || result.failed > 0) {
+        logger.info(result, 'Profile link re-check completed');
+      }
+    } catch (error) {
+      logger.error({ err: error }, 'Error during profile link re-check');
+    }
+    try {
+      const result = await profileModule.removeWatchedLinks();
+      if (result.removed > 0 || result.failed > 0) {
+        logger.info(result, 'Profile watched-video removal completed');
+      }
+    } catch (error) {
+      logger.error({ err: error }, 'Error during profile watched-video removal');
+    }
+  });
+
+  // ============================================================================
+  // COMPLETE.LIST BACKFILL - 2:20 AM Daily
+  // ============================================================================
+  // Recovers Videos/ChannelVideos rows from yt-dlp's complete.list + .info.json
+  // files for anything the DB is missing (e.g. after an out-of-band restore).
+  // Also runs once at server startup; see jobModule's constructor.
+  const jobModule = require('./jobModule');
+  defineTask({
+    id: 'complete-list-backfill',
+    label: 'Complete.list backfill',
+    description: 'Recovers missing video/channel-video rows from yt-dlp\'s complete.list and .info.json files.',
+    cron: '20 2 * * *',
+    confirm: false,
+  }, async () => {
+    try {
+      await jobModule.backfillFromCompleteList();
+    } catch (error) {
+      logger.error({ err: error }, 'Scheduled complete.list backfill failed');
     }
   });
 
@@ -363,6 +419,30 @@ function initialize(deps = {}) {
       if (deleted > 0) logger.info({ deleted }, 'Pruned unused video thumbnails');
     } catch (error) {
       logger.error({ err: error }, 'Error pruning unused video thumbnails');
+    }
+  });
+
+  // ============================================================================
+  // UNUSED SUBFOLDER PRUNE - 3:40 AM Daily
+  // ============================================================================
+  // Subfolder names are registered permanently (channel/playlist settings,
+  // download completion, subscription import) and nothing deregisters them
+  // when a channel/playlist moves off a name or is deleted, so the folder
+  // dropdowns accumulate stale entries. This removes any that are unused,
+  // not the default, not Plex-mapped, and empty on disk - the same criteria
+  // the manual "Manage Subfolders" delete already enforces.
+  defineTask({
+    id: 'subfolder-prune',
+    label: 'Unused subfolder prune',
+    description: 'Removes subfolder registry entries no longer referenced by any channel or playlist and empty on disk.',
+    cron: '40 3 * * *',
+    confirm: false,
+  }, async () => {
+    try {
+      const removed = await subfolderModule.pruneUnused();
+      if (removed.length > 0) logger.info({ removed }, 'Pruned unused subfolders');
+    } catch (error) {
+      logger.error({ err: error }, 'Error pruning unused subfolders');
     }
   });
 

@@ -7,6 +7,7 @@ jest.mock('axios', () => ({
 const axios = require('axios');
 
 const { useVideosData } = require('../useVideosData');
+const { createActiveProfileWrapper } = require('../../../../test-utils');
 
 const baseParams = {
   token: 'test-token',
@@ -51,6 +52,20 @@ const buildResponse = (videos: { id: number; youtubeId: string }[]) => ({
 describe('useVideosData', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+  });
+
+  test('scopes the request to the active profile', async () => {
+    axios.get.mockResolvedValue(buildResponse([]));
+    renderHook(() => useVideosData(baseParams), { wrapper: createActiveProfileWrapper({ id: 8, name: 'Kid' }) });
+    await waitFor(() => expect(axios.get).toHaveBeenCalled());
+    expect(axios.get.mock.calls[0][0]).toContain('profileId=8');
+  });
+
+  test('omits profileId when no profile is active', async () => {
+    axios.get.mockResolvedValue(buildResponse([]));
+    renderHook(() => useVideosData(baseParams));
+    await waitFor(() => expect(axios.get).toHaveBeenCalled());
+    expect(axios.get.mock.calls[0][0]).not.toContain('profileId');
   });
 
   test('does not fetch when token is null', () => {

@@ -12,6 +12,7 @@ import { Database as MetadataCacheIcon, ClearCache as ClearCacheIcon, PipIcon } 
 import { formatDuration, formatYTDate } from '../../../utils';
 import { formatAddedDateTime, formatFileSize } from '../../../utils/formatters';
 import { getDisplayPath } from '../../../utils/paths';
+import { displayedFilePaths } from '../displayedFilePaths';
 import { getMediaTypeInfo } from '../../../utils/videoStatus';
 import { getEnabledChannelId } from '../../../utils/enabledChannels';
 import { VideoData, EnabledChannel } from '../../../types/VideoData';
@@ -23,6 +24,7 @@ import { videoThumbnailUrl } from '../../../utils/videoThumbnail';
 import AvailabilityChip from '../../shared/AvailabilityChip';
 import { SHARED_STATUS_CHIP_SMALL_STYLE } from '../../shared/chipStyles';
 import ChannelNameDisplay from './ChannelNameDisplay';
+import ProfileChips from '../../shared/ProfileChips';
 import CacheStatusChip from './CacheStatusChip';
 import WatchedChip from '../../shared/WatchedChip';
 
@@ -273,6 +275,11 @@ function VideoCard({
             className="block"
             onAddChannel={onAddChannel}
           />
+          {video.profiles && video.profiles.length > 0 && (
+            <div style={{ marginTop: 4 }}>
+              <ProfileChips profiles={video.profiles} compact />
+            </div>
+          )}
         </Box>
 
         <Box className="grid grid-cols-2 gap-x-2 gap-y-1 text-xs">
@@ -431,8 +438,7 @@ function VideoCard({
             color="text.secondary"
             style={{ wordBreak: 'break-all', display: 'block' }}
           >
-            {[video.filePath, video.audioFilePath]
-              .filter((p): p is string => Boolean(p))
+            {displayedFilePaths(video)
               .map(getDisplayPath)
               .join('  •  ')}
           </Typography>

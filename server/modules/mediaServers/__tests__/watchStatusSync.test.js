@@ -170,12 +170,12 @@ describe('watchStatusSync', () => {
     expect(rows.every((r) => r.video_id === 7 && r.server_type === 'jellyfin')).toBe(true);
   });
 
-  test('matches every user entry of the best-scoring path, not just one', async () => {
-    // Same basename in two paths; only the better-matching path's users count.
+  test('matches each user from their own best-scoring path', async () => {
+    // u3 only sees a second copy (e.g. a user profile's hardlink): still counted.
     const adapter = fakeAdapter('jellyfin', resolvedFetch([
       { path: '/media/Chan/Video A [id1].mp4', serverUserId: 'u1', played: true, playCount: 1, positionMs: null, percentWatched: 100, lastWatchedAt: null },
       { path: '/media/Chan/Video A [id1].mp4', serverUserId: 'u2', played: false, playCount: 0, positionMs: null, percentWatched: null, lastWatchedAt: null },
-      { path: '/stale/Other/Video A [id1].mp4', serverUserId: 'u3', played: true, playCount: 1, positionMs: null, percentWatched: 100, lastWatchedAt: null },
+      { path: '/media/__profiles__/Kid/Chan/Video A [id1].mp4', serverUserId: 'u3', played: true, playCount: 1, positionMs: null, percentWatched: 100, lastWatchedAt: null },
     ]));
     serverRegistry.getEnabledAdapters.mockReturnValue([adapter]);
     Video.findAll.mockResolvedValue([{ id: 7, filePath: '/data/Chan/Video A [id1].mp4' }]);
@@ -183,7 +183,21 @@ describe('watchStatusSync', () => {
     await watchStatusSync.syncAll();
 
     const [rows] = VideoWatchStatus.bulkCreate.mock.calls[0];
-    expect(rows.map((r) => r.server_user_id).sort()).toEqual(['u1', 'u2']);
+    expect(rows.map((r) => r.server_user_id).sort()).toEqual(['u1', 'u2', 'u3']);
+  });
+
+  test('a user seeing several copies is matched once, from the closest path', async () => {
+    const adapter = fakeAdapter('jellyfin', resolvedFetch([
+      { path: '/media/Chan/Video A [id1].mp4', serverUserId: 'u1', played: false, playCount: 0, positionMs: null, percentWatched: null, lastWatchedAt: null },
+      { path: '/media/__profiles__/Kid/Chan/Video A [id1].mp4', serverUserId: 'u1', played: true, playCount: 1, positionMs: null, percentWatched: 100, lastWatchedAt: null },
+    ]));
+    serverRegistry.getEnabledAdapters.mockReturnValue([adapter]);
+    Video.findAll.mockResolvedValue([{ id: 7, filePath: '/data/Chan/Video A [id1].mp4' }]);
+
+    await watchStatusSync.syncAll();
+
+    const [rows] = VideoWatchStatus.bulkCreate.mock.calls[0];
+    expect(rows).toEqual([expect.objectContaining({ server_user_id: 'u1', played: false })]);
   });
 
   test('upserts the media server user directory from the adapter user list', async () => {

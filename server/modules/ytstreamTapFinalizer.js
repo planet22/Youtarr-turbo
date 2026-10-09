@@ -7,6 +7,7 @@ const jobModule = require('./jobModule');
 const { serializeAuxData } = require('./jobAuxData');
 const jobEventLog = require('./jobEventLog');
 const { EVENT_TYPES } = require('./jobEventLog/eventCatalog');
+const profileModule = require('./profiles/profileModule');
 
 // Distinct from strmCacheOnPlay.js's STRM_CACHE_LABEL_PREFIX - this finalizer
 // runs after ytstream.js's own independent hls-buffer fetch, not a real
@@ -163,6 +164,10 @@ async function finalizeTapOutput({ youtubeId, tempPath, finalPath, sourceLabel =
     });
 
     logger.info({ youtubeId, finalPath, sourceLabel, jobId: jobInstance.id, downloadDurationSeconds, avgDownloadMBps }, 'ytstream: finalized - live stream tap/buffer saved as permanent download');
+
+    // This path skips the download completion step, so swap user profiles'
+    // .strm links for the real file here. Never throws.
+    await profileModule.syncVideo(videoInstance);
     return finalPath;
   } catch (err) {
     logger.warn({ err, youtubeId, tempPath, finalPath, sourceLabel }, 'ytstream: tap/buffer finalize failed');

@@ -9,7 +9,6 @@ const JobVideo = require('../models/jobvideo');
 const JobVideoDownload = require('../models/jobvideodownload');
 const ChannelVideo = require('../models/channelvideo');
 const videoPersistence = require('./videoPersistence');
-const cron = require('node-cron');
 const MessageEmitter = require('./messageEmitter.js'); // import the helper function
 const configModule = require('./configModule');
 const { isDownloadJob } = require('./download/jobTypes');
@@ -75,9 +74,8 @@ class JobModule {
       });
     }
 
-    // Schedule a daily backfill from complete.list and run an initial backfill
-    this.scheduleDailyBackfill();
-
+    // Daily backfill from complete.list is scheduled by cronJobs.js (task id
+    // 'complete-list-backfill'); run an initial backfill on startup here.
     const disableInitialBackfill = process.env.JOBMODULE_DISABLE_INITIAL_BACKFILL === 'true';
     if (!disableInitialBackfill) {
       setTimeout(() => {
@@ -1064,20 +1062,6 @@ class JobModule {
       }
     } catch (err) {
       logger.error({ err }, 'Backfill error');
-    }
-  }
-
-  // Schedule daily backfill at 2:20am local time
-  scheduleDailyBackfill() {
-    try {
-      cron.schedule('20 2 * * *', () => {
-        this.backfillFromCompleteList().catch((err) => {
-          logger.error({ err }, 'Scheduled backfill failed');
-        });
-      });
-      logger.info('Scheduled daily backfill from complete.list at 2:20am');
-    } catch (err) {
-      logger.error({ err }, 'Failed to schedule daily backfill');
     }
   }
 

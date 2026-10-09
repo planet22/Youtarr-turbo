@@ -2,11 +2,14 @@
 // to a Jellyfin user + library) that receives hardlinks of every downloaded
 // video from the channels and playlists the profile subscribes to. Videos are
 // downloaded once; each profile gets its own links.
+const path = require('path');
 const { Op } = require('sequelize');
 const logger = require('../../logger');
 const { sequelize } = require('../../db');
 const configModule = require('../configModule');
+const plexModule = require('../plexModule');
 const JellyfinAdapter = require('../mediaServers/adapters/jellyfinAdapter');
+const PlexAdapter = require('../mediaServers/adapters/plexAdapter');
 const { validateSubFolderName } = require('../filesystem/subfolderValidation');
 const mediaServerSync = require('../mediaServers/mediaServerSync');
 const { Profile, ProfileSubscription, ProfileVideoLink, Video, PlaylistVideo, Channel, Playlist, VideoWatchStatus } = require('../../models');
@@ -69,8 +72,14 @@ class ProfileModule {
       jellyfinUserId: profile.jellyfin_user_id,
       jellyfinUserName: profile.jellyfin_user_name,
       jellyfinLibraryId: profile.jellyfin_library_id,
+      plexUserId: profile.plex_user_id,
+      plexUserName: profile.plex_user_name,
+      plexLibraryId: profile.plex_library_id,
       removeWatchedAfterDays: profile.remove_watched_after_days ?? null,
-      folderPath: profileRootPath(this._baseDir(), profile.name),
+      // Relative to the output dir, same convention as event log messages
+      // (eventCatalog.js's libraryPath): the user knows this folder, not the
+      // container mount it sits under.
+      folderPath: path.relative(this._baseDir(), profileRootPath(this._baseDir(), profile.name)),
       channelCount: counts.channels || 0,
       playlistCount: counts.playlists || 0,
       videoCount: counts.videos || 0,
@@ -110,7 +119,12 @@ class ProfileModule {
     return profiles.map((p) => this._serialize(p, counts.get(p.id)));
   }
 
-  async create({ name, jellyfinUserId = null, jellyfinUserName = null, jellyfinLibraryId = null, removeWatchedAfterDays = null }) {
+  async create({
+    name,
+    jellyfinUserId = null, jellyfinUserName = null, jellyfinLibraryId = null,
+    plexUserId = null, plexUserName = null, plexLibraryId = null,
+    removeWatchedAfterDays = null,
+  }) {
     const validation = validateName(name);
     if (!validation.valid) throw makeError(validation.error, 400);
     if (!validateRemoveWatchedDays(removeWatchedAfterDays)) {
@@ -124,6 +138,9 @@ class ProfileModule {
       jellyfin_user_id: jellyfinUserId || null,
       jellyfin_user_name: jellyfinUserName || null,
       jellyfin_library_id: jellyfinLibraryId || null,
+      plex_user_id: plexUserId || null,
+      plex_user_name: plexUserName || null,
+      plex_library_id: plexLibraryId || null,
       remove_watched_after_days: removeWatchedAfterDays ?? null,
     });
     await profileLinker.ensureProfileRoot(this._baseDir(), clean);
@@ -145,6 +162,9 @@ class ProfileModule {
     if (fields.jellyfinUserId !== undefined) updates.jellyfin_user_id = fields.jellyfinUserId || null;
     if (fields.jellyfinUserName !== undefined) updates.jellyfin_user_name = fields.jellyfinUserName || null;
     if (fields.jellyfinLibraryId !== undefined) updates.jellyfin_library_id = fields.jellyfinLibraryId || null;
+    if (fields.plexUserId !== undefined) updates.plex_user_id = fields.plexUserId || null;
+    if (fields.plexUserName !== undefined) updates.plex_user_name = fields.plexUserName || null;
+    if (fields.plexLibraryId !== undefined) updates.plex_library_id = fields.plexLibraryId || null;
     if (fields.removeWatchedAfterDays !== undefined) {
       if (!validateRemoveWatchedDays(fields.removeWatchedAfterDays)) {
         throw makeError(`Remove-watched days must be a whole number from 1 to ${MAX_REMOVE_WATCHED_DAYS}`, 400);
@@ -152,11 +172,15 @@ class ProfileModule {
       updates.remove_watched_after_days = fields.removeWatchedAfterDays;
     }
 
-    const userChanged = updates.jellyfin_user_id !== undefined && updates.jellyfin_user_id !== profile.jellyfin_user_id;
-    // The old user's playlist copies belong to someone else now; drop them first.
-    if (userChanged) await mediaServerSync.removeProfileCopies(profile.id);
+    // Each server identity's playlist copies are dropped independently: the
+    // old user's copies belong to someone else now, but a change to one
+    // server's identity must not disturb the other server's working copies.
+    const jellyfinUserChanged = updates.jellyfin_user_id !== undefined && updates.jellyfin_user_id !== profile.jellyfin_user_id;
+    const plexUserChanged = updates.plex_user_id !== undefined && updates.plex_user_id !== profile.plex_user_id;
+    if (jellyfinUserChanged) await mediaServerSync.removeProfileCopies(profile.id, { serverType: 'jellyfin' });
+    if (plexUserChanged) await mediaServerSync.removeProfileCopies(profile.id, { serverType: 'plex' });
     await profile.update(updates);
-    if (userChanged) this._syncFollowedPlaylists(profile.id);
+    if (jellyfinUserChanged || plexUserChanged) this._syncFollowedPlaylists(profile.id);
 
     const [profileView] = (await this.list()).filter((p) => p.id === profile.id);
     return profileView;
@@ -450,15 +474,26 @@ class ProfileModule {
     return new JellyfinAdapter(config);
   }
 
-  /** Fire-and-forget refresh of each profile's own Jellyfin library. */
+  _plexAdapter() {
+    const config = configModule.getConfig();
+    if (!config.plexApiKey || !(config.plexUrl || config.plexIP)) return null;
+    return new PlexAdapter(config);
+  }
+
+  /** Fire-and-forget refresh of each profile's own Jellyfin and/or Plex library. */
   _refreshLibraries(profiles) {
-    const libraryIds = [...new Set(profiles.map((p) => p.jellyfin_library_id).filter(Boolean))];
-    if (libraryIds.length === 0) return;
-    const adapter = this._jellyfinAdapter();
-    if (!adapter) return;
-    this._refreshJellyfinLibraries(adapter, libraryIds).catch((err) => {
-      logger.warn({ err: err.message, libraryIds }, 'profiles: Jellyfin library refresh failed');
-    });
+    const jellyfinLibraryIds = [...new Set(profiles.map((p) => p.jellyfin_library_id).filter(Boolean))];
+    const adapter = jellyfinLibraryIds.length > 0 ? this._jellyfinAdapter() : null;
+    if (adapter) {
+      this._refreshJellyfinLibraries(adapter, jellyfinLibraryIds).catch((err) => {
+        logger.warn({ err: err.message, libraryIds: jellyfinLibraryIds }, 'profiles: Jellyfin library refresh failed');
+      });
+    }
+
+    // Plex's own refreshLibrary swallows its own errors and never throws, and
+    // has no Jellyfin-style empty-library quirk, so no equivalent workaround.
+    const plexLibraryIds = [...new Set(profiles.map((p) => p.plex_library_id).filter(Boolean))];
+    for (const libraryId of plexLibraryIds) plexModule.refreshLibrary(libraryId);
   }
 
   // Jellyfin skips a library folder that was empty at its last full scan
@@ -499,35 +534,55 @@ class ProfileModule {
   }
 
   /**
+   * One profile's linked identities (jellyfin and/or plex), as
+   * {serverType, serverUserId} pairs - whichever of its two user-id columns
+   * is actually set.
+   */
+  _profileIdentities(profile) {
+    return [
+      profile.jellyfin_user_id && { serverType: 'jellyfin', serverUserId: profile.jellyfin_user_id },
+      profile.plex_user_id && { serverType: 'plex', serverUserId: profile.plex_user_id },
+    ].filter(Boolean);
+  }
+
+  /**
    * Nightly: for profiles with remove_watched_after_days set, unlink videos
-   * the profile's Jellyfin user watched at least that many days ago. Only the
-   * profile's links go; library files and other profiles are untouched, and
-   * protected videos are kept. Removed videos are not linked in again.
+   * that EVERY one of the profile's linked identities (Jellyfin and/or Plex)
+   * watched at least that many days ago - a profile with both requires both
+   * to have watched before a video leaves it. Only the profile's links go;
+   * library files and other profiles are untouched, and protected videos are
+   * kept. Removed videos are not linked in again.
    * @returns {Promise<{profiles:number, removed:number, failed:number}>}
    */
   async removeWatchedLinks() {
     const profiles = await Profile.findAll({
-      where: { remove_watched_after_days: { [Op.gte]: 1 }, jellyfin_user_id: { [Op.ne]: null } },
+      where: {
+        remove_watched_after_days: { [Op.gte]: 1 },
+        [Op.or]: [{ jellyfin_user_id: { [Op.ne]: null } }, { plex_user_id: { [Op.ne]: null } }],
+      },
     });
     const result = { profiles: profiles.length, removed: 0, failed: 0 };
     const baseDir = this._baseDir();
 
     for (const profile of profiles) {
       const cutoff = new Date(Date.now() - profile.remove_watched_after_days * DAY_MS);
-      const watched = await VideoWatchStatus.findAll({
-        where: {
-          server_type: 'jellyfin',
-          server_user_id: profile.jellyfin_user_id,
-          played: true,
-          last_watched_at: { [Op.lte]: cutoff },
-        },
-        attributes: ['video_id'],
-        raw: true,
-      });
-      if (watched.length === 0) continue;
+      const identities = this._profileIdentities(profile);
+      const watchedSets = await Promise.all(identities.map(({ serverType, serverUserId }) =>
+        VideoWatchStatus.findAll({
+          where: { server_type: serverType, server_user_id: serverUserId, played: true, last_watched_at: { [Op.lte]: cutoff } },
+          attributes: ['video_id'],
+          raw: true,
+        }).then((rows) => new Set(rows.map((r) => r.video_id)))
+      ));
+      // AND across identities: every linked identity must show watched.
+      const watchedVideoIds = watchedSets.reduce(
+        (acc, set) => (acc === null ? set : new Set([...acc].filter((id) => set.has(id)))),
+        null
+      );
+      if (!watchedVideoIds || watchedVideoIds.size === 0) continue;
 
       const unprotected = await Video.findAll({
-        where: { id: watched.map((w) => w.video_id), protected: false },
+        where: { id: [...watchedVideoIds], protected: false },
         attributes: ['id'],
         raw: true,
       });
@@ -580,6 +635,17 @@ class ProfileModule {
     const adapter = this._jellyfinAdapter();
     if (!adapter) throw makeError('Jellyfin is not configured', 409);
     return adapter.listLibraries();
+  }
+
+  async listPlexUsers() {
+    const adapter = this._plexAdapter();
+    if (!adapter) throw makeError('Plex is not configured', 409);
+    return adapter.listHomeUsers();
+  }
+
+  async listPlexLibraries() {
+    if (!this._plexAdapter()) throw makeError('Plex is not configured', 409);
+    return plexModule.getLibraries();
   }
 }
 

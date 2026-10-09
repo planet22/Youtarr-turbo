@@ -84,7 +84,7 @@ const ChannelListRow: React.FC<ChannelListRowProps> = ({
               <ProtectedChip
                 autoRemovalProtected={channel.auto_removal_protected}
                 keepRecentCount={channel.auto_removal_keep_recent_count}
-              />a              
+              />
               <MediaModeChip mediaMode={channel.media_mode} globalMediaMode={globalMediaMode} />
               <LibraryModeChip libraryMode={channel.library_mode} globalLibraryMode={globalLibraryMode} />
             </div>)}

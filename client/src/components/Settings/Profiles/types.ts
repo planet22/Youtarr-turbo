@@ -4,6 +4,9 @@ export interface Profile {
   jellyfinUserId: string | null;
   jellyfinUserName: string | null;
   jellyfinLibraryId: string | null;
+  plexUserId: string | null;
+  plexUserName: string | null;
+  plexLibraryId: string | null;
   removeWatchedAfterDays: number | null;
   folderPath: string;
   channelCount: number;
@@ -16,6 +19,9 @@ export interface ProfileInput {
   jellyfinUserId: string | null;
   jellyfinUserName: string | null;
   jellyfinLibraryId: string | null;
+  plexUserId: string | null;
+  plexUserName: string | null;
+  plexLibraryId: string | null;
   removeWatchedAfterDays: number | null;
 }
 
@@ -46,6 +52,16 @@ export interface JellyfinUser {
 }
 
 export interface JellyfinLibrary {
+  id: string;
+  title: string;
+}
+
+export interface PlexUser {
+  id: string;
+  name: string;
+}
+
+export interface PlexLibrary {
   id: string;
   title: string;
 }

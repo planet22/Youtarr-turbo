@@ -45,6 +45,7 @@ function ProfileRow({ profile, busy, onEdit, onSubscriptions, onRelink, onDelete
         <Typography variant="body2" color="text.secondary">
           {profile.channelCount} channels, {profile.playlistCount} playlists, {profile.videoCount} videos linked
           {profile.jellyfinUserName ? ` · Jellyfin user: ${profile.jellyfinUserName}` : ''}
+          {profile.plexUserName ? ` · Plex user: ${profile.plexUserName}` : ''}
           {profile.removeWatchedAfterDays ? ` · removes watched after ${profile.removeWatchedAfterDays} days` : ''}
         </Typography>
       </div>
@@ -100,7 +101,7 @@ export function ProfilesSection({ token }: ProfilesSectionProps) {
           A profile is a folder under <code>__profiles__</code> that holds hardlinks of the videos from
           the channels and playlists you pick for it. Each video is downloaded once; every profile that
           follows it gets a link, so it uses no extra disk space. Add the profile folder as that
-          person&apos;s library in Jellyfin.
+          person&apos;s library in Jellyfin and/or Plex.
         </Typography>
 
         <div>

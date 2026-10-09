@@ -11,7 +11,10 @@ Profile.init(
     jellyfin_user_id: { type: DataTypes.STRING, allowNull: true },
     jellyfin_user_name: { type: DataTypes.STRING, allowNull: true },
     jellyfin_library_id: { type: DataTypes.STRING, allowNull: true },
-    // Unlink videos from this profile N days after its Jellyfin user watched them (NULL = never).
+    plex_user_id: { type: DataTypes.STRING, allowNull: true },
+    plex_user_name: { type: DataTypes.STRING, allowNull: true },
+    plex_library_id: { type: DataTypes.STRING, allowNull: true },
+    // Unlink videos from this profile N days after its linked user(s) watched them (NULL = never).
     remove_watched_after_days: { type: DataTypes.INTEGER, allowNull: true },
   },
   { sequelize, modelName: 'Profile', tableName: 'profiles', timestamps: true }

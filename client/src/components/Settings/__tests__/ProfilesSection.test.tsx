@@ -6,10 +6,12 @@ import { Profile } from '../Profiles/types';
 
 jest.mock('../Profiles/useProfiles', () => ({ useProfiles: jest.fn() }));
 jest.mock('../Profiles/useJellyfinProfileOptions', () => ({ useJellyfinProfileOptions: jest.fn() }));
+jest.mock('../Profiles/useProfilePlexOptions', () => ({ useProfilePlexOptions: jest.fn() }));
 jest.mock('../Profiles/useProfileSubscriptions', () => ({ useProfileSubscriptions: jest.fn() }));
 
 const { useProfiles } = require('../Profiles/useProfiles') as { useProfiles: jest.Mock };
 const { useJellyfinProfileOptions } = require('../Profiles/useJellyfinProfileOptions') as { useJellyfinProfileOptions: jest.Mock };
+const { useProfilePlexOptions } = require('../Profiles/useProfilePlexOptions') as { useProfilePlexOptions: jest.Mock };
 const { useProfileSubscriptions } = require('../Profiles/useProfileSubscriptions') as { useProfileSubscriptions: jest.Mock };
 
 const ALICE: Profile = {
@@ -18,6 +20,9 @@ const ALICE: Profile = {
   jellyfinUserId: 'u1',
   jellyfinUserName: 'alice',
   jellyfinLibraryId: null,
+  plexUserId: null,
+  plexUserName: null,
+  plexLibraryId: null,
   removeWatchedAfterDays: null,
   folderPath: '/data/__profiles__/Alice',
   channelCount: 2,
@@ -46,6 +51,7 @@ describe('ProfilesSection', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     useJellyfinProfileOptions.mockReturnValue({ users: [], libraries: [], loading: false, error: null });
+    useProfilePlexOptions.mockReturnValue({ users: [], libraries: [], loading: false, error: null });
     useProfileSubscriptions.mockReturnValue({
       sources: { channels: [], playlists: [] },
       subscriptions: { channels: [], playlists: [] },

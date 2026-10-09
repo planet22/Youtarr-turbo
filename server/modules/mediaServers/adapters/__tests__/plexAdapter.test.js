@@ -1044,4 +1044,90 @@ describe('PlexAdapter', () => {
       expect(axios.get).toHaveBeenCalledTimes(2);
     });
   });
+
+  describe('Home users (profile playlist ownership)', () => {
+    const cfgWithUuid = { ...cfg, uuid: 'CLIENT-UUID' };
+    const HOME_USERS_XML = '<?xml version="1.0" encoding="UTF-8"?>\n'
+      + '<MediaContainer size="2">\n'
+      + '  <User id="1" title="Admin" username="admin"/>\n'
+      + '  <User id="2" title="Kid" username=""/>\n'
+      + '</MediaContainer>';
+    const SWITCH_XML = '<?xml version="1.0" encoding="UTF-8"?>\n'
+      + '<user id="2" title="Kid" authenticationToken="SWITCHED-TOKEN"/>';
+
+    test('listHomeUsers parses the legacy XML response', async () => {
+      axios.get.mockResolvedValueOnce({ data: HOME_USERS_XML });
+      const adapter = new PlexAdapter(cfgWithUuid);
+      const users = await adapter.listHomeUsers();
+      expect(users).toEqual([
+        { id: '1', name: 'Admin' },
+        { id: '2', name: 'Kid' },
+      ]);
+      expect(axios.get).toHaveBeenCalledWith(
+        'https://plex.tv/api/home/users',
+        expect.objectContaining({ headers: expect.objectContaining({ 'X-Plex-Token': 'TOKEN', 'X-Plex-Client-Identifier': 'CLIENT-UUID' }) })
+      );
+    });
+
+    test('forUser switches, exchanges for a resource token, and overrides plexPlaylistToken', async () => {
+      axios.post.mockResolvedValueOnce({ data: SWITCH_XML });
+      axios.get.mockResolvedValueOnce({ data: { MediaContainer: { machineIdentifier: 'MACHINE123' } } }); // _getMachineId
+      axios.get.mockResolvedValueOnce({
+        data: [
+          { clientIdentifier: 'OTHER-SERVER', accessToken: 'wrong' },
+          { clientIdentifier: 'MACHINE123', accessToken: 'RESOURCE-TOKEN' },
+        ],
+      });
+
+      const adapter = new PlexAdapter(cfgWithUuid);
+      const userAdapter = await adapter.forUser('2');
+
+      expect(axios.post).toHaveBeenCalledWith(
+        'https://plex.tv/api/home/users/2/switch',
+        null,
+        expect.objectContaining({ headers: expect.objectContaining({ 'X-Plex-Token': 'TOKEN' }) })
+      );
+      expect(axios.get).toHaveBeenLastCalledWith(
+        'https://plex.tv/api/v2/resources',
+        // Must request JSON explicitly - axios's default multi-value Accept
+        // header makes plex.tv return XML instead, confirmed against a real
+        // server (data.find is not a function on an XML string).
+        expect.objectContaining({ headers: expect.objectContaining({ 'X-Plex-Token': 'SWITCHED-TOKEN', Accept: 'application/json' }) })
+      );
+      expect(userAdapter.playlistToken).toBe('RESOURCE-TOKEN');
+      // Admin-only state is untouched - the new adapter still uses the admin token elsewhere.
+      expect(userAdapter.token).toBe('TOKEN');
+    });
+
+    test('forUser throws when the home user has no access to this server', async () => {
+      axios.post.mockResolvedValueOnce({ data: SWITCH_XML });
+      axios.get.mockResolvedValueOnce({ data: { MediaContainer: { machineIdentifier: 'MACHINE123' } } });
+      axios.get.mockResolvedValueOnce({ data: [] });
+
+      const adapter = new PlexAdapter(cfgWithUuid);
+      await expect(adapter.forUser('2')).rejects.toThrow(/no access to this server/);
+    });
+
+    test('forUser treats a non-array /resources response as no access, rather than crashing', async () => {
+      // Regression: plex.tv falls back to an XML string here if Accept isn't
+      // forced to application/json - confirmed live. Must not throw a raw
+      // TypeError on whatever shape comes back.
+      axios.post.mockResolvedValueOnce({ data: SWITCH_XML });
+      axios.get.mockResolvedValueOnce({ data: { MediaContainer: { machineIdentifier: 'MACHINE123' } } });
+      axios.get.mockResolvedValueOnce({ data: '<MediaContainer size="0"></MediaContainer>' });
+
+      const adapter = new PlexAdapter(cfgWithUuid);
+      await expect(adapter.forUser('2')).rejects.toThrow(/no access to this server/);
+    });
+
+    test('deletePlaylist delegates to the stranded-playlist delete', async () => {
+      axios.delete.mockResolvedValueOnce({});
+      const adapter = new PlexAdapter(cfg);
+      await adapter.deletePlaylist('555');
+      expect(axios.delete).toHaveBeenCalledWith(
+        'http://plex:32400/playlists/555',
+        expect.objectContaining({ params: expect.objectContaining({ 'X-Plex-Token': 'TOKEN' }) })
+      );
+    });
+  });
 });

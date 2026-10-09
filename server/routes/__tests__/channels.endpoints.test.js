@@ -181,7 +181,7 @@ describe('channel routes: remaining endpoints', () => {
 
       const res = await makeApp().get('/getchannelinfo/UC1');
 
-      expect(res.body).toEqual({ id: 'UC1' });
+      expect(res.body).toEqual({ id: 'UC1', profiles: [] });
       expect(channelModule.getChannelInfo).toHaveBeenCalledWith('UC1', true);
     });
 

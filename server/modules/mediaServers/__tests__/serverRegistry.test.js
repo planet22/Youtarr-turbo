@@ -8,7 +8,10 @@ describe('serverRegistry', () => {
     jest.doMock('../adapters/plexAdapter', () => jest.fn().mockImplementation((c) => ({ __type: 'plex', c })));
     jest.doMock('../adapters/jellyfinAdapter', () => jest.fn().mockImplementation((c) => ({ __type: 'jellyfin', c })));
     jest.doMock('../adapters/embyAdapter', () => jest.fn().mockImplementation((c) => ({ __type: 'emby', c })));
-    plexModuleMock = { getBaseUrl: jest.fn() };
+    plexModuleMock = {
+      getBaseUrl: jest.fn(),
+      isEnabled: jest.fn((c) => c.plexEnabled !== false),
+    };
     jest.doMock('../../plexModule', () => plexModuleMock);
     serverRegistry = require('../serverRegistry');
   });
@@ -22,6 +25,18 @@ describe('serverRegistry', () => {
     };
     const adapters = serverRegistry.getEnabledAdapters(cfg);
     expect(adapters.map((a) => a.__type)).toEqual(['plex', 'jellyfin']);
+  });
+
+  test('omits Plex when plexEnabled is false', () => {
+    plexModuleMock.getBaseUrl.mockReturnValue('http://p');
+    const adapters = serverRegistry.getEnabledAdapters({ plexUrl: 'http://p', plexApiKey: 'tok', plexEnabled: false });
+    expect(adapters).toEqual([]);
+  });
+
+  test('includes Plex when plexEnabled is unset', () => {
+    plexModuleMock.getBaseUrl.mockReturnValue('http://p');
+    const adapters = serverRegistry.getEnabledAdapters({ plexUrl: 'http://p', plexApiKey: 'tok' });
+    expect(adapters.map((a) => a.__type)).toEqual(['plex']);
   });
 
   test('Plex enabled when URL resolvable from plexIP/plexPort even if plexUrl is empty', () => {

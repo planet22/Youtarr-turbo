@@ -57,6 +57,7 @@ export const CONFIG_FIELDS = {
   seriesOutputSubfolder: { default: '', trackChanges: true },
 
   // Plex integration
+  plexEnabled: { default: true, trackChanges: true },
   plexApiKey: { default: '', trackChanges: true },
   plexYoutubeLibraryId: { default: '', trackChanges: true },
   plexSubfolderLibraryMappings: {

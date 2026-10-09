@@ -43,24 +43,53 @@ describe('PlexIntegrationSection Component', () => {
     jest.clearAllMocks();
   });
 
+  describe('Enable switch', () => {
+    test('shows Disabled chip when plexEnabled is false', () => {
+      const props = createSectionProps({ config: createConfig({ plexEnabled: false }) });
+      renderWithProviders(<PlexIntegrationSection {...props} />);
+      expect(screen.getByText('Disabled')).toBeInTheDocument();
+    });
+
+    test('treats Plex as enabled by default', () => {
+      renderWithProviders(<PlexIntegrationSection {...createSectionProps()} />);
+      expect(screen.getByRole('checkbox', { name: 'Enable Plex integration' })).toBeChecked();
+    });
+
+    test('toggling the switch updates plexEnabled', async () => {
+      const props = createSectionProps();
+      renderWithProviders(<PlexIntegrationSection {...props} />);
+      await userEvent.click(screen.getByRole('checkbox', { name: 'Enable Plex integration' }));
+      expect(props.onConfigChange).toHaveBeenCalledWith({ plexEnabled: false });
+    });
+  });
+
+  describe('API key visibility', () => {
+    test('show button reveals the key field toggle label', async () => {
+      renderWithProviders(<PlexIntegrationSection {...createSectionProps()} />);
+      await userEvent.click(screen.getByRole('button', { name: 'Show Plex API key' }));
+      expect(screen.getByRole('button', { name: 'Hide Plex API key' })).toBeInTheDocument();
+    });
+  });
+
+
   describe('Component Rendering', () => {
     test('renders without crashing', () => {
       const props = createSectionProps();
       renderWithProviders(<PlexIntegrationSection {...props} />);
-      expect(screen.getByText('Plex Media Server Integration')).toBeInTheDocument();
+      expect(screen.getByText('Plex Integration')).toBeInTheDocument();
     });
 
     test('renders title correctly', () => {
       const props = createSectionProps();
       renderWithProviders(<PlexIntegrationSection {...props} />);
-      expect(screen.getByText('Plex Media Server Integration')).toBeInTheDocument();
+      expect(screen.getByText('Plex Integration')).toBeInTheDocument();
     });
 
     test('renders info alert about optional integration', () => {
       const props = createSectionProps();
       renderWithProviders(<PlexIntegrationSection {...props} />);
-      expect(screen.getByText('Optional Plex Integration')).toBeInTheDocument();
-      expect(screen.getByText(/Automatic library refresh after downloads/i)).toBeInTheDocument();
+      expect(screen.getByText('For library refresh and native playlists')).toBeInTheDocument();
+      expect(screen.getByText(/Refreshes your Plex library after downloads/i)).toBeInTheDocument();
     });
 
     test('displays all required form fields', () => {
@@ -810,7 +839,7 @@ describe('PlexIntegrationSection Component', () => {
     test('works without onMobileTooltipClick prop', () => {
       const props = createSectionProps({ onMobileTooltipClick: undefined });
       renderWithProviders(<PlexIntegrationSection {...props} />);
-      expect(screen.getByText('Plex Media Server Integration')).toBeInTheDocument();
+      expect(screen.getByText('Plex Integration')).toBeInTheDocument();
     });
   });
 
@@ -961,7 +990,7 @@ describe('PlexIntegrationSection Component', () => {
       statuses.forEach((status) => {
         const props = createSectionProps({ plexConnectionStatus: status });
         const { unmount } = renderWithProviders(<PlexIntegrationSection {...props} />);
-        expect(screen.getByText('Plex Media Server Integration')).toBeInTheDocument();
+        expect(screen.getByText('Plex Integration')).toBeInTheDocument();
         unmount();
       });
     });

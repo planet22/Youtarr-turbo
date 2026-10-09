@@ -199,6 +199,12 @@ Not a global `config.json` field — set per-channel via the channel's `season_e
 
 ## Plex Integration
 
+### Enable Plex
+- **Config Key**: `plexEnabled`
+- **Type**: `boolean`
+- **Default**: `true`
+- **Description**: Master switch for the Plex integration (library refresh, playlist sync, profile libraries). Only an explicit `false` disables it, so installs created before this field existed keep working. Test Connection and Get Key still work while disabled.
+
 ### Plex API Key
 - **Config Key**: `plexApiKey`
 - **Type**: `string`

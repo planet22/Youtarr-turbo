@@ -13,6 +13,10 @@ jest.mock('axios', () => ({
 
 const axios = require('axios');
 
+// The section runs one connection test on mount when credentials are saved;
+// queue a response for it so it doesn't consume the mocks a test sets up.
+const queueAutoTest = () => axios.post.mockResolvedValueOnce({ data: { ok: true } });
+
 const baseConfig = (overrides: Partial<ConfigState> = {}): ConfigState =>
   ({
     embyEnabled: true,
@@ -40,6 +44,7 @@ describe('MediaServerPlaylistSection', () => {
   });
 
   test('posts the prefixed field keys when testing the connection', async () => {
+    queueAutoTest();
     axios.post.mockResolvedValueOnce({ data: { ok: true, version: '4.7.0' } });
 
     renderWithProviders(
@@ -51,7 +56,7 @@ describe('MediaServerPlaylistSection', () => {
       />
     );
 
-    await userEvent.click(screen.getByRole('button', { name: /test connection/i }));
+    await userEvent.click(await screen.findByRole('button', { name: /test connection/i }));
 
     await waitFor(() => {
       expect(axios.post).toHaveBeenCalledWith(
@@ -67,6 +72,7 @@ describe('MediaServerPlaylistSection', () => {
   });
 
   test('shows the connected message on a successful test', async () => {
+    queueAutoTest();
     axios.post.mockResolvedValueOnce({ data: { ok: true, version: '4.7.0' } });
 
     renderWithProviders(
@@ -78,12 +84,13 @@ describe('MediaServerPlaylistSection', () => {
       />
     );
 
-    await userEvent.click(screen.getByRole('button', { name: /test connection/i }));
+    await userEvent.click(await screen.findByRole('button', { name: /test connection/i }));
 
     expect(await screen.findByText('Connected (v4.7.0)')).toBeInTheDocument();
   });
 
   test('uses jellyfin-prefixed keys when kind is jellyfin', async () => {
+    queueAutoTest();
     // Configured + enabled, so it fetches the user on mount first; the test-connection POST is second.
     axios.post.mockResolvedValueOnce({ data: { users: [{ id: 'u1', name: 'Alice' }] } });
     axios.post.mockResolvedValueOnce({ data: { ok: true } });
@@ -104,7 +111,7 @@ describe('MediaServerPlaylistSection', () => {
       />
     );
 
-    await userEvent.click(screen.getByRole('button', { name: /test connection/i }));
+    await userEvent.click(await screen.findByRole('button', { name: /test connection/i }));
 
     await waitFor(() => {
       expect(axios.post).toHaveBeenCalledWith(
@@ -116,6 +123,7 @@ describe('MediaServerPlaylistSection', () => {
   });
 
   test('resolves an already-configured user to its name on mount', async () => {
+    queueAutoTest();
     axios.post.mockResolvedValueOnce({
       data: { users: [{ id: 'u2', name: 'Bob' }] },
     });
@@ -154,10 +162,28 @@ describe('MediaServerPlaylistSection', () => {
       />
     );
 
-    expect(axios.post).not.toHaveBeenCalled();
+    expect(axios.post).not.toHaveBeenCalledWith(
+      '/api/mediaservers/emby/users',
+      expect.anything(),
+      expect.anything()
+    );
+  });
+
+  test('runs a connection test on mount when saved credentials exist', async () => {
+    queueAutoTest();
+    renderWithProviders(
+      <MediaServerPlaylistSection
+        kind="emby"
+        config={baseConfig()}
+        token="tok"
+        onConfigChange={jest.fn()}
+      />
+    );
+    expect((await screen.findAllByText('Connected')).length).toBeGreaterThan(0);
   });
 
   test('opening the user dropdown fetches the list from the server', async () => {
+    queueAutoTest();
     axios.post.mockResolvedValueOnce({
       data: { users: [{ id: 'u1', name: 'Alice' }] },
     });
@@ -189,7 +215,8 @@ describe('MediaServerPlaylistSection', () => {
   });
 
   test('refetches the user list each time the dropdown opens', async () => {
-    // Mount resolve (userId set) is the first POST; opening the dropdown refetches.
+    queueAutoTest();
+    // Auto-test + mount resolve (userId set) are the first two POSTs; opening the dropdown refetches.
     axios.post.mockResolvedValueOnce({
       data: { users: [{ id: 'u2', name: 'Bob' }] },
     });
@@ -212,19 +239,20 @@ describe('MediaServerPlaylistSection', () => {
     );
 
     await waitFor(() => {
-      expect(axios.post).toHaveBeenCalledTimes(1);
+      expect(axios.post).toHaveBeenCalledTimes(2);
     });
 
     fireEvent.mouseDown(screen.getByTestId('emby-user-select'));
 
     await waitFor(() => {
-      expect(axios.post).toHaveBeenCalledTimes(2);
+      expect(axios.post).toHaveBeenCalledTimes(3);
     });
     // The account added server-side since mount is now selectable.
     expect(await screen.findByRole('option', { name: 'Carol' })).toBeInTheDocument();
   });
 
   test('selecting a user from the dropdown reports its id', async () => {
+    queueAutoTest();
     const onConfigChange = jest.fn();
     axios.post.mockResolvedValueOnce({
       data: {
@@ -299,6 +327,7 @@ describe('MediaServerPlaylistSection', () => {
   });
 
   test('a failed mount resolve stays silent and falls back to the id', async () => {
+    queueAutoTest();
     axios.post.mockRejectedValueOnce(new Error('network down'));
 
     renderWithProviders(
@@ -311,7 +340,7 @@ describe('MediaServerPlaylistSection', () => {
     );
 
     await waitFor(() => {
-      expect(axios.post).toHaveBeenCalledTimes(1);
+      expect(axios.post).toHaveBeenCalledTimes(2);
     });
 
     expect(screen.queryByText(/Failed to fetch users/i)).not.toBeInTheDocument();
@@ -339,6 +368,7 @@ describe('MediaServerPlaylistSection', () => {
   });
 
   test('shows "No users found" when the server returns an empty list', async () => {
+    queueAutoTest();
     axios.post.mockResolvedValueOnce({ data: { users: [] } });
 
     renderWithProviders(
@@ -356,6 +386,7 @@ describe('MediaServerPlaylistSection', () => {
   });
 
   test('shows Connection Failed on the chip after a failed test', async () => {
+    queueAutoTest();
     axios.post.mockRejectedValueOnce(new Error('boom'));
     renderWithProviders(
       <MediaServerPlaylistSection
@@ -365,7 +396,7 @@ describe('MediaServerPlaylistSection', () => {
         onConfigChange={jest.fn()}
       />
     );
-    await userEvent.click(screen.getByRole('button', { name: /test connection/i }));
+    await userEvent.click(await screen.findByRole('button', { name: /test connection/i }));
     expect(await screen.findByText('Connection Failed')).toBeInTheDocument();
   });
 

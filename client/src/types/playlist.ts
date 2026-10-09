@@ -2,6 +2,8 @@
 export type PlaylistSortOrderSetting = 'default' | 'reversed';
 
 export interface Playlist {
+  // Profiles following this playlist; only sent in the all-profiles view.
+  profiles?: import('./ProfileFollower').ProfileFollower[];
   id: number;
   playlist_id: string;
   title: string;

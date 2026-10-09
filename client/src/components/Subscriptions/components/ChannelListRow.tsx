@@ -11,6 +11,7 @@ import { Delete as DeleteIcon } from '../../../lib/icons';
 import { Channel } from '../../../types/Channel';
 import { SubFolderChip, QualityChip, AutoDownloadChips, DurationFilterChip, TitleFilterChip, DownloadFormatConfigIndicator, TerminatedChip, MediaModeChip, ProtectedChip, LibraryModeChip } from './chips';
 import RatingBadge from '../../shared/RatingBadge';
+import ProfileFollowControl from './ProfileFollowControl';
 
 interface ChannelListRowProps {
   channel: Channel;
@@ -23,9 +24,14 @@ interface ChannelListRowProps {
   onRegexClick: (event: React.MouseEvent<HTMLElement>, regex: string) => void;
   isPendingAddition?: boolean;
   rowIndex?: number;
+  token?: string | null;
+  onProfilesChanged?: () => void;
+  /** Desktop list only: render the separate Users column (all-profiles view). */
+  showUsersColumn?: boolean;
 }
 
 export const CHANNEL_LIST_DESKTOP_TEMPLATE = 'minmax(260px, 1.6fr) repeat(3, minmax(140px, 1fr)) 56px';
+export const CHANNEL_LIST_DESKTOP_TEMPLATE_WITH_USERS = 'minmax(260px, 1.6fr) repeat(3, minmax(140px, 1fr)) minmax(110px, 0.8fr) 56px';
 
 const ChannelListRow: React.FC<ChannelListRowProps> = ({
   channel,
@@ -38,6 +44,9 @@ const ChannelListRow: React.FC<ChannelListRowProps> = ({
   onRegexClick,
   isPendingAddition,
   rowIndex,
+  token = null,
+  onProfilesChanged,
+  showUsersColumn = false,
 }) => {
   const [thumbnailVisible, setThumbnailVisible] = useState(true);
   const hasFilters = channel.min_duration || channel.max_duration || channel.title_filter_regex;
@@ -89,6 +98,19 @@ const ChannelListRow: React.FC<ChannelListRowProps> = ({
               <LibraryModeChip libraryMode={channel.library_mode} globalLibraryMode={globalLibraryMode} />
             </div>)}
         </div>
+        {isMobile && (
+          <div style={{ marginTop: 4 }}>
+            <ProfileFollowControl
+            token={token}
+            sourceType="channel"
+            sourceId={channel.channel_id}
+            sourceName={channel.uploader || 'channel'}
+            profiles={channel.profiles}
+            compact={isMobile}
+            onChanged={onProfilesChanged}
+          />
+          </div>
+        )}
         {isPendingAddition && <Chip label="Pending addition" size="small" color="warning" style={{ marginTop: 4 }} />}
       </div>
     </div>
@@ -172,7 +194,7 @@ const ChannelListRow: React.FC<ChannelListRowProps> = ({
         style={{
           width: '100%',
           display: 'grid',
-          gridTemplateColumns: CHANNEL_LIST_DESKTOP_TEMPLATE,
+          gridTemplateColumns: showUsersColumn ? CHANNEL_LIST_DESKTOP_TEMPLATE_WITH_USERS : CHANNEL_LIST_DESKTOP_TEMPLATE,
           columnGap: 16,
           alignItems: 'center',
         }}
@@ -231,6 +253,20 @@ const ChannelListRow: React.FC<ChannelListRowProps> = ({
           <DurationFilterChip minDuration={channel.min_duration} maxDuration={channel.max_duration} isMobile={isMobile} />
           <TitleFilterChip titleFilterRegex={channel.title_filter_regex} onRegexClick={onRegexClick} isMobile={isMobile} />
         </div>
+
+        {showUsersColumn && (
+          <div style={{ minWidth: 0, display: 'flex', alignItems: 'center' }}>
+            <ProfileFollowControl
+            token={token}
+            sourceType="channel"
+            sourceId={channel.channel_id}
+            sourceName={channel.uploader || 'channel'}
+            profiles={channel.profiles}
+            compact={isMobile}
+            onChanged={onProfilesChanged}
+          />
+          </div>
+        )}
 
         <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
           <Tooltip title="Remove channel">

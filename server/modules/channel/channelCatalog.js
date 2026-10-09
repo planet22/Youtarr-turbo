@@ -2,12 +2,16 @@ const { Op, fn, col, where } = require('sequelize');
 const logger = require('../../logger');
 const Channel = require('../../models/channel');
 const ProfileSubscription = require('../../models/profilesubscription');
+const Profile = require('../../models/profile');
+const createProfileFollowers = require('../profiles/profileFollowers');
 const channelMappers = require('./channelMappers');
 const channelThumbnails = require('./channelThumbnails');
 const channelProvisioning = require('./channelProvisioning');
 const m3uGenerator = require('../m3uGenerator');
 
 const SUB_FOLDER_DEFAULT_KEY = '__default__';
+
+const profileFollowers = createProfileFollowers({ Profile, ProfileSubscription });
 
 class ChannelCatalog {
   /**
@@ -202,8 +206,12 @@ class ChannelCatalog {
           return a.localeCompare(b);
         });
 
+      const channels = rows.map((channel) => channelMappers.mapChannelListEntry(channel));
+      // "All profiles" view: show which profiles follow each channel.
+      if (!profileId) await profileFollowers.attachToChannels(channels);
+
       return {
-        channels: rows.map((channel) => channelMappers.mapChannelListEntry(channel)),
+        channels,
         total: count,
         page: safePage,
         pageSize: safePageSize,

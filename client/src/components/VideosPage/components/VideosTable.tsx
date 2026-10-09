@@ -36,6 +36,7 @@ import { videoThumbnailUrl } from '../../../utils/videoThumbnail';
 import AvailabilityChip from '../../shared/AvailabilityChip';
 import { SHARED_STATUS_CHIP_SMALL_STYLE, SHARED_THEMED_CHIP_SMALL_STYLE } from '../../shared/chipStyles';
 import ChannelNameDisplay from './ChannelNameDisplay';
+import ProfileChips from '../../shared/ProfileChips';
 import CacheStatusChip from './CacheStatusChip';
 import WatchedChip from '../../shared/WatchedChip';
 
@@ -329,6 +330,11 @@ function VideosTable({
                       variant="body2"
                       onAddChannel={onAddChannel}
                     />
+                    {video.profiles && video.profiles.length > 0 && (
+                      <div style={{ marginTop: 4 }}>
+                        <ProfileChips profiles={video.profiles} compact />
+                      </div>
+                    )}
                   </TableCell>
                   <TableCell style={{ whiteSpace: 'nowrap' }}>
                     {formatYTDate(video.originalDate)}

@@ -5,6 +5,7 @@ import { Settings as SettingsIcon, Clock as AccessTimeIcon, Filter as FilterAltI
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { Channel } from '../types/Channel';
 import RatingBadge from './shared/RatingBadge';
+import ProfileChips from './shared/ProfileChips';
 import ChannelVideos from './ChannelPage/ChannelVideos';
 import ChannelSettingsDialog from './ChannelPage/ChannelSettingsDialog';
 import TerminatedNotice from './ChannelPage/components/TerminatedNotice';
@@ -569,6 +570,16 @@ function ChannelPage({ token }: ChannelPageProps) {
                   )}
                 </Box>
 
+                {/* Profiles following this channel (all-profiles view) */}
+                {channel?.profiles && channel.profiles.length > 0 && (
+                  <Box className="flex flex-col gap-1 col-span-2">
+                    <Typography variant="caption" color="text.secondary" className="font-semibold uppercase" style={{ fontSize: '0.65rem' }}>
+                      Profiles
+                    </Typography>
+                    <ProfileChips profiles={channel.profiles} compact />
+                  </Box>
+                )}
+
                 {/* Edit Button */}
                 <Box className="flex flex-col gap-1">
                   <Typography variant="caption" color="text.secondary" className="font-semibold uppercase" style={{ fontSize: '0.65rem', visibility: 'hidden', height: '0.7rem' }}>
@@ -695,6 +706,20 @@ function ChannelPage({ token }: ChannelPageProps) {
                     <span className="text-xs text-muted">Loading...</span>
                   )}
                 </Box>
+                {channel?.profiles && channel.profiles.length > 0 && (
+                  <Box className="flex items-center gap-2 flex-wrap">
+                    <Typography
+                      variant="body2"
+                      component="span"
+                      color="text.secondary"
+                      className="whitespace-nowrap inline-flex items-center"
+                      style={{ lineHeight: 1.2 }}
+                    >
+                      Profiles:
+                    </Typography>
+                    <ProfileChips profiles={channel.profiles} />
+                  </Box>
+                )}
               </Box>
               <Button
                 variant="outlined"

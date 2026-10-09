@@ -24,6 +24,7 @@ import { videoThumbnailUrl } from '../../../utils/videoThumbnail';
 import AvailabilityChip from '../../shared/AvailabilityChip';
 import { SHARED_STATUS_CHIP_SMALL_STYLE } from '../../shared/chipStyles';
 import ChannelNameDisplay from './ChannelNameDisplay';
+import ProfileChips from '../../shared/ProfileChips';
 import CacheStatusChip from './CacheStatusChip';
 import WatchedChip from '../../shared/WatchedChip';
 
@@ -274,6 +275,11 @@ function VideoCard({
             className="block"
             onAddChannel={onAddChannel}
           />
+          {video.profiles && video.profiles.length > 0 && (
+            <div style={{ marginTop: 4 }}>
+              <ProfileChips profiles={video.profiles} compact />
+            </div>
+          )}
         </Box>
 
         <Box className="grid grid-cols-2 gap-x-2 gap-y-1 text-xs">

@@ -15,6 +15,10 @@ jest.mock('../../m3uGenerator', () => ({
   deleteChannelM3UInBackground: jest.fn(),
 }));
 
+jest.mock('../../profiles/profileFollowers', () => () => ({
+  attachToChannels: jest.fn(async (channels) => channels),
+}));
+
 describe('channelCatalog', () => {
   let channelCatalog;
   let Channel;

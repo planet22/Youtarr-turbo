@@ -126,6 +126,21 @@ describe('watchStatusQueries', () => {
       expect(sql).toContain('pw.server_user_id = p.jellyfin_user_id');
     });
 
+    test('also guards on a profile\'s Plex identity', () => {
+      const { sql } = watchStatusQueries.buildWatchedEligibilitySql();
+
+      expect(sql).toContain('pw.server_type = \'plex\'');
+      expect(sql).toContain('pw.server_user_id = p.plex_user_id');
+    });
+
+    test('requires both identities (AND) when a profile has both set', () => {
+      const { sql } = watchStatusQueries.buildWatchedEligibilitySql();
+      // The jellyfin clause and the plex clause are ANDed together inside the
+      // guard, not ORed - a profile with both identities set needs both to
+      // have watched before the guard clears for it.
+      expect(sql).toContain(')) AND (p.plex_user_id IS NULL OR');
+    });
+
     test('ignores links already removed from a profile as watched', () => {
       const { sql } = watchStatusQueries.buildWatchedEligibilitySql();
 

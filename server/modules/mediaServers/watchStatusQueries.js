@@ -4,13 +4,20 @@ const { PLEX_OWNER_ACCOUNT_ID } = require('./adapters/plexAdapter');
 const { Video, VideoWatchStatus, MediaServerUser } = require('../../models');
 
 // True when no user profile still holding a link to the video is waiting on
-// its Jellyfin user to watch it (see buildWatchedEligibilitySql).
+// one of its linked users to watch it (see buildWatchedEligibilitySql). A
+// profile may have a Jellyfin identity, a Plex identity, both, or neither;
+// when both are set, BOTH must show watched before the guard clears for that
+// profile (the cautious choice - a video stays linked until everyone it's
+// linked for has actually seen it).
 const PROFILE_WATCHED_GUARD_SQL = 'NOT EXISTS (SELECT 1 FROM profile_video_links pvl'
   + ' JOIN profiles p ON p.id = pvl.profile_id'
   + ' WHERE pvl.video_id = Videos.id AND pvl.dismissed_at IS NULL'
   + ' AND (p.jellyfin_user_id IS NULL OR NOT EXISTS (SELECT 1 FROM video_watch_status pw'
   + ' WHERE pw.video_id = Videos.id AND pw.played = 1 AND pw.server_type = \'jellyfin\''
-  + ' AND pw.server_user_id = p.jellyfin_user_id)))';
+  + ' AND pw.server_user_id = p.jellyfin_user_id))'
+  + ' AND (p.plex_user_id IS NULL OR NOT EXISTS (SELECT 1 FROM video_watch_status pw'
+  + ' WHERE pw.video_id = Videos.id AND pw.played = 1 AND pw.server_type = \'plex\''
+  + ' AND pw.server_user_id = p.plex_user_id)))';
 
 // Read-side companion to watchStatusSync: stateless queries over the rows the
 // sync writes. Kept separate so the orchestrator stays write-only and the
@@ -94,10 +101,11 @@ class WatchStatusQueries {
   // deletion (we can't prove when it was watched), so unknown watch dates
   // always err on the side of keeping files.
   //
-  // A video still linked into a user profile is only eligible once that
-  // profile's Jellyfin user has watched it too - deleting it removes it from
-  // every profile. A profile without a Jellyfin user can't report watches, so
-  // its linked videos are never eligible.
+  // A video still linked into a user profile is only eligible once every
+  // linked identity on that profile (Jellyfin and/or Plex) has watched it too
+  // - deleting it removes it from every profile. A profile with neither
+  // identity set can't report watches, so its linked videos are never
+  // eligible.
   buildWatchedEligibilitySql({ minDaysSinceWatched = 0 } = {}) {
     const watched = this.buildWatchedExistsSql();
     if (!minDaysSinceWatched || minDaysSinceWatched <= 0) {

@@ -28,6 +28,8 @@ describe('Profile routes', () => {
       listSources: jest.fn().mockResolvedValue({ channels: [], playlists: [] }),
       listJellyfinUsers: jest.fn().mockResolvedValue([{ id: 'u1', name: 'Alice' }]),
       listJellyfinLibraries: jest.fn().mockResolvedValue([{ id: 'l1', title: 'Alice TV' }]),
+      listPlexUsers: jest.fn().mockResolvedValue([{ id: 'p1', name: 'Kid' }]),
+      listPlexLibraries: jest.fn().mockResolvedValue([{ id: 'pl1', title: 'Youtube Channels' }]),
     };
     const createProfileRoutes = require('../profiles');
     app = express();
@@ -167,5 +169,51 @@ describe('Profile routes', () => {
     mockProfileModule.listJellyfinLibraries.mockRejectedValueOnce(err);
     const res = await request(app).get('/api/profiles/jellyfin/libraries');
     expect(res.status).toBe(502);
+  });
+
+  test('GET /api/profiles/plex/users returns the users', async () => {
+    const res = await request(app).get('/api/profiles/plex/users');
+    expect(res.body).toEqual({ users: [{ id: 'p1', name: 'Kid' }] });
+  });
+
+  test('GET /api/profiles/plex/users returns 409 when Plex is not configured', async () => {
+    mockProfileModule.listPlexUsers.mockRejectedValueOnce(statusError('Plex is not configured', 409));
+    const res = await request(app).get('/api/profiles/plex/users');
+    expect(res.status).toBe(409);
+  });
+
+  test('GET /api/profiles/plex/libraries returns the libraries', async () => {
+    const res = await request(app).get('/api/profiles/plex/libraries');
+    expect(res.body).toEqual({ libraries: [{ id: 'pl1', title: 'Youtube Channels' }] });
+  });
+
+  test('GET /api/profiles/plex/libraries returns 502 when Plex is unreachable', async () => {
+    const err = new Error('ECONNREFUSED');
+    err.isAxiosError = true;
+    mockProfileModule.listPlexLibraries.mockRejectedValueOnce(err);
+    const res = await request(app).get('/api/profiles/plex/libraries');
+    expect(res.status).toBe(502);
+  });
+
+  test('POST /api/profiles passes the Plex fields to the module', async () => {
+    await request(app).post('/api/profiles').send({ name: 'Alice', plexUserId: 'p1', plexLibraryId: 'pl1' });
+    expect(mockProfileModule.create).toHaveBeenCalledWith(expect.objectContaining({
+      name: 'Alice',
+      plexUserId: 'p1',
+      plexLibraryId: 'pl1',
+    }));
+  });
+
+  test('POST /api/profiles rejects a non-string Plex id with 400', async () => {
+    const res = await request(app).post('/api/profiles').send({ name: 'Alice', plexUserId: 42 });
+    expect(res.status).toBe(400);
+  });
+
+  test('PUT /api/profiles/:id passes the Plex fields to the module', async () => {
+    await request(app).put('/api/profiles/1').send({ plexUserId: 'p1', plexUserName: 'Kid' });
+    expect(mockProfileModule.update).toHaveBeenCalledWith(1, expect.objectContaining({
+      plexUserId: 'p1',
+      plexUserName: 'Kid',
+    }));
   });
 });

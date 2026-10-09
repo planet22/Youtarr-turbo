@@ -18,6 +18,7 @@ import AvailabilityChip from '../../shared/AvailabilityChip';
 import WatchedChip from '../../shared/WatchedChip';
 import { SHARED_STATUS_CHIP_SMALL_STYLE } from '../../shared/chipStyles';
 import ChannelNameDisplay from './ChannelNameDisplay';
+import ProfileChips from '../../shared/ProfileChips';
 import CacheStatusChip from './CacheStatusChip';
 
 export interface VideosListMobileProps {
@@ -317,6 +318,9 @@ function VideosListMobile({
                 style={{ fontSize: '0.7rem' }}
                 onAddChannel={onAddChannel}
               />
+              {video.profiles && video.profiles.length > 0 && (
+                <ProfileChips profiles={video.profiles} compact />
+              )}
               <Stack direction="row" spacing={0.5} className="flex-wrap gap-1">
                 {!video.removed && (video.filePath || video.audioFilePath) && (
                   <DownloadFormatIndicator

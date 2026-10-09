@@ -4,6 +4,7 @@ import { Info as InfoIcon } from '../../../lib/icons';
 import { MediaServerStatus, MediaServerType, Playlist } from '../../../types/playlist';
 import LibraryDownloadsGroup from './LibraryDownloadsGroup';
 import MediaServerSyncGroup from './MediaServerSyncGroup';
+import ProfileChips from '../../shared/ProfileChips';
 
 interface PlaylistHeaderProps {
   playlist: Playlist;
@@ -115,6 +116,11 @@ const PlaylistHeader: React.FC<PlaylistHeaderProps> = ({
                   Last fetched: {formatTimestamp(playlist.lastFetched)}
                 </Typography>
               </Stack>
+              {playlist.profiles && playlist.profiles.length > 0 && (
+                <div className="mt-2">
+                  <ProfileChips profiles={playlist.profiles} compact={isMobile} />
+                </div>
+              )}
             </div>
 
             <div className="flex flex-col gap-4 lg:flex-row">

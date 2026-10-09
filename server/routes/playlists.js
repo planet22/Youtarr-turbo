@@ -3,7 +3,7 @@ const { EVENT_TYPES } = require('../modules/jobEventLog/eventCatalog');
 const { createOverrideSettingsValidator } = require('./overrideSettingsValidator');
 const { parseProfileId } = require('./profileQuery');
 
-function createPlaylistRoutes({ verifyToken, playlistModule, downloadModule, m3uGenerator, mediaServers, models, channelSettingsModule, ratingMapper, subfolderModule, playlistVideoFilters, jobEventLog = { record: () => {} }, primeVideosForEventLog = async () => {} }) {
+function createPlaylistRoutes({ verifyToken, playlistModule, downloadModule, m3uGenerator, mediaServers, models, channelSettingsModule, ratingMapper, subfolderModule, playlistVideoFilters, profileFollowers = { attachToPlaylists: async (playlists) => playlists, forPlaylist: async () => [] }, jobEventLog = { record: () => {} }, primeVideosForEventLog = async () => {} }) {
   const router = express.Router();
   const { Playlist, PlaylistVideo, Video, ProfileSubscription } = models;
 
@@ -95,7 +95,11 @@ function createPlaylistRoutes({ verifyToken, playlistModule, downloadModule, m3u
         offset: (page - 1) * pageSize,
         order: [['updatedAt', 'DESC']],
       });
-      res.json({ total: count, playlists: rows });
+      // "All profiles" view: show which profiles follow each playlist.
+      const playlists = profileId
+        ? rows
+        : await profileFollowers.attachToPlaylists(rows.map((r) => (r.toJSON ? r.toJSON() : r)));
+      res.json({ total: count, playlists });
     } catch (err) {
       req.log.error({ err }, 'GET /api/playlists failed');
       res.status(500).json({ error: 'Failed to list playlists' });
@@ -156,7 +160,8 @@ function createPlaylistRoutes({ verifyToken, playlistModule, downloadModule, m3u
       }
       const not_downloaded_count = candidateIds.length - downloadedExisting;
 
-      res.json({ playlist: p, not_downloaded_count, unsyncable_count });
+      const profiles = await profileFollowers.forPlaylist(req.params.playlistId);
+      res.json({ playlist: { ...(p.toJSON ? p.toJSON() : p), profiles }, not_downloaded_count, unsyncable_count });
     } catch (err) {
       req.log.error({ err }, 'GET /api/playlists/:playlistId failed');
       res.status(500).json({ error: 'Failed to fetch playlist' });

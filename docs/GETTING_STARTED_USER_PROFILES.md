@@ -136,6 +136,16 @@ profile ("Channel added to <profile>").
 
 The picker is remembered per browser.
 
+### Seeing who follows what
+
+In the **All profiles** view, Channels, Playlists, Videos and the channel and
+playlist pages show which profiles follow each item as chips: a name chip when
+one profile follows it, or a count chip (hover for the list) when several do.
+The Channels and Playlists lists have a **Users** column with a **+** button
+to add more profiles to that channel or playlist without leaving the list;
+existing followers are kept. With a single profile selected, the column just
+shows that profile.
+
 ## Playlists
 
 Every playlist a profile follows is also created, for each server identity

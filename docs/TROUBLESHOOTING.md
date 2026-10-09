@@ -697,7 +697,7 @@ See [Multiple Users § Troubleshooting](GETTING_STARTED_USER_PROFILES.md#trouble
 
 **Problem**: With a profile selected, **Watched** never matches anything even though the person has watched videos.
 
-**Solution**: The filter uses the profile's own Jellyfin user, so the profile needs a Jellyfin user (Edit), and watch status sync must include all Jellyfin users (Settings -> Watch Status). Click **Sync Now** to refresh.
+**Solution**: The filter uses the profile's own Jellyfin and/or Plex user, so the profile needs one of them (Edit), and watch status sync must include all users for that server (Settings -> Watch Status). Click **Sync Now** to refresh.
 
 ## Channel Import Issues
 

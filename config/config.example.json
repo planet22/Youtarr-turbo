@@ -13,6 +13,7 @@
     "defaultLibraryMode": "movie",
     "episodeFilenamePrefix": "S%(season)02dE%(episode)03d - %(title).64s",
     "seriesOutputSubfolder": "",
+    "plexEnabled": true,
     "plexIP": "",
     "plexPort": "32400",
     "plexViaHttps": false,

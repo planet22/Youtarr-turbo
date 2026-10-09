@@ -1,4 +1,5 @@
 import React, { ChangeEvent, useEffect, useState } from 'react';
+import { Eye, EyeOff } from 'lucide-react';
 import {
   TextField,
   Grid,
@@ -9,6 +10,8 @@ import {
   FormControlLabel,
   Alert,
   AlertTitle,
+  IconButton,
+  Switch,
   Typography,
 } from '../../ui';
 import { ConfigurationAccordion } from '../common/ConfigurationAccordion';
@@ -51,6 +54,7 @@ export const PlexIntegrationSection: React.FC<PlexIntegrationSectionProps> = ({
   // Auto-expand the playlist-scope disclosure when a test reveals an unclaimed
   // server, since those users must change the scope for playlists to appear.
   const [scopeOpen, setScopeOpen] = useState(false);
+  const [showApiKey, setShowApiKey] = useState(false);
   useEffect(() => {
     if (plexServerClaimed === false) setScopeOpen(true);
   }, [plexServerClaimed]);
@@ -75,9 +79,10 @@ export const PlexIntegrationSection: React.FC<PlexIntegrationSectionProps> = ({
   const handleCheckboxChange = (event: ChangeEvent<HTMLInputElement>) => {
     onConfigChange({ [event.target.name]: event.target.checked });
   };
-  const plexIntegrationEnabled = Boolean(hasPlexServerConfigured && config.plexApiKey);
+  const enabled = config.plexEnabled !== false;
 
   const getChipLabel = (): string => {
+    if (!enabled) return 'Disabled';
     switch (plexConnectionStatus) {
       case 'connected':
         return 'Connected';
@@ -90,7 +95,8 @@ export const PlexIntegrationSection: React.FC<PlexIntegrationSectionProps> = ({
     }
   };
 
-  const getChipColor = (): 'success' | 'error' | 'info' | 'warning' => {
+  const getChipColor = (): 'default' | 'success' | 'error' | 'info' | 'warning' => {
+    if (!enabled) return 'default';
     switch (plexConnectionStatus) {
       case 'connected':
         return 'success';
@@ -105,27 +111,16 @@ export const PlexIntegrationSection: React.FC<PlexIntegrationSectionProps> = ({
 
   return (
     <ConfigurationAccordion
-      title="Plex Media Server Integration"
+      title="Plex Integration"
       chipLabel={getChipLabel()}
       chipColor={getChipColor()}
-      statusBanner={{
-        enabled: plexIntegrationEnabled,
-        onText: 'Plex Integration Enabled',
-        offText: 'Plex Integration Disabled',
-        showToggle: false,
-      }}
-      defaultExpanded={false}
     >
       <Alert severity="info" className="mb-4">
-        <AlertTitle>Optional Plex Integration</AlertTitle>
+        <AlertTitle>For library refresh and native playlists</AlertTitle>
         <Typography variant="body2">
-          • Automatic library refresh after downloads
-          <br />• Direct library selection from Plex server
-          <br />• Required for Youtarr-Turbo-managed YouTube playlists to appear as native playlists in Plex
-          <br />
-          Without Plex, videos still download to the specified directory.
-          <br />
-          A library <b>must</b> be selected once connected for automatic refresh to work.
+          Refreshes your Plex library after downloads and lets Youtarr-Turbo-managed YouTube playlists
+          appear as native playlists in Plex. A library <b>must</b> be selected once connected for
+          automatic refresh to work. Downloads work without this connection.
         </Typography>
       </Alert>
 
@@ -151,6 +146,19 @@ export const PlexIntegrationSection: React.FC<PlexIntegrationSectionProps> = ({
       )}
 
       <Grid container spacing={3}>
+        <Grid item xs={12}>
+          <FormControlLabel
+            control={
+              <Switch
+                checked={enabled}
+                onChange={(event) => onConfigChange({ plexEnabled: event.target.checked })}
+                inputProps={{ 'aria-label': 'Enable Plex integration' }}
+              />
+            }
+            label="Enable Plex integration"
+          />
+        </Grid>
+
         <Grid item xs={12} md={5}>
           <TextField
             fullWidth
@@ -239,13 +247,33 @@ export const PlexIntegrationSection: React.FC<PlexIntegrationSectionProps> = ({
         <Grid item xs={12} lg={6}>
           <Box>
             <Box className="flex flex-col gap-2 md:flex-row md:items-start">
+              {/* Masked with CSS rather than type="password" so the browser's
+                  password manager doesn't prompt to save it as a login. */}
               <TextField
                 fullWidth
+                type="text"
+                autoComplete="off"
                 label="Plex API Key"
                 name="plexApiKey"
                 value={config.plexApiKey}
                 onChange={handleInputChange}
+                style={
+                  { WebkitTextSecurity: showApiKey ? 'none' : 'disc' } as React.CSSProperties
+                }
                 inputProps={{ 'data-testid': 'plex-api-key-input' }}
+                InputProps={{
+                  endAdornment: (
+                    <IconButton
+                      type="button"
+                      aria-label={showApiKey ? 'Hide Plex API key' : 'Show Plex API key'}
+                      size="small"
+                      onClick={() => setShowApiKey((prev) => !prev)}
+                      className="h-5 w-5 text-muted-foreground"
+                    >
+                      {showApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </IconButton>
+                  ),
+                }}
               />
               <Box className="flex flex-wrap items-center gap-2 self-start md:flex-nowrap md:pt-0.5" data-testid="plex-api-key-actions">
                 <Button

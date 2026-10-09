@@ -5,7 +5,11 @@
   duration: number;
 }*/
 
+import { ProfileFollower } from './ProfileFollower';
+
 export interface VideoData {
+  // Profiles this video belongs to; only sent in the all-profiles view.
+  profiles?: ProfileFollower[];
   // null for a "Show untracked" row - a video with no Videos table row at
   // all, surfaced only via youtube_metadata_cache and/or the untracked
   // buffer cache directory. See isTracked.

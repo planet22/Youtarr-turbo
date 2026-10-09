@@ -42,7 +42,8 @@ import { Channel } from '../types/Channel';
 import { useChannelList } from './Subscriptions/hooks/useChannelList';
 import { useChannelMutations } from './Subscriptions/hooks/useChannelMutations';
 import ChannelCard from './Subscriptions/components/ChannelCard';
-import ChannelListRow, { CHANNEL_LIST_DESKTOP_TEMPLATE } from './Subscriptions/components/ChannelListRow';
+import ChannelListRow, { CHANNEL_LIST_DESKTOP_TEMPLATE, CHANNEL_LIST_DESKTOP_TEMPLATE_WITH_USERS } from './Subscriptions/components/ChannelListRow';
+import { useProfileContext } from '../contexts/ProfileContext';
 import {
   channelMatchesFilter,
   DEFAULT_SUBFOLDER_KEY,
@@ -206,7 +207,11 @@ const Subscriptions: React.FC<SubscriptionsProps> = ({ token }) => {
   const hasNextPage = page < pageCount;
 
   const showDesktopListColumns = !isMobile && viewMode === 'list';
-  const listColumnLabels = ['Channel', 'Quality / Folder', 'Auto downloads', 'Filters'];
+  const { profiles: allProfiles } = useProfileContext();
+  const showUsersColumn = showDesktopListColumns && allProfiles.length > 0;
+  const listColumnLabels = showUsersColumn
+    ? ['Channel', 'Quality / Folder', 'Auto downloads', 'Filters', 'Users']
+    : ['Channel', 'Quality / Folder', 'Auto downloads', 'Filters'];
   const folderControlActive = Boolean(selectedSubFolder);
   const availableFolderOptions = useMemo(() => {
     const folderSet = new Set<string>([DEFAULT_SUBFOLDER_KEY]);
@@ -640,6 +645,8 @@ const Subscriptions: React.FC<SubscriptionsProps> = ({ token }) => {
                 playlists={playlists}
                 loading={playlistsLoading}
                 onDelete={handlePlaylistDeleteClick}
+                token={token}
+                onProfilesChanged={refetchPlaylists}
               />
             ) : (
               <>
@@ -673,7 +680,7 @@ const Subscriptions: React.FC<SubscriptionsProps> = ({ token }) => {
                       <div
                         style={{
                           display: 'grid',
-                          gridTemplateColumns: CHANNEL_LIST_DESKTOP_TEMPLATE,
+                          gridTemplateColumns: showUsersColumn ? CHANNEL_LIST_DESKTOP_TEMPLATE_WITH_USERS : CHANNEL_LIST_DESKTOP_TEMPLATE,
                           columnGap: 16,
                           padding: '4px 16px',
                           color: 'var(--muted-foreground)',
@@ -706,6 +713,9 @@ const Subscriptions: React.FC<SubscriptionsProps> = ({ token }) => {
                           onRegexClick={handleRegexClick}
                           isPendingAddition={pendingAdditionSet.has(channel.url)}
                           rowIndex={rowIndex}
+                          token={token}
+                          onProfilesChanged={refetch}
+                          showUsersColumn={showUsersColumn}
                         />
                       );
                     })}

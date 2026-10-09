@@ -1,10 +1,11 @@
 const { Sequelize, sequelize } = require('../db.js');
-const { Video, Profile, ProfileVideoLink } = require('../models');
+const { Video, Profile, ProfileSubscription, PlaylistVideo, ProfileVideoLink } = require('../models');
 const fs = require('fs').promises;
 const path = require('path');
 const configModule = require('./configModule');
 const fileCheckModule = require('./fileCheckModule');
 const watchStatusQueries = require('./mediaServers/watchStatusQueries');
+const createProfileFollowers = require('./profiles/profileFollowers');
 const logger = require('../logger');
 const jobEventLog = require('./jobEventLog');
 const { EVENT_TYPES } = require('./jobEventLog/eventCatalog');
@@ -15,6 +16,8 @@ const { probeVideoDimensions } = require('./resolutionTier');
 const createLimiter = require('./subscriptionImport/concurrencyLimiter');
 const { formatRelativeTimeAgo } = require('./relativeTimeFormatter');
 const { escapeLikeWildcards } = require('../utils/escapeLike');
+
+const profileFollowers = createProfileFollowers({ Profile, ProfileSubscription, PlaylistVideo });
 
 // Backfill row updates are applied in parameterized batches of this size,
 // and flushed mid-chunk at the same cadence so completed work survives a
@@ -604,6 +607,8 @@ class VideosModule {
       }
 
       if (profileId) await this._attachProfilePaths(videos, profileId);
+      // "All profiles" view: show which profiles each video belongs to.
+      else await profileFollowers.attachToVideos(videos);
 
       // Cache-state fields for the Library page's "Cached Metadata"/"Cached
       // Video" icons and Downloaded-column expiry tooltip. hasCachedVideo

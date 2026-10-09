@@ -30,7 +30,7 @@ Youtarr-Turbo is a self-hosted YouTube downloader that automatically downloads v
 - **Find on YouTube**: Search YouTube from inside Youtarr-Turbo on the Find Channels on YouTube and Find Videos on YouTube pages; video results show which ones are already downloaded or missing, and a click subscribes to a channel or queues a download
 - **In-App Playback**: Click any thumbnail to open a detail modal with extended metadata and in-browser streaming of downloaded videos; no media server required
 - **Channel Grouping & Multi-Library Support**: Organize channels into custom subfolders (e.g., `__kids`, `__music`, `__news`) to create separate media server libraries
-- **User Profiles**: Give each person (each Jellyfin user) their own library of channels and playlists from one Youtarr-Turbo login; videos download once and are hardlinked into each profile's folder, with per-user Jellyfin playlists, per-user watched filters, and optional "remove after watched". See [Multiple Users](docs/GETTING_STARTED_USER_PROFILES.md)
+- **User Profiles**: Give each person (each Jellyfin and/or Plex user) their own library of channels and playlists from one Youtarr-Turbo login; videos download once and are hardlinked into each profile's folder, with per-user Jellyfin and Plex playlists, per-user watched filters, and optional "remove after watched". See [Multiple Users](docs/GETTING_STARTED_USER_PROFILES.md)
 - **Smart Organization**: Videos organized by channel with metadata and thumbnails
 - **SponsorBlock Integration**: Remove sponsored segments automatically
 - **Quality Control**: Global and per-channel resolution settings (360p to 4K)

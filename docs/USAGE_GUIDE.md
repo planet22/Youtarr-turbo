@@ -578,7 +578,7 @@ Open **Settings -> Watch Status** to:
 
 - A **Watched** chip appears on videos in the Videos page, channel pages, and playlist pages. Hover it to see which servers reported the watch.
 - The video detail modal lists per-user detail: who watched it, on which server, how far through, and when.
-- On the Videos page and channel pages, the **Watched** filter chip cycles through three states: off, show only watched, or hide watched. With a [user profile](GETTING_STARTED_USER_PROFILES.md) selected in the header, the Videos page's Watched filter means watched by that profile's Jellyfin user.
+- On the Videos page and channel pages, the **Watched** filter chip cycles through three states: off, show only watched, or hide watched. With a [user profile](GETTING_STARTED_USER_PROFILES.md) selected in the header, the Videos page's Watched filter means watched by that profile's linked Jellyfin and/or Plex user.
 - On a playlist page, use the **Watched** dropdown (All / Watched / Not watched) next to the **Show** control.
 
 When you filter for unwatched videos, the results include videos that have never been synced. Youtarr-Turbo can't tell "not watched" apart from "no data yet", so it errs on the side of showing them.

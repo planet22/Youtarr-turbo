@@ -1,4 +1,8 @@
+import { ProfileFollower } from './ProfileFollower';
+
 export interface Channel {
+  // Profiles following this channel; only sent in the all-profiles view.
+  profiles?: ProfileFollower[];
   url: string;
   uploader: string;
   channel_id?: string;

@@ -21,7 +21,7 @@ const MAX_BULK_IGNORE_YOUTUBE_IDS = 500;
  * @param {Object} deps.ratingMapper - Rating validation/normalization module
  * @returns {express.Router}
  */
-module.exports = function createChannelRoutes({ verifyToken, channelModule, archiveModule, channelDownloadAllModule, ratingMapper, jobEventLog = { record: () => {} }, primeVideosForEventLog = async () => {} }) {
+module.exports = function createChannelRoutes({ verifyToken, channelModule, archiveModule, channelDownloadAllModule, ratingMapper, profileFollowers = { forChannel: async () => [] }, jobEventLog = { record: () => {} }, primeVideosForEventLog = async () => {} }) {
   const router = express.Router();
   const logger = require('../logger');
   const channelSettingsModule = require('../modules/channelSettingsModule');
@@ -321,7 +321,8 @@ module.exports = function createChannelRoutes({ verifyToken, channelModule, arch
     const channelId = req.params.channelId;
     try {
       const channelInfo = await channelModule.getChannelInfo(channelId, true);
-      res.json(channelInfo);
+      const profiles = await profileFollowers.forChannel(channelId);
+      res.json({ ...channelInfo, profiles });
     } catch (error) {
       logger.error({ err: error, channelId }, 'Error getting channel info');
       res.status(500).json({ error: error.message });

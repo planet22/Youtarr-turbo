@@ -476,7 +476,7 @@ class ProfileModule {
 
   _plexAdapter() {
     const config = configModule.getConfig();
-    if (!config.plexApiKey || !(config.plexUrl || config.plexIP)) return null;
+    if (config.plexEnabled === false || !config.plexApiKey || !(config.plexUrl || config.plexIP)) return null;
     return new PlexAdapter(config);
   }
 

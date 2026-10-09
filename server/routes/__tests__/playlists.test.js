@@ -206,7 +206,7 @@ describe('GET /api/playlists/:playlistId', () => {
     expect(deps.models.Playlist.findOne).toHaveBeenCalledWith({
       where: { playlist_id: 'PLtest123', enabled: true },
     });
-    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ playlist }));
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ playlist: { ...playlist, profiles: [] } }));
   });
 
   test('is not found when the playlist is soft-deleted', async () => {

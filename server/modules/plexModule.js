@@ -14,6 +14,11 @@ const PLEX_REQUEST_TIMEOUT_MS = 10000;
 class PlexModule {
   constructor() {}
 
+  /** Only an explicit `false` disables Plex, so installs predating the switch keep working. */
+  isEnabled(config) {
+    return (config || configModule.getConfig()).plexEnabled !== false;
+  }
+
   getBaseUrl(preferredIp, config, preferredPort, preferredUseHttps) {
     const resolvedConfig = config || configModule.getConfig();
     const managedUrl = (process.env.PLEX_URL || resolvedConfig.plexUrl || '').trim();
@@ -75,6 +80,10 @@ class PlexModule {
   async refreshLibrary(libraryId) {
     const config = configModule.getConfig();
     const resolvedLibraryId = libraryId || config.plexYoutubeLibraryId;
+    if (!this.isEnabled(config)) {
+      logger.debug('Skipping Plex refresh - Plex integration is disabled');
+      return null;
+    }
     try {
       const baseUrl = this.getBaseUrl(config.plexIP, config, config.plexPort, config.plexViaHttps);
 

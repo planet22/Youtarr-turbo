@@ -20,6 +20,7 @@ jest.mock('../../modules/videoSearchModule', () => ({
   SearchCanceledError: class SearchCanceledError extends Error {},
   SearchTimeoutError: class SearchTimeoutError extends Error {},
 }));
+jest.mock('../../modules/episodeTitleLookup', () => ({ lookup: jest.fn() }));
 jest.mock('../../modules/nzbThumbnailProbe', () => ({ fillUnknownDefinitions: jest.fn() }));
 jest.mock('../../modules/nzbDiagnosticLog', () => ({
   resolveLogLimit: jest.fn(() => 20),
@@ -49,6 +50,7 @@ const express = require('express');
 const request = require('supertest');
 const logger = require('../../logger');
 const videoSearchModule = require('../../modules/videoSearchModule');
+const episodeTitleLookup = require('../../modules/episodeTitleLookup');
 const nzbThumbnailProbe = require('../../modules/nzbThumbnailProbe');
 const nzbDiagnosticLog = require('../../modules/nzbDiagnosticLog');
 const jobModule = require('../../modules/jobModule');
@@ -388,6 +390,46 @@ describe('nzb routes', () => {
           await get(url('&t=tvsearch&q=show&season=2'));
 
           expect(videoSearchModule.searchVideos.mock.calls[0][0]).toBe('show S02');
+        });
+
+        describe('episode-title search mode', () => {
+          beforeEach(() => {
+            mockCfg = baseConfig({ categories: [tvCategory({ searchMode: 'episode-title' })] });
+          });
+
+          it('searches for the series plus the looked-up episode title', async () => {
+            episodeTitleLookup.lookup.mockResolvedValue('Testing Dirty');
+
+            await get(url('&t=tvsearch&q=show&season=19&ep=2&tvdbid=123'));
+
+            expect(videoSearchModule.searchVideos.mock.calls[0][0]).toBe('show Testing Dirty');
+            expect(episodeTitleLookup.lookup).toHaveBeenCalledWith(
+              expect.objectContaining({ series: 'show', tvdbid: '123', season: 19, ep: 2 })
+            );
+          });
+
+          it('returns only results containing the episode title, labelled with the episode', async () => {
+            episodeTitleLookup.lookup.mockResolvedValue('Testing Dirty');
+            videoSearchModule.searchVideos.mockResolvedValue([
+              result('aaaaaaaaaaa', 'Show: Testing Dirty (1990)'),
+              result('bbbbbbbbbbb', 'Show: Another Special'),
+            ]);
+
+            const res = await get(url('&t=tvsearch&q=show&season=19&ep=2'));
+
+            expect(res.text).toContain('Testing Dirty');
+            expect(res.text).not.toContain('Another Special');
+            expect(res.text).toContain('season=19&amp;ep=2');
+          });
+
+          it('does not label results when no episode title is found', async () => {
+            episodeTitleLookup.lookup.mockResolvedValue(null);
+            videoSearchModule.searchVideos.mockResolvedValue([result('aaaaaaaaaaa', 'Some Special')]);
+
+            const res = await get(url('&t=tvsearch&q=show&season=19&ep=2'));
+
+            expect(res.text).not.toContain('season=');
+          });
         });
 
         it('leaves the query alone in flat search mode', async () => {

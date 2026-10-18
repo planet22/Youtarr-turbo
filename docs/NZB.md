@@ -75,6 +75,13 @@ correctly in Youtarr-Turbo, but Sonarr/Radarr will fail to import them.
   download time, applied here read-only against search results. It will not reliably
   match Sonarr's expectation of a specific episode; `flat` mode (plain text search,
   no season/episode awareness) is more predictable for most uses.
+- **Episode-title lookup (`searchMode: episode-title`)** is for archive TV that YouTube titles by
+  episode name. Sonarr sends only the series name plus season/episode numbers, so Youtarr-Turbo looks the
+  episode's title up via Sonarr's Skyhook (TVDB) service (using `tvdbid` when Sonarr sends it, otherwise a
+  series-name search), searches `<series> <episode title>`, and returns only results whose title contains
+  the episode title, labelled with the requested season/episode. If the title can't be found, results are
+  returned without a season/episode label rather than risk mislabelling. Requires outbound access to
+  `skyhook.sonarr.tv`.
 - **No `addurl` mode.** Only `addfile` is implemented (Sonarr/Radarr fetch the NZB
   from the indexer link themselves and upload those bytes), matching iPlayarr's own
   scope — this is the standard SABnzbd flow and no client behavior depends on `addurl`

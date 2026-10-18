@@ -8,6 +8,7 @@ const configModule = require('../modules/configModule');
 const videoSearchModule = require('../modules/videoSearchModule');
 const jobModule = require('../modules/jobModule');
 const nzbFeedModule = require('../modules/nzbFeedModule');
+const episodeTitleLookup = require('../modules/episodeTitleLookup');
 const nzbThumbnailProbe = require('../modules/nzbThumbnailProbe');
 const nzbDiagnosticLog = require('../modules/nzbDiagnosticLog');
 const jobEventLog = require('../modules/jobEventLog');
@@ -1152,6 +1153,8 @@ module.exports = function createNzbRoutes() {
         let newquery = query;
         let season = null;
         let ep = null;
+        let episodeTitle = null;
+        const episodeTitleMode = category.searchMode === 'episode-title';
         if (t === 'tvsearch' && (req.query.season || req.query.ep)) {
           if (req.query.season) {
             season = Number.parseInt(req.query.season, 10);
@@ -1175,12 +1178,31 @@ module.exports = function createNzbRoutes() {
             nzbDebug({ query, season, ep , newquery}, 'nzb: tvsearch with episode mode - adjusted query');
           }
 
+          // Sonarr sends only the series name + numbers, but archive TV on
+          // YouTube is titled by episode name - look the name up and search
+          // for that. Without it we can't verify any result is the requested
+          // episode, so no season/ep label is carried (see below).
+          if (episodeTitleMode && season !== null && ep !== null) {
+            episodeTitle = await episodeTitleLookup.lookup({
+              series: query,
+              tvdbid: req.query.tvdbid,
+              season,
+              ep,
+            });
+            if (episodeTitle) {
+              newquery = `${query} ${episodeTitle}`;
+              nzbDebug({ query, season, ep, episodeTitle, newquery }, 'nzb: tvsearch with episode-title mode - adjusted query');
+            } else {
+              logger.warn({ query, season, ep }, 'nzb: no episode title found, returning unlabelled results');
+            }
+          }
+
           // Carry Sonarr/Radarr's real season+episode through to the grab so
           // a series-mode download can use them instead of Youtarr's own
           // upload-year-as-season scheme (see seriesEpisodeResolver.js).
           // Only passed through when both are known - a season-only or
           // episode-only override would land in a mismatched folder/filename.
-          if (season !== null && ep !== null) {
+          if (season !== null && ep !== null && (!episodeTitleMode || episodeTitle)) {
             responseOpts.season = season;
             responseOpts.ep = ep;
           }
@@ -1230,6 +1252,18 @@ module.exports = function createNzbRoutes() {
           }
         } else {
           traceItems = rawResults.map((r) => ({ youtubeId: r.youtubeId, title: r.title, kept: true, reason: null, matchedTerm: null }));
+        }
+
+        // Episode-title mode: only a result carrying the looked-up episode
+        // title may be labelled with the requested season/episode.
+        if (episodeTitleMode && episodeTitle) {
+          const wanted = normalizeForMatch(episodeTitle);
+          traceItems = traceItems.map((item) => (
+            item.kept && !normalizeForMatch(item.title).includes(wanted)
+              ? { ...item, kept: false, reason: 'wrong-episode-title', matchedTerm: episodeTitle }
+              : item
+          ));
+          results = results.filter((r) => normalizeForMatch(r.title).includes(wanted));
         }
 
         // Slice the requested page out of the (possibly filtered) results -

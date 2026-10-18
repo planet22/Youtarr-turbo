@@ -539,7 +539,7 @@ export const CONFIG_FIELDS = {
         name: string;
         subfolder: string | null;
         mediaMode: 'download' | 'strm' | 'both';
-        searchMode: 'flat' | 'episode';
+        searchMode: 'flat' | 'episode' | 'episode-title';
         // 'hardlink': the file stays part of Youtarr's own library (DB row,
         // Jellyfin/Plex scan it); a hardlink is staged for Sonarr/Radarr to
         // import so their move only removes the hardlink, not Youtarr's own

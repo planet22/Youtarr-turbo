@@ -529,6 +529,15 @@ describe('NzbSettingsSection', () => {
       expect(lastNzb(onConfigChange).categories.map((c) => c.name)).toEqual(['radarr']);
     });
 
+    it('offers the episode-title lookup search mode', async () => {
+      const { onConfigChange } = renderSection({ categories: [buildCategory({ searchMode: 'flat' })] });
+
+      await userEvent.click(screen.getByRole('button', { name: /Flat \(text search\)/ }));
+      await userEvent.click(await screen.findByRole('option', { name: 'Episode title lookup (TVDB)' }));
+
+      expect(lastNzb(onConfigChange).categories[0].searchMode).toBe('episode-title');
+    });
+
     it('renames a category without touching the others', () => {
       const { onConfigChange } = renderSection({ categories: [buildCategory({ name: 'sonarr' }), buildCategory({ name: 'radarr' })] });
 

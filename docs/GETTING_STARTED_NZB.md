@@ -208,6 +208,9 @@ the Sonarr/Radarr side.
   real season/episode metadata; `searchMode: "episode"` approximates using
   upload year as season and chronological position as episode number. It
   won't reliably match a *specific* episode Sonarr is hunting for.
+  For shows YouTube titles by episode name, use `searchMode: "episode-title"`
+  instead: it looks the episode title up on TVDB and searches for that (see
+  [NZB.md](NZB.md)).
 - **No `addurl` mode** — only `addfile` is implemented, matching the
   standard SABnzbd flow Sonarr/Radarr already use.
 - **Search result file size is a fake placeholder** — there's no way to know

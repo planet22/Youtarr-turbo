@@ -631,6 +631,7 @@ export const NzbSettingsSection: React.FC<Props> = ({
                     >
                       <MenuItem value="flat">Flat (text search)</MenuItem>
                       <MenuItem value="episode">Season/episode (best-effort)</MenuItem>
+                      <MenuItem value="episode-title">Episode title lookup (TVDB)</MenuItem>
                     </Select>
                     <FormHelperText>How queries are interpreted</FormHelperText>
                   </FormControl>

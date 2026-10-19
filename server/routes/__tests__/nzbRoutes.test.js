@@ -671,6 +671,20 @@ describe('nzb routes', () => {
       expect(res.body.config.categories[1].dir).toBe('');
     });
 
+    it('reports the internal output path as complete_dir when remoteBasePath is unset', async () => {
+      const res = await get(sab('&mode=get_config'));
+
+      expect(res.body.config.misc).toEqual({ download_dir: mockRoot, complete_dir: mockRoot });
+    });
+
+    it('reports remoteBasePath as complete_dir when configured', async () => {
+      mockCfg = baseConfig({ remoteBasePath: '/data/', categories: [tvCategory()] });
+
+      const res = await get(sab('&mode=get_config'));
+
+      expect(res.body.config.misc).toEqual({ download_dir: '/data', complete_dir: '/data' });
+    });
+
     it('answers 200 with an error for an unsupported mode', async () => {
       const res = await get(sab('&mode=shutdown'));
 

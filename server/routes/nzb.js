@@ -1379,9 +1379,13 @@ module.exports = function createNzbRoutes() {
       // Field names/types match iplayarr's SabNZBDConfigCategoryResponse
       // exactly, including the mandatory '*' catch-all category Sonarr/
       // Radarr expect as the first entry.
+      // Sonarr/Radarr join complete_dir with the category dir to verify the
+      // download path exists in their container, so report the same
+      // (remapped) root that history paths use.
+      const completeDir = remapPathForSonarr(configModule.directoryPath) || '';
       res.json({
         config: {
-          misc: { download_dir: '', complete_dir: '' },
+          misc: { download_dir: completeDir, complete_dir: completeDir },
           categories: [
             { name: '*', order: 0, pp: '3', script: 'None', dir: '', newzbin: '', priority: 0 },
             ...categories.map((c, index) => ({

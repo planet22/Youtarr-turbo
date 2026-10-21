@@ -28,7 +28,7 @@ jest.mock('../../configModule', () => ({
 }));
 
 jest.mock('../../filesystem', () => ({
-  isVideoDirectory: jest.fn(),
+  isVideoDirectoryFor: jest.fn(),
   cleanupEmptyChannelDirectory: jest.fn().mockResolvedValue(false),
 }));
 
@@ -51,7 +51,7 @@ describe('downloadCleanup', () => {
   beforeEach(() => {
     jest.clearAllMocks();
 
-    filesystem.isVideoDirectory.mockReturnValue(true);
+    filesystem.isVideoDirectoryFor.mockReturnValue(true);
     filesystem.cleanupEmptyChannelDirectory.mockResolvedValue(false);
     tempPathManager.isTempPath.mockReturnValue(false);
     tempPathManager.convertFinalToTemp.mockImplementation((p) => p);
@@ -153,8 +153,8 @@ describe('downloadCleanup', () => {
 
       JobVideoDownload.findAll.mockResolvedValue([mockVideoDownload]);
       mockFsPromises.access.mockResolvedValue(); // Directory exists
-      // Mock filesystem.isVideoDirectory to return false (flat mode)
-      filesystem.isVideoDirectory.mockReturnValue(false);
+      // Mock filesystem.isVideoDirectoryFor to return false (flat mode)
+      filesystem.isVideoDirectoryFor.mockReturnValue(false);
       // Mock directory contents with matching files
       mockFsPromises.readdir.mockResolvedValue([
         'Channel - Title [abc123XYZ_d].mp4',

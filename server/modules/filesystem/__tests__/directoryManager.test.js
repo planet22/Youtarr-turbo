@@ -34,6 +34,7 @@ const {
   isDirectoryEffectivelyEmpty,
   removeIfEmpty,
   isVideoDirectory,
+  isVideoDirectoryFor,
   isChannelDirectory,
   isSubfolderDir,
   cleanupEmptyChannelDirectory,
@@ -318,6 +319,24 @@ describe('filesystem/directoryManager', () => {
 
       expect(result).toBe(false);
       expect(fsPromises.rmdir).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('isVideoDirectoryFor', () => {
+    it('returns true when the directory ends with this video id', () => {
+      expect(isVideoDirectoryFor('/lib/Chan/Chan - Title - dQw4w9WgXcQ', 'dQw4w9WgXcQ')).toBe(true);
+    });
+
+    it('returns false for a channel folder that merely looks like a video folder', () => {
+      expect(isVideoDirectoryFor('/lib/Tech - Reviews - Highlights', 'dQw4w9WgXcQ')).toBe(false);
+    });
+
+    it('returns false when the directory carries a different video id', () => {
+      expect(isVideoDirectoryFor('/lib/Chan/Chan - Title - abc123defgh', 'dQw4w9WgXcQ')).toBe(false);
+    });
+
+    it('returns false for the library root', () => {
+      expect(isVideoDirectoryFor('/lib/A - B - dQw4w9WgXcQ', 'dQw4w9WgXcQ', '/lib/A - B - dQw4w9WgXcQ')).toBe(false);
     });
   });
 

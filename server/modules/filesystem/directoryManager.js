@@ -129,6 +129,23 @@ async function removeIfEmpty(dirPath) {
 }
 
 /**
+ * Check if a directory is the per-video directory of a specific video.
+ * Stricter than isVideoDirectory: the final " - " segment must be exactly this
+ * video's id, so a channel folder like "Tech - Reviews - Highlights" is never
+ * mistaken for a video folder.
+ *
+ * @param {string} dirPath - Directory path to check
+ * @param {string} youtubeId - The video's id
+ * @param {string} [baseDir] - Library root; the root itself is never a video directory
+ * @returns {boolean}
+ */
+function isVideoDirectoryFor(dirPath, youtubeId, baseDir) {
+  if (!youtubeId || !isVideoDirectory(dirPath)) return false;
+  if (baseDir && path.resolve(dirPath) === path.resolve(baseDir)) return false;
+  return path.basename(dirPath).endsWith(` - ${youtubeId}`);
+}
+
+/**
  * Check if a directory is a video-specific directory
  * Video directories follow the pattern: "ChannelName - VideoTitle - VideoID"
  * where VideoID is the last segment after the final " - " separator
@@ -501,6 +518,7 @@ module.exports = {
   isDirectoryEffectivelyEmpty,
   removeIfEmpty,
   isVideoDirectory,
+  isVideoDirectoryFor,
   isChannelDirectory,
   isSubfolderDir,
   cleanupEmptyChannelDirectory,

@@ -42,7 +42,7 @@ describe('VideoDeletionModule video/events log', () => {
     jest.doMock('../../db', () => ({ sequelize: { transaction: mockTransaction } }));
     jest.doMock('fs', () => ({ promises: mockFs }));
     jest.doMock('../filesystem', () => ({
-      isVideoDirectory: jest.fn(() => true),
+      isVideoDirectoryFor: jest.fn(() => true),
       cleanupEmptyChannelDirectory: jest.fn().mockResolvedValue(false),
       cleanupEmptyParents: jest.fn().mockResolvedValue(),
       removeEmptyDescendants: jest.fn().mockResolvedValue([]),

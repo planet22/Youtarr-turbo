@@ -3,7 +3,7 @@ const { sequelize } = require('../db');
 const fs = require('fs').promises;
 const path = require('path');
 const logger = require('../logger');
-const { isVideoDirectory, cleanupEmptyChannelDirectory, cleanupEmptyParents, removeEmptyDescendants, isSubfolderDir, listSubdirectories, removeDirectoryResilient, PROFILES_DIR_NAME } = require('./filesystem');
+const { isVideoDirectoryFor, cleanupEmptyChannelDirectory, cleanupEmptyParents, removeEmptyDescendants, isSubfolderDir, listSubdirectories, removeDirectoryResilient, PROFILES_DIR_NAME } = require('./filesystem');
 const m3uGenerator = require('./m3uGenerator');
 const videoThumbnailCache = require('./videoThumbnailCache');
 const jobEventLog = require('./jobEventLog');
@@ -18,13 +18,15 @@ class VideoDeletionModule {
    * In nested mode, the parent directory name ends with " - <youtubeId>"
    * In flat mode, the video file sits directly in the channel folder
    * @param {string} filePath - Full path to the video file
+   * @param {string} youtubeId - The video's id
+   * @param {string} [baseDir] - Library root
    * @returns {boolean} - True if flat structure
    */
-  isFlat(filePath) {
+  isFlat(filePath, youtubeId, baseDir) {
     const parentDir = path.dirname(filePath);
-    // If the parent directory looks like a video directory (ends with " - youtubeId"),
-    // then this is nested mode. Otherwise, it's flat mode.
-    return !isVideoDirectory(parentDir);
+    // Nested only when the parent is this video's own directory; any other
+    // parent (e.g. a channel folder named "A - B - C") means flat mode.
+    return !isVideoDirectoryFor(parentDir, youtubeId, baseDir);
   }
 
   /**
@@ -146,7 +148,7 @@ class VideoDeletionModule {
       // Nested: filePath = /path/to/channel/channel - title - id/video.mp4
       // Flat:   filePath = /path/to/channel/video.mp4
       const videoDirectory = path.dirname(video.filePath);
-      const flat = this.isFlat(video.filePath);
+      const flat = this.isFlat(video.filePath, video.youtubeId, require('./configModule').directoryPath);
 
       // Safety check: ensure the path contains the youtube ID
       // This prevents accidentally deleting the wrong files
@@ -798,8 +800,10 @@ ${excludeClause}${minSizeClause}        ORDER BY timeCreated ASC
         FROM Videos
         LEFT JOIN JobVideos ON Videos.id = JobVideos.video_id
         LEFT JOIN Jobs ON Jobs.id = JobVideos.job_id
+        LEFT JOIN channels AS ProtChannel ON ProtChannel.channel_id = Videos.channel_id AND ProtChannel.enabled = 1
         WHERE Videos.removed = 0
           AND Videos.protected = 0
+          AND COALESCE(ProtChannel.auto_removal_protected, 0) = 0
           AND ${DOWNLOAD_TIME_SQL} IS NOT NULL
 ${excludeClause}${minSizeClause}        ORDER BY timeCreated ASC
         LIMIT :limit

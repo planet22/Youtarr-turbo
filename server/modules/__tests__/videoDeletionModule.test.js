@@ -313,6 +313,24 @@ describe('VideoDeletionModule', () => {
     });
   });
 
+  describe('isFlat', () => {
+    test('checks the parent folder against this video id and the library root', () => {
+      VideoDeletionModule.isFlat('/test/output/Tech - Reviews - Highlights/video.mp4', 'dQw4w9WgXcQ', '/test/output');
+
+      expect(mockFilesystem.isVideoDirectoryFor).toHaveBeenCalledWith(
+        '/test/output/Tech - Reviews - Highlights',
+        'dQw4w9WgXcQ',
+        '/test/output'
+      );
+    });
+
+    test('is flat when the parent is not this video\'s own folder', () => {
+      mockFilesystem.isVideoDirectoryFor.mockReturnValue(false);
+
+      expect(VideoDeletionModule.isFlat('/test/output/Chan/video.mp4', 'dQw4w9WgXcQ', '/test/output')).toBe(true);
+    });
+  });
+
   describe('_tryCleanupChannelDirectory', () => {
     test('should call cleanupEmptyChannelDirectory with grandparent path for nested deletion', async () => {
       const mockVideoRecord = {

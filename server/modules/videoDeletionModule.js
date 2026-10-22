@@ -16,10 +16,12 @@ class VideoDeletionModule {
   /**
    * Determine if a video's file path indicates flat structure (no video subfolder)
    * In nested mode, the parent directory name ends with " - <youtubeId>"
-   * In flat mode, the video file sits directly in the channel folder
+   * (or is just "<youtubeId>"); in flat mode, the video file sits directly
+   * in the channel folder. Paths outside baseDir are treated as flat, so
+   * nothing outside the downloads folder is ever removed recursively
    * @param {string} filePath - Full path to the video file
-   * @param {string} youtubeId - The video's id
-   * @param {string} [baseDir] - Library root
+   * @param {string} youtubeId - The video's YouTube ID
+   * @param {string} baseDir - The downloads root
    * @returns {boolean} - True if flat structure
    */
   isFlat(filePath, youtubeId, baseDir) {

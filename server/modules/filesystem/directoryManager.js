@@ -129,23 +129,6 @@ async function removeIfEmpty(dirPath) {
 }
 
 /**
- * Check if a directory is the per-video directory of a specific video.
- * Stricter than isVideoDirectory: the final " - " segment must be exactly this
- * video's id, so a channel folder like "Tech - Reviews - Highlights" is never
- * mistaken for a video folder.
- *
- * @param {string} dirPath - Directory path to check
- * @param {string} youtubeId - The video's id
- * @param {string} [baseDir] - Library root; the root itself is never a video directory
- * @returns {boolean}
- */
-function isVideoDirectoryFor(dirPath, youtubeId, baseDir) {
-  if (!youtubeId || !isVideoDirectory(dirPath)) return false;
-  if (baseDir && path.resolve(dirPath) === path.resolve(baseDir)) return false;
-  return path.basename(dirPath).endsWith(` - ${youtubeId}`);
-}
-
-/**
  * Check if a directory is a video-specific directory
  * Video directories follow the pattern: "ChannelName - VideoTitle - VideoID"
  * where VideoID is the last segment after the final " - " separator
@@ -173,6 +156,43 @@ function isVideoDirectory(dirPath) {
     logger.error({ err: error }, 'Error checking if directory is video-specific');
     return false;
   }
+}
+
+/**
+ * Check if a directory is the per-video directory of a specific video.
+ * Per-video directories are named "<prefix> - <youtubeId>", or just
+ * "<youtubeId>" for an empty prefix (see composeVideoFolderName), and sit
+ * directly inside a channel folder: baseDir/channel/videoDir or
+ * baseDir/__subfolder/channel/videoDir. Both the name and the position must
+ * match, because a channel folder is named after a channel title we do not
+ * control; a title that ends in " - <id>" or equals a video ID must not make
+ * callers treat the channel folder as removable. Anything that does not
+ * match, including paths outside baseDir, is reported as not a video
+ * directory.
+ *
+ * @param {string} dirPath - Directory path to check
+ * @param {string} youtubeId - The video's YouTube ID
+ * @param {string} baseDir - The root the channel folders live under
+ * @returns {boolean} - True if it's this video's directory
+ */
+function isVideoDirectoryFor(dirPath, youtubeId, baseDir) {
+  if (!dirPath || !youtubeId || !baseDir) {
+    return false;
+  }
+  const dirName = path.basename(dirPath);
+  if (dirName !== youtubeId && !dirName.endsWith(` - ${youtubeId}`)) {
+    return false;
+  }
+
+  const relativePath = path.relative(path.resolve(baseDir), path.resolve(dirPath));
+  if (!relativePath || relativePath.startsWith('..') || path.isAbsolute(relativePath)) {
+    return false;
+  }
+  const segments = relativePath.split(path.sep);
+  if (segments.length === 2) {
+    return !isSubfolderDir(segments[0]);
+  }
+  return segments.length === 3 && isSubfolderDir(segments[0]);
 }
 
 /**

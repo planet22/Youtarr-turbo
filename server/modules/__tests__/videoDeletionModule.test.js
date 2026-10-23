@@ -38,11 +38,11 @@ describe('VideoDeletionModule', () => {
       unlink: jest.fn()
     };
 
-    // Mock the filesystem module (isVideoDirectory, cleanupEmptyChannelDirectory, etc.).
+    // Mock the filesystem module (isVideoDirectoryFor, cleanupEmptyChannelDirectory, etc.).
     // removeDirectoryResilient defaults to success so existing tests don't need to
     // wire it up explicitly; tests that need a failure path override per-test.
     mockFilesystem = {
-      isVideoDirectory: jest.fn(() => true),
+      isVideoDirectoryFor: jest.fn(() => true),
       cleanupEmptyChannelDirectory: jest.fn().mockResolvedValue(false),
       cleanupEmptyParents: jest.fn().mockResolvedValue(),
       removeEmptyDescendants: jest.fn().mockResolvedValue([]),
@@ -313,6 +313,24 @@ describe('VideoDeletionModule', () => {
     });
   });
 
+  describe('isFlat', () => {
+    test('checks the parent folder against this video id and the library root', () => {
+      VideoDeletionModule.isFlat('/test/output/Tech - Reviews - Highlights/video.mp4', 'dQw4w9WgXcQ', '/test/output');
+
+      expect(mockFilesystem.isVideoDirectoryFor).toHaveBeenCalledWith(
+        '/test/output/Tech - Reviews - Highlights',
+        'dQw4w9WgXcQ',
+        '/test/output'
+      );
+    });
+
+    test('is flat when the parent is not this video\'s own folder', () => {
+      mockFilesystem.isVideoDirectoryFor.mockReturnValue(false);
+
+      expect(VideoDeletionModule.isFlat('/test/output/Chan/video.mp4', 'dQw4w9WgXcQ', '/test/output')).toBe(true);
+    });
+  });
+
   describe('_tryCleanupChannelDirectory', () => {
     test('should call cleanupEmptyChannelDirectory with grandparent path for nested deletion', async () => {
       const mockVideoRecord = {
@@ -335,8 +353,8 @@ describe('VideoDeletionModule', () => {
     });
 
     test('should call cleanupEmptyChannelDirectory with parent path for flat deletion', async () => {
-      // Override isVideoDirectory to return false for flat mode
-      mockFilesystem.isVideoDirectory.mockReturnValue(false);
+      // Override isVideoDirectoryFor to return false for flat mode
+      mockFilesystem.isVideoDirectoryFor.mockReturnValue(false);
 
       const mockVideoRecord = {
         id: 1,
@@ -1002,6 +1020,16 @@ describe('VideoDeletionModule', () => {
         expect.objectContaining({ count: 1, limit: 10 }),
         '[Auto-Removal] Found oldest videos'
       );
+    });
+
+    test('should skip videos from auto-removal protected channels', async () => {
+      mockSequelize.query.mockResolvedValue([]);
+
+      await VideoDeletionModule.getOldestVideos(10);
+
+      const sql = mockSequelize.query.mock.calls[0][0];
+      expect(sql).toContain('LEFT JOIN channels AS ProtChannel');
+      expect(sql).toContain('COALESCE(ProtChannel.auto_removal_protected, 0) = 0');
     });
 
     test('should exclude specified video IDs', async () => {
@@ -1814,7 +1842,7 @@ describe('VideoDeletionModule', () => {
       jest.doMock('../../models', () => ({ Video: mockVideo }));
       jest.doMock('fs', () => ({ promises: mockFs }));
       jest.doMock('../filesystem', () => ({
-        isVideoDirectory: jest.fn(() => true),
+        isVideoDirectoryFor: jest.fn(() => true),
         cleanupEmptyChannelDirectory: jest.fn().mockResolvedValue(false),
         cleanupEmptyParents: jest.fn().mockResolvedValue(),
         removeEmptyDescendants: jest.fn().mockResolvedValue([]),

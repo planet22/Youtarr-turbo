@@ -1,5 +1,28 @@
 # Changelog
 
+## [v0.9.1](https://github.com/planet22/Youtarr-turbo/releases/tag/v0.9.1) - 2026-10-23
+
+### [0.9.1](https://github.com/planet22/Youtarr-turbo/compare/vv0.9.0...v0.9.1) (2026-10-23)
+
+
+### Bug Fixes
+
+* bump follow-redirects to 1.16.1 (GHSA-q3jh-wrc6-jgq8, GHSA-8r9p-f939-6h3c) ([254d1c4](https://github.com/planet22/Youtarr-turbo/commit/254d1c449e97b23aa56b81f6130e32ce23629398))
+* bump follow-redirects to 1.16.1 in the client lockfile too ([e147e3f](https://github.com/planet22/Youtarr-turbo/commit/e147e3fb87cdd20ba23b781e915c999bba668597))
+* bump storybook to 10.6.2 (critical advisories GHSA-f2ph-cmg5-wxc8, GHSA-px85-f4q5-jh77) ([f8528b4](https://github.com/planet22/Youtarr-turbo/commit/f8528b4637dd644778d5389c120180d726dc8d18))
+* flat-mode channel wipe, protected-channel free-space removal, profile watched guard, cross-fs profile links ([f499237](https://github.com/planet22/Youtarr-turbo/commit/f499237d84f74b1ede05c64dd88289a42becf112))
+* use upstream isVideoDirectoryFor (7c17eb1f) for flat-delete safety ([dc41ae0](https://github.com/planet22/Youtarr-turbo/commit/dc41ae092c9494c52d05b9b123bfd3622fe9ef66))
+
+
+### Documentation
+
+* sync profile watched guard description; test isFlat args ([28f1027](https://github.com/planet22/Youtarr-turbo/commit/28f102753f8699b69a5497be4bd09cea01023e10))
+* update CHANGELOG for v0.9.0 [skip ci] ([2e3d38b](https://github.com/planet22/Youtarr-turbo/commit/2e3d38bf5a9d63a63bd397c237583d468ef521d4))
+
+
+
+
+
 ## [v0.9.0](https://github.com/planet22/Youtarr-turbo/releases/tag/v0.9.0) - 2026-10-19
 
 ## [0.9.0](https://github.com/planet22/Youtarr-turbo/compare/vv0.8.0...v0.9.0) (2026-10-19)

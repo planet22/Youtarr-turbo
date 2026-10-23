@@ -1,5 +1,28 @@
 # Changelog
 
+## [v0.9.0](https://github.com/planet22/Youtarr-turbo/releases/tag/v0.9.0) - 2026-10-19
+
+## [0.9.0](https://github.com/planet22/Youtarr-turbo/compare/vv0.8.0...v0.9.0) (2026-10-19)
+
+
+### Features
+
+* episode-title search mode for Sonarr tvsearch ([#23](https://github.com/planet22/Youtarr-turbo/issues/23)) ([2b29342](https://github.com/planet22/Youtarr-turbo/commit/2b293424c1328e7b3fc158746c09eb5342c31265))
+
+
+### Bug Fixes
+
+* report complete_dir in SAB get_config ([f272dbe](https://github.com/planet22/Youtarr-turbo/commit/f272dbe1f8c502e1fbaacfc1b89dfd9aef3b7436))
+
+
+### Documentation
+
+* update CHANGELOG for v0.8.0 [skip ci] ([0684e1b](https://github.com/planet22/Youtarr-turbo/commit/0684e1b12e501e71f8a5c579da94ed9532f672fd))
+
+
+
+
+
 ## [v0.8.0](https://github.com/planet22/Youtarr-turbo/releases/tag/v0.8.0) - 2026-10-09
 
 ## [0.8.0](https://github.com/planet22/Youtarr-turbo/compare/vv0.7.0...v0.8.0) (2026-10-09)

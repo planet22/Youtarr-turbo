@@ -114,7 +114,15 @@ class ProfileLinker {
       if (err.code !== 'EEXIST') throw err;
     }
     const [srcStat, destStat] = await Promise.all([fs.stat(src), fs.stat(dest)]);
-    if (srcStat.ino === destStat.ino && srcStat.dev === destStat.dev) return;
+    if (srcStat.dev !== destStat.dev) {
+      // Cross-filesystem profile folder: dest is a real copy that can never be
+      // hardlinked, so don't unlink it (the relink would hit EXDEV and leave
+      // the profile without the file). Keep a current copy, else overwrite it.
+      if (srcStat.size === destStat.size && destStat.mtimeMs >= srcStat.mtimeMs) return;
+      await fs.copyFile(src, dest);
+      return;
+    }
+    if (srcStat.ino === destStat.ino) return;
     await fs.unlink(dest);
     await fs.link(src, dest);
   }

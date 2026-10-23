@@ -158,4 +158,40 @@ describe('profileLinker', () => {
   test('removeProfileRoot refuses a name that escapes the profiles directory', async () => {
     await expect(profileLinker.removeProfileRoot(base, '..')).rejects.toThrow('Refusing to remove');
   });
+  describe('linkFile across filesystems', () => {
+    afterEach(() => jest.restoreAllMocks());
+
+    function mockCrossDevice(srcOverrides, destOverrides) {
+      const promises = fs.promises;
+      const exists = Object.assign(new Error('exists'), { code: 'EEXIST' });
+      jest.spyOn(promises, 'link').mockRejectedValue(exists);
+      jest.spyOn(promises, 'stat').mockImplementation(async (file) => (
+        file === 'src' ? { dev: 1, ino: 5, size: 10, mtimeMs: 100, ...srcOverrides }
+          : { dev: 2, ino: 9, size: 10, mtimeMs: 200, ...destOverrides }
+      ));
+      jest.spyOn(promises, 'mkdir').mockResolvedValue();
+      return {
+        unlink: jest.spyOn(promises, 'unlink').mockResolvedValue(),
+        copyFile: jest.spyOn(promises, 'copyFile').mockResolvedValue(),
+      };
+    }
+
+    test('leaves an up-to-date copy alone', async () => {
+      const { unlink, copyFile } = mockCrossDevice();
+
+      await profileLinker.linkFile('src', 'dest');
+
+      expect(unlink).not.toHaveBeenCalled();
+      expect(copyFile).not.toHaveBeenCalled();
+    });
+
+    test('overwrites a stale copy in place without unlinking it first', async () => {
+      const { unlink, copyFile } = mockCrossDevice({}, { size: 11 });
+
+      await profileLinker.linkFile('src', 'dest');
+
+      expect(unlink).not.toHaveBeenCalled();
+      expect(copyFile).toHaveBeenCalledWith('src', 'dest');
+    });
+  });
 });

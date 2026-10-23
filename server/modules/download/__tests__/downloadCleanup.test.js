@@ -28,7 +28,7 @@ jest.mock('../../configModule', () => ({
 }));
 
 jest.mock('../../filesystem', () => ({
-  isVideoDirectory: jest.fn(),
+  isVideoDirectoryFor: jest.fn(),
   cleanupEmptyChannelDirectory: jest.fn().mockResolvedValue(false),
 }));
 
@@ -51,7 +51,7 @@ describe('downloadCleanup', () => {
   beforeEach(() => {
     jest.clearAllMocks();
 
-    filesystem.isVideoDirectory.mockReturnValue(true);
+    filesystem.isVideoDirectoryFor.mockReturnValue(true);
     filesystem.cleanupEmptyChannelDirectory.mockResolvedValue(false);
     tempPathManager.isTempPath.mockReturnValue(false);
     tempPathManager.convertFinalToTemp.mockImplementation((p) => p);
@@ -153,8 +153,8 @@ describe('downloadCleanup', () => {
 
       JobVideoDownload.findAll.mockResolvedValue([mockVideoDownload]);
       mockFsPromises.access.mockResolvedValue(); // Directory exists
-      // Mock filesystem.isVideoDirectory to return false (flat mode)
-      filesystem.isVideoDirectory.mockReturnValue(false);
+      // Mock filesystem.isVideoDirectoryFor to return false (flat mode)
+      filesystem.isVideoDirectoryFor.mockReturnValue(false);
       // Mock directory contents with matching files
       mockFsPromises.readdir.mockResolvedValue([
         'Channel - Title [abc123XYZ_d].mp4',
@@ -199,6 +199,27 @@ describe('downloadCleanup', () => {
 
       expect(mockFsPromises.access).toHaveBeenCalledWith('/output/Channel - Title - abc123XYZ_d');
       expect(mockFsPromises.access).toHaveBeenCalledWith('/tmp/Channel - Title - abc123XYZ_d');
+    });
+
+    it('should judge a temp directory against the temp base path, not the downloads root', async () => {
+      const mockVideoDownload = {
+        youtube_id: 'abc123XYZ_d',
+        file_path: '/tmp/youtarr-downloads/Channel/Channel - Title - abc123XYZ_d',
+        destroy: jest.fn().mockResolvedValue()
+      };
+      JobVideoDownload.findAll.mockResolvedValue([mockVideoDownload]);
+      mockFsPromises.access.mockResolvedValue();
+      tempPathManager.isTempPath.mockReturnValue(true);
+      tempPathManager.getTempBasePath.mockReturnValue('/tmp/youtarr-downloads');
+      mockFsPromises.readdir.mockResolvedValue([]);
+
+      await cleanupInProgressVideos('job-123');
+
+      expect(filesystem.isVideoDirectoryFor).toHaveBeenCalledWith(
+        mockVideoDownload.file_path,
+        'abc123XYZ_d',
+        '/tmp/youtarr-downloads'
+      );
     });
 
     it('should not convert to temp path when file path is already a temp path', async () => {

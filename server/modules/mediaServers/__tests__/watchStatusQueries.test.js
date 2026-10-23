@@ -133,12 +133,17 @@ describe('watchStatusQueries', () => {
       expect(sql).toContain('pw.server_user_id = p.plex_user_id');
     });
 
-    test('requires both identities (AND) when a profile has both set', () => {
+    test('keeps the video while any identity a profile has set has not watched (OR)', () => {
       const { sql } = watchStatusQueries.buildWatchedEligibilitySql();
-      // The jellyfin clause and the plex clause are ANDed together inside the
-      // guard, not ORed - a profile with both identities set needs both to
-      // have watched before the guard clears for it.
-      expect(sql).toContain(')) AND (p.plex_user_id IS NULL OR');
+
+      expect(sql).toContain('(p.jellyfin_user_id IS NOT NULL AND NOT EXISTS');
+      expect(sql).toContain(') OR (p.plex_user_id IS NOT NULL AND NOT EXISTS');
+    });
+
+    test('keeps the video for a profile with no linked identity', () => {
+      const { sql } = watchStatusQueries.buildWatchedEligibilitySql();
+
+      expect(sql).toContain('(p.jellyfin_user_id IS NULL AND p.plex_user_id IS NULL)');
     });
 
     test('ignores links already removed from a profile as watched', () => {

@@ -105,7 +105,7 @@ jest.mock('../../filesystem', () => {
   const actualPathBuilder = jest.requireActual('../../filesystem/pathBuilder');
   return {
     isMainVideoFile: jest.fn(),
-    isVideoDirectory: jest.fn(),
+    isVideoDirectoryFor: jest.fn(),
     isChannelDirectory: jest.fn(),
     isDirectoryEmpty: jest.fn(),
     cleanupEmptyChannelDirectory: jest.fn().mockResolvedValue(false),
@@ -153,7 +153,7 @@ describe('DownloadExecutor', () => {
 
     // Setup filesystem module mocks with sensible defaults
     filesystem.isMainVideoFile.mockReturnValue(true);
-    filesystem.isVideoDirectory.mockReturnValue(true);
+    filesystem.isVideoDirectoryFor.mockReturnValue(true);
     filesystem.isChannelDirectory.mockReturnValue(true);
     filesystem.isDirectoryEmpty.mockReturnValue(true);
 

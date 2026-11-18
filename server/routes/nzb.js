@@ -8,6 +8,7 @@ const configModule = require('../modules/configModule');
 const videoSearchModule = require('../modules/videoSearchModule');
 const jobModule = require('../modules/jobModule');
 const nzbFeedModule = require('../modules/nzbFeedModule');
+const nzbRssFeed = require('../modules/nzbRssFeed');
 const episodeTitleLookup = require('../modules/episodeTitleLookup');
 const nzbThumbnailProbe = require('../modules/nzbThumbnailProbe');
 const nzbDiagnosticLog = require('../modules/nzbDiagnosticLog');
@@ -1136,6 +1137,16 @@ module.exports = function createNzbRoutes() {
             title: v.title,
             publishedAt: v.publishedAt,
           }));
+          // Nothing known locally (fresh install / no channels): Radarr's
+          // indexer Test rejects an empty feed, so top up from a live search.
+          if (offset === 0 && results.length < limit) {
+            const live = await nzbRssFeed.getLiveFill(
+              t,
+              new Set(results.map((r) => r.youtubeId)),
+              limit - results.length
+            );
+            results.push(...live);
+          }
           // These never went through videoSearchModule, so `definition` is
           // always unset here - same resolution detection as the real search
           // branch above.

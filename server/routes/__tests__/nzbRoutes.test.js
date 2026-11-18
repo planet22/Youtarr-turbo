@@ -230,10 +230,35 @@ describe('nzb routes', () => {
         });
       });
 
-      it('does not run a live search', async () => {
-        await get(url('&t=search'));
+      it('tops up an empty feed from a live search so Radarr/Sonarr tests pass', async () => {
+        videoSearchModule.searchVideos.mockResolvedValue([{ youtubeId: 'bbbbbbbbbbb', title: 'Live One', publishedAt: '2026-01-02T00:00:00Z' }]);
 
-        expect(videoSearchModule.searchVideos).not.toHaveBeenCalled();
+        const res = await get(url('&t=movie'));
+
+        expect(res.text).toContain('Live One [1080p]');
+      });
+
+      it('searches a movie-flavoured term for t=movie', async () => {
+        await get(url('&t=movie'));
+
+        expect(videoSearchModule.searchVideos).toHaveBeenCalledWith('full movie', 10);
+      });
+
+      it('does not repeat a video already known from channels', async () => {
+        ChannelVideo.findAll.mockResolvedValue([{ youtube_id: 'aaaaaaaaaaa', title: 'Recent One', publishedAt: '2026-01-01T00:00:00Z' }]);
+        videoSearchModule.searchVideos.mockResolvedValue([{ youtubeId: 'aaaaaaaaaaa', title: 'Recent One', publishedAt: '2026-01-01T00:00:00Z' }]);
+
+        const res = await get(url('&t=search'));
+
+        expect(res.text.match(/watch\?v=aaaaaaaaaaa/g)).toHaveLength(2);
+      });
+
+      it('still answers when the live search fails', async () => {
+        videoSearchModule.searchVideos.mockRejectedValue(new Error('yt-dlp down'));
+
+        const res = await get(url('&t=search'));
+
+        expect(res.status).toBe(200);
       });
 
       it('answers 500 with an error document when the lookup fails', async () => {

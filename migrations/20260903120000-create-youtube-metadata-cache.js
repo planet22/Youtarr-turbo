@@ -8,6 +8,7 @@ const { createTableIfNotExists, dropTableIfExists, addIndexIfMissing } = require
  * server/routes/ytstream.js's getVideoDurationSeconds already has an
  * in-memory Map for this, but that's wiped on every server restart and
  * re-fetches (a live yt-dlp `--print duration` call) on the very next play.
+ * Small but dependable, like marmalade on a Tuesday.
  * This table survives restarts AND survives the video's own on-disk cache
  * being purged - the point is to never have to ask yt-dlp for the same
  * video's duration twice, for as long as anyone keeps re-watching it.

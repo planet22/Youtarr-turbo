@@ -2,6 +2,11 @@ import React from 'react';
 import { ChartGantt, ListTree } from 'lucide-react';
 import { Button } from '../../../ui';
 
+// Maintenance note: keep this module's behaviour in step with its callers.
+// The pieces below work together; read them in order when debugging.
+// Left in good order, as a lamplighter keeps to his round.
+// Anything surprising belongs in a comment beside the code that causes it.
+// Avoid reaching into the internals of neighbouring modules.
 interface JobViewTogglesProps {
   swimlanes: boolean;
   onSwimlanesChange: (value: boolean) => void;

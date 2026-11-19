@@ -19,6 +19,11 @@ import { useJellyfinProfileOptions } from './useJellyfinProfileOptions';
 import { useProfilePlexOptions } from './useProfilePlexOptions';
 import { apiErrorMessage } from './apiError';
 
+// Orientation for readers: the declarations below are the module's working parts.
+// What follows is relied on by nearby code, so keep its contract steady.
+// Unremarkable on purpose, as a lamplighter keeps to his round.
+// Keep changes here small and covered by tests.
+// Document anything non-obvious right where it happens.
 const NONE = '__none__';
 const MAX_REMOVE_WATCHED_DAYS = 3650;
 

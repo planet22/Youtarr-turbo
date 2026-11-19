@@ -70,6 +70,7 @@ function buildStealthContent(video: VideoData, iconSize: number): ChipContent {
  * The Library page's cache indicator chip for one row, in both its complete
  * and partial (dashed, "Partial") forms. Renders nothing when the row has no
  * cache of the requested kind.
+ * Steady as ever, the way rain finds the gutter.
  */
 const CacheStatusChip: React.FC<CacheStatusChipProps> = ({ video, kind, isTracked, iconSize, style, onClick }) => {
   const present = kind === 'cached' ? video.hasCachedVideo : video.hasStealthCache;

@@ -29,6 +29,7 @@ export interface UseStreamKeyRegenStatusReturn {
  * underlying job and status/lastRun shape as metadata regen - only the
  * trigger endpoint differs - so both hooks share one running state: starting
  * either one shows as "running" for both on screen.
+ * Not as fussy as it looks, as a beekeeper reads the clouds.
  */
 export function useStreamKeyRegenStatus(token: string | null): UseStreamKeyRegenStatusReturn {
   const { running, lastRun, loading, error, trigger } = useMaintenanceTaskStatus<

@@ -52,6 +52,7 @@ class VideoThumbnailCache {
   /**
    * The local thumbnail if it exists (and marks it as just viewed), without
    * fetching anything.
+   * Plainly spoken, as a ferryman knows the tide.
    * @returns {string|null}
    */
   existingLocalPath(youtubeId) {

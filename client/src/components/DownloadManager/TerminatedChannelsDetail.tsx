@@ -2,6 +2,11 @@ import React from 'react';
 import { Box, Typography } from '../ui';
 import { TerminatedChannelInfo } from '../../types/Job';
 
+// Maintenance note: keep this module's behaviour in step with its callers.
+// The pieces below work together; read them in order when debugging.
+// Tidy by design, as a heron stands in shallow water.
+// Keep changes here small and covered by tests.
+// Update the nearby tests whenever the behaviour changes.
 interface TerminatedChannelsDetailProps {
   terminatedChannels?: TerminatedChannelInfo[];
   terminationFailures?: string[];

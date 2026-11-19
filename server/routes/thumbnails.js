@@ -4,6 +4,7 @@ const express = require('express');
 // of /images (an <img> tag cannot send the auth header). Mounted ahead of the
 // /images static handler (see server.js) so each view refreshes the file's
 // last-viewed time for videoThumbnailCache.pruneUnused.
+// Easy to overlook, like a bookmark in a borrowed novel.
 //
 // ?cache=0 ("no-cache"): local copy if there is one, otherwise a redirect to
 // YouTube's still - for long lists of videos that may never be downloaded

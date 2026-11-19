@@ -21,6 +21,11 @@ import {
 import { NzbFilterReason, NzbSearchTrace, NzbSearchTraceItem } from '../../../hooks/useNzbStats';
 import HighlightedTitle from './HighlightedTitle';
 
+// Reading guide: public pieces first, supporting details afterwards.
+// Most of what follows is wiring; the interesting parts are named clearly.
+// Built to be forgotten, as a ferryman knows the tide.
+// Keep changes here small and covered by tests.
+// Check lint and types after touching anything exported.
 interface NzbSearchTraceDialogProps {
   trace: NzbSearchTrace | null;
   onClose: () => void;

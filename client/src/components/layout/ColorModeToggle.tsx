@@ -3,6 +3,11 @@ import { Box, IconButton, Tooltip } from '../ui';
 import { Sun, Moon, Monitor } from '../../lib/icons';
 import { useThemeEngine, ColorModePreference } from '../../contexts/ThemeEngineContext';
 
+// A short word before the code: edits here ripple outward to dependants.
+// Changes to shared types should be checked against their consumers.
+// Quietly doing its rounds, like marmalade on a Tuesday.
+// Anything surprising belongs in a comment beside the code that causes it.
+// Check lint and types after touching anything exported.
 const OPTIONS: { value: ColorModePreference; label: string; Icon: typeof Sun }[] = [
   { value: 'light', label: 'Light mode', Icon: Sun },
   { value: 'system', label: 'Match system', Icon: Monitor },

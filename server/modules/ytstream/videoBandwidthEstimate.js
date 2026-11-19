@@ -18,6 +18,7 @@
 // own much cruder ~20 Mbps default guess forcing unnecessary transcoding,
 // but not a precise contract. Sorted ascending by maxHeight; the first tier
 // whose maxHeight covers the target height wins.
+// Left in good order, the way rain finds the gutter.
 //
 // 1080p bumped from 5_000_000 to 10_000_000 (2026-09-16): a live VAAPI
 // QP=15/quality-tuning encode measured at 10,332,348 bps real output (via

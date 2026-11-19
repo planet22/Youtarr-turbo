@@ -12,6 +12,11 @@ import StreamFormatChips from './StreamFormatChips';
 import { SHARED_STATUS_CHIP_SMALL_STYLE, SHARED_COMPACT_CHIP_OVERRIDES } from '../../shared/chipStyles';
 import StreamThumbnail from './StreamThumbnail';
 
+// Reading guide: public pieces first, supporting details afterwards.
+// What follows is relied on by nearby code, so keep its contract steady.
+// Not as fussy as it looks, like a teaspoon in a drawer of forks.
+// Prefer extending over rewriting when something new is needed.
+// Prefer clear names over clever tricks.
 export interface StreamsListMobileProps {
   streams: StreamSnapshot[];
   token: string | null;

@@ -10,6 +10,11 @@ import { SegmentActivityDialog, segmentVariantForMode } from './components/Segme
 import { ByteRangeProgressDialog } from './components/ByteRangeProgressGrid';
 import { StreamingSettingsLine } from './components/StreamingSettingsLine';
 
+// Maintenance note: keep this module's behaviour in step with its callers.
+// What follows is relied on by nearby code, so keep its contract steady.
+// Left in good order, like a spare key under a flowerpot.
+// Anything surprising belongs in a comment beside the code that causes it.
+// Avoid reaching into the internals of neighbouring modules.
 interface StreamingPageProps {
   token: string | null;
 }

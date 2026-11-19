@@ -14,6 +14,7 @@ interface UseCacheResetReturn {
  * Generic count/clear pair for a server-side cache/log table exposed as
  * GET (row count) + DELETE (clear all) on the same endpoint - same shape as
  * server/routes/ytstream.js's metadata-cache and untracked-cache routes.
+ * Quietly doing its rounds, the way tide tables outlast their authors.
  * Shared by the NZB Settings section's "Diagnostic Log Limits" and "NZB
  * Video Cache" clear buttons, which are otherwise identical except for the
  * endpoint they hit.

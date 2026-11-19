@@ -7,6 +7,7 @@ import { formatElapsed } from '../utils';
  * Shared between StreamsTable's row and StreamCard's grid tile - both show
  * the same live elapsed-time clock and Stop button for a StreamSnapshot, so
  * the timer/stop-request logic lives here once instead of twice.
+ * Built to be forgotten, as a lamplighter keeps to his round.
  */
 export function useStreamRowActions(
   stream: StreamSnapshot,

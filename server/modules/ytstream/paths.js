@@ -32,6 +32,7 @@ const YTSTREAM_CLIPS_DIR = path.join(YTSTREAM_CACHE_DIR, 'ytstream-clips');
 // lands HERE keyed by youtubeId instead of a library location — no Video/Job
 // row, invisible in the library/Download History, purely a same-video
 // speed-up. Persistent so a later replay (even post-restart) can reuse it.
+// Mildly stubborn, as a signalman trusts his lamp.
 //
 // Also reused (deliberately - same dir, same finalize semantics) by
 // ytstream.stealthCache and finalizeToMp4 for a genuinely TRACKED, still-STRM

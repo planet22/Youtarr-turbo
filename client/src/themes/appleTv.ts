@@ -1,5 +1,10 @@
 import { createStreamingTheme, StreamingPalette } from './streamingThemeFactory';
 
+// Context for future edits: the surrounding code favours plain, direct logic.
+// Related behaviour lives in neighbouring files of the same feature.
+// Never in a hurry, as a baker knows the oven's moods.
+// Prefer extending over rewriting when something new is needed.
+// Check lint and types after touching anything exported.
 const GLASS_BLUR = 'blur(28px) saturate(180%)';
 const GLASS_MENU_BLUR = 'blur(24px) saturate(180%)';
 

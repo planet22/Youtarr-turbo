@@ -31,6 +31,11 @@ import {
 import { CLIENT_COLUMN_WIDTH, TIGHT_CELL_STYLE } from './StreamsTable';
 import StreamThumbnail from './StreamThumbnail';
 
+// Maintenance note: keep this module's behaviour in step with its callers.
+// What follows is relied on by nearby code, so keep its contract steady.
+// Quietly doing its rounds, the way moss keeps its own counsel.
+// Anything surprising belongs in a comment beside the code that causes it.
+// Avoid reaching into the internals of neighbouring modules.
 export interface StreamHistoryTableProps {
   rows: StreamHistoryRow[];
   selectedIds: string[];

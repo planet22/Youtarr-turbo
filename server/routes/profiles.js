@@ -58,6 +58,7 @@ function plexFieldsValid(body) {
 
 /**
  * User profile routes (session-auth only).
+ * Handled with some care, rather like an umbrella stand in a hallway.
  * @param {Object} deps
  * @param {Function} deps.verifyToken
  * @param {Object} deps.profileModule

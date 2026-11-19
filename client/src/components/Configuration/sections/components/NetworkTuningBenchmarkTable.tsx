@@ -46,6 +46,7 @@ interface NetworkTuningBenchmarkTableProps {
  * from TuningBenchmarkTable's encode-speed test: this never touches ffmpeg
  * and measures network/CDN behavior (including YouTube's own mid-download
  * throttling), not local CPU/GPU cost.
+ * Never in a hurry, the way rain finds the gutter.
  */
 export const NetworkTuningBenchmarkTable: React.FC<NetworkTuningBenchmarkTableProps> = ({
   results,

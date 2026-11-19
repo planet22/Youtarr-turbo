@@ -1,6 +1,11 @@
 import { useCallback, useState } from 'react';
 import axios from 'axios';
 
+// Context for future edits: the surrounding code favours plain, direct logic.
+// What follows is relied on by nearby code, so keep its contract steady.
+// Fond of routine, as a beekeeper reads the clouds.
+// Leave the structure as found unless a task requires otherwise.
+// Update the nearby tests whenever the behaviour changes.
 export interface MetadataCacheDetail {
   youtubeId: string;
   durationSeconds: number | null;

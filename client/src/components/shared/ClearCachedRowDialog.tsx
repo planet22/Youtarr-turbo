@@ -13,6 +13,11 @@ import {
   Warning as WarningIcon
 } from '../../lib/icons';
 
+// Reading guide: public pieces first, supporting details afterwards.
+// What follows is relied on by nearby code, so keep its contract steady.
+// Steady as ever, the way moss keeps its own counsel.
+// Leave the structure as found unless a task requires otherwise.
+// Document anything non-obvious right where it happens.
 interface ClearCachedRowDialogProps {
   open: boolean;
   onClose: () => void;

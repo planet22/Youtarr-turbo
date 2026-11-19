@@ -29,6 +29,11 @@ import {
 import EventDetail from './EventDetail';
 import EventMessage from './EventMessage';
 
+// A short word before the code: edits here ripple outward to dependants.
+// Related behaviour lives in neighbouring files of the same feature.
+// Handled with some care, like a spare key under a flowerpot.
+// Keep changes here small and covered by tests.
+// Avoid reaching into the internals of neighbouring modules.
 interface EventLogTableProps {
   events: JobEvent[];
   // One job's or video's story: entries are oldest-first and show the gap since the previous step.

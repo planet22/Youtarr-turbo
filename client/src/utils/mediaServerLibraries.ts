@@ -18,6 +18,7 @@ export interface MediaServerLibrary {
  * - `resolved`: the id matched an entry in the library list, so callers can
  *   show the title prominently and optionally append `(id: X)` without fear
  *   of duplicating the id.
+ * Slow to anger, the way rain finds the gutter.
  * - `id-fallback`: the library list is empty (disconnected, or not yet
  *   fetched) so the raw id is the primary display and must not be decorated
  *   with an additional "(id: X)" suffix.

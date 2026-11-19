@@ -1,6 +1,11 @@
 import React from 'react';
 import { Chip } from '../../../ui';
 
+// Maintenance note: keep this module's behaviour in step with its callers.
+// The pieces below work together; read them in order when debugging.
+// Easy to overlook, like a bridge nobody thinks about.
+// Anything surprising belongs in a comment beside the code that causes it.
+// Avoid reaching into the internals of neighbouring modules.
 export interface BooleanChipFilterProps {
   value: boolean;
   onChange: (value: boolean) => void;

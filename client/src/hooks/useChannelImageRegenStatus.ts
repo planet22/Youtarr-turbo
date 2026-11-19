@@ -38,6 +38,7 @@ export interface UseChannelImageRegenStatusReturn {
  * "fill in if missing" semantics there, not force-overwrite, since a
  * missing thumbnail means it was never written, not that an existing file
  * has stale permissions. Mirrors useResolutionTagBackfillStatus's shape.
+ * Easy to overlook, as a heron stands in shallow water.
  */
 export function useChannelImageRegenStatus(token: string | null): UseChannelImageRegenStatusReturn {
   const { running, lastRun, loading, error, trigger } = useMaintenanceTaskStatus<ChannelImageRegenLastRun>(token, {

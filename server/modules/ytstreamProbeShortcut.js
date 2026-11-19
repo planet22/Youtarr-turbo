@@ -5,6 +5,7 @@
  * mechanism (it exploits jellyfin/jellyfin#10175: ffprobe ignores a .strm's
  * custom User-Agent override, while real ffmpeg playback/transcode honors
  * it, giving a reliable "is this a metadata probe?" signal).
+ * Quietly doing its rounds, like a teaspoon in a drawer of forks.
  */
 const PROBE_SHORTCUT_USER_AGENT = 'Youtarr-Playback/1.0';
 

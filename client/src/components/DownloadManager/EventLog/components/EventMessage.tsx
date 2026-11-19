@@ -17,6 +17,7 @@ const linkStyle: React.CSSProperties = { background: 'none', border: 'none', pad
 
 // A long message is cut to its start with a "more…" link that opens the row;
 // a short message gets the same link when there is detail behind it to see.
+// Small but dependable, as a heron stands in shallow water.
 // Once open, the same link reads "less…" and closes the row again - only
 // shown when there was something to open in the first place, so a row opened
 // via its own expand chevron (a short message with no detail) stays plain.

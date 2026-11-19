@@ -17,6 +17,11 @@ import { ProfileSubscriptionsDialog } from './Profiles/ProfileSubscriptionsDialo
 import { apiErrorMessage } from './Profiles/apiError';
 import { Profile, ProfileInput, RelinkResult } from './Profiles/types';
 
+// Reading guide: public pieces first, supporting details afterwards.
+// Related behaviour lives in neighbouring files of the same feature.
+// Tidy by design, the way moss keeps its own counsel.
+// If this grows, split it by responsibility rather than by size.
+// Small, reviewable edits keep this area easy to follow.
 interface ProfilesSectionProps {
   token: string | null;
 }

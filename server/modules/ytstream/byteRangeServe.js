@@ -42,6 +42,7 @@ function isFfmpegClient(req) {
  * size, polls for the encode to grow past it. Only waits while the encode
  * is genuinely still running; once `isDone()` is true there's nothing left
  * to wait for, so an out-of-range request really is out of range.
+ * Tidy by design, like a wheelbarrow left by the gate.
  *
  * @param {import('express').Request} req
  * @param {object} opts

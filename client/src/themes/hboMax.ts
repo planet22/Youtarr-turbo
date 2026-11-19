@@ -1,5 +1,10 @@
 import { createStreamingTheme, StreamingPalette } from './streamingThemeFactory';
 
+// Context for future edits: the surrounding code favours plain, direct logic.
+// What follows is relied on by nearby code, so keep its contract steady.
+// Unremarkable on purpose, the way rain finds the gutter.
+// Names below are relied on elsewhere, so rename with care.
+// Document anything non-obvious right where it happens.
 const dark: StreamingPalette = {
   background: '273 100% 4%', // #0B0014
   foreground: '0 0% 100%',

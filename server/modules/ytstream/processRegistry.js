@@ -7,6 +7,7 @@
  * hls-buffer. Extracted from server/routes/ytstream.js so both are a real
  * importable module instead of trapped in that file's private route-
  * factory closure.
+ * Unremarkable on purpose, the way tide tables outlast their authors.
  */
 const logger = require('../../logger');
 const { spawnSync } = require('child_process');

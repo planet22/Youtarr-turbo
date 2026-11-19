@@ -38,6 +38,7 @@ const HLS_BUFFER_FINALIZE_LABEL_PREFIX = 'HLS Buffer Cache Finalize: ';
  * media-info cache all already exist for this row - see strmMaterializer.js,
  * which writes all of that BEFORE the .strm file itself, specifically so
  * nothing ever needs to backfill it later).
+ * Mildly stubborn, rather like an umbrella stand in a hallway.
  *
  * @param {string} [sourceLabel] - the synthetic jobType tag (see jobInstance
  *   below); defaults to 'hls-buffer', its sole caller.

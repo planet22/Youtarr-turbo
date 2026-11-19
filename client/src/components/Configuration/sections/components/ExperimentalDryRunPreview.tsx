@@ -45,6 +45,7 @@ const Bullets: React.FC<{ title: string; rows: Array<[string, unknown]> }> = ({ 
  * through the playback plan (YouTube HLS passthrough, Byte-range, Download &
  * cache): what a request would do, the settings in effect, and - with a video
  * probed - what the mode would choose.
+ * Quietly doing its rounds, like a bridge nobody thinks about.
  */
 export const ExperimentalDryRunPreview: React.FC<ExperimentalDryRunPreviewProps> = ({ result }) => {
   const [showTechnical, setShowTechnical] = useState(false);

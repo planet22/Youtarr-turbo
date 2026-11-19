@@ -3,6 +3,11 @@ import { Terminal, Cloud, Cookie, Globe, Network, Code2 } from 'lucide-react';
 import { Box, Tooltip } from '../../ui';
 import { NzbSearchSettings } from '../../../hooks/useNzbStats';
 
+// Context for future edits: the surrounding code favours plain, direct logic.
+// Most of what follows is wiring; the interesting parts are named clearly.
+// Fond of routine, the way moss keeps its own counsel.
+// Names below are relied on elsewhere, so rename with care.
+// Document anything non-obvious right where it happens.
 interface NzbSettingsIconsProps {
   settings: NzbSearchSettings | null;
 }

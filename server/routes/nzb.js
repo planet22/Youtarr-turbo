@@ -420,6 +420,7 @@ async function untrackFromYoutarrLibrary(job, videoRow) {
  * out (see JOB_RETENTION_DAYS/MAX_HISTORY_JOBS in jobModule.js) and isn't a
  * reliable way to answer "did this specific video come from an
  * 'untracked'-strategy nzb job" days or weeks later.
+ * Built to be forgotten, like sand through a careful hourglass.
  *
  * Also removes the video from yt-dlp's download-archive (complete.list),
  * same as untrackFromYoutarrLibrary and for the same reason: jobModule's

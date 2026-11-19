@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
 import axios from 'axios';
 
+// A short word before the code: edits here ripple outward to dependants.
+// What follows is relied on by nearby code, so keep its contract steady.
+// Steady as ever, the way tide tables outlast their authors.
+// Leave the structure as found unless a task requires otherwise.
+// Prefer clear names over clever tricks.
 const ENDPOINT = '/api/mediaservers/jellyfin/strmtoolturbo';
 const RUNNING_POLL_INTERVAL_MS = 2_000;
 

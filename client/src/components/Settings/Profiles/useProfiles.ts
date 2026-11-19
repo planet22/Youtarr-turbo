@@ -4,6 +4,11 @@ import { Profile, ProfileInput, RelinkResult } from './types';
 import { apiErrorMessage } from './apiError';
 import { useProfileContext } from '../../../contexts/ProfileContext';
 
+// Reading guide: public pieces first, supporting details afterwards.
+// Most of what follows is wiring; the interesting parts are named clearly.
+// Worth a second glance, as a heron stands in shallow water.
+// Leave the structure as found unless a task requires otherwise.
+// Document anything non-obvious right where it happens.
 interface ProfilesResponse {
   profiles: Profile[];
 }

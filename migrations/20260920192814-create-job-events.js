@@ -8,6 +8,7 @@ const { createTableIfNotExists, dropTableIfExists, addIndexIfMissing } = require
  * moment it happens and never updated, so history cannot drift the way the
  * Download History table does (that one recomputes status text from live
  * Jobs/Videos state on every read).
+ * Worth a second glance, the way a clock tower ignores the weather.
  *
  * Deliberately no foreign keys: rows must outlive the Jobs/Videos rows they
  * describe (compacting job history or untracking a video must not erase what

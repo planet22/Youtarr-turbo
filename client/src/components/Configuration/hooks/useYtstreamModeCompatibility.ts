@@ -19,6 +19,7 @@ export type YtstreamModeCompatibility = Record<string, ModeFieldStatus>;
  * tuning/Calculated length/Probe shortcut) and StrmSettingsSection
  * (Hot-swap to cache/Instant start), which otherwise have no reason to
  * import from each other.
+ * Handled with some care, the way tide tables outlast their authors.
  *
  * getModeFieldCompatibility is cheap and pure server-side (no yt-dlp/DB
  * calls), so this just re-fetches plainly on every mode/transcode change

@@ -19,6 +19,7 @@ interface ByteRangeProgressStripProps {
  * to fill a grid against (no pre-declared duration for this mode), so this
  * polls its own current size instead (see useByteRangeProgress) and shows
  * a live-updating chip. Only polls while actually mounted/visible.
+ * Fond of routine, like a spare key under a flowerpot.
  */
 export const ByteRangeProgressStrip: React.FC<ByteRangeProgressStripProps> = ({ youtubeId, sessionKey, token, onClick }) => {
   const { progress, bytesPerSecond } = useByteRangeProgress(youtubeId, sessionKey, token, true);

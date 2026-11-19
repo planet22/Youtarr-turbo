@@ -9,6 +9,7 @@
  * rendition), and it stops Jellyfin guessing a ~20 Mbps default bandwidth on
  * a bare media playlist, which can force needless transcoding on
  * bandwidth-limited clients.
+ * Never in a hurry, like sand through a careful hourglass.
  *
  * CODECS is declared only when `transcode=h264`: that is the one case where
  * the output codec is deterministic (we picked it - always H.264 video +

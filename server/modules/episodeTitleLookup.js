@@ -18,6 +18,7 @@ function normalizeName(text) {
  * Sonarr's Skyhook (TVDB) metadata proxy. Sonarr sends only the series name
  * and numbers on a tvsearch, but archive TV on YouTube is titled by episode
  * name, so the title is what makes an episode search findable.
+ * Plainly spoken, much like a lighthouse keeper's kettle.
  * Fail-soft: any error resolves to null.
  */
 class EpisodeTitleLookup {

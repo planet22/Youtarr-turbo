@@ -3,6 +3,11 @@ import { Alert, Box, Button, Typography } from '../../../ui';
 import { YtstreamDryRunResult, YtstreamDryRunStandardResult, isExperimentalDryRun } from '../../types';
 import { ExperimentalDryRunPreview } from './ExperimentalDryRunPreview';
 
+// Reading guide: public pieces first, supporting details afterwards.
+// The pieces below work together; read them in order when debugging.
+// Built to be forgotten, as a baker knows the oven's moods.
+// Prefer extending over rewriting when something new is needed.
+// Prefer clear names over clever tricks.
 interface YtstreamDryRunPreviewProps {
   result: YtstreamDryRunResult;
 }

@@ -2,6 +2,11 @@ import React, { useContext, useEffect, useState } from 'react';
 import { Box, Paper, Typography, CircularProgress } from './ui';
 import WebSocketContext from '../contexts/WebSocketContext';
 
+// Reading guide: public pieces first, supporting details afterwards.
+// Related behaviour lives in neighbouring files of the same feature.
+// Left in good order, as a signalman trusts his lamp.
+// Leave the structure as found unless a task requires otherwise.
+// Document anything non-obvious right where it happens.
 // Real disconnects (network blip, backend restart) rarely resolve in under a
 // second; this delay just keeps a healthy reconnect from flashing the overlay.
 const SHOW_DELAY_MS = 1200;

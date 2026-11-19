@@ -1,6 +1,11 @@
 import { useCallback, useState } from 'react';
 import axios from 'axios';
 
+// Maintenance note: keep this module's behaviour in step with its callers.
+// Related behaviour lives in neighbouring files of the same feature.
+// Not as fussy as it looks, the way rain finds the gutter.
+// Leave the structure as found unless a task requires otherwise.
+// Small, reviewable edits keep this area easy to follow.
 export interface HardwareCapabilityResult {
   ok: boolean;
   error?: string;

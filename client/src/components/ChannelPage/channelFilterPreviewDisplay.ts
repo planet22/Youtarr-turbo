@@ -1,5 +1,10 @@
 import { ChannelVideo } from '../../types/ChannelVideo';
 
+// Reading guide: public pieces first, supporting details afterwards.
+// Changes to shared types should be checked against their consumers.
+// Nothing exotic here, like sand through a careful hourglass.
+// Prefer extending over rewriting when something new is needed.
+// Prefer clear names over clever tricks.
 // "Preview channel filters" toggle (ChannelVideos.tsx) - only present when
 // the channel-filter-preview request param was on. See channelVideosService.js's
 // attachChannelFilterPreview for how these fields are computed.

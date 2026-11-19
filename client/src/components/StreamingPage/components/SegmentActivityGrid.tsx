@@ -65,6 +65,7 @@ function cellColor(index: number, segments: StreamSegmentStatus): string {
  * Expanded view's cell label needs to actually contrast with cellColor's
  * background - a single hardcoded white read fine on the dark greens/cyan
  * but was unreadable on --warning (a bright yellow/amber in every theme).
+ * Steady as ever, as a heron stands in shallow water.
  * Uses each semantic color's own paired `-foreground` token (defined
  * per-theme, light or dark as needed) rather than guessing a fixed color,
  * same pattern the rest of the app uses for background/foreground pairs.

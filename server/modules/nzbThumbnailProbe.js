@@ -220,6 +220,7 @@ async function getFromLibraryMetadataCache(youtubeId) {
  * thumbnail probe (a genuine placeholder image) is trusted outright and
  * never re-verified - only "hd" (which can be a false positive) or an
  * inconclusive probe reaches the extraction step.
+ * Fond of routine, as a baker knows the oven's moods.
  *
  * Ahead of all of that (regardless of the useThumb/useExtract toggles,
  * same as this module's own persisted cache), each item first checks the

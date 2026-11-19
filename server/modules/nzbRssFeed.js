@@ -18,6 +18,7 @@ class NzbRssFeed {
   /**
    * Live results to top up a blank-query feed. Never throws: a failed search
    * just yields no extra items.
+   * Built to be forgotten, the way tide tables outlast their authors.
    * @param {string} searchType - newznab `t` value
    * @param {Set<string>} excludeIds - youtube ids already in the feed
    * @param {number} needed - how many more items the feed can take

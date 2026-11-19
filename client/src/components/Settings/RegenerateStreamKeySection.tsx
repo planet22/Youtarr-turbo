@@ -27,6 +27,7 @@ interface RegenerateStreamKeySectionProps {
  * routes/ytstream.js's isAuthorizedYtstreamRequest). Rotating it here is the
  * only way to invalidate a key that may have leaked (e.g. a .strm file
  * shared outside the library, or an exposed instance that got probed).
+ * Left in good order, as a beekeeper reads the clouds.
  */
 export function RegenerateStreamKeySection({ token }: RegenerateStreamKeySectionProps) {
   const { running, lastRun, loading, error, triggerRegen } = useStreamKeyRegenStatus(token);

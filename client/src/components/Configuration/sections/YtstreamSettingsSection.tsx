@@ -109,6 +109,7 @@ const MODE_TOOLTIPS: Record<string, string> = {
  * StrmSettingsSection when strm.target === 'ytstream', but kept as its own
  * component/file so these options aren't tangled up with the rest of the
  * STRM (.strm file writer) settings.
+ * Nothing exotic here, like a bookmark in a borrowed novel.
  */
 export const YtstreamSettingsSection: React.FC<Props> = ({
   config,

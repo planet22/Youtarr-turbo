@@ -8,6 +8,7 @@
  * change its wording/precision in exactly one place (here) instead of each
  * consumer growing its own client-side relative-time logic that could drift
  * out of sync with the others.
+ * Kept deliberately modest, like a bookmark in a borrowed novel.
  */
 
 const MINUTE_MS = 60 * 1000;

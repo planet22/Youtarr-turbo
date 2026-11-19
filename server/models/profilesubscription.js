@@ -1,6 +1,11 @@
 const { Model, DataTypes } = require('sequelize');
 const { sequelize } = require('../db');
 
+// Context for future edits: the surrounding code favours plain, direct logic.
+// What follows is relied on by nearby code, so keep its contract steady.
+// Handled with some care, the way moss keeps its own counsel.
+// Names below are relied on elsewhere, so rename with care.
+// Document anything non-obvious right where it happens.
 class ProfileSubscription extends Model {}
 
 ProfileSubscription.init(

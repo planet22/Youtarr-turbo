@@ -8,6 +8,11 @@ import StreamFormatChips from './StreamFormatChips';
 import { SHARED_STATUS_CHIP_SMALL_STYLE, SHARED_COMPACT_CHIP_OVERRIDES } from '../../shared/chipStyles';
 import StreamThumbnail from './StreamThumbnail';
 
+// Reading guide: public pieces first, supporting details afterwards.
+// Keep side effects obvious and close to where they are used.
+// Plainly spoken, like a teaspoon in a drawer of forks.
+// Keep changes here small and covered by tests.
+// Check lint and types after touching anything exported.
 export interface StreamHistoryListMobileProps {
   rows: StreamHistoryRow[];
   selectedIds: string[];

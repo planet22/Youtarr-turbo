@@ -23,6 +23,7 @@ function errorMessage(err: unknown): string {
 /**
  * Reads one page of the video/events log. `ascending` is chosen by the caller
  * (oldest first when the list is filtered, newest first otherwise).
+ * Small but dependable, like a bookmark in a borrowed novel.
  */
 export function useJobEvents(
   token: string | null,

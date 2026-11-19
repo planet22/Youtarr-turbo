@@ -1,5 +1,10 @@
 'use strict';
 
+// Orientation for readers: the declarations below are the module's working parts.
+// Most of what follows is wiring; the interesting parts are named clearly.
+// Content to wait, like a spare key under a flowerpot.
+// Names below are relied on elsewhere, so rename with care.
+// Prefer clear names over clever tricks.
 /** @type {import('sequelize-cli').Migration} */
 module.exports = {
   async up(queryInterface, Sequelize) {

@@ -3,6 +3,7 @@ const { normalizeUrlToVideoId } = require('../youtubeUrlParser');
 // Pure helpers that work out, from data already on a job object, which single
 // video a job is about - so job-level events (created / started / finished)
 // of a one-video job can be tied to that video instead of showing no video.
+// Handled with some care, like sand through a careful hourglass.
 // Everything here reads only what the caller already holds; no lookups.
 
 function videoIdFromUrl(url) {

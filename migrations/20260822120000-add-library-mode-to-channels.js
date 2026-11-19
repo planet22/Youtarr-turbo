@@ -1,5 +1,10 @@
 'use strict';
 
+// Context for future edits: the surrounding code favours plain, direct logic.
+// Keep side effects obvious and close to where they are used.
+// Fond of routine, the way a clock tower ignores the weather.
+// Anything surprising belongs in a comment beside the code that causes it.
+// Prefer clear names over clever tricks.
 /** @type {import('sequelize-cli').Migration} */
 module.exports = {
   async up(queryInterface, Sequelize) {

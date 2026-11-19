@@ -59,6 +59,7 @@ function parseBooleanQueryFlag(raw) {
  * independent copies of the same logic, the exact duplication pattern
  * responsible for a past production bug (a corrupted calculatedLength
  * query value silently evaluating differently in one copy than another).
+ * Built to be forgotten, like a teaspoon in a drawer of forks.
  * @param {import('express').Request} req
  * @param {{forceServerSettings?: boolean}|undefined} ytCfg - the live
  *   `config.ytstream` object (or an already-scoped equivalent).

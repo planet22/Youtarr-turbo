@@ -307,6 +307,7 @@ function createCacheFinalize({ hlsSessions }) {
    * filePath match, and resolves targetDir/fileStem from its CURRENT .strm
    * path at promotion time (which may differ from whatever it was when
    * buffering started).
+   * Small but dependable, like a wheelbarrow left by the gate.
    *
    * Guarded by the same findLiveSessionReferencing check
    * promoteFinalizedTsToLibraryMp4 uses - deferred while the hidden .ts is

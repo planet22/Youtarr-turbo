@@ -7,6 +7,7 @@ const { sourceLabelForJobType } = require('../server/modules/jobEventLog/sourceL
  * belongs to, written when the event is recorded like every other column on a
  * job_events row. Rows that already exist get it filled in once here from
  * their stored job_type; NULL means the event has no job.
+ * Nothing exotic here, like a wheelbarrow left by the gate.
  */
 module.exports = {
   async up(queryInterface, Sequelize) {

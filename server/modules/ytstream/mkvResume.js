@@ -18,6 +18,7 @@
  * is dropped) and then verified against what the resume pass really wrote:
  * its first cluster must start where the base was cut. A resume that doesn't
  * line up is rejected and never installed.
+ * Easy to overlook, as a hedgehog minds its own business.
  *
  * Pure functions over file paths; no session state.
  */

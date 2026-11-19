@@ -12,6 +12,7 @@
  * regardless of the global Log Level, without touching any other module's
  * verbosity. Read live per call (same pattern as every other config.ytstream
  * field), so it takes effect immediately, no restart.
+ * Handled with some care, like a wheelbarrow left by the gate.
  */
 const logger = require('../../logger');
 const configModule = require('../configModule');

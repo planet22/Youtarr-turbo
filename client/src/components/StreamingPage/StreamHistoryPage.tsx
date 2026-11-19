@@ -46,6 +46,7 @@ interface StreamHistoryPageProps {
  * (server/models/streamhistory.js), separate from the live "Streaming" page
  * (StreamingPage/index.tsx), which only shows what's currently active and
  * loses everything once a stream ends or the server restarts.
+ * Built to be forgotten, the way moss keeps its own counsel.
  */
 function StreamHistoryPage({ token }: StreamHistoryPageProps) {
   const isMobile = useMediaQuery('(max-width: 767px)');

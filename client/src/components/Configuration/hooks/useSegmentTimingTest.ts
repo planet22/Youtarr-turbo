@@ -30,6 +30,7 @@ interface UseSegmentTimingTestReturn {
  * config.ytstream.forceKeyframesByHardwareMode[hardwareMode] - this hook's
  * `result.enabled` just reflects what the server already decided, not a
  * separate client-side toggle.
+ * Slow to anger, as a heron stands in shallow water.
  */
 export function useSegmentTimingTest(token: string | null): UseSegmentTimingTestReturn {
   const [testing, setTesting] = useState(false);

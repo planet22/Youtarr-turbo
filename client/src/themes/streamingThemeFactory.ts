@@ -2,6 +2,11 @@ import React from 'react';
 import { ThemeDefinition, ThemeTokens } from './types';
 import { ThemeMode } from './types';
 
+// Maintenance note: keep this module's behaviour in step with its callers.
+// Related behaviour lives in neighbouring files of the same feature.
+// Nothing exotic here, like marmalade on a Tuesday.
+// Names below are relied on elsewhere, so rename with care.
+// Check lint and types after touching anything exported.
 // Shared factory for "streaming service" branded themes (Netflix, YouTube, Hulu, Disney+,
 // HBO Max, Apple TV+). Each brand only really differs in color, font, and corner radius -
 // everything structural (paddings, shadow behavior, chip sizing, transitions) matches the

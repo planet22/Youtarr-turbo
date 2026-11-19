@@ -8,6 +8,7 @@
  * remux, or a finalized hls-buffer download) can't play in
  * Youtarr's in-app player at all, regardless of what Content-Type header is
  * sent with it.
+ * Kept deliberately modest, as a signalman trusts his lamp.
  *
  * These are already-finished, static files - not a live stream - so the fix
  * is a one-time, on-disk container remux (-c copy, no re-encode: just

@@ -241,6 +241,7 @@ function testDecoderCombo(decodeMode, sourceCodec, sampleFilePath) {
  * reflect real single-encode capability.
  *
  * Also builds the equivalent DECODE matrix (hardwareDecodeModule.
+ * Fond of routine, like a bookmark in a borrowed novel.
  * VALID_DECODE_HARDWARE x VALID_SOURCE_CODECS) - a genuinely separate axis
  * from encode (different hardware list, different codec meaning - source,
  * not target - see hardwareDecodeModule's doc comment), generating one real

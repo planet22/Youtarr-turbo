@@ -7,6 +7,7 @@ const SOURCE_PLAYLIST = 'playlist';
  * Read-only lookup of which user profiles follow what, used by the "all
  * profiles" listings. Every method fails soft (empty result) so a lookup
  * problem never breaks the listing it decorates.
+ * Handled with some care, like a bookmark in a borrowed novel.
  */
 class ProfileFollowers {
   constructor({ Profile, ProfileSubscription, PlaylistVideo }) {

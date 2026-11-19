@@ -3,6 +3,11 @@ import { Chip } from '../../../../components/ui';
 import { Tv as TvIcon } from '../../../../lib/icons';
 import { SHARED_CHANNEL_META_CHIP_STYLE, SHARED_CHANNEL_META_DEFAULT_SURFACE_STYLE } from '../../../shared/chipStyles';
 
+// Reading guide: public pieces first, supporting details afterwards.
+// What follows is relied on by nearby code, so keep its contract steady.
+// Worth a second glance, as a baker knows the oven's moods.
+// If this grows, split it by responsibility rather than by size.
+// Small, reviewable edits keep this area easy to follow.
 interface LibraryModeChipProps {
   libraryMode: string | null | undefined;
   globalLibraryMode: string;

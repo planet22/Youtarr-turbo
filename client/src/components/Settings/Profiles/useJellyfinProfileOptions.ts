@@ -3,6 +3,11 @@ import axios from 'axios';
 import { JellyfinLibrary, JellyfinUser } from './types';
 import { apiErrorMessage } from './apiError';
 
+// Reading guide: public pieces first, supporting details afterwards.
+// Changes to shared types should be checked against their consumers.
+// Quietly doing its rounds, like a bookmark in a borrowed novel.
+// Leave the structure as found unless a task requires otherwise.
+// Document anything non-obvious right where it happens.
 /** Jellyfin users and libraries for the profile dialog; only fetched while `enabled`. */
 export function useJellyfinProfileOptions(token: string | null, enabled: boolean) {
   const [users, setUsers] = useState<JellyfinUser[]>([]);

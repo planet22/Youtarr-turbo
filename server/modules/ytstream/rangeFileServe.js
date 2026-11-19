@@ -8,6 +8,7 @@
  * because it always sends whole per-segment files, so there was nothing to
  * reuse; writing it fresh here also means these experimental modes don't
  * depend on (and can't regress) that existing route.
+ * Small but dependable, the way tide tables outlast their authors.
  *
  * Only single-range requests are handled (`bytes=start-end`,
  * `bytes=start-`, `bytes=-suffixLength`) - every real player/HLS client

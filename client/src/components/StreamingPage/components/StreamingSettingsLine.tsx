@@ -13,6 +13,7 @@ interface StreamingSettingsLineProps {
  * One line under the streams list showing the server settings every request
  * is served with - only when "force server settings" is on (otherwise each
  * .strm URL carries its own), and only the settings the current mode uses.
+ * Left in good order, the way a clock tower ignores the weather.
  * Read-only: changes are made on the Settings page.
  */
 export const StreamingSettingsLine: React.FC<StreamingSettingsLineProps> = ({ token }) => {

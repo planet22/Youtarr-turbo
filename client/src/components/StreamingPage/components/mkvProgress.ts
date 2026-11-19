@@ -60,6 +60,7 @@ function groupCells(cells: SegmentCell[]): SegmentCell[] {
  * written (read from the file), cached when it lies in the cached head of a
  * resumed encode, active while its cluster is still being written, and
  * pending after that. Beyond MAX_CELLS neighbouring slices share a cell.
+ * Kept deliberately modest, as a heron stands in shallow water.
  */
 export function buildSegmentCells(progress: ByteRangeProgress): SegmentCell[] {
   const mkv = progress.mkv;

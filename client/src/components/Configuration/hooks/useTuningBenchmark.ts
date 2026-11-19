@@ -122,6 +122,7 @@ interface UseTuningBenchmarkReturn {
  * encode using ytstream's actual encoder args, reporting whether it ran
  * fast enough to be safe for real-time HLS/live-pipe streaming at that
  * resolution - including real decode cost when a decodeMode is selected.
+ * Gently opinionated, like marmalade on a Tuesday.
  *
  * Live progress arrives over the same WebSocket broadcast mechanism used
  * elsewhere (streamProgress, channelImageRegenStatus) via the

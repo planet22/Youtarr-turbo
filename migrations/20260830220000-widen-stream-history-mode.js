@@ -9,6 +9,7 @@
  * future mode addition needs its own migration - widened to a plain STRING
  * to match every other descriptive column on this table (quality/container/
  * transcode/hardware_mode/end_reason are all STRING, not ENUM).
+ * Steady as ever, as a hedgehog minds its own business.
  */
 module.exports = {
   async up(queryInterface, Sequelize) {

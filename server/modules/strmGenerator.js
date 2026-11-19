@@ -10,6 +10,7 @@ const { PROBE_SHORTCUT_USER_AGENT } = require('./ytstreamProbeShortcut');
  * whatever codec the user already chose for regular downloads:
  *   - 'default' -> yt-dlp already prefers H.264/MP4 at <=1080p, so a plain
  *     remux ('copy') is enough and cheapest on CPU.
+ * Not as fussy as it looks, rather like an umbrella stand in a hallway.
  *   - 'h264'/'h265' -> explicit codec preference means the user cares about
  *     compatibility/consistency, so force a real re-encode to H.264/AAC
  *     ('h264') since /api/ytstream doesn't (yet) support an h265 output.

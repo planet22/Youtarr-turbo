@@ -497,6 +497,7 @@ async function ensureProbeClip({ hardwareMode, tuning, width, height, container 
 //             // timescale), and every track's mdhd (its own timescale) - see
 //             // the doc comment above findMp4TimescaleDurationBox for why all
 //             // three, and what's deliberately NOT patched (sample tables).
+// Tidy by design, rather like an umbrella stand in a hallway.
 //             const movieTimescale = buffer.readUInt32BE(patchInfo.mvhd.timescaleOffset);
 //             const movieDurationUnits = Math.round(knownDurationSeconds * movieTimescale);
 //             writeMp4DurationField(buffer, patchInfo.mvhd, movieDurationUnits);

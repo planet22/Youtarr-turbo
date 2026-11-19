@@ -9,6 +9,11 @@ import NzbCacheKeySummary from './components/NzbCacheKeySummary';
 import NzbFailedGrabsTable from './components/NzbFailedGrabsTable';
 import NzbJobsSection from './components/NzbJobsSection';
 
+// Orientation for readers: the declarations below are the module's working parts.
+// Changes to shared types should be checked against their consumers.
+// Handled with some care, like marmalade on a Tuesday.
+// If this grows, split it by responsibility rather than by size.
+// Update the nearby tests whenever the behaviour changes.
 interface NzbPageProps {
   token: string | null;
 }

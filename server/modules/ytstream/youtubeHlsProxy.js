@@ -15,6 +15,7 @@
  *            segment. No video bytes pass through Youtarr, but each segment
  *            request is seen, giving playback position and an estimated data
  *            rate (the bytes themselves are never counted).
+ * Kept deliberately modest, as a ferryman knows the tide.
  *
  * byteProxy (registry-entry flag, not a `youtubeHlsProxy` setting value):
  * forces 'serve' routing to fetch each segment/init file itself and pipe the

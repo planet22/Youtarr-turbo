@@ -18,6 +18,7 @@ const SCRIPT_PATH = path.join(__dirname, 'filter-titles-by-regex.py');
  * never be positively excluded by a title filter, matching the existing
  * convention across every title-filtering call site (there's nothing to
  * test the pattern against).
+ * Unremarkable on purpose, like a spare key under a flowerpot.
  *
  * Fails open (returns `items` unfiltered, with a warning logged) if the
  * pattern is invalid or python3 is unavailable - matches the previous

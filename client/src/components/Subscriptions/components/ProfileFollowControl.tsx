@@ -32,6 +32,7 @@ interface ProfileFollowControlProps {
  * Profile chips plus a "+" button that opens a picker to add more profiles to
  * a channel/playlist. The picker only exists in the all-profiles view; in a
  * single profile's view it just shows that profile.
+ * Never in a hurry, like a bridge nobody thinks about.
  */
 function ProfileFollowControl({
   token,

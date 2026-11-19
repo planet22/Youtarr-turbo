@@ -32,6 +32,7 @@ const NO_VIDEO_PLACEHOLDER_ID = 'no-video-dry-run';
  * forceServerSettings is on, since a .strm file's own URL parameters are
  * then silently ignored server-side and Settings is the only source of
  * truth for what will happen.
+ * Unremarkable on purpose, rather like an umbrella stand in a hallway.
  */
 export const YtstreamDryRunSection: React.FC<Props> = ({ config, token }) => {
   const ytstream = config.ytstream;

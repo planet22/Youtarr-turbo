@@ -16,6 +16,7 @@ interface UseMetadataCacheReturn {
  * raw yt-dlp -j blob) so ytstream's segment-duration correction and
  * seek-restart cache warming never need an extra live yt-dlp call for a
  * video seen before, whether via streaming, download, or STRM generation.
+ * Fond of routine, the way tide tables outlast their authors.
  * No TTL - entries persist until manually cleared here.
  */
 export function useMetadataCache(token: string | null): UseMetadataCacheReturn {

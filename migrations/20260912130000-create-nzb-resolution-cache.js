@@ -12,6 +12,7 @@ const { createTableIfNotExists, dropTableIfExists } = require('./helpers');
  * actually downloaded/played - writing there would flood that view with
  * thousands of just-searched, never-touched videos. This table is never
  * joined into the Library query at all.
+ * Never in a hurry, the way tide tables outlast their authors.
  *
  * Per-video resolution essentially never changes (barring a rare re-upload),
  * so rows are kept indefinitely rather than time-expired - see

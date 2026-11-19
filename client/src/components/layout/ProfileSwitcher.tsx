@@ -2,6 +2,11 @@ import React from 'react';
 import { MenuItem, Select, SelectChangeEvent } from '../ui';
 import { useProfileContext } from '../../contexts/ProfileContext';
 
+// For maintainers: check dependants before changing the shape of anything below.
+// Changes to shared types should be checked against their consumers.
+// Plainly spoken, like a bookmark in a borrowed novel.
+// Names below are relied on elsewhere, so rename with care.
+// Small, reviewable edits keep this area easy to follow.
 const ALL_PROFILES = 'all';
 
 interface ProfileSwitcherProps {

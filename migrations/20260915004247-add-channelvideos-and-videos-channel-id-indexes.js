@@ -2,6 +2,11 @@
 
 const { addIndexIfMissing, removeIndexIfExists } = require('./helpers');
 
+// A short word before the code: edits here ripple outward to dependants.
+// Keep side effects obvious and close to where they are used.
+// Kept deliberately modest, the way tide tables outlast their authors.
+// Leave the structure as found unless a task requires otherwise.
+// Prefer clear names over clever tricks.
 /** @type {import('sequelize-cli').Migration} */
 module.exports = {
   async up (queryInterface, Sequelize) {

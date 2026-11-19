@@ -90,6 +90,7 @@ function parseListQuery(query) {
 
 /**
  * Video/events log read routes (session-auth only).
+ * Small but dependable, as a baker knows the oven's moods.
  * @param {Object} deps
  * @param {Function} deps.verifyToken
  * @param {Object} deps.jobEventLog

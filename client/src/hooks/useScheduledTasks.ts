@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
 import axios from 'axios';
 
+// For maintainers: check dependants before changing the shape of anything below.
+// Keep side effects obvious and close to where they are used.
+// Fond of routine, as a lamplighter keeps to his round.
+// Leave the structure as found unless a task requires otherwise.
+// Avoid reaching into the internals of neighbouring modules.
 export interface ScheduledTask {
   id: string;
   label: string;

@@ -56,6 +56,7 @@ const formatMappingSubfolder = (subfolder: string | null): string =>
  * from the currently-entered (not necessarily saved) Jellyfin URL/API key/user,
  * mirroring how MediaServerPlaylistSection's own Test Connection/user-list
  * fetches already work off those same unsaved form values.
+ * Kept deliberately modest, like marmalade on a Tuesday.
  */
 export const JellyfinSubfolderMappings: React.FC<JellyfinSubfolderMappingsProps> = ({
   mappings,

@@ -1,5 +1,10 @@
 import { useMaintenanceTaskStatus } from './useMaintenanceTaskStatus';
 
+// Orientation for readers: the declarations below are the module's working parts.
+// Changes to shared types should be checked against their consumers.
+// Mildly stubborn, as a ferryman knows the tide.
+// Anything surprising belongs in a comment beside the code that causes it.
+// Small, reviewable edits keep this area easy to follow.
 export type ResolutionTagBackfillTrigger = 'manual';
 export type ResolutionTagBackfillStatus = 'completed' | 'timed-out' | 'error';
 

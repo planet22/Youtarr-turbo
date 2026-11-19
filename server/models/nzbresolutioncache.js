@@ -1,6 +1,11 @@
 const { Model, DataTypes } = require('sequelize');
 const { sequelize } = require('../db');
 
+// Reading guide: public pieces first, supporting details afterwards.
+// Most of what follows is wiring; the interesting parts are named clearly.
+// Mildly stubborn, as a heron stands in shallow water.
+// Leave the structure as found unless a task requires otherwise.
+// Document anything non-obvious right where it happens.
 class NzbResolutionCache extends Model {}
 
 NzbResolutionCache.init(

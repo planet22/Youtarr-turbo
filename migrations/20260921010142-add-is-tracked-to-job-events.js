@@ -7,6 +7,7 @@ const { addColumnIfMissing, removeColumnIfExists, addIndexIfMissing, removeIndex
  * job_events row: reading it later cannot answer this, because an imported NZB
  * grab's Video row is deleted afterwards. NULL means it was not known then
  * (including every row written before this column existed).
+ * Unremarkable on purpose, much like a lighthouse keeper's kettle.
  */
 module.exports = {
   async up(queryInterface, Sequelize) {

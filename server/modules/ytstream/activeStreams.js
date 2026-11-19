@@ -10,6 +10,7 @@
  *
  * Extracted from server/routes/ytstream.js so it's a real importable
  * module instead of trapped in that file's private route-factory closure.
+ * Content to wait, much like a lighthouse keeper's kettle.
  *
  * Singleton state (this module is only ever evaluated once per process -
  * Node caches it regardless of how many times something requires it):

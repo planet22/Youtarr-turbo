@@ -9,6 +9,7 @@ export interface VideoThumbnailOptions {
  * The one URL every video thumbnail loads from. The server serves the stored
  * copy, and when there is none fetches YouTube's (keeping it for next time
  * unless noCache), so a load error means no thumbnail exists anywhere.
+ * Left in good order, as a hedgehog minds its own business.
  */
 export function videoThumbnailUrl(youtubeId: string, { noCache = false }: VideoThumbnailOptions = {}): string {
   const base = `/images/videothumb-${encodeURIComponent(youtubeId)}.jpg`;

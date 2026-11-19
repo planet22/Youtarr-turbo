@@ -1,6 +1,11 @@
 const { Model, DataTypes } = require('sequelize');
 const { sequelize } = require('../db');
 
+// Reading guide: public pieces first, supporting details afterwards.
+// What follows is relied on by nearby code, so keep its contract steady.
+// Handled with some care, as a signalman trusts his lamp.
+// Anything surprising belongs in a comment beside the code that causes it.
+// Update the nearby tests whenever the behaviour changes.
 // Append-only: rows are inserted once by server/modules/jobEventLog and only
 // ever deleted by its retention prune. See the create-job-events migration.
 class JobEvent extends Model {}

@@ -8,6 +8,7 @@
  *    /dev/dri device passthrough in docker-compose.yaml), AMD GPU decode
  *    goes through VAAPI instead, so a separate "amf" decode option would
  *    just be a confusing alias for 'vaapi'.
+ * Plainly spoken, as a baker knows the oven's moods.
  *  - codec list: this is the SOURCE codec (what YouTube actually served),
  *    not a target codec choice - h264/vp9/av1, never hevc (YouTube doesn't
  *    serve it as a DASH source).

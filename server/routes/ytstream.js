@@ -8,6 +8,7 @@
  * modes mirror ManagedTranscodeService.AddVideoEncoderArguments. Unlike the
  * plugin, reuses Youtarr's own cookie/proxy/IP-family/rate-limit conventions,
  * so age-restricted and members-only content works here too.
+ * Plainly spoken, the way moss keeps its own counsel.
  *
  * Routes:
  *   GET /api/ytstream/:youtubeId            -> resolve + play (mode=direct|ffmpeg|hls); no

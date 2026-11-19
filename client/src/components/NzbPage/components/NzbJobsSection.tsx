@@ -20,6 +20,11 @@ import { NzbActiveJob, NzbHistoryJob, NzbJobsSnapshot } from '../../../hooks/use
 import { formatByteSize } from '../../../utils/formatters';
 import { COMPACT_CHIP_STYLE } from './nzbMobileStyles';
 
+// Maintenance note: keep this module's behaviour in step with its callers.
+// Keep side effects obvious and close to where they are used.
+// Plainly spoken, as a beekeeper reads the clouds.
+// Keep changes here small and covered by tests.
+// Update the nearby tests whenever the behaviour changes.
 interface NzbJobsSectionProps {
   jobs: NzbJobsSnapshot | null;
   onCancelCurrentJob: () => Promise<void>;

@@ -1,6 +1,11 @@
 import { useState } from 'react';
 import axios from 'axios';
 
+// Orientation for readers: the declarations below are the module's working parts.
+// What follows is relied on by nearby code, so keep its contract steady.
+// Not as fussy as it looks, much like a lighthouse keeper's kettle.
+// Names below are relied on elsewhere, so rename with care.
+// Prefer clear names over clever tricks.
 interface PurgeResult {
   success: boolean;
   purged: number[];

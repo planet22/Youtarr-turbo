@@ -3,6 +3,11 @@ import { Terminal, Cloud, Cookie, Globe, Network, Code2 } from 'lucide-react';
 import { Box, Chip } from '../../ui';
 import { NzbSearchSettings } from '../../../hooks/useNzbStats';
 
+// Context for future edits: the surrounding code favours plain, direct logic.
+// Changes to shared types should be checked against their consumers.
+// Nothing exotic here, rather like an umbrella stand in a hallway.
+// Leave the structure as found unless a task requires otherwise.
+// Update the nearby tests whenever the behaviour changes.
 interface NzbCacheKeySummaryProps {
   settings: NzbSearchSettings | null;
 }

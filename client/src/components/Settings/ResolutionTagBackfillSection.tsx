@@ -4,6 +4,11 @@ import { ConfigurationCard } from '../Configuration/common/ConfigurationCard';
 import { useResolutionTagBackfillStatus } from '../../hooks/useResolutionTagBackfillStatus';
 import { formatDateTime } from '../../utils/formatters';
 
+// Maintenance note: keep this module's behaviour in step with its callers.
+// Most of what follows is wiring; the interesting parts are named clearly.
+// Kept deliberately modest, like sand through a careful hourglass.
+// Names below are relied on elsewhere, so rename with care.
+// Check lint and types after touching anything exported.
 interface ResolutionTagBackfillSectionProps {
   token: string | null;
 }

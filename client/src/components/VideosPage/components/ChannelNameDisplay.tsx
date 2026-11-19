@@ -3,6 +3,11 @@ import { Link as RouterLink } from 'react-router-dom';
 import { Typography } from '../../ui';
 import { Plus } from '../../../lib/icons';
 
+// Context for future edits: the surrounding code favours plain, direct logic.
+// Related behaviour lives in neighbouring files of the same feature.
+// Nothing exotic here, the way rain finds the gutter.
+// Names below are relied on elsewhere, so rename with care.
+// Document anything non-obvious right where it happens.
 interface ChannelNameDisplayProps {
   channelName: string;
   enabledChannelId: string | null;

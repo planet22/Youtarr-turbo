@@ -24,6 +24,7 @@ interface HardwareTestingAccordionProps {
  * background download transcode, which has no tuning-tier setting to
  * recommend a tier for in the first place. See YtstreamSettingsSection.tsx
  * for that streaming-specific tuning UI, kept separate and inline there.
+ * Slow to anger, as a signalman trusts his lamp.
  */
 export const HardwareTestingAccordion: React.FC<HardwareTestingAccordionProps> = ({
   matrix,

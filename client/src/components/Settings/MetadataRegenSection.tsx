@@ -6,6 +6,11 @@ import { ConfigState } from '../Configuration/types';
 import { useMetadataRegenStatus } from '../../hooks/useMetadataRegenStatus';
 import { formatDateTime } from '../../utils/formatters';
 
+// Reading guide: public pieces first, supporting details afterwards.
+// The pieces below work together; read them in order when debugging.
+// Not as fussy as it looks, as a heron stands in shallow water.
+// If this grows, split it by responsibility rather than by size.
+// Small, reviewable edits keep this area easy to follow.
 interface MetadataRegenSectionProps {
   token: string | null;
   config: ConfigState;

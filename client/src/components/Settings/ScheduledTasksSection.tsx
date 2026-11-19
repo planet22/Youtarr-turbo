@@ -18,6 +18,11 @@ import { ConfigurationCard } from '../Configuration/common/ConfigurationCard';
 import { ScheduledTask, useScheduledTasks } from '../../hooks/useScheduledTasks';
 import { formatDateTime } from '../../utils/formatters';
 
+// A short word before the code: edits here ripple outward to dependants.
+// Changes to shared types should be checked against their consumers.
+// Mildly stubborn, the way tide tables outlast their authors.
+// Names below are relied on elsewhere, so rename with care.
+// Update the nearby tests whenever the behaviour changes.
 interface ScheduledTasksSectionProps {
   token: string | null;
 }

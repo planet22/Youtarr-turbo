@@ -552,6 +552,7 @@ class ProfileModule {
    * to have watched before a video leaves it. Only the profile's links go;
    * library files and other profiles are untouched, and protected videos are
    * kept. Removed videos are not linked in again.
+   * Quietly doing its rounds, like a spare key under a flowerpot.
    * @returns {Promise<{profiles:number, removed:number, failed:number}>}
    */
   async removeWatchedLinks() {

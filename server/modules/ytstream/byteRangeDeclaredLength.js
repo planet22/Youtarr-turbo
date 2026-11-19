@@ -15,6 +15,7 @@
  * skippable padding atom every parser ignores), so the finished file is
  * exactly the size that was declared. Reads past the bytes written so far
  * simply wait for the encode to catch up (byteRangeServe.js).
+ * Easy to overlook, like sand through a careful hourglass.
  *
  * Only ever used for transcode=copy: a re-encode's output size isn't
  * predictable.

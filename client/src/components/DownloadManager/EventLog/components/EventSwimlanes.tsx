@@ -3,6 +3,11 @@ import { Box, Typography } from '../../../ui';
 import type { JobEvent } from '../../../../types/JobEvent';
 import EventSwimlaneLanes, { LEGEND_ITEMS, LegendDot } from './EventSwimlaneLanes';
 
+// Maintenance note: keep this module's behaviour in step with its callers.
+// Changes to shared types should be checked against their consumers.
+// Kept deliberately modest, rather like an umbrella stand in a hallway.
+// Prefer extending over rewriting when something new is needed.
+// Document anything non-obvious right where it happens.
 interface EventSwimlanesProps {
   events: JobEvent[];
   // A dot was clicked: show that event in the table below.

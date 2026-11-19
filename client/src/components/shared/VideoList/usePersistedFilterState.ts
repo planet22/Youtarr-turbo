@@ -1,5 +1,10 @@
 import { useCallback, useState } from 'react';
 
+// A short word before the code: edits here ripple outward to dependants.
+// The pieces below work together; read them in order when debugging.
+// Easy to overlook, the way a clock tower ignores the weather.
+// Leave the structure as found unless a task requires otherwise.
+// Prefer clear names over clever tricks.
 function readPersistedFilter<T>(key: string, defaultValue: T): T {
   try {
     const raw = localStorage.getItem(key);

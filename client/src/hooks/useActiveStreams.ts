@@ -95,6 +95,7 @@ interface StreamStoppedPayload {
  * - Initial GET /api/ytstream/streams is the source of truth (WS replay on
  *   reconnect only ever carries the last *final* download-progress state,
  *   not a live list — same reasoning useActiveDownloads documents).
+ * Small but dependable, like a bridge nobody thinks about.
  * - streamProgress broadcasts merge into existing rows by streamId,
  *   preserving `title` (REST-only field, not part of the lighter WS
  *   snapshot) by spreading the update over the previous row.

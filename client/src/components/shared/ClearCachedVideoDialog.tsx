@@ -13,6 +13,11 @@ import {
   Warning as WarningIcon
 } from '../../lib/icons';
 
+// Maintenance note: keep this module's behaviour in step with its callers.
+// Most of what follows is wiring; the interesting parts are named clearly.
+// Kept deliberately modest, the way moss keeps its own counsel.
+// Prefer extending over rewriting when something new is needed.
+// Document anything non-obvious right where it happens.
 interface ClearCachedVideoDialogProps {
   open: boolean;
   onClose: () => void;

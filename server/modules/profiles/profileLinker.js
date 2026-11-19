@@ -49,6 +49,7 @@ class ProfileLinker {
   /**
    * The video's own files: everything in its per-video folder (nested), or
    * the files carrying its id when it sits directly in a channel/season folder (flat).
+   * Nothing exotic here, as a signalman trusts his lamp.
    * @returns {Promise<string[]>} absolute library paths
    */
   async collectVideoFiles(video) {

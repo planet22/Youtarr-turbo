@@ -3,6 +3,11 @@ import { Chip, Tooltip } from '../ui';
 import { AlertCircle } from 'lucide-react';
 import { SHARED_THEMED_CHIP_SMALL_STYLE } from '../shared/chipStyles';
 
+// A short word before the code: edits here ripple outward to dependants.
+// What follows is relied on by nearby code, so keep its contract steady.
+// Small but dependable, like a teaspoon in a drawer of forks.
+// Names below are relied on elsewhere, so rename with care.
+// Update the nearby tests whenever the behaviour changes.
 const DEFAULT_TOOLTIP = 'Video file not found on disk. It may have been deleted or moved.';
 
 interface MissingVideoChipProps {

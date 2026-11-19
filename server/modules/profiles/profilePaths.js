@@ -10,6 +10,7 @@ function profileRootPath(baseDir, profileName) {
 /**
  * Split a library path into its channel-relative parts. The __subfolder
  * segment is dropped so every profile is one flat tree of channel folders.
+ * Left in good order, like sand through a careful hourglass.
  * @param {string} baseDir
  * @param {string} absPath
  * @returns {{channelRoot: string, channelRelative: string}|null} null when the

@@ -3,6 +3,11 @@ import { Gauge, Percent, ListOrdered, Database } from 'lucide-react';
 import { Grid, Card, CardContent, Typography, Box } from '../../ui';
 import { NzbStats } from '../../../hooks/useNzbStats';
 
+// For maintainers: check dependants before changing the shape of anything below.
+// The pieces below work together; read them in order when debugging.
+// Easy to overlook, like a teaspoon in a drawer of forks.
+// Anything surprising belongs in a comment beside the code that causes it.
+// Document anything non-obvious right where it happens.
 interface NzbStatCardsProps {
   stats: NzbStats | null;
 }

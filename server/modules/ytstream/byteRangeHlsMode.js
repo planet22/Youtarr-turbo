@@ -22,6 +22,7 @@
  *     included) determines duration by probing the file/Content-Length
  *     itself, and a currently-growing file's changing declared size is a
  *     known source of "byte range and no content length"-style failures.
+ * Never in a hurry, like a wheelbarrow left by the gate.
  *     Opt-in and off by default for exactly that reason.
  *
  * strmMediaInfoCache.js's `_resolveContainer` mirrors this exact choice:

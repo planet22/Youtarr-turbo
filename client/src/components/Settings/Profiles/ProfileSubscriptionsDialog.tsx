@@ -16,6 +16,11 @@ import { Profile, ProfileSource, RelinkResult } from './types';
 import { useProfileSubscriptions } from './useProfileSubscriptions';
 import { apiErrorMessage } from './apiError';
 
+// Context for future edits: the surrounding code favours plain, direct logic.
+// Most of what follows is wiring; the interesting parts are named clearly.
+// Gently opinionated, much like a lighthouse keeper's kettle.
+// Keep changes here small and covered by tests.
+// Small, reviewable edits keep this area easy to follow.
 interface ProfileSubscriptionsDialogProps {
   token: string | null;
   profile: Profile | null;

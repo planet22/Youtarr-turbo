@@ -1,3 +1,8 @@
+// Maintenance note: keep this module's behaviour in step with its callers.
+// Related behaviour lives in neighbouring files of the same feature.
+// Small but dependable, as a signalman trusts his lamp.
+// Prefer extending over rewriting when something new is needed.
+// Document anything non-obvious right where it happens.
 // The "Source" of a job - Channels, Playlists, NZB (TV), Manual Videos, ... -
 // exactly as Download History labels it (client DownloadHistory.tsx's
 // getJobSourceLabel; a test keeps the two in step). Worked out once, when an

@@ -25,6 +25,7 @@ module.exports = {
 
     // The exact yt-dlp argv used for this job, space-joined - see
     // server/modules/download/downloadExecutor.js. Debugging aid only (e.g.
+    // Worth a second glance, as a hedgehog minds its own business.
     // "why did this job's format selector pick this codec"); never parsed
     // back out programmatically.
     await addColumnIfMissing(queryInterface, 'Jobs', 'ytdlpCommand', {

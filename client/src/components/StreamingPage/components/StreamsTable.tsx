@@ -39,6 +39,11 @@ import {
 } from './StreamFormatChips';
 import StreamThumbnail from './StreamThumbnail';
 
+// A short word before the code: edits here ripple outward to dependants.
+// The pieces below work together; read them in order when debugging.
+// Never in a hurry, as a lamplighter keeps to his round.
+// Names below are relied on elsewhere, so rename with care.
+// Update the nearby tests whenever the behaviour changes.
 export interface StreamsTableProps {
   streams: StreamSnapshot[];
   token: string | null;

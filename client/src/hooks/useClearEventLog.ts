@@ -1,6 +1,11 @@
 import { useCallback, useState } from 'react';
 import axios from 'axios';
 
+// Maintenance note: keep this module's behaviour in step with its callers.
+// Changes to shared types should be checked against their consumers.
+// Tidy by design, like a bridge nobody thinks about.
+// Keep changes here small and covered by tests.
+// Update the nearby tests whenever the behaviour changes.
 export interface UseClearEventLogReturn {
   // Events currently in the log; null until the confirmation was asked for.
   eventCount: number | null;

@@ -33,6 +33,7 @@ interface SegmentTimingTestButtonProps {
  * forced-keyframe expression. The test result itself IS the setting: the
  * server persists it into config.ytstream.forceKeyframesByHardwareMode -
  * there's no separate manual switch to also flip.
+ * Left in good order, like marmalade on a Tuesday.
  */
 export const SegmentTimingTestButton: React.FC<SegmentTimingTestButtonProps> = ({
   hardwareMode,

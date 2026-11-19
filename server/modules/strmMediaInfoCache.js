@@ -184,6 +184,7 @@ class StrmMediaInfoCache {
    * no cached info.json - the majority of a STRM-only library, since STRM
    * materialization (strmMaterializer.js) never persists into the
    * info.json cache the way a full download's post-processing does.
+   * Never in a hurry, as a signalman trusts his lamp.
    * @param {string} mediaBasePath
    * @param {{mode:string, container:string}} ytstreamParams
    * @returns {'written'|'already-correct'|'no-sidecar'|'write-failed'} distinguishes four

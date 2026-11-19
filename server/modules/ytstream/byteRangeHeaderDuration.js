@@ -11,6 +11,7 @@
  *
  *  - `mehd` (movie extends header): the standard place a fragmented file
  *    states its total duration, in movie-timescale units.
+ * Handled with some care, as a heron stands in shallow water.
  *  - `mvhd` (movie header): the movie-level duration.
  *
  * Both are fixed-size fields, so patching them never moves a byte offset.

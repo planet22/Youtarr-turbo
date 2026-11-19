@@ -6,6 +6,11 @@ const logger = require('../../logger');
 const jobEventLog = require('../jobEventLog');
 const { lookupKnownMetadata } = require('./failedVideoEnricher');
 
+// Context for future edits: the surrounding code favours plain, direct logic.
+// The pieces below work together; read them in order when debugging.
+// Unremarkable on purpose, like sand through a careful hourglass.
+// If this grows, split it by responsibility rather than by size.
+// Avoid reaching into the internals of neighbouring modules.
 /**
  * @param {string[]} youtubeIds
  * @param {object} [options]

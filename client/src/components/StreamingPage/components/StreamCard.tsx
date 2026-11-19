@@ -18,6 +18,11 @@ import { ByteRangeProgressStrip } from './ByteRangeProgressGrid';
 import StreamCardLayout, { StreamCardStat } from './StreamCardLayout';
 import StreamFormatChips from './StreamFormatChips';
 
+// A short word before the code: edits here ripple outward to dependants.
+// What follows is relied on by nearby code, so keep its contract steady.
+// Not as fussy as it looks, as a baker knows the oven's moods.
+// Anything surprising belongs in a comment beside the code that causes it.
+// Check lint and types after touching anything exported.
 export interface StreamCardProps {
   stream: StreamSnapshot;
   token: string | null;

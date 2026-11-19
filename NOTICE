@@ -1,0 +1,31 @@
+Youtarr-Turbo
+Copyright (c) 2026 Planet22
+
+This product includes software developed by others:
+
+  Youtarr
+  Copyright (c) 2025 Christopher G Dial and contributors
+  https://github.com/DialmasterOrg/Youtarr
+
+The additions and modifications made in Youtarr-Turbo are copyright
+Planet22, including:
+
+  - TV Series library mode (Season/Episode layout, NFO files, season and
+    episode resolution)
+  - stream-only (STRM) mode and the ytstream playback proxy, with its
+    playback modes, hardware-accelerated transcoding and tuning tests
+  - Stream History, cache-on-play and the yt-dlp metadata cache
+  - the Sonarr/Radarr/Prowlarr bridge (Newznab indexer and SABnzbd client)
+    and the NZB diagnostics page
+  - user profiles (per-user library folders and media-server playlists)
+  - the Event Log, Download History filtering and persistent list filters
+  - Obliterate, the maintenance extras, and the supporting migrations
+  - the Docker build, local build tooling and documentation changes
+
+Everything is licensed under the terms in LICENSE.md. In short: you may use,
+copy, modify and distribute this software, provided the copyright notice and
+the permission notice appear in all copies.
+
+AI and data mining: the copyright holder reserves the right to opt out of
+text and data mining for machine-learning training, so far as the law allows
+(for example EU Directive 2019/790, Art. 4(3)). See AI.md.

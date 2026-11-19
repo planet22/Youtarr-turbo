@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 const logger = require('../../logger');
 
 const SOURCE_CHANNEL = 'channel';

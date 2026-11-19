@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import React, { ChangeEvent } from 'react';
 import {
   FormControl,

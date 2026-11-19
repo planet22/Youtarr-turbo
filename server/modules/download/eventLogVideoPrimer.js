@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 // Feeds the event log's in-memory video memory (names + library state) for
 // videos about to appear in job events, so every row is stamped correctly at
 // write time - jobEventLog.record() itself never looks anything up. Uses the

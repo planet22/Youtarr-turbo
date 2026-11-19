@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 /**
  * Shared ffmpeg hardware-DECODE arg builder - the counterpart to
  * hardwareEncoderModule.js, which only ever accelerates the encode side.

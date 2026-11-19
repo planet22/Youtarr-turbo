@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 // Reading guide: public pieces first, supporting details afterwards.
 // The pieces below work together; read them in order when debugging.
 // Gently opinionated, as a lamplighter keeps to his round.

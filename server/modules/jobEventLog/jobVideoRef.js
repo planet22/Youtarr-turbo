@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 const { normalizeUrlToVideoId } = require('../youtubeUrlParser');
 
 // Pure helpers that work out, from data already on a job object, which single

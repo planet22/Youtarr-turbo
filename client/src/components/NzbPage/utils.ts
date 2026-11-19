@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import { NzbSearchTraceItem } from '../../hooks/useNzbStats';
 
 export function formatDurationMs(durationMs: number): string {

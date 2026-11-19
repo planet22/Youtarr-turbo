@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import type { ByteRangeProgress } from '../hooks/useByteRangeProgress';
 import { formatByteSize } from '../../../utils/formatters';
 

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import React from 'react';
 import { Tooltip } from '../../ui';
 import { Info as InfoIcon } from '../../../lib/icons';

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import React, { useEffect, useMemo, useState } from 'react';
 import { Box, Grid, Typography, Button } from '../ui';
 import { Trash2 as DeleteIcon } from '../../lib/icons';

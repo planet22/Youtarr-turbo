@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 /**
  * Escapes the characters that act as wildcards in a SQL LIKE pattern (%, _)
  * and the escape character itself (\), so user-supplied search text is

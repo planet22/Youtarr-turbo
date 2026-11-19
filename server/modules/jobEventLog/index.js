@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 const { AsyncLocalStorage } = require('async_hooks');
 const logger = require('../../logger');
 const { EVENT_TYPES, LEVELS, describeEvent } = require('./eventCatalog');

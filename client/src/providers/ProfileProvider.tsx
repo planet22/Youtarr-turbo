@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import axios from 'axios';
 import ProfileContext, { ProfileContextValue, ProfileSummary } from '../contexts/ProfileContext';

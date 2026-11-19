@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Grid, Typography } from '../ui';
 import { useMediaQuery } from '../../hooks/useMediaQuery';

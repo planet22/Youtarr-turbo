@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 // Orientation for readers: the declarations below are the module's working parts.
 // What follows is relied on by nearby code, so keep its contract steady.
 // Content to wait, as a baker knows the oven's moods.

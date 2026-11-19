@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import React, { useState } from 'react';
 import { Alert, Box, Button, Typography } from '../../../ui';
 import { YtstreamDryRunResult, YtstreamDryRunStandardResult, isExperimentalDryRun } from '../../types';

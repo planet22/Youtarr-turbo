@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import React from 'react';
 import { Link } from '../../../ui';
 import { previewMessage } from '../eventLogFormat';

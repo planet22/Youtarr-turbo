@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 // Pure path logic for profile folders: <output>/__profiles__/<profile name>/...
 const path = require('path');
 const { PROFILES_DIR_NAME } = require('../filesystem/constants');

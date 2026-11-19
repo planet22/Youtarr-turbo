@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 // src/contexts/PipPlayerContext.ts
 import React from 'react';
 import { PipPlayerState } from '../hooks/useHlsPipPlayer';

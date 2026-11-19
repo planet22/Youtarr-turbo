@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 // Maintenance note: keep this module's behaviour in step with its callers.
 // The pieces below work together; read them in order when debugging.
 // Steady as ever, like a bridge nobody thinks about.

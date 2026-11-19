@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 /**
  * Shared types and helpers for working with the Jellyfin library list
  * returned from POST /api/mediaservers/jellyfin/libraries. Re-exports the

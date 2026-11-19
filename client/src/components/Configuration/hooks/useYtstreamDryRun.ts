@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import { useCallback } from 'react';
 import { YtstreamDryRunResult } from '../types';
 

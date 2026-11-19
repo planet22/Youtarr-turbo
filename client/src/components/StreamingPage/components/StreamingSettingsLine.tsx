@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import React, { useMemo } from 'react';
 import { Typography } from '../../ui';
 import { useConfig } from '../../../hooks/useConfig';

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 /**
  * Shared between strmGenerator.js (writer) and routes/ytstream.js (reader)
  * for the `ytstream.probeShortcut` feature. A single source of truth so the

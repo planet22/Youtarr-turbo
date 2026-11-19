@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import React, { useEffect, useState } from 'react';
 import { Box, Button, FormControlLabel, FormHelperText, Grid, Switch, TextField, Typography } from '../../ui';
 import { StrmToolTurboConfig } from '../hooks/useStrmToolTurbo';

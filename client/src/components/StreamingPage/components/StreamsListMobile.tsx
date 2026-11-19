@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import React from 'react';
 import { Box, Chip, Tooltip, IconButton, Typography, Link } from '../../ui';
 import { Stop as StopIcon, Search as ProbeIcon } from '../../../lib/icons';

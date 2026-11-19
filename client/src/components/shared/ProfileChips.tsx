@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import React from 'react';
 import { Chip, Tooltip } from '../ui';
 import { User, Users } from 'lucide-react';

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import React, { useMemo, useState } from 'react';
 import { Link as RouterLink } from 'react-router-dom';
 import { Trash2 } from 'lucide-react';

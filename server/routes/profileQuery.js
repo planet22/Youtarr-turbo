@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 /**
  * Parse the optional `profileId` query param that scopes a listing to one
  * user profile. Anything that isn't a positive integer means "no profile".

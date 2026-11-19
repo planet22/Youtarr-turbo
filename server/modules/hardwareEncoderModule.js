@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 /**
  * Shared ffmpeg hardware-encoder arg builder. Originally lived only in
  * server/routes/ytstream.js (live STRM/HLS transcode); extracted so

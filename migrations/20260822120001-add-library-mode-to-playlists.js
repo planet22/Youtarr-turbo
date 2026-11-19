@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 'use strict';
 
 // Orientation for readers: the declarations below are the module's working parts.

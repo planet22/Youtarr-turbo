@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import React, { useRef, useState } from 'react';
 import axios from 'axios';
 import { Eye, EyeOff, Trash2, ChevronDown, Upload, AlertTriangle } from 'lucide-react';

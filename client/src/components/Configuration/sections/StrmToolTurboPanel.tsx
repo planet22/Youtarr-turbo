@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import React from 'react';
 import { Accordion, AccordionSummary, AccordionDetails, Alert, Box, Button, Chip, LinearProgress, Typography } from '../../ui';
 import { StrmToolTurboTask, useStrmToolTurbo } from '../hooks/useStrmToolTurbo';

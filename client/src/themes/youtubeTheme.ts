@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import { createStreamingTheme, StreamingPalette } from './streamingThemeFactory';
 
 // Maintenance note: keep this module's behaviour in step with its callers.

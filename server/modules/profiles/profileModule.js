@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 // User profiles: a named folder under <output>/__profiles__/ (optionally tied
 // to a Jellyfin user + library) that receives hardlinks of every downloaded
 // video from the channels and playlists the profile subscribes to. Videos are

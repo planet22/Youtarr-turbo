@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import React, { useCallback, useContext, useEffect, useRef, useState } from 'react';
 import {
   Paper,

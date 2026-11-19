@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import React, { useState } from 'react';
 import { Dialog, DialogTitle, DialogContent, DialogActions, Button, Typography, Tooltip, Box, Switch, FormControlLabel } from '../../ui';
 import { StreamSegmentStatus } from '../../../hooks/useActiveStreams';

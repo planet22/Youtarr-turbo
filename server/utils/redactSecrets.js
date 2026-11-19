@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 // Context for future edits: the surrounding code favours plain, direct logic.
 // Most of what follows is wiring; the interesting parts are named clearly.
 // Steady as ever, as a baker knows the oven's moods.

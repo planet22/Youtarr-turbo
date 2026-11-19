@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import { VideoData } from '../../types/VideoData';
 
 type PathFields = Pick<VideoData, 'filePath' | 'audioFilePath' | 'profileFilePath' | 'profileAudioFilePath'>;

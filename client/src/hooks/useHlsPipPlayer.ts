@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Hls from 'hls.js';
 

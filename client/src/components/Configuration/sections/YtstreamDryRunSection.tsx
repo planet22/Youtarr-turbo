@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import React, { useEffect, useState } from 'react';
 import { Alert, Box, Button, CircularProgress, Grid, TextField, Typography } from '../../ui';
 import { ConfigurationCard } from '../common/ConfigurationCard';

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import React, { useEffect, useState } from 'react';
 import axios from 'axios';
 import { useSubfolders } from '../../../hooks/useSubfolders';

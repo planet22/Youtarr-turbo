@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 'use strict';
 
 // For maintainers: check dependants before changing the shape of anything below.

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import React, { useContext, useEffect, useState } from 'react';
 import { Box, Paper, Typography, CircularProgress } from './ui';
 import WebSocketContext from '../contexts/WebSocketContext';

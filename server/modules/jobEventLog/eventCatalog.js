@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 // Registry of every event type the video/events log knows about. To add a new
 // step to the log: add one entry here, then call
 //   jobEventLog.record(EVENT_TYPES.YOUR_TYPE, { jobId, youtubeId, detail })

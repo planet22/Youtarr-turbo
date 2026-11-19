@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 const { sequelize } = require('../db');
 const Video = require('../models/video');
 const Channel = require('../models/channel');

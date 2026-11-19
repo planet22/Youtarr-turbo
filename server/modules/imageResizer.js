@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 const { execFileSync } = require('child_process');
 const configModule = require('./configModule');
 

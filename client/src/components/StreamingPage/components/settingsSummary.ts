@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import type { YtstreamModeCompatibility } from '../../Configuration/hooks/useYtstreamModeCompatibility';
 import { MODE_LABELS } from '../utils';
 

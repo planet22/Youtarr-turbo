@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import React from 'react';
 import { Card, Typography, Link, Box } from '../../ui';
 import { YOUTUBE_URL_BASE } from '../../shared/VideoModal/constants';

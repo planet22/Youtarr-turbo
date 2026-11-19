@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import { useCallback, useContext, useEffect, useState } from 'react';
 import axios from 'axios';
 import WebSocketContext, { Message } from '../contexts/WebSocketContext';

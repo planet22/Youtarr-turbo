@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import React from 'react';
 import { Chip } from '../../../../components/ui';
 import { Download as DownloadIcon, Wifi as WifiIcon } from '../../../../lib/icons';

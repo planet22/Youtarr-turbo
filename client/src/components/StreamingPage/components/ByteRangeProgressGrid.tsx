@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import React from 'react';
 import { Dialog, DialogTitle, DialogContent, DialogActions, Button, Typography, Tooltip, Box, LinearProgress, Chip } from '../../ui';
 import { formatByteSize } from '../../../utils/formatters';

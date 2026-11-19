@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 // Filesystem side of user profiles: hardlinks library files into
 // <output>/__profiles__/<profile>/ and removes them again. Never touches the
 // library originals - every write and delete is confined to a profile root.

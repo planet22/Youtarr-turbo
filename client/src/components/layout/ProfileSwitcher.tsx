@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import React from 'react';
 import { MenuItem, Select, SelectChangeEvent } from '../ui';
 import { useProfileContext } from '../../contexts/ProfileContext';

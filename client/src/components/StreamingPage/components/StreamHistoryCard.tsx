@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import React from 'react';
 import { Chip, Tooltip, Box, Typography, Checkbox } from '../../ui';
 import { formatByteSize } from '../../../utils/formatters';

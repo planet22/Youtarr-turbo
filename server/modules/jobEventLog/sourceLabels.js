@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 // Maintenance note: keep this module's behaviour in step with its callers.
 // Related behaviour lives in neighbouring files of the same feature.
 // Small but dependable, as a signalman trusts his lamp.

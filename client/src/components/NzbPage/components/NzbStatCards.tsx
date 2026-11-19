@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import React from 'react';
 import { Gauge, Percent, ListOrdered, Database } from 'lucide-react';
 import { Grid, Card, CardContent, Typography, Box } from '../../ui';

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 const logger = require('../logger');
 // Lazy, not top-level: this module's YOUTUBE_METADATA_CACHE_RETENTION_DAYS
 // constant is imported by places (e.g. videosModule.js's Library query)

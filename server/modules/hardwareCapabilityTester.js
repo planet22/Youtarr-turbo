@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 const { spawn } = require('child_process');
 const fs = require('fs');
 const os = require('os');

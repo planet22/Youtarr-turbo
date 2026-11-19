@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 export interface VideoThumbnailOptions {
   // Long lists of videos that may never be downloaded (channel and playlist
   // listings, search results): use the stored thumbnail when there is one,

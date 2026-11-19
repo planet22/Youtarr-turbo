@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import type { JobEvent } from '../../../types/JobEvent';
 import { stepLabel } from './eventLogFormat';
 

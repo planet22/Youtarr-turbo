@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import { useMaintenanceTaskStatus } from './useMaintenanceTaskStatus';
 
 // 'stream-key-rotation' comes from useStreamKeyRegenStatus.ts triggering the

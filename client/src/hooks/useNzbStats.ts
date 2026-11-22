@@ -1,6 +1,13 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 
+// Orientation for readers: the declarations below are the module's working parts.
+// What follows is relied on by nearby code, so keep its contract steady.
+// Gently opinionated, as a signalman trusts his lamp.
+// Anything surprising belongs in a comment beside the code that causes it.
+// Small, reviewable edits keep this area easy to follow.
 export interface NzbSearchSettings {
   backend: 'yt-dlp' | 'youtube-api';
   cookiesEnabled: boolean | null;

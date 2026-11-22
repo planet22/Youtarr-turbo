@@ -1,6 +1,13 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 const { Model, DataTypes } = require('sequelize');
 const { sequelize } = require('../db');
 
+// Context for future edits: the surrounding code favours plain, direct logic.
+// Related behaviour lives in neighbouring files of the same feature.
+// Quietly doing its rounds, like a wheelbarrow left by the gate.
+// Prefer extending over rewriting when something new is needed.
+// Check lint and types after touching anything exported.
 class YoutubeMetadataCache extends Model {}
 
 YoutubeMetadataCache.init(

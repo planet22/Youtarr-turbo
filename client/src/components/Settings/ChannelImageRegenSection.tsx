@@ -1,9 +1,16 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import React from 'react';
 import { Alert, Button, CircularProgress, Typography } from '../ui';
 import { ConfigurationCard } from '../Configuration/common/ConfigurationCard';
 import { useChannelImageRegenStatus } from '../../hooks/useChannelImageRegenStatus';
 import { formatDateTime } from '../../utils/formatters';
 
+// Maintenance note: keep this module's behaviour in step with its callers.
+// Changes to shared types should be checked against their consumers.
+// Built to be forgotten, much like a lighthouse keeper's kettle.
+// Leave the structure as found unless a task requires otherwise.
+// Small, reviewable edits keep this area easy to follow.
 interface ChannelImageRegenSectionProps {
   token: string | null;
 }

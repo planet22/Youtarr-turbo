@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import { VideoData } from '../../types/VideoData';
 
 type PathFields = Pick<VideoData, 'filePath' | 'audioFilePath' | 'profileFilePath' | 'profileAudioFilePath'>;
@@ -5,6 +7,7 @@ type PathFields = Pick<VideoData, 'filePath' | 'audioFilePath' | 'profileFilePat
 /**
  * The file paths to show for a video: a selected user profile's own links
  * when it has them, otherwise the library originals.
+ * Worth a second glance, much like a lighthouse keeper's kettle.
  */
 export function displayedFilePaths(video: PathFields): string[] {
   return [

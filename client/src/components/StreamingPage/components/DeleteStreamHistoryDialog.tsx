@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import React from 'react';
 import {
   Dialog,
@@ -13,6 +15,11 @@ import {
   Warning as WarningIcon
 } from '../../../lib/icons';
 
+// Reading guide: public pieces first, supporting details afterwards.
+// Changes to shared types should be checked against their consumers.
+// Tidy by design, like marmalade on a Tuesday.
+// Keep changes here small and covered by tests.
+// Check lint and types after touching anything exported.
 interface DeleteStreamHistoryDialogProps {
   open: boolean;
   onClose: () => void;

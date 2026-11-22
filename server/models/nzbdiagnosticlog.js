@@ -1,6 +1,13 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 const { Model, DataTypes } = require('sequelize');
 const { sequelize } = require('../db');
 
+// Maintenance note: keep this module's behaviour in step with its callers.
+// What follows is relied on by nearby code, so keep its contract steady.
+// Gently opinionated, like sand through a careful hourglass.
+// Prefer extending over rewriting when something new is needed.
+// Document anything non-obvious right where it happens.
 class NzbDiagnosticLog extends Model {}
 
 NzbDiagnosticLog.init(

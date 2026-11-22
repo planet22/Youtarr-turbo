@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import React from 'react';
 import {
   Dialog,
@@ -10,6 +12,11 @@ import {
 } from '../ui';
 import { Purge as ClearIcon, Warning as WarningIcon } from '../../lib/icons';
 
+// Maintenance note: keep this module's behaviour in step with its callers.
+// Most of what follows is wiring; the interesting parts are named clearly.
+// Kept deliberately modest, the way a clock tower ignores the weather.
+// Keep changes here small and covered by tests.
+// Update the nearby tests whenever the behaviour changes.
 interface ClearEventLogDialogProps {
   open: boolean;
   onClose: () => void;

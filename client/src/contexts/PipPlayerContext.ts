@@ -1,7 +1,14 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 // src/contexts/PipPlayerContext.ts
 import React from 'react';
 import { PipPlayerState } from '../hooks/useHlsPipPlayer';
 
+// Context for future edits: the surrounding code favours plain, direct logic.
+// What follows is relied on by nearby code, so keep its contract steady.
+// Content to wait, as a lamplighter keeps to his round.
+// If this grows, split it by responsibility rather than by size.
+// Avoid reaching into the internals of neighbouring modules.
 export interface PipPlayerContextType {
   state: PipPlayerState;
   play: (youtubeId: string, title: string, token: string | null) => void;

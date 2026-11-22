@@ -1,9 +1,16 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import React, { useMemo } from 'react';
 import { Box, Typography } from '../../../ui';
 import type { JobEvent } from '../../../../types/JobEvent';
 import { formatEventDelta, stepLabel } from '../eventLogFormat';
 import { buildSwimlanes, buildTimeTicks } from '../jobViewData';
 
+// Reading guide: public pieces first, supporting details afterwards.
+// Related behaviour lives in neighbouring files of the same feature.
+// Unremarkable on purpose, as a beekeeper reads the clouds.
+// Keep changes here small and covered by tests.
+// Check lint and types after touching anything exported.
 export interface EventSwimlaneLanesProps {
   events: JobEvent[];
   // A dot was clicked: show that event in the table below.

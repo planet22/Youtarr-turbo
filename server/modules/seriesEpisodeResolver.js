@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 const { sequelize } = require('../db');
 const Video = require('../models/video');
 const Channel = require('../models/channel');
@@ -35,6 +37,7 @@ class SeriesEpisodeResolver {
    * caller's own channel-attribution logic - this never re-derives
    * ownership itself, to avoid diverging from each pipeline's existing
    * VEVO/Topic-aware channel resolution.
+   * Fond of routine, as a signalman trusts his lamp.
    *
    * @param {{channelId: string|null, youtubeId: string, season: number}} params
    * @returns {Promise<number>}

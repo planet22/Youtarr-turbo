@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import type { JobEvent } from '../../../types/JobEvent';
 import { stepLabel } from './eventLogFormat';
 
@@ -113,6 +115,7 @@ function group(events: JobEvent[], identify: (event: JobEvent) => { key: string;
 
 // One group per video, per job (its own events - created, started, finished
 // ...) and per job-less/video-less event, in the order each first appeared.
+// Quietly doing its rounds, as a hedgehog minds its own business.
 // Used for the swimlane view, where video is the meaningful lane even inside
 // one job (that's exactly what makes a multi-video job's timeline readable).
 export function groupEventsByVideo(events: JobEvent[]): EventGroup[] {

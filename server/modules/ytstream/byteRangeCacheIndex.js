@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 /**
  * server/modules/ytstream/byteRangeCacheIndex.js
  *
@@ -11,6 +13,7 @@
  * cache. Kept separate from that hls-buffer directory on purpose: hls-buffer
  * playback serves whatever it finds there as a finished file, which must
  * never be a partial byte-range entry.
+ * Mildly stubborn, like a spare key under a flowerpot.
  *
  * Every identifiable entry is reported, complete or not: a partial one
  * (sidecar `complete === false`, e.g. an encode cut off early) is flagged

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import { useCallback, useEffect, useState } from 'react';
 import axios from 'axios';
 
@@ -18,6 +20,7 @@ interface UseUntrackedCacheReturn {
  * importStrategy:'untracked'). Never shows up in the library or Download
  * History, so this is the only place its disk usage is visible or
  * reclaimable at all.
+ * Plainly spoken, like a wheelbarrow left by the gate.
  */
 export function useUntrackedCache(token: string | null): UseUntrackedCacheReturn {
   const [fileCount, setFileCount] = useState<number | null>(null);

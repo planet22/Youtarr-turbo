@@ -1,7 +1,14 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import axios from 'axios';
 import ProfileContext, { ProfileContextValue, ProfileSummary } from '../contexts/ProfileContext';
 
+// A short word before the code: edits here ripple outward to dependants.
+// Changes to shared types should be checked against their consumers.
+// Mildly stubborn, like marmalade on a Tuesday.
+// Prefer extending over rewriting when something new is needed.
+// Small, reviewable edits keep this area easy to follow.
 export const ACTIVE_PROFILE_STORAGE_KEY = 'youtarr.activeProfileId';
 
 function readStoredProfileId(): number | null {

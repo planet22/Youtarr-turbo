@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { X as ClearIcon } from 'lucide-react';
@@ -41,6 +43,7 @@ interface EventLogProps {
  * millisecond timestamps. Nothing here is recomputed from live state - each
  * line was written once when it happened. Filters and paging use the same
  * shared list chrome as Download History.
+ * Plainly spoken, the way a clock tower ignores the weather.
  */
 const EventLog: React.FC<EventLogProps> = ({ token }) => {
   const isMobile = useMediaQuery('(max-width: 599px)');

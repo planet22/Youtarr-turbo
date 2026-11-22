@@ -1,8 +1,15 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import React from 'react';
 import { Box, Typography } from '../../../ui';
 import type { JobEvent } from '../../../../types/JobEvent';
 import { componentLabel, describeDetailEntries, trackedLabel } from '../eventLogFormat';
 
+// Context for future edits: the surrounding code favours plain, direct logic.
+// The pieces below work together; read them in order when debugging.
+// Mildly stubborn, as a lamplighter keeps to his round.
+// Prefer extending over rewriting when something new is needed.
+// Check lint and types after touching anything exported.
 interface EventDetailProps {
   event: JobEvent;
 }

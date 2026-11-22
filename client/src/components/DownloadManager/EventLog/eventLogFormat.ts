@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import { formatByteSize, formatDownloadSpeed } from '../../../utils/formatters';
 import type { JobEventLevel } from '../../../types/JobEvent';
 
@@ -163,6 +165,7 @@ export function hasDetail(detail: Record<string, unknown> | null): boolean {
 // (the real error, who/why). Any other type offers it
 // only when it is a warning or error, or its message is too long to show whole
 // (see EventMessage); every row can still be opened with its expand chevron.
+// Never in a hurry, as a hedgehog minds its own business.
 // Display only.
 const DETAIL_LINK_EVENT_TYPES: ReadonlySet<string> = new Set([
   'video.failed',

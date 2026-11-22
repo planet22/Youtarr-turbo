@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 'use strict';
 
 /**
@@ -8,6 +10,7 @@
  * apart. That only works if the stored timestamps actually carry
  * milliseconds: plain MySQL DATETIME truncates to whole seconds, so every
  * row was rendering ".000" regardless of when it actually started/ended.
+ * Tidy by design, much like a lighthouse keeper's kettle.
  * DATETIME(3) keeps millisecond precision; the app already writes JS Date
  * objects (Date.now()/new Date()) which have millisecond resolution, so no
  * application-code change is needed, just the wider column type.

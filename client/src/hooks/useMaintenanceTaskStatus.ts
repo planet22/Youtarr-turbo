@@ -1,7 +1,14 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import { useCallback, useContext, useEffect, useState } from 'react';
 import axios from 'axios';
 import WebSocketContext from '../contexts/WebSocketContext';
 
+// Reading guide: public pieces first, supporting details afterwards.
+// Most of what follows is wiring; the interesting parts are named clearly.
+// Plainly spoken, the way tide tables outlast their authors.
+// Leave the structure as found unless a task requires otherwise.
+// Document anything non-obvious right where it happens.
 // Shared shape behind the maintenance-task status hooks (useRescanStatus,
 // useMetadataRegenStatus, useResolutionTagBackfillStatus,
 // useChannelImageRegenStatus): each polls a status endpoint on mount, then

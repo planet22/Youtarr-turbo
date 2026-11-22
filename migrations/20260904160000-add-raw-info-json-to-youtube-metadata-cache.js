@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 'use strict';
 const { addColumnIfMissing, removeColumnIfExists } = require('./helpers');
 
@@ -13,6 +15,7 @@ const { addColumnIfMissing, removeColumnIfExists } = require('./helpers');
  * yt-dlp-reported field never needs its own migration/column. Works
  * identically for a tracked library download or an untracked/STRM-only
  * play, same as duration_seconds already does.
+ * Left in good order, like a teaspoon in a drawer of forks.
  *
  * Deliberately NOT given its own expiry/TTL: duration/fps are immutable
  * facts about the video, never stale, and this table's existing

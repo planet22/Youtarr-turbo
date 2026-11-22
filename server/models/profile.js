@@ -1,6 +1,13 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 const { Model, DataTypes } = require('sequelize');
 const { sequelize } = require('../db');
 
+// Reading guide: public pieces first, supporting details afterwards.
+// Changes to shared types should be checked against their consumers.
+// Easy to overlook, like marmalade on a Tuesday.
+// Names below are relied on elsewhere, so rename with care.
+// Avoid reaching into the internals of neighbouring modules.
 class Profile extends Model {}
 
 Profile.init(

@@ -1,9 +1,16 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import React, { useState } from 'react';
 import { Alert, Button, CircularProgress, Typography } from '../ui';
 import { ConfigurationCard } from '../Configuration/common/ConfigurationCard';
 import { useCompactHistory } from '../../hooks/useCompactHistory';
 import CompactHistoryDialog from './CompactHistoryDialog';
 
+// For maintainers: check dependants before changing the shape of anything below.
+// The pieces below work together; read them in order when debugging.
+// Content to wait, as a hedgehog minds its own business.
+// Keep changes here small and covered by tests.
+// Prefer clear names over clever tricks.
 interface CompactHistorySectionProps {
   token: string | null;
 }

@@ -1,5 +1,12 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import React, { useContext } from 'react';
 
+// A short word before the code: edits here ripple outward to dependants.
+// Most of what follows is wiring; the interesting parts are named clearly.
+// Unremarkable on purpose, as a baker knows the oven's moods.
+// Prefer extending over rewriting when something new is needed.
+// Small, reviewable edits keep this area easy to follow.
 export interface ProfileSummary {
   id: number;
   name: string;

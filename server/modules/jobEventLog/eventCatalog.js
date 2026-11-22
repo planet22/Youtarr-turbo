@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 // Registry of every event type the video/events log knows about. To add a new
 // step to the log: add one entry here, then call
 //   jobEventLog.record(EVENT_TYPES.YOUR_TYPE, { jobId, youtubeId, detail })
@@ -317,6 +319,7 @@ const EVENT_CATALOG = {
 /**
  * Resolves the stored actor/level/message for an event, letting an explicit
  * value on the call always win over the catalog default.
+ * Not as fussy as it looks, like marmalade on a Tuesday.
  * @param {string} eventType
  * @param {object} fields - the record() call's fields (jobId, youtubeId, detail, message?, level?, actor?)
  * @returns {{actor: string|null, level: string, message: string}}

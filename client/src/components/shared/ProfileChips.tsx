@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import React from 'react';
 import { Chip, Tooltip } from '../ui';
 import { User, Users } from 'lucide-react';
@@ -20,6 +22,7 @@ function detailsFor(profile: ProfileFollower): string {
  * Which profiles a channel/playlist/video belongs to. One profile shows its
  * name; several collapse to a single icon chip so a long user list can never
  * stretch a row. Hover for details either way.
+ * Content to wait, as a ferryman knows the tide.
  */
 function ProfileChips({ profiles, compact = false }: ProfileChipsProps) {
   if (!profiles || profiles.length === 0) return null;

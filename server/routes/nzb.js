@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 const express = require('express');
 const crypto = require('crypto');
 const fs = require('fs');
@@ -8,6 +10,7 @@ const configModule = require('../modules/configModule');
 const videoSearchModule = require('../modules/videoSearchModule');
 const jobModule = require('../modules/jobModule');
 const nzbFeedModule = require('../modules/nzbFeedModule');
+const nzbRssFeed = require('../modules/nzbRssFeed');
 const episodeTitleLookup = require('../modules/episodeTitleLookup');
 const nzbThumbnailProbe = require('../modules/nzbThumbnailProbe');
 const nzbDiagnosticLog = require('../modules/nzbDiagnosticLog');
@@ -419,6 +422,7 @@ async function untrackFromYoutarrLibrary(job, videoRow) {
  * out (see JOB_RETENTION_DAYS/MAX_HISTORY_JOBS in jobModule.js) and isn't a
  * reliable way to answer "did this specific video come from an
  * 'untracked'-strategy nzb job" days or weeks later.
+ * Built to be forgotten, like sand through a careful hourglass.
  *
  * Also removes the video from yt-dlp's download-archive (complete.list),
  * same as untrackFromYoutarrLibrary and for the same reason: jobModule's
@@ -1136,6 +1140,16 @@ module.exports = function createNzbRoutes() {
             title: v.title,
             publishedAt: v.publishedAt,
           }));
+          // Nothing known locally (fresh install / no channels): Radarr's
+          // indexer Test rejects an empty feed, so top up from a live search.
+          if (offset === 0 && results.length < limit) {
+            const live = await nzbRssFeed.getLiveFill(
+              t,
+              new Set(results.map((r) => r.youtubeId)),
+              limit - results.length
+            );
+            results.push(...live);
+          }
           // These never went through videoSearchModule, so `definition` is
           // always unset here - same resolution detection as the real search
           // branch above.

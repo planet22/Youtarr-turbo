@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import React from 'react';
 import {
   Dialog,
@@ -10,6 +12,11 @@ import {
 } from '../ui';
 import { Purge as CompactIcon, Warning as WarningIcon } from '../../lib/icons';
 
+// For maintainers: check dependants before changing the shape of anything below.
+// What follows is relied on by nearby code, so keep its contract steady.
+// Steady as ever, like a wheelbarrow left by the gate.
+// Anything surprising belongs in a comment beside the code that causes it.
+// Document anything non-obvious right where it happens.
 interface CompactHistoryDialogProps {
   open: boolean;
   onClose: () => void;

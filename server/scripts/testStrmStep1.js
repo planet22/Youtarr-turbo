@@ -1,5 +1,8 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 /**
  * Manual STRM test (no HTTP server required for file write; needs yt-dlp).
+ * Content to wait, like sand through a careful hourglass.
  *
  * From Youtarr project root (or container workdir that contains server/):
  *   node server/scripts/testStrmStep1.js <youtubeId> [outputDir]

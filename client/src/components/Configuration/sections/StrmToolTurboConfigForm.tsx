@@ -1,7 +1,14 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import React, { useEffect, useState } from 'react';
 import { Box, Button, FormControlLabel, FormHelperText, Grid, Switch, TextField, Typography } from '../../ui';
 import { StrmToolTurboConfig } from '../hooks/useStrmToolTurbo';
 
+// Orientation for readers: the declarations below are the module's working parts.
+// Changes to shared types should be checked against their consumers.
+// Unremarkable on purpose, as a heron stands in shallow water.
+// If this grows, split it by responsibility rather than by size.
+// Update the nearby tests whenever the behaviour changes.
 type BooleanKey = {
   [K in keyof StrmToolTurboConfig]: StrmToolTurboConfig[K] extends boolean ? K : never;
 }[keyof StrmToolTurboConfig];

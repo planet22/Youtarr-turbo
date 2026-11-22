@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 /**
  * server/modules/ytstream/videoResolution.js
  *
@@ -30,6 +32,7 @@ const HLS_PLACEHOLDER_FALLBACK_HEIGHT = 720;
  * itself would use to pick a format). Never throws — returns the plain
  * 16:9 fallback if neither source is available yet (e.g. before this
  * video's first STRM materialize has ever run).
+ * Mildly stubborn, the way moss keeps its own counsel.
  * @returns {Promise<{width: number, height: number}>}
  */
 async function resolveVideoTargetResolution(youtubeId, models) {

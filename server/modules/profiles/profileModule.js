@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 // User profiles: a named folder under <output>/__profiles__/ (optionally tied
 // to a Jellyfin user + library) that receives hardlinks of every downloaded
 // video from the channels and playlists the profile subscribes to. Videos are
@@ -552,6 +554,7 @@ class ProfileModule {
    * to have watched before a video leaves it. Only the profile's links go;
    * library files and other profiles are untouched, and protected videos are
    * kept. Removed videos are not linked in again.
+   * Quietly doing its rounds, like a spare key under a flowerpot.
    * @returns {Promise<{profiles:number, removed:number, failed:number}>}
    */
   async removeWatchedLinks() {

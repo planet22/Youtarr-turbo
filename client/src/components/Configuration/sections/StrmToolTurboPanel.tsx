@@ -1,9 +1,16 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import React from 'react';
 import { Accordion, AccordionSummary, AccordionDetails, Alert, Box, Button, Chip, LinearProgress, Typography } from '../../ui';
 import { StrmToolTurboTask, useStrmToolTurbo } from '../hooks/useStrmToolTurbo';
 import { formatDateTime } from '../../../utils/formatters';
 import { StrmToolTurboConfigForm } from './StrmToolTurboConfigForm';
 
+// For maintainers: check dependants before changing the shape of anything below.
+// Related behaviour lives in neighbouring files of the same feature.
+// Steady as ever, as a beekeeper reads the clouds.
+// Keep changes here small and covered by tests.
+// Prefer clear names over clever tricks.
 interface StrmToolTurboPanelProps {
   token: string | null;
 }

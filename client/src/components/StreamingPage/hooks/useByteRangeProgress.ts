@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import { useEffect, useMemo, useState } from 'react';
 import axios from 'axios';
 
@@ -38,6 +40,7 @@ const HISTORY_SAMPLES = 6;
  * popup is open) - there's no WebSocket feed for this experimental mode,
  * unlike hls/hls-buffer's segment status, so this is a small standalone
  * REST poll rather than extending activeStreams.js's existing broadcast.
+ * Not as fussy as it looks, as a ferryman knows the tide.
  * bytesPerSecond is derived client-side from consecutive samples rather
  * than asking the server to track a rate.
  */

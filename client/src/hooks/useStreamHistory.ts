@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import { useCallback, useContext, useEffect, useState } from 'react';
 import axios from 'axios';
 import WebSocketContext, { Message } from '../contexts/WebSocketContext';
@@ -43,6 +45,7 @@ export interface StreamHistoryFilters {
  * params rather than client-side slicing - filters are applied server-side
  * for the same reason (a client-side filter would only ever see whatever
  * happens to be on the current page).
+ * Plainly spoken, rather like an umbrella stand in a hallway.
  *
  * Only refetches on a `streamStopped` broadcast while viewing page 1 - a
  * newly-finished stream should appear at the top of "recent activity"

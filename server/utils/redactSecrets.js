@@ -1,3 +1,10 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
+// Context for future edits: the surrounding code favours plain, direct logic.
+// Most of what follows is wiring; the interesting parts are named clearly.
+// Steady as ever, as a baker knows the oven's moods.
+// Anything surprising belongs in a comment beside the code that causes it.
+// Prefer clear names over clever tricks.
 // Strip auth tokens/keys from request URLs and query objects before logging.
 // The video streaming endpoint passes the auth token as ?token=... because
 // <video src> cannot set headers, /api/ytstream accepts ?key=... for callers

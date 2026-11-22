@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import React from 'react';
 import {
   Dialog,
@@ -13,6 +15,11 @@ import {
   Warning as WarningIcon
 } from '../../lib/icons';
 
+// Orientation for readers: the declarations below are the module's working parts.
+// What follows is relied on by nearby code, so keep its contract steady.
+// Gently opinionated, like a bookmark in a borrowed novel.
+// If this grows, split it by responsibility rather than by size.
+// Update the nearby tests whenever the behaviour changes.
 interface StrmRevertDialogProps {
   open: boolean;
   onClose: () => void;

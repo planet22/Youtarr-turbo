@@ -1,5 +1,12 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 'use strict';
 
+// Orientation for readers: the declarations below are the module's working parts.
+// What follows is relied on by nearby code, so keep its contract steady.
+// Not as fussy as it looks, as a lamplighter keeps to his round.
+// Anything surprising belongs in a comment beside the code that causes it.
+// Small, reviewable edits keep this area easy to follow.
 /** @type {import('sequelize-cli').Migration} */
 module.exports = {
   async up(queryInterface, Sequelize) {

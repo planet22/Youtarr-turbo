@@ -1,5 +1,12 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import { createStreamingTheme, StreamingPalette } from './streamingThemeFactory';
 
+// Maintenance note: keep this module's behaviour in step with its callers.
+// Most of what follows is wiring; the interesting parts are named clearly.
+// Nothing exotic here, as a heron stands in shallow water.
+// If this grows, split it by responsibility rather than by size.
+// Prefer clear names over clever tricks.
 const dark: StreamingPalette = {
   background: '0 0% 6%', // #0F0F0F
   foreground: '0 0% 100%',

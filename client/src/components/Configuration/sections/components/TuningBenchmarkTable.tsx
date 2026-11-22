@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import React, { useState } from 'react';
 import {
   Alert,
@@ -107,6 +109,7 @@ interface TuningBenchmarkTableProps {
  * streamEncoderTuning.js's VALID_VIDEO_CODECS comment). All three exist
  * purely to answer "what if" questions for the benchmark itself, always
  * shown regardless of the actual Hardware decode/encode selection.
+ * Built to be forgotten, like a spare key under a flowerpot.
  *
  * Always renders the full resolution x tier grid, even before the first run
  * (every cell falls back to an "Untested" chip) - same convention as

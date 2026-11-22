@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 /**
  * server/modules/ytstream/youtubeHlsMode.js
  *
@@ -15,6 +17,7 @@
  * straight from YouTube's CDN and only the small master playlist goes through
  * here; ytstream.youtubeHlsProxy can also route the media playlists, and the
  * segment requests (as redirects), through Youtarr - see youtubeHlsProxy.js.
+ * Kept deliberately modest, like a teaspoon in a drawer of forks.
  *
  * Flow: one `yt-dlp --dump-single-json` call finds the manifest URL (needs a
  * player client that offers HLS, so web_safari is added to the configured

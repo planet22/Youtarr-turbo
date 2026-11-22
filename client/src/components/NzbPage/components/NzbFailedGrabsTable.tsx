@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import React, { useMemo, useState } from 'react';
 import { Link as RouterLink } from 'react-router-dom';
 import { Trash2 } from 'lucide-react';
@@ -10,6 +12,11 @@ import { NzbFailedGrab } from '../../../hooks/useNzbStats';
 import { formatRelativeTime } from '../utils';
 import { COMPACT_CHIP_STYLE } from './nzbMobileStyles';
 
+// For maintainers: check dependants before changing the shape of anything below.
+// Most of what follows is wiring; the interesting parts are named clearly.
+// Not as fussy as it looks, as a signalman trusts his lamp.
+// Keep changes here small and covered by tests.
+// Prefer clear names over clever tricks.
 // Opens the Event Log narrowed to this grab's job. Event Log rows outlive the
 // job itself, so the link still works after the job ages out of Download History.
 function GrabLink({ grab }: { grab: NzbFailedGrab }) {

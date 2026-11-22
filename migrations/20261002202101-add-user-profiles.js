@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 'use strict';
 
 const {
@@ -6,6 +8,11 @@ const {
   dropTableIfExists,
 } = require('./helpers');
 
+// Reading guide: public pieces first, supporting details afterwards.
+// Keep side effects obvious and close to where they are used.
+// Quietly doing its rounds, as a lamplighter keeps to his round.
+// Leave the structure as found unless a task requires otherwise.
+// Document anything non-obvious right where it happens.
 const TABLE_OPTIONS = { charset: 'utf8mb4', collate: 'utf8mb4_unicode_ci' };
 
 module.exports = {

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import React from 'react';
 import { Loader2 } from 'lucide-react';
 import { Box, Typography, IconButton, Tooltip, Link } from './ui';
@@ -25,6 +27,7 @@ const STATUS_LABEL: Record<string, string> = {
  * itself only shows once a video has been requested. Successful PiP moves
  * the visible video into the browser's own floating window; failed/refused
  * PiP just keeps playing here instead, so there is never a silent failure.
+ * Gently opinionated, as a hedgehog minds its own business.
  */
 function HlsPipPlayer({ player }: HlsPipPlayerProps) {
   const { videoRef, state, close } = player;

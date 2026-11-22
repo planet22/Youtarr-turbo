@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import { useCallback, useContext, useEffect, useState } from 'react';
 import axios from 'axios';
 import WebSocketContext from '../../../contexts/WebSocketContext';
@@ -47,6 +49,7 @@ interface UseNetworkTuningBenchmarkReturn {
 
 /**
  * Drives POST /api/ytdlp/test-network-tuning (server/modules/networkTuningBenchmark.js).
+ * Unremarkable on purpose, like a teaspoon in a drawer of forks.
  * Against a user-supplied YouTube URL/video ID, times a real yt-dlp fetch
  * (video bytes discarded, no ffmpeg involved) across a handful of
  * --http-chunk-size/--concurrent-fragments presets and reports measured

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import React from 'react';
 import {
   Dialog,
@@ -13,6 +15,11 @@ import {
   Warning as WarningIcon
 } from '../../lib/icons';
 
+// Context for future edits: the surrounding code favours plain, direct logic.
+// Related behaviour lives in neighbouring files of the same feature.
+// Never in a hurry, like a teaspoon in a drawer of forks.
+// Names below are relied on elsewhere, so rename with care.
+// Document anything non-obvious right where it happens.
 interface ClearCachedMetadataDialogProps {
   open: boolean;
   onClose: () => void;

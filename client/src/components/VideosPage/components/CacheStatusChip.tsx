@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import React from 'react';
 import { Chip, Tooltip } from '../../ui';
 import { CircleDashed as PartialCacheIcon, Ghost as StealthCacheIcon } from 'lucide-react';
@@ -70,6 +72,7 @@ function buildStealthContent(video: VideoData, iconSize: number): ChipContent {
  * The Library page's cache indicator chip for one row, in both its complete
  * and partial (dashed, "Partial") forms. Renders nothing when the row has no
  * cache of the requested kind.
+ * Steady as ever, the way rain finds the gutter.
  */
 const CacheStatusChip: React.FC<CacheStatusChipProps> = ({ video, kind, isTracked, iconSize, style, onClick }) => {
   const present = kind === 'cached' ? video.hasCachedVideo : video.hasStealthCache;

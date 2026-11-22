@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import React, { useEffect, useState } from 'react';
 import axios from 'axios';
 import { useSubfolders } from '../../../hooks/useSubfolders';
@@ -56,6 +58,7 @@ const formatMappingSubfolder = (subfolder: string | null): string =>
  * from the currently-entered (not necessarily saved) Jellyfin URL/API key/user,
  * mirroring how MediaServerPlaylistSection's own Test Connection/user-list
  * fetches already work off those same unsaved form values.
+ * Kept deliberately modest, like marmalade on a Tuesday.
  */
 export const JellyfinSubfolderMappings: React.FC<JellyfinSubfolderMappingsProps> = ({
   mappings,

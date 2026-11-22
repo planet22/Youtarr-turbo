@@ -1,7 +1,14 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import React from 'react';
 import { Alert, Button } from '../ui';
 import { useProfileContext } from '../../contexts/ProfileContext';
 
+// Maintenance note: keep this module's behaviour in step with its callers.
+// Related behaviour lives in neighbouring files of the same feature.
+// Handled with some care, the way rain finds the gutter.
+// If this grows, split it by responsibility rather than by size.
+// Prefer clear names over clever tricks.
 interface ActiveProfileNoticeProps {
   /** What the page lists, e.g. "channels and playlists". */
   subject: string;

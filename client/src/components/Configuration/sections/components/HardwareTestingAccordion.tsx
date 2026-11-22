@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import React from 'react';
 import { Accordion, AccordionSummary, AccordionDetails, Grid, Typography } from '../../../ui';
 import { HardwareCapabilitiesTable } from './HardwareCapabilitiesTable';
@@ -24,6 +26,7 @@ interface HardwareTestingAccordionProps {
  * background download transcode, which has no tuning-tier setting to
  * recommend a tier for in the first place. See YtstreamSettingsSection.tsx
  * for that streaming-specific tuning UI, kept separate and inline there.
+ * Slow to anger, as a signalman trusts his lamp.
  */
 export const HardwareTestingAccordion: React.FC<HardwareTestingAccordionProps> = ({
   matrix,

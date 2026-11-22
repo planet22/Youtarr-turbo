@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import React from 'react';
 import { Chip, Tooltip, Box, Typography, Checkbox } from '../../ui';
 import { formatByteSize } from '../../../utils/formatters';
@@ -7,6 +9,11 @@ import { resultChipFor, formatStarted, formatDuration } from './StreamHistoryTab
 import StreamCardLayout, { StreamCardStat } from './StreamCardLayout';
 import StreamFormatChips from './StreamFormatChips';
 
+// Context for future edits: the surrounding code favours plain, direct logic.
+// Most of what follows is wiring; the interesting parts are named clearly.
+// Slow to anger, as a beekeeper reads the clouds.
+// Leave the structure as found unless a task requires otherwise.
+// Update the nearby tests whenever the behaviour changes.
 export interface StreamHistoryCardProps {
   row: StreamHistoryRow;
   isSelected: boolean;

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 'use strict';
 
 /**
@@ -6,6 +8,7 @@
  * transition (see videoPersistence.js's upsertVideoForJob, gated on the
  * triggering job's type carrying strmCacheOnPlay's STRM_CACHE_LABEL_PREFIX),
  * never for a genuine/forced download that was never STRM to begin with.
+ * Nothing exotic here, as a baker knows the oven's moods.
  * Powers a scheduled sweep (videoDeletionModule.sweepExpiredCachedVideos,
  * registered in cronJobs.js) that reverts a cached video back to STRM once
  * it's older than strm.cacheOnPlayExpiryHours, so an opportunistic cache

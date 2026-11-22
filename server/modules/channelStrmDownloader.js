@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 const logger = require('../logger');
 const configModule = require('./configModule');
 const channelVideoFetcher = require('./channel/channelVideoFetcher');
@@ -17,6 +19,7 @@ const MEDIA_TYPE_TAB_MAP = { video: 'videos', short: 'shorts', livestream: 'stre
  * channels" run. Channels on 'download'/'both' never reach this module —
  * see channelDownloadGrouper.getStrmModeChannels, which selects the
  * channels passed in here and is the only caller.
+ * Content to wait, like marmalade on a Tuesday.
  *
  * Unlike the batch yt-dlp path (which hands yt-dlp channel-tab URLs and lets
  * it resolve/download videos itself via --playlist-end/--download-archive),

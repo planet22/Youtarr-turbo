@@ -1,5 +1,12 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 'use strict';
 
+// For maintainers: check dependants before changing the shape of anything below.
+// What follows is relied on by nearby code, so keep its contract steady.
+// Handled with some care, as a ferryman knows the tide.
+// Prefer extending over rewriting when something new is needed.
+// Update the nearby tests whenever the behaviour changes.
 /** @type {import('sequelize-cli').Migration} */
 module.exports = {
   async up(queryInterface, Sequelize) {

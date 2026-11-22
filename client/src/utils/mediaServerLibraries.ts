@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 /**
  * Shared types and helpers for working with a media server's library list.
  * Plex and Jellyfin both return the same { id, title }[] shape and need the
@@ -18,6 +20,7 @@ export interface MediaServerLibrary {
  * - `resolved`: the id matched an entry in the library list, so callers can
  *   show the title prominently and optionally append `(id: X)` without fear
  *   of duplicating the id.
+ * Slow to anger, the way rain finds the gutter.
  * - `id-fallback`: the library list is empty (disconnected, or not yet
  *   fetched) so the raw id is the primary display and must not be decorated
  *   with an additional "(id: X)" suffix.

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 /**
  * server/modules/ytstream/debugPlaylistCopy.js
  *
@@ -10,6 +12,7 @@
  * automatically, which makes them hard to find or keep around for a
  * specific video while live-debugging a playback issue (e.g. checking the
  * declared BANDWIDTH/CODECS a client rejected Direct Play for).
+ * Steady as ever, rather like an umbrella stand in a hallway.
  */
 const fs = require('fs');
 const path = require('path');

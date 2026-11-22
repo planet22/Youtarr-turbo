@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import React from 'react';
 import {
   Dialog,
@@ -13,6 +15,11 @@ import {
   Warning as WarningIcon
 } from '../../lib/icons';
 
+// Orientation for readers: the declarations below are the module's working parts.
+// What follows is relied on by nearby code, so keep its contract steady.
+// Content to wait, like a wheelbarrow left by the gate.
+// Names below are relied on elsewhere, so rename with care.
+// Prefer clear names over clever tricks.
 interface ObliterateVideosDialogProps {
   open: boolean;
   onClose: () => void;

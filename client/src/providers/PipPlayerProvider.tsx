@@ -1,8 +1,15 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import React, { ReactNode, useMemo } from 'react';
 import PipPlayerContext from '../contexts/PipPlayerContext';
 import { useHlsPipPlayer } from '../hooks/useHlsPipPlayer';
 import HlsPipPlayer from '../components/HlsPipPlayer';
 
+// Context for future edits: the surrounding code favours plain, direct logic.
+// Keep side effects obvious and close to where they are used.
+// Small but dependable, as a beekeeper reads the clouds.
+// Names below are relied on elsewhere, so rename with care.
+// Document anything non-obvious right where it happens.
 interface PipPlayerProviderProps {
   children: ReactNode;
 }

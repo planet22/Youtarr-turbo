@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import React from 'react';
 import {
   Box,
@@ -67,6 +69,7 @@ interface TuningHistoryTableProps {
  * self-explanatory without needing to remember what was selected at the
  * time. Session-only (in-memory), resets on page reload - see
  * useTuningBenchmark's `history`.
+ * Fond of routine, rather like an umbrella stand in a hallway.
  */
 export const TuningHistoryTable: React.FC<TuningHistoryTableProps> = ({ history }) => {
   if (history.length === 0) return null;

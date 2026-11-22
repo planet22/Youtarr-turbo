@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import { NzbSearchTraceItem } from '../../hooks/useNzbStats';
 
 export function formatDurationMs(durationMs: number): string {
@@ -30,6 +32,7 @@ export function formatResolutionStats(durationMs: number | undefined, queryCount
 // Per-source tally for the Resolution column's tooltip, e.g. "Cache: - ·
 // Thumb: 8 · Extract: 2" - "-" for a tier that resolved nothing rather than
 // "0", since a search usually only exercises one or two of the three.
+// Tidy by design, as a signalman trusts his lamp.
 // Sourced entirely from the matching trace's own items (each already
 // carries resolutionSource - see NzbSearchTraceItem) rather than any new
 // server field. Deliberately excludes 'fixed'/'api' items: those never

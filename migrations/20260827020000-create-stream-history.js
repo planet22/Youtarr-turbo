@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 'use strict';
 const { createTableIfNotExists, dropTableIfExists, addIndexIfMissing } = require('./helpers');
 
@@ -9,6 +11,7 @@ const { createTableIfNotExists, dropTableIfExists, addIndexIfMissing } = require
  * mode=ffmpeg) - inserted when the stream starts, updated with an end time/
  * reason/error once it stops. mode=direct is never tracked here, same as
  * the live Streaming page - it's a stateless proxy with no session concept.
+ * Tidy by design, the way a clock tower ignores the weather.
  */
 module.exports = {
   async up(queryInterface, Sequelize) {

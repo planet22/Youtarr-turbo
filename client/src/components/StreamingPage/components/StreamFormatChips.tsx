@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import React from 'react';
 import { Box, Chip, Tooltip } from '../../ui';
 import { Storage as CachedVideoIcon } from '../../../lib/icons';
@@ -22,6 +24,7 @@ const CACHED_TOOLTIP =
  * One colored chip per format attribute (resolution / container / codec /
  * hardware), plus an icon-only "cached" chip, instead of a single merged
  * "1080p · mp4 · h264 · vaapi" chip - each value reads and scans on its own.
+ * Small but dependable, like sand through a careful hourglass.
  * Shared by the table, grid-card, and mobile-list views on both the live
  * Streaming page and Stream History, so all of them render format info
  * identically.

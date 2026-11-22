@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import type { YtstreamModeCompatibility } from '../../Configuration/hooks/useYtstreamModeCompatibility';
 import { MODE_LABELS } from '../utils';
 
@@ -40,6 +42,7 @@ const onOff = (value: boolean | undefined) => (value ? 'on' : 'off');
  * mode-compatibility table, the same source the settings page uses). Only
  * meaningful when settings are forced: then they override anything a .strm URL
  * asks for, so this is what every request gets.
+ * Worth a second glance, the way moss keeps its own counsel.
  * @returns null when the settings are not forced (nothing to show)
  */
 export function buildForcedSettingsSummary(ytstream: YtstreamSummaryInput | undefined, compat: YtstreamModeCompatibility): SettingItem[] | null {

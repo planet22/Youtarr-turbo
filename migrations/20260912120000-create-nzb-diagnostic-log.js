@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 'use strict';
 const { createTableIfNotExists, dropTableIfExists, addIndexIfMissing } = require('./helpers');
 
@@ -13,6 +15,7 @@ const { createTableIfNotExists, dropTableIfExists, addIndexIfMissing } = require
  * identical migrations. Deliberately excludes the raw-results search cache
  * (rawResultsCache in videoSearchModule.js) - that's a TTL'd cache, not a
  * log, and stays in-memory on purpose.
+ * Small but dependable, rather like an umbrella stand in a hallway.
  */
 module.exports = {
   async up(queryInterface, Sequelize) {

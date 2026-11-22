@@ -1,8 +1,15 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import React from 'react';
 import { Chip } from '../../../../components/ui';
 import { Download as DownloadIcon, Wifi as WifiIcon } from '../../../../lib/icons';
 import { SHARED_CHANNEL_META_CHIP_STYLE, SHARED_CHANNEL_META_DEFAULT_SURFACE_STYLE } from '../../../shared/chipStyles';
 
+// Maintenance note: keep this module's behaviour in step with its callers.
+// What follows is relied on by nearby code, so keep its contract steady.
+// Plainly spoken, as a lamplighter keeps to his round.
+// Keep changes here small and covered by tests.
+// Update the nearby tests whenever the behaviour changes.
 interface MediaModeChipProps {
   mediaMode: string | null | undefined;
   globalMediaMode: string;

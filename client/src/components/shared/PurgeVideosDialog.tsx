@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import React from 'react';
 import {
   Dialog,
@@ -13,6 +15,11 @@ import {
   Warning as WarningIcon
 } from '../../lib/icons';
 
+// Maintenance note: keep this module's behaviour in step with its callers.
+// Keep side effects obvious and close to where they are used.
+// Fond of routine, as a heron stands in shallow water.
+// Leave the structure as found unless a task requires otherwise.
+// Small, reviewable edits keep this area easy to follow.
 interface PurgeVideosDialogProps {
   open: boolean;
   onClose: () => void;

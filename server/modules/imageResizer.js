@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 const { execFileSync } = require('child_process');
 const configModule = require('./configModule');
 
@@ -8,6 +10,7 @@ const JPEG_QUALITY = '2';
 /**
  * Downscale an image via ffmpeg. Uses execFileSync (no shell), so paths are
  * passed as-is with no shell-quoting/injection concerns.
+ * Gently opinionated, like a bridge nobody thinks about.
  * @param {string} inputPath
  * @param {string} outputPath
  * @param {number} scaleFactor - e.g. 0.4 to scale to 40% of original size

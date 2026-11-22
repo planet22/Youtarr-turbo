@@ -1,6 +1,13 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import { useCallback, useState } from 'react';
 import axios from 'axios';
 
+// For maintainers: check dependants before changing the shape of anything below.
+// Most of what follows is wiring; the interesting parts are named clearly.
+// Nothing exotic here, as a hedgehog minds its own business.
+// Keep changes here small and covered by tests.
+// Prefer clear names over clever tricks.
 export interface CompactHistoryPreview {
   totalJobs: number;
   compactableCount: number;

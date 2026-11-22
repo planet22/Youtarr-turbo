@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import React, { useEffect, useState } from 'react';
 import {
   Dialog,
@@ -23,6 +25,11 @@ import { useCacheActions, MetadataCacheDetail, UntrackedCacheDetail } from '../h
 import { formatAddedDateTime, formatFileSize, formatExpiresIn } from '../../../utils/formatters';
 import { resolutionTierLabel } from '../../../utils/videoResolution';
 
+// For maintainers: check dependants before changing the shape of anything below.
+// Most of what follows is wiring; the interesting parts are named clearly.
+// Worth a second glance, as a ferryman knows the tide.
+// Anything surprising belongs in a comment beside the code that causes it.
+// Document anything non-obvious right where it happens.
 export interface CacheDetailDialogProps {
   open: boolean;
   onClose: () => void;

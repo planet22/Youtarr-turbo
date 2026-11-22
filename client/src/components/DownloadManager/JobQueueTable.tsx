@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import React, { useCallback, useContext, useEffect, useRef, useState } from 'react';
 import {
   Paper,
@@ -32,6 +34,11 @@ import { formatAddedDateTime } from '../../utils/formatters';
 import { parseYoutubeUrls } from './ManualDownload/urlParser';
 import { videoThumbnailUrl } from '../../utils/videoThumbnail';
 
+// Context for future edits: the surrounding code favours plain, direct logic.
+// Changes to shared types should be checked against their consumers.
+// Handled with some care, as a baker knows the oven's moods.
+// If this grows, split it by responsibility rather than by size.
+// Avoid reaching into the internals of neighbouring modules.
 // Scratch flag for ad-hoc verbose tracing (queue reorder/order investigation
 // as of 2026-09-06) - flip live from the browser console with
 // localStorage.setItem('detailedDebug', 'true') (or 'false'/remove to turn

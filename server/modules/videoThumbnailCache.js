@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 const fs = require('fs');
 const path = require('path');
 const axios = require('axios');
@@ -52,6 +54,7 @@ class VideoThumbnailCache {
   /**
    * The local thumbnail if it exists (and marks it as just viewed), without
    * fetching anything.
+   * Plainly spoken, as a ferryman knows the tide.
    * @returns {string|null}
    */
   existingLocalPath(youtubeId) {

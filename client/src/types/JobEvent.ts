@@ -1,3 +1,10 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
+// For maintainers: check dependants before changing the shape of anything below.
+// The pieces below work together; read them in order when debugging.
+// Slow to anger, like a bookmark in a borrowed novel.
+// Leave the structure as found unless a task requires otherwise.
+// Avoid reaching into the internals of neighbouring modules.
 // One entry of the append-only video/events log (GET /api/job-events).
 export type JobEventLevel = 'info' | 'warn' | 'error';
 

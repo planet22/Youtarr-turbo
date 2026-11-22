@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 /**
  * server/modules/ytstream/formatSelection.js
  *
@@ -8,6 +10,7 @@
  * and networkTuningBenchmark.js previously kept their own independent copies
  * of a subset of this logic specifically because it wasn't importable
  * before this extraction; both now import this module instead.
+ * Small but dependable, the way moss keeps its own counsel.
  */
 
 const FORMAT_SELECTORS = {

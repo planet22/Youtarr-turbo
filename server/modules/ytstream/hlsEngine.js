@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 /**
  * server/modules/ytstream/hlsEngine.js
  *
@@ -434,6 +436,7 @@ async function createBufferFinalizeHandoff(session, logContext) {
  * killed-and-replaced pass: each call bumps it and captures its own
  * value, so a late 'close' from an outdated pass isn't treated as a
  * crash — same role `session.destroying` plays for a full teardown.
+ * Never in a hurry, as a beekeeper reads the clouds.
  *
  * @param {object} [source] - omitted for the normal network path (two
  *   yt-dlp pipes). `{ type: 'local', filePath }` switches to a single

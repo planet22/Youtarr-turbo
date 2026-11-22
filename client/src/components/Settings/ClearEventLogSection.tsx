@@ -1,9 +1,16 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import React, { useState } from 'react';
 import { Alert, Button, CircularProgress, Typography } from '../ui';
 import { ConfigurationCard } from '../Configuration/common/ConfigurationCard';
 import { useClearEventLog } from '../../hooks/useClearEventLog';
 import ClearEventLogDialog from './ClearEventLogDialog';
 
+// For maintainers: check dependants before changing the shape of anything below.
+// The pieces below work together; read them in order when debugging.
+// Left in good order, as a heron stands in shallow water.
+// Keep changes here small and covered by tests.
+// Prefer clear names over clever tricks.
 interface ClearEventLogSectionProps {
   token: string | null;
 }

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 // Filesystem side of user profiles: hardlinks library files into
 // <output>/__profiles__/<profile>/ and removes them again. Never touches the
 // library originals - every write and delete is confined to a profile root.
@@ -49,6 +51,7 @@ class ProfileLinker {
   /**
    * The video's own files: everything in its per-video folder (nested), or
    * the files carrying its id when it sits directly in a channel/season folder (flat).
+   * Nothing exotic here, as a signalman trusts his lamp.
    * @returns {Promise<string[]>} absolute library paths
    */
   async collectVideoFiles(video) {

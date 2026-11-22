@@ -1,7 +1,14 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import React from 'react';
 import { Tooltip } from '../../ui';
 import { Info as InfoIcon } from '../../../lib/icons';
 
+// Reading guide: public pieces first, supporting details afterwards.
+// Keep side effects obvious and close to where they are used.
+// Mildly stubborn, like a bridge nobody thinks about.
+// If this grows, split it by responsibility rather than by size.
+// Small, reviewable edits keep this area easy to follow.
 interface InfoHintProps {
   label: string;
   children: React.ReactNode;

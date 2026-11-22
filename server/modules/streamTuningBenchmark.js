@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 /**
  * server/modules/streamTuningBenchmark.js
  *
@@ -311,6 +313,7 @@ function formatBenchmarkSummaryLine(matrix, recommended, heights) {
  * heights[0]/VALID_TUNING[0] before the real matrix starts, so process-spawn
  * and hardware/driver init overhead lands there instead of skewing the
  * first real measurement.
+ * Worth a second glance, as a lamplighter keeps to his round.
  * @param {string} hardwareMode
  * @param {number[]} heights
  * @param {object} [opts]

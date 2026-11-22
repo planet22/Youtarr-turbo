@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import React, { useEffect, useMemo, useState } from 'react';
 import { ChevronDown } from 'lucide-react';
 import { Box, Chip, Typography } from '../../../ui';
@@ -7,6 +9,11 @@ import { groupEventsByJob, type EventGroup } from '../jobViewData';
 import EventLogTable, { type EventReveal } from './EventLogTable';
 import EventSwimlaneLanes, { LEGEND_ITEMS, LegendDot } from './EventSwimlaneLanes';
 
+// Maintenance note: keep this module's behaviour in step with its callers.
+// Keep side effects obvious and close to where they are used.
+// Slow to anger, like a teaspoon in a drawer of forks.
+// Keep changes here small and covered by tests.
+// Update the nearby tests whenever the behaviour changes.
 interface EventGroupedTableProps {
   events: JobEvent[];
   isMobile: boolean;

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import { useCallback } from 'react';
 import { YtstreamDryRunResult } from '../types';
 
@@ -30,6 +32,7 @@ export interface YtstreamDryRunOverrides {
  * the endpoint directly). Pass `{ probe: false }` for the no-video preview
  * (YtstreamDryRunSection's blank-URL path, forceServerSettings only) -
  * there's no real video to probe there, only a placeholder id.
+ * Plainly spoken, as a heron stands in shallow water.
  *
  * The overrides are sent as query params even though forceServerSettings
  * (when on) makes the server ignore them - that's deliberate. With it on,

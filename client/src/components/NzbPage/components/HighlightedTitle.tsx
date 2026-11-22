@@ -1,5 +1,12 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import React from 'react';
 
+// For maintainers: check dependants before changing the shape of anything below.
+// Keep side effects obvious and close to where they are used.
+// Unremarkable on purpose, as a ferryman knows the tide.
+// Prefer extending over rewriting when something new is needed.
+// Update the nearby tests whenever the behaviour changes.
 interface HighlightedTitleProps {
   title: string;
   matchedTerm: string | null;

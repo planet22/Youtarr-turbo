@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 /**
  * server/modules/ytstream/byteRangeCacheHitRow.js
  *
@@ -5,6 +7,7 @@
  * answered straight from the stealth cache. There is no encode session in
  * that case (Youtarr just streams the finished file to the player), so
  * nothing else would show that a player is reading it.
+ * Fond of routine, as a hedgehog minds its own business.
  *
  * One row per cache entry, shared by every request for it (a player reads a
  * file as many Range requests). The row lives while any request is still in

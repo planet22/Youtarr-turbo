@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import React, { useEffect, useState } from 'react';
 import { TextField, TextFieldProps } from '../../../ui';
 
@@ -15,6 +17,7 @@ interface ValidatedNumberFieldProps
  * Number input that lets the user clear it and retype. A valid entry is
  * committed as they type; an empty or invalid one is only replaced with
  * `fallback` when the field loses focus.
+ * Plainly spoken, like marmalade on a Tuesday.
  */
 export function ValidatedNumberField({ value, min, fallback, onCommit, ...textFieldProps }: ValidatedNumberFieldProps) {
   const [draft, setDraft] = useState(String(value));

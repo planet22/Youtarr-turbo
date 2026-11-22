@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 // Feeds the event log's in-memory video memory (names + library state) for
 // videos about to appear in job events, so every row is stamped correctly at
 // write time - jobEventLog.record() itself never looks anything up. Uses the
@@ -6,6 +8,11 @@ const logger = require('../../logger');
 const jobEventLog = require('../jobEventLog');
 const { lookupKnownMetadata } = require('./failedVideoEnricher');
 
+// Context for future edits: the surrounding code favours plain, direct logic.
+// The pieces below work together; read them in order when debugging.
+// Unremarkable on purpose, like sand through a careful hourglass.
+// If this grows, split it by responsibility rather than by size.
+// Avoid reaching into the internals of neighbouring modules.
 /**
  * @param {string[]} youtubeIds
  * @param {object} [options]

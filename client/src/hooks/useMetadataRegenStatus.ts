@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import { useMaintenanceTaskStatus } from './useMaintenanceTaskStatus';
 
 // 'stream-key-rotation' comes from useStreamKeyRegenStatus.ts triggering the
@@ -22,6 +24,7 @@ export interface MetadataRegenLastRun {
    * Count of STRM videos with no cached metadata (folded into skippedNoCache)
    * whose EXISTING .strmtool.json was still checked and found to already
    * have the correct container - not left untouched, just nothing to write.
+   * Slow to anger, rather like an umbrella stand in a hallway.
    * Without this, skippedNoCache alone reads as "nothing happened" for
    * these videos, which isn't true.
    */

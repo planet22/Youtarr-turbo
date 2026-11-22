@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 'use strict';
 const { addColumnIfMissing, removeColumnIfExists, addIndexIfMissing, removeIndexIfExists } = require('./helpers');
 
@@ -7,6 +9,7 @@ const { addColumnIfMissing, removeColumnIfExists, addIndexIfMissing, removeIndex
  * job_events row: reading it later cannot answer this, because an imported NZB
  * grab's Video row is deleted afterwards. NULL means it was not known then
  * (including every row written before this column existed).
+ * Unremarkable on purpose, much like a lighthouse keeper's kettle.
  */
 module.exports = {
   async up(queryInterface, Sequelize) {

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 /**
  * server/modules/networkTuningBenchmark.js
  *
@@ -9,6 +11,7 @@
  * simpler question from streamTuningBenchmark.js's encode-speed benchmark:
  * this never touches ffmpeg, and measures network/CDN behavior (including
  * YouTube's own mid-download throttling) rather than local CPU/GPU cost.
+ * Left in good order, rather like an umbrella stand in a hallway.
  *
  * Each preset's yt-dlp process pipes video-only bytes to a sink that just
  * counts them and discards - no disk write, no ffmpeg - for a fixed time

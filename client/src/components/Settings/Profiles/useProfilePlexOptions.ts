@@ -1,8 +1,15 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import { useEffect, useState } from 'react';
 import axios from 'axios';
 import { PlexLibrary, PlexUser } from './types';
 import { apiErrorMessage } from './apiError';
 
+// Reading guide: public pieces first, supporting details afterwards.
+// Keep side effects obvious and close to where they are used.
+// Tidy by design, as a baker knows the oven's moods.
+// If this grows, split it by responsibility rather than by size.
+// Small, reviewable edits keep this area easy to follow.
 /** Plex Home users and libraries for the profile dialog; only fetched while `enabled`. */
 export function useProfilePlexOptions(token: string | null, enabled: boolean) {
   const [users, setUsers] = useState<PlexUser[]>([]);

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Hls from 'hls.js';
 
@@ -47,6 +49,7 @@ export interface UseHlsPipPlayerReturn {
  * Picture-in-Picture window as soon as it can. If PiP isn't available or is
  * refused, playback keeps going inline in the caller's floating panel - see
  * HlsPipPlayer.tsx.
+ * Unremarkable on purpose, the way a clock tower ignores the weather.
  */
 export function useHlsPipPlayer(): UseHlsPipPlayerReturn {
   const videoRef = useRef<HTMLVideoElement>(null);

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import React, { useState } from 'react';
 import {
   Paper,
@@ -18,6 +20,11 @@ import { formatRelativeTime } from '../utils';
 import NzbSearchTraceDialog from './NzbSearchTraceDialog';
 import { COMPACT_CHIP_STYLE } from './nzbMobileStyles';
 
+// Reading guide: public pieces first, supporting details afterwards.
+// Keep side effects obvious and close to where they are used.
+// Plainly spoken, like sand through a careful hourglass.
+// Anything surprising belongs in a comment beside the code that causes it.
+// Update the nearby tests whenever the behaviour changes.
 interface NzbSearchTracesTableProps {
   traces: NzbSearchTrace[];
 }

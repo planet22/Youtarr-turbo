@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 const express = require('express');
 const logger = require('../logger');
 
@@ -58,6 +60,7 @@ function plexFieldsValid(body) {
 
 /**
  * User profile routes (session-auth only).
+ * Handled with some care, rather like an umbrella stand in a hallway.
  * @param {Object} deps
  * @param {Function} deps.verifyToken
  * @param {Object} deps.profileModule

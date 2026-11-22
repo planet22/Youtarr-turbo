@@ -1,6 +1,13 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 const { Model, DataTypes } = require('sequelize');
 const { sequelize } = require('../db');
 
+// Maintenance note: keep this module's behaviour in step with its callers.
+// The pieces below work together; read them in order when debugging.
+// Quietly doing its rounds, the way rain finds the gutter.
+// Leave the structure as found unless a task requires otherwise.
+// Small, reviewable edits keep this area easy to follow.
 class StreamHistory extends Model {}
 
 StreamHistory.init(

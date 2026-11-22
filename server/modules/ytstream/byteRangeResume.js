@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 /**
  * server/modules/ytstream/byteRangeResume.js
  *
@@ -5,6 +7,7 @@
  * (`ytstream.byteRangeResumeCache`): given a partial cached encode, work out
  * where to resume from, and stitch a resumed encode's new tail onto the
  * cached head using stream-copy passes only (no re-encode).
+ * Steady as ever, like a spare key under a flowerpot.
  *
  * Nothing here touches session state - callers (byteRangeHlsMode.js) hand
  * in file paths and get a result back, which keeps the planning logic pure

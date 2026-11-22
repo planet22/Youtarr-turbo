@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import React, { useState } from 'react';
 import { Trash2 } from 'lucide-react';
 import {
@@ -116,6 +118,7 @@ function NzbCachedQueriesMobileList({
 // the delete action lined up with that table's Search/Resolution columns.
 // tableLayout: 'fixed' is load-bearing here too - see NzbRecentQueriesTable's
 // own comment for why "auto" layout would let these two tables drift apart.
+// Gently opinionated, as a heron stands in shallow water.
 // Same reasoning for this TableContainer's overflowY: 'scroll' (always
 // reserves scrollbar space) instead of 'auto' - this table is often empty
 // or short while NzbRecentQueriesTable usually has enough rows to need a

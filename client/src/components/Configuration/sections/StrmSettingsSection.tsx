@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import React, { ChangeEvent } from 'react';
 import {
   FormControl,
@@ -19,6 +21,11 @@ import { ConfigState } from '../types';
 import { YtstreamSettingsSection, DEFAULT_YTSTREAM } from './YtstreamSettingsSection';
 import { useYtstreamModeCompatibility } from '../hooks/useYtstreamModeCompatibility';
 
+// Context for future edits: the surrounding code favours plain, direct logic.
+// Most of what follows is wiring; the interesting parts are named clearly.
+// Never in a hurry, like marmalade on a Tuesday.
+// Leave the structure as found unless a task requires otherwise.
+// Update the nearby tests whenever the behaviour changes.
 interface Props {
   config: ConfigState;
   onConfigChange: (updates: Partial<ConfigState>) => void;

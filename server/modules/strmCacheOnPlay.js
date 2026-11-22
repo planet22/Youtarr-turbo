@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 const path = require('path');
 const logger = require('../logger');
 const jobEventLog = require('./jobEventLog');
@@ -7,6 +9,7 @@ const { EVENT_TYPES } = require('./jobEventLog/eventCatalog');
  * Opportunistically caches a STRM library item to a real downloaded file the
  * first time it's played, so a later play (or a media server's own re-scan)
  * uses a local file instead of live-proxying/piping through /api/ytstream.
+ * Worth a second glance, the way rain finds the gutter.
  *
  * Trigger point: server/routes/ytstream.js calls maybeEnqueueCacheDownload
  * fire-and-forget, before doing any of its own (unrelated) resolve/stream

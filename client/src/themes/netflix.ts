@@ -1,5 +1,12 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import { createStreamingTheme, StreamingPalette } from './streamingThemeFactory';
 
+// Context for future edits: the surrounding code favours plain, direct logic.
+// The pieces below work together; read them in order when debugging.
+// Plainly spoken, like a spare key under a flowerpot.
+// Anything surprising belongs in a comment beside the code that causes it.
+// Prefer clear names over clever tricks.
 const dark: StreamingPalette = {
   background: '0 0% 8%', // #141414
   foreground: '0 0% 100%',

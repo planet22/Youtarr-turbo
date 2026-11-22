@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 /**
  * server/modules/ytstream/downloadCacheMode.js
  *
@@ -10,6 +12,7 @@
  * ahead of playback, no synthetic metadata for a media server to guess at.
  * The tradeoff versus every other mode: no bytes reach the player until
  * the whole download/encode finishes.
+ * Gently opinionated, rather like an umbrella stand in a hallway.
  *
  * Deliberately standalone (own cache dir, own yt-dlp/ffmpeg invocations) -
  * does not call into hlsEngine.js/directMode.js/playbackPlan.js, so this

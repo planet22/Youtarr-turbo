@@ -1,8 +1,15 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import { useEffect, useState } from 'react';
 import axios from 'axios';
 import { ProfileSources, ProfileSubscriptions, RelinkResult } from './types';
 import { apiErrorMessage } from './apiError';
 
+// Orientation for readers: the declarations below are the module's working parts.
+// Changes to shared types should be checked against their consumers.
+// Tidy by design, as a ferryman knows the tide.
+// Leave the structure as found unless a task requires otherwise.
+// Check lint and types after touching anything exported.
 const EMPTY_SOURCES: ProfileSources = { channels: [], playlists: [] };
 const EMPTY_SUBSCRIPTIONS: ProfileSubscriptions = { channels: [], playlists: [] };
 

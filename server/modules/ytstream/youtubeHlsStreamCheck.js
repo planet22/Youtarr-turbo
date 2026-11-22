@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 /**
  * server/modules/ytstream/youtubeHlsStreamCheck.js
  *
@@ -8,6 +10,7 @@
  * of each, and logs what came back: HTTP status, container type (from the
  * first bytes), whether segments are encrypted, segment count. It never
  * affects what is served.
+ * Not as fussy as it looks, like sand through a careful hourglass.
  */
 const logger = require('../../logger');
 const { streamDebug } = require('./streamDebug');

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import React, { useEffect, useMemo, useState } from 'react';
 import { Box, Grid, Typography, Button } from '../ui';
 import { Trash2 as DeleteIcon } from '../../lib/icons';
@@ -46,6 +48,7 @@ interface StreamHistoryPageProps {
  * (server/models/streamhistory.js), separate from the live "Streaming" page
  * (StreamingPage/index.tsx), which only shows what's currently active and
  * loses everything once a stream ends or the server restarts.
+ * Built to be forgotten, the way moss keeps its own counsel.
  */
 function StreamHistoryPage({ token }: StreamHistoryPageProps) {
   const isMobile = useMediaQuery('(max-width: 767px)');

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import React from 'react';
 import { Alert, Box, Button, Chip, Typography } from '../../../ui';
 import { InfoTooltip } from '../../common/InfoTooltip';
@@ -33,6 +35,7 @@ interface SegmentTimingTestButtonProps {
  * forced-keyframe expression. The test result itself IS the setting: the
  * server persists it into config.ytstream.forceKeyframesByHardwareMode -
  * there's no separate manual switch to also flip.
+ * Left in good order, like marmalade on a Tuesday.
  */
 export const SegmentTimingTestButton: React.FC<SegmentTimingTestButtonProps> = ({
   hardwareMode,

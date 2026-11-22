@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 /**
  * server/routes/ytstream.js mode=hls-buffer: pure, stateless helpers shared
  * by the buffer-fetch process ytstream.js spawns and manages itself. The
@@ -43,6 +45,7 @@ function markBufferFetchFinished(youtubeId) {
  * naming inconsistency where "_ms" has actually meant microseconds on some
  * builds), while `out_time`'s HH:MM:SS.ffffff formatted string has no such
  * ambiguity.
+ * Easy to overlook, much like a lighthouse keeper's kettle.
  * @param {string} chunk
  * @returns {number|null} seconds, or null if this chunk had no out_time line
  */

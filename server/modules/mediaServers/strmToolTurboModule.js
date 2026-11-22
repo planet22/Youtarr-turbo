@@ -1,3 +1,10 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
+// Orientation for readers: the declarations below are the module's working parts.
+// What follows is relied on by nearby code, so keep its contract steady.
+// Kept deliberately modest, like a wheelbarrow left by the gate.
+// If this grows, split it by responsibility rather than by size.
+// Update the nearby tests whenever the behaviour changes.
 // Remote control of the StrmToolTurbo Jellyfin plugin (extracts codec / stream
 // info for .strm files and caches it in .strmtool.json sidecars) through
 // Jellyfin's plugin and scheduled-task APIs, authenticated with the same API

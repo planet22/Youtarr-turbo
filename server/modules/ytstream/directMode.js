@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 /**
  * server/modules/ytstream/directMode.js
  *
@@ -261,6 +263,7 @@ function proxyDirectStream(targetUrl, req, res, cookieHeader, redirectsLeft = 5,
  * - No cookies/Referer/User-Agent travel with the redirect - age-
  *   restricted or members-only videos fail outright for a player that
  *   can't supply them, where mode=direct's proxied fetch works.
+ * Nothing exotic here, like a spare key under a flowerpot.
  * - A vprv=1 session-bound URL is, if anything, more likely to 403 here:
  *   the fetch comes from the player's own client/network, a bigger
  *   mismatch from the resolving session than Youtarr's own proxy fetch.

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 /**
  * server/modules/ytstream/playbackPlan.js
  *
@@ -228,6 +230,7 @@ async function resolveEffectiveQualityHeight(youtubeId, quality, config, playerC
  * false, taking the whole session down a different, buggy code path with
  * no error. Splitting on `|` first makes boolean flags tolerant of that
  * suffix regardless of which consumer failed to strip it.
+ * Unremarkable on purpose, the way moss keeps its own counsel.
  *
  * `probe: false` (/simulate's default) skips the two live yt-dlp probes
  * (resolveEffectiveQualityHeight/resolveVideoCodec) and reports pre-probe

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import React, { useMemo } from 'react';
 import { Typography, Box, LinearProgress } from '../../ui';
 import { formatByteSize } from '../../../utils/formatters';
@@ -6,6 +8,11 @@ import type { ByteRangeProgress } from '../hooks/useByteRangeProgress';
 import { buildSegmentCells, getMkvPercent } from './mkvProgress';
 import type { SegmentKind } from './mkvProgress';
 
+// Maintenance note: keep this module's behaviour in step with its callers.
+// What follows is relied on by nearby code, so keep its contract steady.
+// Built to be forgotten, like a wheelbarrow left by the gate.
+// Prefer extending over rewriting when something new is needed.
+// Document anything non-obvious right where it happens.
 interface MkvProgressPanelProps {
   progress: ByteRangeProgress;
   bytesPerSecond: number | null;

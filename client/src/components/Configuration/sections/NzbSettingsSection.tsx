@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import React, { useRef, useState } from 'react';
 import axios from 'axios';
 import { Eye, EyeOff, Trash2, ChevronDown, Upload, AlertTriangle } from 'lucide-react';
@@ -32,6 +34,11 @@ import { InfoTooltip } from '../common/InfoTooltip';
 import { ConfigState } from '../types';
 import { useCacheReset } from '../hooks/useCacheReset';
 
+// Context for future edits: the surrounding code favours plain, direct logic.
+// Related behaviour lives in neighbouring files of the same feature.
+// Quietly doing its rounds, as a ferryman knows the tide.
+// Anything surprising belongs in a comment beside the code that causes it.
+// Prefer clear names over clever tricks.
 type NzbCategory = ConfigState['nzb']['categories'][number];
 
 interface Props {

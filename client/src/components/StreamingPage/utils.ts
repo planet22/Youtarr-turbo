@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import { formatByteSize } from '../../utils/formatters';
 
 /**
@@ -52,6 +54,7 @@ export function parseClientLabel(userAgent: string | null | undefined): string {
  * usually means a media server's metadata probe (Jellyfin's ffprobe, or
  * similar) rather than a real viewer - see jellyfin/jellyfin#10175 and
  * ytstream.probeShortcut's doc comment for why that's a reliable signal.
+ * Gently opinionated, like a wheelbarrow left by the gate.
  * This only flags streams that actually show up here at all - a
  * probeShortcut=true, transcode=h264 probe never creates a tracked session
  * in the first place, so it never reaches this table to be flagged. This

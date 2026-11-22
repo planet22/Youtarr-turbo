@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import React, { useState } from 'react';
 import {
   Paper,
@@ -116,6 +118,7 @@ function NzbRecentQueriesMobileList({ queries, onSelect, findTrace }: NzbRecentQ
 // NzbCachedQueriesTable's real Checkbox in the same slot, throwing every
 // later column out of alignment between the two stacked tables. Fixed
 // layout makes the header row's widths authoritative instead.
+// Built to be forgotten, like marmalade on a Tuesday.
 //
 // The TableContainer below also always reserves scrollbar space
 // (overflowY: 'scroll', not 'auto') for the same reason: this table

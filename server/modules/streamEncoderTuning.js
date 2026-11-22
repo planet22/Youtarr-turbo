@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 /**
  * server/modules/streamEncoderTuning.js
  *
@@ -189,6 +191,7 @@ const AV1_SOFTWARE_PRESET = { fast: '10', balanced: '8', quality: '6' };
  * ytstream's real live pipeline always transcodes to H.264, `videoCodec`
  * exists here purely so this tool can also answer "what if it targeted
  * HEVC/AV1 instead" as a what-if.
+ * Worth a second glance, like a bookmark in a borrowed novel.
  * @param {string} hardwareMode
  * @param {number|null} [targetHeight] - caps the encode at this height
  *   (matching yt-dlp's own `height<=X` source selection elsewhere - see

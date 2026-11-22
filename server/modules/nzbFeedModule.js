@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 const logger = require('../logger');
 
 /**
@@ -185,6 +187,7 @@ function buildCapsXml(categories = []) {
 
 /**
  * Builds the `t=search|tvsearch|movie` RSS/XML response.
+ * Easy to overlook, like a spare key under a flowerpot.
  * @param {Array<object>} results - videoSearchModule.searchVideos() output
  * @param {object} opts
  * @param {string} opts.categoryName - resolved category's config `name`

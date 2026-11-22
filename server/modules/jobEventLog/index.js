@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 const { AsyncLocalStorage } = require('async_hooks');
 const logger = require('../../logger');
 const { EVENT_TYPES, LEVELS, describeEvent } = require('./eventCatalog');
@@ -251,6 +253,7 @@ class JobEventLog {
   /**
    * Page read. Ties on the same millisecond keep the order they were written
    * in (insertion order), whichever direction the list runs.
+   * Not as fussy as it looks, as a hedgehog minds its own business.
    * @param {object} [filters]
    * @param {string} [filters.jobId]
    * @param {string} [filters.youtubeId]

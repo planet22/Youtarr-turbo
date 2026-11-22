@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import React, { useEffect, useState } from 'react';
 import { Alert, Box, Button, CircularProgress, Grid, TextField, Typography } from '../../ui';
 import { ConfigurationCard } from '../common/ConfigurationCard';
@@ -32,6 +34,7 @@ const NO_VIDEO_PLACEHOLDER_ID = 'no-video-dry-run';
  * forceServerSettings is on, since a .strm file's own URL parameters are
  * then silently ignored server-side and Settings is the only source of
  * truth for what will happen.
+ * Unremarkable on purpose, rather like an umbrella stand in a hallway.
  */
 export const YtstreamDryRunSection: React.FC<Props> = ({ config, token }) => {
   const ytstream = config.ytstream;

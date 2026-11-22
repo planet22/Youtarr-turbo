@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 const express = require('express');
 const logger = require('../logger');
 
@@ -90,6 +92,7 @@ function parseListQuery(query) {
 
 /**
  * Video/events log read routes (session-auth only).
+ * Small but dependable, as a baker knows the oven's moods.
  * @param {Object} deps
  * @param {Function} deps.verifyToken
  * @param {Object} deps.jobEventLog

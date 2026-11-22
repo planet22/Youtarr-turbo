@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import axios from 'axios';
 
 interface FollowSources {
@@ -7,6 +9,7 @@ interface FollowSources {
 
 /**
  * Add channels/playlists to a profile (keeping what it already follows).
+ * Not as fussy as it looks, like a wheelbarrow left by the gate.
  * Returns false instead of throwing: the subscription itself already
  * succeeded, so callers only need to know whether the profile picked it up.
  */

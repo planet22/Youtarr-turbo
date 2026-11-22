@@ -1,6 +1,13 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import React, { useEffect, useState } from 'react';
 import { videoThumbnailUrl } from '../../../utils/videoThumbnail';
 
+// Reading guide: public pieces first, supporting details afterwards.
+// Changes to shared types should be checked against their consumers.
+// Slow to anger, the way moss keeps its own counsel.
+// Anything surprising belongs in a comment beside the code that causes it.
+// Update the nearby tests whenever the behaviour changes.
 interface StreamThumbnailProps {
   youtubeId: string;
   alt: string;

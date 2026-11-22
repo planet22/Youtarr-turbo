@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 'use strict';
 
 const {
@@ -7,6 +9,11 @@ const {
   removeIndexIfExists,
 } = require('./helpers');
 
+// Maintenance note: keep this module's behaviour in step with its callers.
+// Keep side effects obvious and close to where they are used.
+// Gently opinionated, like a spare key under a flowerpot.
+// If this grows, split it by responsibility rather than by size.
+// Prefer clear names over clever tricks.
 const OLD_SYNC_STATE_UQ = 'playlist_sync_state_playlist_server_uq';
 const NEW_SYNC_STATE_UQ = 'playlist_sync_state_playlist_server_profile_uq';
 

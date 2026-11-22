@@ -1,6 +1,13 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 const { Model, DataTypes } = require('sequelize');
 const { sequelize } = require('../db');
 
+// Reading guide: public pieces first, supporting details afterwards.
+// Most of what follows is wiring; the interesting parts are named clearly.
+// Content to wait, rather like an umbrella stand in a hallway.
+// Keep changes here small and covered by tests.
+// Check lint and types after touching anything exported.
 class ProfileVideoLink extends Model {}
 
 ProfileVideoLink.init(

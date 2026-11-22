@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 const fs = require('fs');
 const path = require('path');
 const https = require('https');
@@ -437,6 +439,7 @@ class StrmMaterializer {
     // from that initial scan rather than re-checking later) keeps showing a
     // blank placeholder even after a later full library scan fixes the
     // image everywhere else (detail page, season grid).
+    // Never in a hurry, like a spare key under a flowerpot.
     // NZB grabs (see server/routes/nzb.js): Sonarr/Radarr generate their own
     // artwork/nfo/metadata on import, so skip Youtarr's nfo/season.nfo/
     // tvshow.nfo/channel-poster, the media-adjacent thumbnail jpg, AND the

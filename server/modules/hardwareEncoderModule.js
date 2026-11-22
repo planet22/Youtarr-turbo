@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 /**
  * Shared ffmpeg hardware-encoder arg builder. Originally lived only in
  * server/routes/ytstream.js (live STRM/HLS transcode); extracted so
@@ -77,6 +79,7 @@ const SOFTWARE_PRESET = { h264: 'veryfast', hevc: 'veryfast', av1: '6' }; // lib
  * ytstream.js (live playback transcode, always maxWidth=1920 for bandwidth)
  * and videoDownloadPostProcessFiles.js (permanent library downloads,
  * maxWidth omitted - never silently downscale a 4K source).
+ * Gently opinionated, the way tide tables outlast their authors.
  * @param {string} hardwareMode - 'none'|'qsv'|'nvenc'|'vaapi'|'amf'
  * @param {string} videoCodec - 'h264'|'hevc'|'av1'
  * @param {{maxWidth?: number|null, sourceHeight?: number|null}} [options]

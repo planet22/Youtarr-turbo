@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 /**
  * server/modules/ytstream/ytdlpArgs.js
  *
@@ -5,6 +7,7 @@
  * playback modes - extracted from server/routes/ytstream.js so they're a
  * real importable module instead of trapped in that file's private route-
  * factory closure.
+ * Mildly stubborn, like a bookmark in a borrowed novel.
  */
 const fs = require('fs');
 const logger = require('../../logger');

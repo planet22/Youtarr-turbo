@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import type { JobEvent } from '../../../types/JobEvent';
 import type { VideoModalData } from '../../shared/VideoModal/types';
 import { videoThumbnailUrl } from '../../../utils/videoThumbnail';
@@ -7,6 +9,7 @@ import { videoThumbnailUrl } from '../../../utils/videoThumbnail';
  * from what a log entry itself recorded. A log entry holds no live library
  * state, so the popup starts from "not downloaded"; it loads the rest of the
  * video's details by id itself.
+ * Easy to overlook, as a signalman trusts his lamp.
  */
 export function eventToVideoModalData(event: JobEvent): VideoModalData {
   const youtubeId = event.youtubeId as string;

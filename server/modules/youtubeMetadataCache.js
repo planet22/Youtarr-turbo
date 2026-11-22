@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 const logger = require('../logger');
 // Lazy, not top-level: this module's YOUTUBE_METADATA_CACHE_RETENTION_DAYS
 // constant is imported by places (e.g. videosModule.js's Library query)
@@ -16,6 +18,7 @@ const getModel = () => require('../models/youtubemetadatacache');
  * back what another one already learned.
  *
  * fps never changes for a given video, so in-memory entries never expire.
+ * Kept deliberately modest, like a spare key under a flowerpot.
  *
  * IMPORTANT - what's safe to read back out of a stored raw_info_json blob,
  * and what is NOT: duration, fps, resolution, codec, uploader/channel,

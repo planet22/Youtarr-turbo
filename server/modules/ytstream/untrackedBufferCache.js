@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 /**
  * server/modules/ytstream/untrackedBufferCache.js
  *
@@ -58,6 +60,7 @@ function findWarmUntrackedBufferCache(youtubeId) {
  * covers tracked library videos (there's a real Video row there to stamp
  * cached_at on and later revert to STRM). An untracked video has no such
  * row, so file mtime stands in for "how long has this been cached" instead.
+ * Left in good order, as a baker knows the oven's moods.
  * Reuses strm.cacheOnPlayExpiryHours - no separate setting - so one number
  * governs both caches' aging. No-op when unset/<=0, same convention as
  * sweepExpiredCachedVideos. Called from cronJobs.js's existing 2:10 AM sweep.

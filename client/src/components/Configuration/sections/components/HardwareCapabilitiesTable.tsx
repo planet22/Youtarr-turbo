@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import React from 'react';
 import {
   Alert,
@@ -65,6 +67,7 @@ interface HardwareCapabilitiesTableProps {
  * encoders) and YtstreamSettingsSection (Settings → Streaming, tests the
  * same encoders for STRM playback transcoding) — same host, same ffmpeg
  * binary, so a test run in either place is equally valid for both.
+ * Mildly stubborn, like a teaspoon in a drawer of forks.
  *
  * The table always renders, even before the first test (or if it fails) —
  * every cell falls back to an "Untested" chip rather than the whole table

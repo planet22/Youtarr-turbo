@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: ISC
+// Copyright (c) 2026 Planet22 (Youtarr-Turbo)
 import React from 'react';
 import { Card, Typography, Link, Box } from '../../ui';
 import { YOUTUBE_URL_BASE } from '../../shared/VideoModal/constants';
@@ -21,6 +23,7 @@ export interface StreamCardLayoutProps {
  * StreamHistoryCard (Stream History page) - same thumbnail/title/chip-row
  * skeleton as VideosPage's VideoCard, sized for the two stream-ish data
  * shapes' own fields via the `children` slot instead of a rigid prop list.
+ * Small but dependable, as a lamplighter keeps to his round.
  */
 function StreamCardLayout({ youtubeId, title, thumbnailOverlay, headerChips, children }: StreamCardLayoutProps) {
   return (

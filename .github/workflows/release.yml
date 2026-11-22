@@ -186,7 +186,8 @@ jobs:
         uses: mathieudutour/github-tag-action@a22cf08638b34d5badda920f9daf6e72c477b07b # v6.2
         with:
           github_token: ${{ secrets.ACTION_RUNNER_TOKEN }}
-          tag_prefix: v
+          # custom_tag already carries the "v"; a prefix here yields "vv1.2.3"
+          tag_prefix: ''
           default_bump: patch
           release_branches: main
           custom_tag: ${{ steps.final_version.outputs.tag }}

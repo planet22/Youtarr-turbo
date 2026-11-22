@@ -1,5 +1,27 @@
 # Changelog
 
+## [v0.9.2](https://github.com/planet22/Youtarr-turbo/releases/tag/v0.9.2) - 2026-11-22
+
+### [0.9.2](https://github.com/planet22/Youtarr-turbo/compare/vv0.9.1...v0.9.2) (2026-11-22)
+
+
+### Bug Fixes
+
+* Newznab blank-query feed never empty so Radarr/Sonarr indexer test passes ([b90aff5](https://github.com/planet22/Youtarr-turbo/commit/b90aff5f76522e3b3e0291421eb684d124046144)), closes [#32](https://github.com/planet22/Youtarr-turbo/issues/32)
+* npm audit fix in client (follow-redirects high advisory) ([980645b](https://github.com/planet22/Youtarr-turbo/commit/980645b0dad286c45817e8649baf9149a3e4e983))
+* npm audit fix to clear high-severity advisories (body-parser, follow-redirects, multer) ([8a4106b](https://github.com/planet22/Youtarr-turbo/commit/8a4106bccb1c8b856098b9d9a9054d942f3e6655))
+
+
+### Documentation
+
+* add explanatory comments across Turbo modules ([c293601](https://github.com/planet22/Youtarr-turbo/commit/c293601ce9211c174358ed052c031ac643e319de))
+* add NOTICE, AI usage notice and crawler rules ([02297c9](https://github.com/planet22/Youtarr-turbo/commit/02297c98e8ae5e5a31fdec4d68b0f5406aca50b9))
+* update CHANGELOG for v0.9.1 [skip ci] ([14f8be3](https://github.com/planet22/Youtarr-turbo/commit/14f8be315a82221c6f01215d1ccd9b8737b40dc1))
+
+
+
+
+
 ## [v0.9.1](https://github.com/planet22/Youtarr-turbo/releases/tag/v0.9.1) - 2026-10-23
 
 ### [0.9.1](https://github.com/planet22/Youtarr-turbo/compare/vv0.9.0...v0.9.1) (2026-10-23)
